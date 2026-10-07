@@ -1,0 +1,115 @@
+"""配置加载：config.yaml + .env。
+
+相对路径一律相对配置文件所在目录解析；没写的路径用仓库内默认值。
+"""
+from __future__ import annotations
+
+import os
+from pathlib import Path
+from typing import Literal
+
+import yaml
+from dotenv import load_dotenv
+from pydantic import BaseModel, Field
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+class ServerCfg(BaseModel):
+    host: str = "127.0.0.1"
+    port: int = 8700
+    data_dir: Path = ROOT / "projects"
+
+
+class ComfyCfg(BaseModel):
+    url: str = "http://127.0.0.1:8188"
+    models_dir: Path | None = None  # 只给 doctor 检查模型文件用
+    timeout: float = 30.0
+    max_retries: int = 6
+
+
+class ProviderCfg(BaseModel):
+    id: str
+    kind: Literal["openai", "claude", "manual"]
+    base_url: str | None = None
+    model: str | None = None
+    api_key_env: str | None = None
+    # 跑在本机显卡上（LM Studio）：调用前要让 GPU 任务让路，调用后卸载模型
+    local_gpu: bool = False
+    unload_cmd: list[str] | None = None
+    use_sdk: bool = True  # 仅 claude：先试 Agent SDK，失败退回 claude -p
+    timeout: float = 1800.0
+
+    def api_key(self) -> str | None:
+        return os.environ.get(self.api_key_env) if self.api_key_env else None
+
+
+class LLMCfg(BaseModel):
+    default: str | None = None
+    providers: list[ProviderCfg] = Field(default_factory=list)
+    routes: dict[str, str] = Field(default_factory=dict)
+
+    def provider(self, provider_id: str) -> ProviderCfg:
+        for p in self.providers:
+            if p.id == provider_id:
+                return p
+        raise KeyError(f"未配置 LLM provider {provider_id!r}，已有：{[p.id for p in self.providers]}")
+
+    def provider_for(self, task: str) -> ProviderCfg:
+        pid = self.routes.get(task) or self.default
+        if not pid:
+            raise KeyError(f"任务 {task!r} 没有配置 llm.routes，也没有 llm.default")
+        return self.provider(pid)
+
+
+class EngineCfg(BaseModel):
+    enabled: bool = True
+    params: dict = Field(default_factory=dict)
+
+
+class FfmpegCfg(BaseModel):
+    ffmpeg: str = "ffmpeg"
+    ffprobe: str = "ffprobe"
+    font: str | None = None
+
+
+class Config(BaseModel):
+    server: ServerCfg = Field(default_factory=ServerCfg)
+    comfyui: ComfyCfg = Field(default_factory=ComfyCfg)
+    llm: LLMCfg = Field(default_factory=LLMCfg)
+    engines: dict[str, EngineCfg] = Field(default_factory=dict)
+    ffmpeg: FfmpegCfg = Field(default_factory=FfmpegCfg)
+    workflows_dir: Path = ROOT / "workflows"
+    log_dir: Path = ROOT / "logs"
+
+    def engine(self, name: str) -> EngineCfg:
+        return self.engines.get(name) or EngineCfg()
+
+    @property
+    def data_dir(self) -> Path:
+        return self.server.data_dir
+
+
+def _absolutize(cfg: Config, base: Path) -> Config:
+    def fix(p: Path | None) -> Path | None:
+        if p is None:
+            return None
+        return p if p.is_absolute() else (base / p).resolve()
+
+    cfg.server.data_dir = fix(cfg.server.data_dir)
+    cfg.comfyui.models_dir = fix(cfg.comfyui.models_dir)
+    cfg.workflows_dir = fix(cfg.workflows_dir)
+    cfg.log_dir = fix(cfg.log_dir)
+    return cfg
+
+
+def load_config(path: Path | None = None) -> Config:
+    """读配置。不给路径时依次找 $STUDIO_CONFIG、config.yaml、config.example.yaml。"""
+    load_dotenv(ROOT / ".env")
+    if path is None:
+        env = os.environ.get("STUDIO_CONFIG")
+        path = Path(env) if env else ROOT / "config.yaml"
+        if not path.exists():
+            path = ROOT / "config.example.yaml"
+    data = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
+    return _absolutize(Config.model_validate(data), Path(path).resolve().parent)
