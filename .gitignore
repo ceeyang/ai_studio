@@ -1,0 +1,8 @@
+config.yaml
+.env
+projects/
+logs/
+__pycache__/
+.venv/
+node_modules/
+frontend/dist/
