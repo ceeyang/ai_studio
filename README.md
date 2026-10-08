@@ -6,7 +6,16 @@
 
     uv sync
     Copy-Item config.example.yaml config.yaml   # 按本机情况改
-    uv run studio-server                        # http://127.0.0.1:8700
+
+日常使用（生产态，只占一个端口）：
+
+    cd frontend; npm install; npm run build; cd ..
+    uv run studio-server                        # 打开 http://127.0.0.1:8700
+
+改前端代码时（开发态，热更新）：
+
+    powershell -ExecutionPolicy Bypass -File start.ps1
+    # 后端 http://127.0.0.1:8700，前端 http://127.0.0.1:5173（/api 与 /media 代理到后端）
 
 ## 命令行
 
@@ -21,4 +30,6 @@
 
 ## 测试
 
-    uv run pytest
+    uv run pytest                 # 后端
+    cd frontend; npm test         # 前端组件（Vitest）
+    cd frontend; npm run e2e      # Playwright 冒烟：临时数据目录 + manual LLM，不需要显卡
