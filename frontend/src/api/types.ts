@@ -1,0 +1,275 @@
+// 与后端 JSON 一一对应：backend/app/schemas.py、backend/queue/manager.py（job_to_dict / queue_state）、
+// backend/doctor.py（Check）、GET /api/engines。改后端字段时同步改这里。
+
+export type Aspect = '9:16' | '16:9';
+
+export interface Project {
+  id: number;
+  slug: string;
+  title: string;
+  aspect: Aspect;
+  image_engine: string;
+  video_engine: string;
+  seed: number;
+  negative: string;
+  style_bible_id: number | null;
+  created_at: string;
+}
+
+export interface ProjectIn {
+  title: string;
+  slug?: string;
+  aspect: Aspect;
+  image_engine: string;
+  video_engine: string;
+}
+
+export interface EngineRow {
+  name: string;
+  family: string;
+  caps: Record<string, unknown>;
+}
+
+export interface Engines {
+  image: EngineRow[];
+  video: EngineRow[];
+}
+
+export interface Episode {
+  id: number;
+  project_id: number;
+  number: number;
+  title: string;
+  source_text: string;
+  target_seconds: number;
+  status: string;
+}
+
+export interface EpisodeIn {
+  title: string;
+  source_text: string;
+  target_seconds: number;
+}
+
+export interface EpisodePatch {
+  title?: string;
+  source_text?: string;
+  target_seconds?: number;
+}
+
+export interface SceneBlock {
+  id: number;
+  order: number;
+  location_id: number | null;
+  text: string;
+}
+
+export interface SceneBlockPatch {
+  text?: string;
+  location_id?: number | null;
+}
+
+export interface Candidate {
+  id: number;
+  slot_id: number;
+  file_path: string;
+  url: string;
+  engine: string;
+  params: Record<string, unknown>;
+  input_hash: string;
+  job_id: number | null;
+  note: string;
+  rating: number | null;
+  created_at: string;
+}
+
+export interface Slot {
+  id: number;
+  kind: string;
+  selected_candidate_id: number | null;
+  stale: boolean;
+  candidates: Candidate[];
+}
+
+export interface DialogueLine {
+  speaker: string;
+  zh: string;
+  start: number;
+  end: number;
+}
+
+export interface CastEntry {
+  character_id: number;
+  variation_id: number | null;
+}
+
+export const TRANSITIONS = [
+  'hard_cut',
+  'dissolve_0.5',
+  'white_flash_0.2',
+  'black_dip_0.3',
+  'fade_out_1.0',
+] as const;
+export type Transition = (typeof TRANSITIONS)[number];
+
+export interface Shot {
+  id: number;
+  episode_id: number;
+  scene_block_id: number | null;
+  order: number;
+  code: string;
+  shot_size: string;
+  camera_move: string;
+  action: string;
+  dialogue: DialogueLine[];
+  cast: CastEntry[];
+  props: unknown[];
+  image_prompt: string;
+  motion_prompt: string;
+  audio_prompt: string;
+  image_engine: string | null;
+  video_engine: string | null;
+  duration: number;
+  use_end_frame: boolean;
+  continue_from_prev: boolean;
+  transition_out: string;
+}
+
+export interface ShotDetail extends Shot {
+  slots: Slot[];
+}
+
+export interface EpisodeDetail extends Episode {
+  scene_blocks: SceneBlock[];
+  shots: ShotDetail[];
+}
+
+export interface ShotPatch {
+  shot_size?: string;
+  camera_move?: string;
+  action?: string;
+  image_prompt?: string;
+  motion_prompt?: string;
+  audio_prompt?: string;
+  image_engine?: string | null;
+  video_engine?: string | null;
+  duration?: number;
+  transition_out?: Transition;
+}
+
+export interface ShotIn extends ShotPatch {
+  after_shot_id?: number | null;
+}
+
+export type Stage = 'script' | 'storyboard' | 'keyframes' | 'videos' | 'export' | 'all';
+
+export interface RunIn {
+  stage: Stage;
+  shots?: string[];
+  candidates?: number;
+  force?: boolean;
+  priority?: number;
+}
+
+export interface RunOut {
+  job_ids: number[];
+}
+
+export interface Character {
+  id: number;
+  project_id: number;
+  name: string;
+  description: string;
+  visual_prompt: string;
+  core_features: string;
+  voice: string | null;
+}
+
+export type CharacterPatch = Partial<Pick<Character, 'name' | 'description' | 'visual_prompt' | 'core_features'>>;
+
+export interface Location {
+  id: number;
+  project_id: number;
+  name: string;
+  time_of_day: string;
+  atmosphere: string;
+  visual_prompt: string;
+}
+
+export type LocationPatch = Partial<Pick<Location, 'name' | 'time_of_day' | 'atmosphere' | 'visual_prompt'>>;
+
+export interface Style {
+  anchor_text: string;
+  palette: string;
+  lighting: string;
+  texture: string;
+  character_rules: string;
+  mood_keywords: string[];
+  negative: string;
+}
+
+export type JobStatus = 'queued' | 'running' | 'waiting_input' | 'done' | 'failed' | 'canceled';
+
+/** manual provider 抛出 NeedsInput 时写进 job.result.input_request 的内容（backend/llm/gateway.py::_manual）。 */
+export interface InputRequest {
+  key: string;
+  task: string;
+  system: string;
+  user: string;
+  schema?: unknown;
+  error?: string;
+}
+
+export interface JobResult {
+  input_request?: InputRequest;
+  [key: string]: unknown;
+}
+
+export interface Job {
+  id: number;
+  type: string;
+  status: JobStatus;
+  project_id: number | null;
+  owner_type: string | null;
+  owner_id: number | null;
+  payload: Record<string, unknown>;
+  gpu: boolean;
+  model_family: string | null;
+  priority: number;
+  depends_on: number[];
+  log: string;
+  error: string | null;
+  result: JobResult | null;
+  created_at: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+}
+
+export interface QueueCounts {
+  queued: number;
+  running: number;
+  waiting_input: number;
+}
+
+export interface QueueState {
+  paused: boolean;
+  counts: QueueCounts;
+  current_family: string | null;
+}
+
+export interface DoctorCheck {
+  group: string;
+  name: string;
+  status: 'ok' | 'warn' | 'fail';
+  detail: string;
+}
+
+export interface ExportRow {
+  id: number;
+  episode_id: number;
+  variant: string;
+  file_path: string;
+  url: string;
+  settings: Record<string, unknown>;
+  created_at: string;
+}
