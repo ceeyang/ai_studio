@@ -54,8 +54,14 @@ def install_frontend(app: FastAPI, dist: Path | None) -> None:
     def not_found() -> HTTPException:
         return HTTPException(404, "Not Found")
 
-    @app.get("/{full_path:path}", include_in_schema=False)
-    def frontend(full_path: str):
+    @app.api_route(
+        "/{full_path:path}",
+        methods=["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        include_in_schema=False,
+    )
+    def frontend(full_path: str, request: Request):
+        if request.method not in ("GET", "HEAD"):
+            raise not_found()  # 写请求能走到这里，说明没匹配到任何已注册的 API 路由
         first = full_path.split("/", 1)[0]
         if first in BACKEND_PREFIXES:
             raise not_found()  # 未知的 API 路径要拿到 JSON 404，而不是网页

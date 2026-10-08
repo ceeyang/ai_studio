@@ -63,6 +63,16 @@ def test_no_dist_means_no_frontend(tmp_path):
         assert c.get("/").status_code == 404
 
 
+def test_unknown_api_path_404_for_any_method(tmp_path):
+    with make_client(tmp_path, build_dist(tmp_path)) as c:
+        r = c.post("/api/nope")
+        assert r.status_code == 404 and r.headers["content-type"].startswith("application/json")
+        r = c.get("/api/health")
+        assert r.status_code == 200 and r.json()["ok"] is True
+        r = c.get("/")
+        assert r.status_code == 200 and "AI Studio" in r.text
+
+
 def test_frontend_dist_is_relative_to_config_file(tmp_path):
     p = tmp_path / "config.yaml"
     p.write_text("frontend_dist: web/dist\n", encoding="utf-8")
