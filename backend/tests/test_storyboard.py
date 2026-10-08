@@ -101,6 +101,29 @@ def test_duration_clamped_to_engine_max(tmp_path, db):
         assert {x.duration for x in s.get(Episode, ep_id).shots} == {5.0}
 
 
+def test_duration_clamp_trims_dialogue_past_new_duration(tmp_path, db):
+    img = "medium close-up, 85mm, eye level. " + LOOK + " " + " ".join(["detail"] * 50)
+    block1 = {"shots": [
+        {"shot_size": "近景", "camera_move": "static", "action": "动作0", "cast": ["林夏"],
+         "dialogue": [{"speaker": "林夏", "zh": "第一句", "start": 0.5, "end": 6.5},
+                      {"speaker": "林夏", "zh": "第二句", "start": 6.0, "end": 7.5}],
+         "image_prompt": img, "motion_prompt": "she looks up slowly", "audio_prompt": "quiet hum",
+         "duration": 8, "transition_out": "hard_cut"},
+        {"shot_size": "近景", "camera_move": "static", "action": "动作1", "cast": ["林夏"],
+         "dialogue": [], "image_prompt": img, "motion_prompt": "she looks up slowly",
+         "audio_prompt": "quiet hum", "duration": 8, "transition_out": "hard_cut"},
+    ]}
+    ctx, ep_id, _ = setup(tmp_path, db, [block1, shots_json(2, duration=8)],
+                          video_engine="wan22_i2v")
+    run_storyboard(ctx, {"episode_id": ep_id})
+    with db.session() as s:
+        first = s.get(Episode, ep_id).shots[0]
+        assert first.duration == 5.0
+        assert len(first.dialogue) == 1
+        assert first.dialogue[0]["end"] == 5.0
+    assert any("裁掉 1 句" in m for m in ctx.logs)
+
+
 def test_regenerate_single_block_keeps_others(tmp_path, db):
     ctx, ep_id, prov = setup(tmp_path, db, [shots_json(2), shots_json(2), shots_json(2)])
     run_storyboard(ctx, {"episode_id": ep_id})

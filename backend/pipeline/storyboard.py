@@ -104,15 +104,27 @@ def run_storyboard(ctx, payload: dict) -> dict:
                               log=ctx.log, manual=manual, key=key)
         with sv.db.session() as s:
             s.execute(delete(Shot).where(Shot.scene_block_id == blk["id"]))
+            trimmed = 0
             for j, sh in enumerate(out.shots):
+                dur = min(sh.duration, max_seconds)
+                dialogue = []
+                for d in sh.dialogue:
+                    if d.start >= dur - 0.2:
+                        trimmed += 1
+                        continue
+                    dd = d.model_dump()
+                    dd["end"] = min(dd["end"], dur)
+                    dialogue.append(dd)
                 s.add(Shot(
                     episode_id=episode_id, scene_block_id=blk["id"], order=blk["order"] * 1000 + j,
                     shot_size=sh.shot_size, camera_move=sh.camera_move, action=sh.action,
-                    dialogue=[d.model_dump() for d in sh.dialogue],
+                    dialogue=dialogue,
                     cast=[{"character_id": char_ids[c], "variation_id": None} for c in sh.cast],
                     image_prompt=sh.image_prompt, motion_prompt=sh.motion_prompt,
-                    audio_prompt=sh.audio_prompt, duration=min(sh.duration, max_seconds),
+                    audio_prompt=sh.audio_prompt, duration=dur,
                     transition_out=sh.transition_out))
+            if trimmed:
+                ctx.log(f"段落 {blk['order'] + 1}：时长截断后裁掉 {trimmed} 句超出的台词")
             ep = s.get(Episode, episode_id)
             ep.stage_hashes = {**(ep.stage_hashes or {}), key: fp}
         done += 1
