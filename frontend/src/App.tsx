@@ -1,6 +1,8 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter, Route, Routes } from 'react-router-dom';
+import { Layout } from './components/Layout';
 import { NotFound } from './components/NotFound';
+import { EventsProvider } from './ws/EventsContext';
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 2000, retry: 1, refetchOnWindowFocus: false } },
@@ -9,11 +11,16 @@ const queryClient = new QueryClient({
 export function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <BrowserRouter>
-        <Routes>
-          <Route path="*" element={<NotFound />} />
-        </Routes>
-      </BrowserRouter>
+      <EventsProvider>
+        <BrowserRouter>
+          <Routes>
+            <Route element={<Layout />}>
+              {/* 页面路由 */}
+              <Route path="*" element={<NotFound />} />
+            </Route>
+          </Routes>
+        </BrowserRouter>
+      </EventsProvider>
     </QueryClientProvider>
   );
 }
