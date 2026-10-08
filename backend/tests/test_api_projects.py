@@ -66,3 +66,23 @@ def test_assets_and_style(api):
     assert st["anchor_text"] == "ANCHOR" and api.get("/api/projects/demo/style").json()["mood_keywords"] == ["tense"]
     blk = api.get(f"/api/episodes/{ep['id']}").json()["scene_blocks"][0]
     assert api.patch(f"/api/scene-blocks/{blk['id']}", json={"text": "改过"}).json()["text"] == "改过"
+
+
+def test_cross_origin_writes_rejected(api):
+    r = api.post("/api/projects", json={"title": "evil"}, headers={"Origin": "http://evil.com"})
+    assert r.status_code == 403
+    assert api.get("/api/projects").json() == []
+    assert api.post("/api/projects", json={"title": "a"}).status_code == 201
+    for origin in ("http://127.0.0.1:5173", "http://localhost", "https://localhost:8700"):
+        assert api.patch("/api/projects/a", json={"seed": 1},
+                         headers={"Origin": origin}).status_code == 200, origin
+    for origin in ("null", "http://localhost.evil.com", "http://127.0.0.1.evil.com:80"):
+        assert api.delete("/api/projects/a", headers={"Origin": origin}).status_code == 403, origin
+    # 读请求不看 Origin
+    assert api.get("/api/projects", headers={"Origin": "http://evil.com"}).status_code == 200
+
+
+def test_unknown_host_rejected(api):
+    assert api.get("/api/health", headers={"Host": "evil.com"}).status_code == 400
+    assert api.get("/api/health", headers={"Host": "127.0.0.1:8700"}).status_code == 200
+    assert api.get("/api/health", headers={"Host": "localhost:8700"}).status_code == 200
