@@ -12,8 +12,17 @@ export interface StudioEventsOptions {
   retryMs?: number;
 }
 
-/** 开发态经 Vite 代理、生产态直连后端，都是当前页面同一个 host。 */
-export function defaultWsUrl(): string {
+// 开发态下 Vite 的 ws 代理一断线就在终端打 "ws proxy error: read ECONNRESET"
+// （本机的火绒/AdGuard 等 WFP 网络过滤驱动会 RST 掉刚写完就关的回环连接，无害但吵）；
+// 所以开发态让浏览器直连后端，绕开代理。后端地址可用 VITE_BACKEND_WS 覆盖，默认 127.0.0.1:8700。
+const DEFAULT_BACKEND_WS = 'ws://127.0.0.1:8700';
+
+/** 开发态直连后端，生产态（FastAPI 同源托管前端）用当前页面的 host。 */
+export function defaultWsUrl(dev: boolean = import.meta.env.DEV): string {
+  if (dev) {
+    const backend = (import.meta.env.VITE_BACKEND_WS as string | undefined) || DEFAULT_BACKEND_WS;
+    return `${backend}/api/ws`;
+  }
   const { protocol, host } = window.location;
   return `${protocol === 'https:' ? 'wss' : 'ws'}://${host}/api/ws`;
 }

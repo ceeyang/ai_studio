@@ -1,13 +1,15 @@
 // 开发代理回归检查：模拟页面轮询 + 突发并发，经 Vite 代理（默认 http://127.0.0.1:5173）打后端，
-// 任何 502 / ECONNRESET / 超时都算失败，退出码 1。顺带检查 /api/ws 能经代理连上并保持住。
+// 任何 502 / ECONNRESET / 超时都算失败，退出码 1。
+// WebSocket 不经 Vite 代理（浏览器直连后端，见 src/ws/useStudioEvents.ts），这里也直连后端检查。
 // 用法（先 .\start.ps1 或分别起后端和 npm run dev）：
-//   node scripts/proxy-soak.mjs [baseUrl] [秒数]   （或 npm run proxy-soak -- [baseUrl] [秒数]）
+//   node scripts/proxy-soak.mjs [baseUrl] [秒数] [backendBaseUrl]   （或 npm run proxy-soak -- [baseUrl] [秒数]）
 //   node scripts/proxy-soak.mjs http://127.0.0.1:5173 60
 // 修复前（http-proxy 默认 Connection: close）：30s 内 57 ok / 130 失败（502 + ECONNRESET）；修复后 60s 387 ok / 0 失败。
 import http from 'node:http';
 
 const base = process.argv[2] ?? 'http://127.0.0.1:5173';
 const seconds = Number(process.argv[3] ?? 30);
+const backendBase = process.argv[4] ?? 'http://127.0.0.1:8700';
 const PATHS = ['/api/queue', '/api/jobs?status=running&limit=5', '/api/projects', '/api/health'];
 
 // 和浏览器一样复用连接，并且在服务端（Vite 默认 5s）关掉空闲连接之前先放掉。
@@ -54,7 +56,7 @@ async function bursts(until) {
 }
 
 async function wsCheck(until) {
-  const url = base.replace(/^http/, 'ws') + '/api/ws';
+  const url = backendBase.replace(/^http/, 'ws') + '/api/ws';
   return new Promise((resolve) => {
     const ws = new WebSocket(url);
     let opened = false;

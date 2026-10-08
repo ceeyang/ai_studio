@@ -4,7 +4,7 @@ import type { ReactNode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { makeJob } from '../test/factories';
 import { newQueryClient } from '../test/render';
-import { useStudioEvents, type WebSocketCtor } from './useStudioEvents';
+import { defaultWsUrl, useStudioEvents, type WebSocketCtor } from './useStudioEvents';
 
 class FakeWS {
   static all: FakeWS[] = [];
@@ -48,6 +48,27 @@ function setup(retryMs = 1000) {
   const ws = () => FakeWS.all[FakeWS.all.length - 1];
   return { qc, spy, hook, ws };
 }
+
+describe('defaultWsUrl', () => {
+  it('开发态直连后端，默认 127.0.0.1:8700', () => {
+    expect(defaultWsUrl(true)).toBe('ws://127.0.0.1:8700/api/ws');
+  });
+
+  it('开发态可用 VITE_BACKEND_WS 覆盖后端地址', () => {
+    vi.stubEnv('VITE_BACKEND_WS', 'ws://127.0.0.1:9999');
+    expect(defaultWsUrl(true)).toBe('ws://127.0.0.1:9999/api/ws');
+  });
+
+  it('生产态走当前页面的 host（http -> ws）', () => {
+    vi.stubGlobal('location', { protocol: 'http:', host: 'studio.local:8700' });
+    expect(defaultWsUrl(false)).toBe('ws://studio.local:8700/api/ws');
+  });
+
+  it('生产态走当前页面的 host（https -> wss）', () => {
+    vi.stubGlobal('location', { protocol: 'https:', host: 'studio.example.com' });
+    expect(defaultWsUrl(false)).toBe('wss://studio.example.com/api/ws');
+  });
+});
 
 describe('useStudioEvents', () => {
   it('连上后把队列状态写进缓存、进度写进状态', () => {
