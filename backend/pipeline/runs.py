@@ -74,19 +74,30 @@ def submit_chain(manager, db: Database, engines, episode_id: int, stages: list[s
 
     if ("keyframes" in stages or "videos" in stages) and not picked:
         raise JobError("这一集还没有分镜，先跑 storyboard")
+    # 先把本次会用到的引擎 family 全部解析出来，任何一个镜头的引擎不存在都在提交任何任务之前报错，
+    # 避免前面镜头的任务已经提交、后面镜头才校验失败导致的孤儿任务。
+    img_fam: dict[int, str] = {}
+    vid_fam: dict[int, str] = {}
+    if "keyframes" in stages:
+        for sid, image_engine, _ in picked:
+            img_fam[sid] = _family(engines, "image", image_engine)
+    if "videos" in stages:
+        for sid, _, video_engine in picked:
+            vid_fam[sid] = _family(engines, "video", video_engine)
+
     ids: list[int] = []
     kf: dict[int, list[int]] = {}
     vids: list[int] = []
     if "keyframes" in stages:
-        for sid, image_engine, _ in picked:
-            fam = _family(engines, "image", image_engine)
+        for sid, _, _ in picked:
+            fam = img_fam[sid]
             kf[sid] = [manager.submit("image.keyframe", {"shot_id": sid}, owner_type="shot",
                                       owner_id=sid, model_family=fam, depends_on=deps, **common)
                        for _ in range(max(1, opts.candidates))]
             ids += kf[sid]
     if "videos" in stages:
-        for sid, _, video_engine in picked:
-            fam = _family(engines, "video", video_engine)
+        for sid, _, _ in picked:
+            fam = vid_fam[sid]
             jid = manager.submit("video.shot", {"shot_id": sid}, owner_type="shot", owner_id=sid,
                                  model_family=fam, depends_on=deps + kf.get(sid, []), **common)
             vids.append(jid)

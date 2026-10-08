@@ -1,5 +1,3 @@
-import json
-
 import pytest
 from sqlalchemy import select
 
@@ -89,6 +87,16 @@ def test_chain_keyframes_videos_export(tmp_path, db, manager):
     assert rows[-1][3] == [v[0] for v in vids]
     assert rows[0][4] == "zimage" and vids[0][4] == "h3" and rows[0][5] is True
     assert out == [r[0] for r in rows]
+
+
+def test_chain_validates_all_shot_engines_before_submitting(tmp_path, db, manager):
+    sv = make_services(tmp_path, db)
+    ep_id, ids = seed_shots(db, n=3)
+    with db.session() as s:
+        s.get(Shot, ids[1]).image_engine = "nope"
+    with pytest.raises(JobError):
+        submit_chain(manager, db, sv.engines, ep_id, ["keyframes", "videos"], RunOptions())
+    assert jobs(db) == []
 
 
 def test_chain_shot_filter(tmp_path, db, manager):
