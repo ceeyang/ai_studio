@@ -1,0 +1,135 @@
+import json
+
+import pytest
+from sqlalchemy import select
+
+import backend.pipeline  # noqa: F401  注册全部处理器
+from backend.domain.models import Episode, Export, Shot
+from backend.domain.slots import add_candidate, get_or_create_slot
+from backend.pipeline.export import run_export
+from backend.pipeline.runs import RunOptions, submit_chain
+from backend.pipeline.script import run_script
+from backend.queue.errors import JobError
+from backend.queue.handlers import HANDLERS
+from backend.queue.manager import JobManager
+from backend.tests.helpers import FakeCtx, FakeFFmpeg, make_gateway, make_services, seed_episode
+
+
+def seed_shots(db, n=3, **kw):
+    _, ep_id = seed_episode(db, **kw)
+    ids = []
+    with db.session() as s:
+        for i in range(n):
+            sh = Shot(episode_id=ep_id, order=i, code=f"S{i + 1:02d}",
+                      transition_out="dissolve_0.5" if i == 0 else "hard_cut")
+            s.add(sh)
+            s.flush()
+            ids.append(sh.id)
+    return ep_id, ids
+
+
+def add_video(sv, shot_id, name):
+    p = sv.media.new_media_path("demo", "video", "mp4")
+    p.write_bytes(b"v")
+    with sv.db.session() as s:
+        add_candidate(s, get_or_create_slot(s, "shot", shot_id, "video"), file_path=sv.media.rel(p),
+                      engine="h3_video", params={}, input_hash=name, job_id=None)
+    return p
+
+
+def test_export_assembles_selected_videos_in_order(tmp_path, db):
+    ff = FakeFFmpeg()
+    sv = make_services(tmp_path, db, ffmpeg=ff)
+    ep_id, ids = seed_shots(db)
+    paths = [add_video(sv, sid, f"h{i}") for i, sid in enumerate(ids)]
+    res = run_export(FakeCtx(sv, job_id=5), {"episode_id": ep_id})
+    call = ff.calls[0]
+    assert call["clips"] == paths
+    assert (call["width"], call["height"], call["fps"]) == (1080, 1920, 24)
+    assert call["transitions"] == ["dissolve_0.5", "hard_cut"]
+    assert res["file"].startswith("demo/exports/ep01_9x16_") and res["file"].endswith(".mp4")
+    with db.session() as s:
+        assert s.get(Export, res["export_id"]).variant == "9x16"
+        assert s.get(Episode, ep_id).status == "exported"
+
+
+def test_export_reports_missing_videos(tmp_path, db):
+    ff = FakeFFmpeg()
+    sv = make_services(tmp_path, db, ffmpeg=ff)
+    ep_id, ids = seed_shots(db)
+    add_video(sv, ids[0], "a")
+    with pytest.raises(JobError, match="S02, S03"):
+        run_export(FakeCtx(sv), {"episode_id": ep_id})
+    run_export(FakeCtx(sv), {"episode_id": ep_id, "allow_missing": True})
+    assert len(ff.calls[0]["clips"]) == 1 and ff.calls[0]["transitions"] == []
+
+
+@pytest.fixture
+def manager(db):
+    return JobManager(db, HANDLERS, poll=0.02)  # 不启动 worker，只看提交了什么
+
+
+def jobs(db):
+    from backend.domain.models import Job
+    with db.session() as s:
+        return [(j.id, j.type, j.payload, j.depends_on, j.model_family, j.gpu)
+                for j in s.scalars(select(Job).order_by(Job.id))]
+
+
+def test_chain_keyframes_videos_export(tmp_path, db, manager):
+    sv = make_services(tmp_path, db)
+    ep_id, ids = seed_shots(db, n=2)
+    out = submit_chain(manager, db, sv.engines, ep_id, ["keyframes", "videos", "export"],
+                       RunOptions(candidates=2))
+    rows = jobs(db)
+    assert [r[1] for r in rows] == ["image.keyframe"] * 4 + ["video.shot"] * 2 + ["export.episode"]
+    kf = {sid: [r[0] for r in rows if r[1] == "image.keyframe" and r[2]["shot_id"] == sid] for sid in ids}
+    vids = [r for r in rows if r[1] == "video.shot"]
+    assert vids[0][3] == kf[ids[0]] and vids[1][3] == kf[ids[1]]
+    assert rows[-1][3] == [v[0] for v in vids]
+    assert rows[0][4] == "zimage" and vids[0][4] == "h3" and rows[0][5] is True
+    assert out == [r[0] for r in rows]
+
+
+def test_chain_shot_filter(tmp_path, db, manager):
+    sv = make_services(tmp_path, db)
+    ep_id, ids = seed_shots(db)
+    submit_chain(manager, db, sv.engines, ep_id, ["keyframes"], RunOptions(shots=["s02", str(ids[2])]))
+    assert [r[2]["shot_id"] for r in jobs(db)] == [ids[1], ids[2]]
+    with pytest.raises(JobError, match="S09"):
+        submit_chain(manager, db, sv.engines, ep_id, ["keyframes"], RunOptions(shots=["S09"]))
+
+
+def test_chain_validation(tmp_path, db, manager):
+    sv = make_services(tmp_path, db)
+    _, ep_id = seed_episode(db)
+    with pytest.raises(JobError, match="分镜"):
+        submit_chain(manager, db, sv.engines, ep_id, ["keyframes"], RunOptions())
+    with pytest.raises(JobError, match="未知阶段"):
+        submit_chain(manager, db, sv.engines, ep_id, ["render"], RunOptions())
+    with pytest.raises(JobError, match="最前面"):
+        submit_chain(manager, db, sv.engines, ep_id, ["keyframes", "storyboard"], RunOptions())
+
+
+def test_chain_starting_with_script_defers_the_rest(tmp_path, db, manager):
+    sv = make_services(tmp_path, db)
+    _, ep_id = seed_episode(db)
+    [jid] = submit_chain(manager, db, sv.engines, ep_id, list(("script", "storyboard", "keyframes")),
+                         RunOptions(force=True, candidates=2))
+    (_, jtype, payload, _, _, gpu), = jobs(db)
+    assert jtype == "script" and gpu is False
+    assert payload["then"] == ["storyboard", "keyframes"]
+    assert payload["options"]["candidates"] == 2 and payload["force"] is True
+
+
+def test_script_handler_continues_chain(tmp_path, db, manager):
+    from backend.tests.test_script import STRUCTURE, VISUAL
+    gw, _ = make_gateway([STRUCTURE, VISUAL])
+    sv = make_services(tmp_path, db, llm=gw)
+    manager.services = sv
+    _, ep_id = seed_episode(db)
+    run_script(FakeCtx(sv, manager=manager),
+               {"episode_id": ep_id, "then": ["storyboard", "keyframes"],
+                "options": {"candidates": 1}})
+    (_, jtype, payload, _, _, _), = jobs(db)
+    assert jtype == "storyboard" and payload["then"] == ["keyframes"]

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import threading
+from pathlib import Path
 
 from backend.config import Config, LLMCfg, ProviderCfg, ServerCfg
 from backend.domain.media import MediaStore
@@ -96,3 +97,15 @@ class FakeRunner:
         if on_progress:
             on_progress(1, 1)
         return [f]
+
+
+class FakeFFmpeg:
+    def __init__(self):
+        self.calls: list[dict] = []
+
+    def assemble(self, clips, out, *, width, height, fps, transitions, work_dir):
+        self.calls.append({"clips": list(clips), "out": Path(out), "width": width,
+                           "height": height, "fps": fps, "transitions": list(transitions)})
+        Path(out).parent.mkdir(parents=True, exist_ok=True)
+        Path(out).write_bytes(b"mp4")
+        return Path(out)
