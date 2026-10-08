@@ -95,3 +95,31 @@ def test_websocket_streams_job_events(api):
         api.post(f"/api/episodes/{ep_id}/run", json={"stage": "script"})
         msg = ws.receive_json()
         assert msg["type"] == "job" and msg["job"]["type"] == "script"
+
+
+def test_media_rejects_unsafe_paths_without_resolving(api, monkeypatch):
+    import pathlib
+
+    seen = []
+    real_resolve = pathlib.Path.resolve
+
+    def guarded(self, *a, **kw):
+        seen.append(str(self))
+        if str(self).startswith(("\\\\", "//")):
+            raise AssertionError(f"不应解析网络路径：{self}")
+        return real_resolve(self, *a, **kw)
+
+    monkeypatch.setattr(pathlib.Path, "resolve", guarded)
+    bad = ["/media/..%2Fstudio.db", "/media/demo/media/..%2F..%2Fstudio.db",
+           "/media///host/share/x", "/media/%2F%2Fhost%2Fshare%2Fx", "/media/C:%2Fx",
+           "/media/C:/Windows/win.ini", "/media/%5C%5Chost%5Cshare%5Cx",
+           "/media/demo%5Cmedia%5Cx.png", "/media//etc/passwd"]
+    for url in bad:
+        r = api.get(url)
+        assert r.status_code == 400, (url, r.status_code)
+    assert seen == []  # 文本检查就拒绝了，没走到 resolve
+
+
+def test_media_missing_file_is_404(api):
+    api.post("/api/projects", json={"title": "demo"})
+    assert api.get("/media/demo/media/first_frame/nope.png").status_code == 404
