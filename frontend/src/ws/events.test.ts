@@ -1,0 +1,52 @@
+import { describe, expect, it } from 'vitest';
+import { makeJob } from '../test/factories';
+import { eventsReducer, initialEvents, invalidationsFor } from './events';
+
+describe('eventsReducer', () => {
+  it('记录连接状态', () => {
+    const s = eventsReducer(initialEvents, { type: 'connected' });
+    expect(s.connected).toBe(true);
+    expect(eventsReducer(s, { type: 'disconnected' }).connected).toBe(false);
+  });
+
+  it('进度按任务记录；任务仍在运行时保留，结束后清掉', () => {
+    let s = eventsReducer(initialEvents, { type: 'progress', job_id: 5, value: 3, max: 20 });
+    expect(s.progress[5]).toEqual({ value: 3, max: 20 });
+    s = eventsReducer(s, { type: 'job', job: makeJob({ id: 5, status: 'running' }) });
+    expect(s.progress[5]).toEqual({ value: 3, max: 20 });
+    s = eventsReducer(s, { type: 'job', job: makeJob({ id: 5, status: 'done' }) });
+    expect(s.progress[5]).toBeUndefined();
+  });
+
+  it('日志和队列事件不改 reducer 状态', () => {
+    const s = eventsReducer(initialEvents, { type: 'log', job_id: 1, line: 'x' });
+    expect(s).toBe(initialEvents);
+  });
+});
+
+describe('invalidationsFor', () => {
+  it('任务事件总是刷新任务列表、队列和这个任务', () => {
+    expect(invalidationsFor({ type: 'job', job: makeJob({ id: 3, status: 'running' }) })).toEqual([
+      ['jobs'],
+      ['queue'],
+      ['job', 3],
+    ]);
+  });
+
+  it('任务结束时刷新剧集和成片；剧本/分镜结束时还要刷新角色、场景、风格', () => {
+    const keysDone = invalidationsFor({ type: 'job', job: makeJob({ id: 3, type: 'export.episode', status: 'done' }) });
+    expect(keysDone).toContainEqual(['episode']);
+    expect(keysDone).toContainEqual(['exports']);
+    expect(keysDone).not.toContainEqual(['characters']);
+    const keysScript = invalidationsFor({ type: 'job', job: makeJob({ id: 4, type: 'script', status: 'waiting_input' }) });
+    expect(keysScript).toEqual(expect.arrayContaining([['episodes'], ['characters'], ['locations'], ['style']]));
+  });
+
+  it('日志事件只刷新那个任务；进度和队列事件不刷新任何查询', () => {
+    expect(invalidationsFor({ type: 'log', job_id: 9, line: 'x' })).toEqual([['job', 9]]);
+    expect(invalidationsFor({ type: 'progress', job_id: 9, value: 1, max: 2 })).toEqual([]);
+    expect(
+      invalidationsFor({ type: 'queue', paused: false, counts: { queued: 0, running: 0, waiting_input: 0 }, current_family: null }),
+    ).toEqual([]);
+  });
+});
