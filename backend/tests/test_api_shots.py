@@ -94,9 +94,6 @@ def test_video_stale_after_new_first_frame(api):
         ff2_id = ff2.id
     slots = {x["kind"]: x for x in api.get(f"/api/shots/{ids[0]}").json()["slots"]}
     assert slots["video"]["stale"] is False
-    assert api.post(f"/api/candidates/{ff2_id}/select").status_code == 200 or True
-    with db.session() as s:
-        from backend.domain.slots import select_candidate
-        select_candidate(s, ff2_id)
+    assert api.post(f"/api/candidates/{ff2_id}/select").status_code == 200
     slots = {x["kind"]: x for x in api.get(f"/api/shots/{ids[0]}").json()["slots"]}
     assert slots["first_frame"]["stale"] is False and slots["video"]["stale"] is True
