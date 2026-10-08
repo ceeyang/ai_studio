@@ -4,7 +4,7 @@ import { jobTypeLabel } from '../format';
 import { useEvents } from '../ws/EventsContext';
 
 export function TaskBar() {
-  const { connected, progress } = useEvents();
+  const { connected, everConnected, progress } = useEvents();
   const queue = useQueue();
   const running = useJobs('running', 5);
   const pause = usePauseQueue();
@@ -17,7 +17,7 @@ export function TaskBar() {
 
   return (
     <header className="taskbar" aria-label="任务条">
-      {!connected && <span className="warn">实时连接已断开，正在重连…</span>}
+      {everConnected && !connected && <span className="warn">实时连接已断开，正在重连…</span>}
       {current ? (
         <span className="current" data-testid="taskbar-current">
           运行中：#{current.id} {jobTypeLabel(current.type)}

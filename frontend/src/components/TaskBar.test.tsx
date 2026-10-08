@@ -21,7 +21,7 @@ function renderBar(events: EventsState) {
 describe('TaskBar', () => {
   it('显示运行中的任务、进度、排队数和等待输入的入口', async () => {
     installFetch({ 'GET /api/queue': QUEUE, 'GET /api/jobs': [makeJob({ id: 7, type: 'video.shot', status: 'running' })] });
-    renderBar({ connected: true, progress: { 7: { value: 12, max: 30 } } });
+    renderBar({ connected: true, everConnected: true, progress: { 7: { value: 12, max: 30 } } });
     const current = await screen.findByTestId('taskbar-current');
     expect(current.textContent).toContain('#7');
     expect(current.textContent).toContain('视频');
@@ -38,7 +38,7 @@ describe('TaskBar', () => {
       'POST /api/queue/pause': { ...QUEUE, paused: true },
       'POST /api/jobs/7/cancel': { ok: true },
     });
-    renderBar({ connected: true, progress: {} });
+    renderBar({ connected: true, everConnected: true, progress: {} });
     const user = userEvent.setup();
     await user.click(await screen.findByRole('button', { name: '暂停队列' }));
     expect(await screen.findByRole('button', { name: '恢复队列' })).toBeTruthy();
@@ -49,9 +49,16 @@ describe('TaskBar', () => {
 
   it('断线时提示正在重连；没有运行中的任务时说明', async () => {
     installFetch({ 'GET /api/queue': { ...QUEUE, counts: { queued: 0, running: 0, waiting_input: 0 } }, 'GET /api/jobs': [] });
-    renderBar({ connected: false, progress: {} });
+    renderBar({ connected: false, everConnected: true, progress: {} });
     expect(screen.getByText('实时连接已断开，正在重连…')).toBeTruthy();
     expect(await screen.findByText('没有运行中的任务')).toBeTruthy();
     expect(screen.queryByRole('link', { name: /等待输入/ })).toBeNull();
+  });
+
+  it('首次加载、WS 还没连上时，不提示"断线重连"（没连过不算断线）', async () => {
+    installFetch({ 'GET /api/queue': { ...QUEUE, counts: { queued: 0, running: 0, waiting_input: 0 } }, 'GET /api/jobs': [] });
+    renderBar({ connected: false, everConnected: false, progress: {} });
+    expect(await screen.findByText('没有运行中的任务')).toBeTruthy();
+    expect(screen.queryByText(/实时连接已断开/)).toBeNull();
   });
 });

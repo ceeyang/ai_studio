@@ -15,17 +15,19 @@ export interface Progress {
 
 export interface EventsState {
   connected: boolean;
+  /** 连上过至少一次就一直是 true（哪怕后来断开）：区分"还没连上过"和"断线了"。 */
+  everConnected: boolean;
   progress: Record<number, Progress>;
 }
 
 export type EventsAction = WsEvent | { type: 'connected' } | { type: 'disconnected' };
 
-export const initialEvents: EventsState = { connected: false, progress: {} };
+export const initialEvents: EventsState = { connected: false, everConnected: false, progress: {} };
 
 export function eventsReducer(state: EventsState, action: EventsAction): EventsState {
   switch (action.type) {
     case 'connected':
-      return state.connected ? state : { ...state, connected: true };
+      return state.connected ? state : { ...state, connected: true, everConnected: true };
     case 'disconnected':
       return state.connected ? { ...state, connected: false } : state;
     case 'progress':

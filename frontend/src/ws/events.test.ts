@@ -3,10 +3,15 @@ import { makeJob } from '../test/factories';
 import { eventsReducer, initialEvents, invalidationsFor } from './events';
 
 describe('eventsReducer', () => {
-  it('记录连接状态', () => {
+  it('记录连接状态；只要连上过一次，everConnected 就一直是 true（哪怕后来断开）', () => {
+    expect(initialEvents.connected).toBe(false);
+    expect(initialEvents.everConnected).toBe(false);
     const s = eventsReducer(initialEvents, { type: 'connected' });
     expect(s.connected).toBe(true);
-    expect(eventsReducer(s, { type: 'disconnected' }).connected).toBe(false);
+    expect(s.everConnected).toBe(true);
+    const dropped = eventsReducer(s, { type: 'disconnected' });
+    expect(dropped.connected).toBe(false);
+    expect(dropped.everConnected).toBe(true);
   });
 
   it('进度按任务记录；任务仍在运行时保留，结束后清掉', () => {
