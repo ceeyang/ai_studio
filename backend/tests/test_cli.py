@@ -107,3 +107,26 @@ def test_server_timeout_message(monkeypatch):
         base_url="http://127.0.0.1:8700", transport=httpx.MockTransport(boom)))
     r = runner.invoke(studio.app, ["project", "list"])
     assert r.exit_code == 2 and "工作台响应超时" in r.output and "连不上" not in r.output
+
+
+def test_main_switches_console_to_utf8(monkeypatch):
+    import io
+    import sys
+
+    out = io.TextIOWrapper(io.BytesIO(), encoding="cp1252")
+    err = io.TextIOWrapper(io.BytesIO(), encoding="cp1252")
+    monkeypatch.setattr(sys, "stdout", out)
+    monkeypatch.setattr(sys, "stderr", err)
+    called = []
+    monkeypatch.setattr(studio, "app", lambda: called.append(sys.stdout.encoding))
+    studio.main()
+    assert called == ["utf-8"] and sys.stderr.encoding == "utf-8"
+    print("提词员")  # cp1252 编不了中文；切到 utf-8 后不再抛 UnicodeEncodeError
+
+
+def test_console_script_points_at_main():
+    import tomllib
+    from pathlib import Path
+
+    meta = tomllib.loads((Path(__file__).parents[2] / "pyproject.toml").read_text(encoding="utf-8"))
+    assert meta["project"]["scripts"]["studio"] == "cli.studio:main"

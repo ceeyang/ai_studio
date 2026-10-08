@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -66,7 +67,7 @@ def _emit(data: Any, human: Callable[[Any], None]) -> None:
 
 
 @app.callback()
-def main(as_json: bool = typer.Option(False, "--json", help="输出 JSON，便于脚本和 Claude 解析")):
+def _root(as_json: bool = typer.Option(False, "--json", help="输出 JSON，便于脚本和 Claude 解析")):
     STATE["json"] = as_json
 
 
@@ -262,5 +263,13 @@ def doctor():
         raise typer.Exit(1)
 
 
-if __name__ == "__main__":
+def main() -> None:
+    """console script 入口：Windows 控制台默认 GBK/cp1252 时中文会乱码或报错，统一改成 UTF-8。"""
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="replace")
     app()
+
+
+if __name__ == "__main__":
+    main()

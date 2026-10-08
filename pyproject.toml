@@ -20,7 +20,7 @@ dependencies = [
 ]
 
 [project.scripts]
-studio = "cli.studio:app"
+studio = "cli.studio:main"
 studio-server = "backend.app.main:run"
 
 [dependency-groups]
