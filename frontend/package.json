@@ -8,7 +8,8 @@
     "build": "tsc --noEmit -p tsconfig.json && vite build",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
-    "e2e": "npm run build && playwright test"
+    "e2e": "npm run build && playwright test",
+    "proxy-soak": "node scripts/proxy-soak.mjs"
   },
   "dependencies": {
     "@tanstack/react-query": "^5.104.1",
