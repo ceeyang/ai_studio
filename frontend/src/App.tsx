@@ -3,6 +3,7 @@ import { BrowserRouter, Route, Routes } from 'react-router-dom';
 import { Layout } from './components/Layout';
 import { NotFound } from './components/NotFound';
 import { EventsProvider } from './ws/EventsContext';
+import { DirectorPage } from './pages/DirectorPage';
 import { ScriptPage } from './pages/ScriptPage';
 import { ProjectsPage } from './pages/ProjectsPage';
 
@@ -18,6 +19,7 @@ export function App() {
           <Routes>
             <Route element={<Layout />}>
               {/* 页面路由 */}
+              <Route path="/projects/:slug/episodes/:episodeId/director" element={<DirectorPage />} />
               <Route path="/projects/:slug/episodes/:episodeId/script" element={<ScriptPage />} />
               <Route path="/" element={<ProjectsPage />} />
               <Route path="/projects/:slug" element={<ProjectsPage />} />
