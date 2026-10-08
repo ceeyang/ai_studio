@@ -1,7 +1,6 @@
 import pytest
-from sqlalchemy import select
 
-from backend.domain.models import Episode, Project, Shot, StyleBible
+from backend.domain.models import Project, Shot, StyleBible
 from backend.domain.slots import selected_candidate, slots_for
 from backend.engines.base import upload_ref
 from backend.pipeline.keyframes import run_keyframe

@@ -1,7 +1,7 @@
 import pytest
 from sqlalchemy import select
 
-from backend.domain.models import Character, Episode, Location, Project, SceneBlock, Shot, StyleBible
+from backend.domain.models import Character, Episode, Location, Project, SceneBlock, StyleBible
 from backend.llm.base import LLMError
 from backend.pipeline.storyboard import allocate_shots, run_storyboard, shot_budget
 from backend.queue.errors import JobError

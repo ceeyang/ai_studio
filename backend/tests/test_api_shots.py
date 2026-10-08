@@ -1,4 +1,4 @@
-from backend.domain.models import Episode, Project, Shot
+from backend.domain.models import Project, Shot
 from backend.domain.shots import renumber_shots
 from backend.domain.slots import add_candidate, get_or_create_slot
 from backend.pipeline.prompting import keyframe_input_hash, video_input_hash

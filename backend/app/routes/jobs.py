@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Request
-from sqlalchemy import select
 
 from backend.app.deps import manager, project_by_slug, services
 from backend.app.schemas import InputIn, RetryIn

@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from backend.domain.models import Job
-from backend.queue.errors import JobCanceled, JobError, NeedsInput
+from backend.queue.errors import JobError, NeedsInput
 from backend.queue.handlers import HandlerRegistry
 from backend.queue.manager import JobManager
 
