@@ -1,0 +1,138 @@
+"""LLM provider：OpenAI 兼容接口（LM Studio / DeepSeek / Agnes…）、本机 Claude Code。"""
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+import shutil
+import subprocess
+import tempfile
+import time
+from collections.abc import Callable
+from pathlib import Path
+
+import httpx
+
+from backend.config import LLMCfg, ProviderCfg
+from backend.llm.base import LLMError, LLMProvider, LLMResult
+
+logger = logging.getLogger(__name__)
+
+
+def flatten_messages(messages: list[dict]) -> str:
+    if len(messages) == 1:
+        return messages[0]["content"]
+    label = {"user": "【用户】", "assistant": "【助手】"}
+    return "\n\n".join(f"{label.get(m['role'], m['role'])}\n{m['content']}" for m in messages)
+
+
+class OpenAIProvider:
+    def __init__(self, cfg: ProviderCfg, *, transport: httpx.BaseTransport | None = None):
+        if not cfg.base_url:
+            raise ValueError(f"LLM provider {cfg.id} 缺少 base_url")
+        self.id = cfg.id
+        self.cfg = cfg
+        headers = {}
+        key = cfg.api_key()
+        if key:
+            headers["Authorization"] = f"Bearer {key}"
+        self._http = httpx.Client(base_url=cfg.base_url.rstrip("/"), timeout=cfg.timeout,
+                                  trust_env=False, headers=headers, transport=transport)
+
+    def complete(self, system: str, messages: list[dict], *, json_mode: bool = True) -> LLMResult:
+        body: dict = {"messages": [{"role": "system", "content": system}, *messages],
+                      "temperature": 0.7, "stream": False}
+        if self.cfg.model:
+            body["model"] = self.cfg.model
+        t0 = time.monotonic()
+        last: Exception | None = None
+        for attempt in range(3):
+            try:
+                r = self._http.post("/chat/completions", json=body)
+                break
+            except httpx.TransportError as e:  # LM Studio 加载模型时会重置连接
+                last = e
+                time.sleep(2)
+        else:
+            raise LLMError(f"连不上 {self.id}（{self.cfg.base_url}）：{last}")
+        if r.status_code >= 400:
+            raise LLMError(f"{self.id} 返回 HTTP {r.status_code}：{r.text[:500]}")
+        d = r.json()
+        text = d["choices"][0]["message"].get("content") or ""
+        return LLMResult(text=text, model=d.get("model"), usage=d.get("usage"),
+                         seconds=time.monotonic() - t0)
+
+
+class ClaudeProvider:
+    """走本机 Claude Code 订阅，不需要 API key。"""
+
+    def __init__(self, cfg: ProviderCfg, *, run: Callable = subprocess.run,
+                 which: Callable[[str], str | None] = shutil.which):
+        self.id = cfg.id
+        self.cfg = cfg
+        self._run = run
+        self._which = which
+
+    def complete(self, system: str, messages: list[dict], *, json_mode: bool = True) -> LLMResult:
+        prompt = flatten_messages(messages)
+        t0 = time.monotonic()
+        if self.cfg.use_sdk:
+            try:
+                text = asyncio.run(self._sdk(system, prompt))
+                return LLMResult(text=text, model=self.cfg.model, seconds=time.monotonic() - t0)
+            except Exception as e:
+                logger.warning("Claude Agent SDK 调用失败，退回 claude -p：%s", e)
+        return self._cli(system, prompt, t0)
+
+    async def _sdk(self, system: str, prompt: str) -> str:
+        from claude_agent_sdk import ClaudeAgentOptions, ResultMessage, query
+
+        opts = ClaudeAgentOptions(system_prompt=system, max_turns=1, allowed_tools=[],
+                                  model=self.cfg.model, cwd=tempfile.gettempdir())
+        result = None
+        async for msg in query(prompt=prompt, options=opts):
+            if isinstance(msg, ResultMessage):
+                if msg.is_error:
+                    raise LLMError(f"Claude Agent SDK 报错：{msg.result}")
+                result = msg.result
+        if not result:
+            raise LLMError("Claude Agent SDK 没有返回结果")
+        return result
+
+    def _cli(self, system: str, prompt: str, t0: float) -> LLMResult:
+        exe = self._which("claude")
+        if not exe:
+            raise LLMError("找不到 claude 命令（Claude Code CLI），装好后再试，或换个 provider")
+        with tempfile.TemporaryDirectory() as tmp:
+            sp = Path(tmp) / "system.md"
+            sp.write_text(system, encoding="utf-8")
+            cmd = [exe, "-p", "--output-format", "json", "--max-turns", "1",
+                   "--system-prompt-file", str(sp)]
+            if self.cfg.model:
+                cmd += ["--model", self.cfg.model]
+            if exe.lower().endswith((".cmd", ".bat")):
+                cmd = ["cmd", "/c", *cmd]
+            p = self._run(cmd, input=prompt, capture_output=True, text=True, encoding="utf-8",
+                          errors="replace", timeout=self.cfg.timeout, cwd=tmp)
+        if p.returncode != 0 and not (p.stdout or "").strip():
+            raise LLMError(f"claude -p 失败（退出码 {p.returncode}）：{(p.stderr or '')[-800:]}")
+        try:
+            d = json.loads(p.stdout)
+        except json.JSONDecodeError:
+            raise LLMError(f"claude -p 输出不是 JSON：{(p.stdout or '')[:500]}") from None
+        if isinstance(d, list):
+            d = next((x for x in reversed(d) if isinstance(x, dict) and x.get("type") == "result"), {})
+        if d.get("is_error") or d.get("subtype") not in (None, "success"):
+            raise LLMError(f"claude -p 报错：{d.get('result') or d.get('subtype')}")
+        return LLMResult(text=d.get("result") or "", model=self.cfg.model, usage=d.get("usage"),
+                         seconds=time.monotonic() - t0)
+
+
+def build_providers(cfg: LLMCfg) -> dict[str, LLMProvider]:
+    out: dict[str, LLMProvider] = {}
+    for p in cfg.providers:
+        if p.kind == "openai":
+            out[p.id] = OpenAIProvider(p)
+        elif p.kind == "claude":
+            out[p.id] = ClaudeProvider(p)
+    return out
