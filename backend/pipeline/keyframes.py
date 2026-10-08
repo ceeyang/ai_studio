@@ -4,7 +4,7 @@ from __future__ import annotations
 import shutil
 
 from backend.domain.models import Shot
-from backend.domain.slots import add_candidate, get_or_create_slot
+from backend.domain.slots import add_candidate, get_or_create_slot, selected_candidate
 from backend.engines.base import ImageRequest
 from backend.pipeline.common import load_episode
 from backend.pipeline.prompting import (compose_image_prompt, join_negative, keyframe_input_hash,
@@ -47,6 +47,12 @@ def run_keyframe(ctx, payload: dict) -> dict:
         prompt = compose_image_prompt(shot.image_prompt, anchor)
         negative = join_negative(proj.negative, style.negative if style else "")
         h = keyframe_input_hash(shot, proj, style, engine_name)
+        # 只要一个候选、又不强制时，输入没变就不重出（多候选是用户明确要抽卡）
+        if not payload.get("force") and int(payload.get("candidates") or 1) == 1:
+            cur = selected_candidate(s, "shot", shot.id, "first_frame")
+            if cur is not None and cur.input_hash == h:
+                ctx.log(f"首帧 {shot.code}：输入没变，跳过（要重出用 --force）")
+                return {"skipped": True, "candidate_ids": []}
         slot = get_or_create_slot(s, "shot", shot.id, "first_frame")
         seed = shot_seed(proj.seed, shot.id, len(slot.candidates))
         slug, code, aspect = proj.slug, shot.code, proj.aspect

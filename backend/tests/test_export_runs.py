@@ -86,6 +86,8 @@ def test_chain_keyframes_videos_export(tmp_path, db, manager):
     assert vids[0][3] == kf[ids[0]] and vids[1][3] == kf[ids[1]]
     assert rows[-1][3] == [v[0] for v in vids]
     assert rows[0][4] == "zimage" and vids[0][4] == "h3" and rows[0][5] is True
+    assert rows[0][2] == {"shot_id": ids[0], "force": False, "candidates": 2}
+    assert vids[0][2] == {"shot_id": ids[0], "force": False}
     assert out == [r[0] for r in rows]
 
 
@@ -104,6 +106,10 @@ def test_chain_shot_filter(tmp_path, db, manager):
     ep_id, ids = seed_shots(db)
     submit_chain(manager, db, sv.engines, ep_id, ["keyframes"], RunOptions(shots=["s02", str(ids[2])]))
     assert [r[2]["shot_id"] for r in jobs(db)] == [ids[1], ids[2]]
+    submit_chain(manager, db, sv.engines, ep_id, ["keyframes", "videos"],
+                 RunOptions(shots=["S01"], force=True))
+    assert [r[2] for r in jobs(db)[2:]] == [{"shot_id": ids[0], "force": True, "candidates": 1},
+                                           {"shot_id": ids[0], "force": True}]
     with pytest.raises(JobError, match="S09"):
         submit_chain(manager, db, sv.engines, ep_id, ["keyframes"], RunOptions(shots=["S09"]))
 

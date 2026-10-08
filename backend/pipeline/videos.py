@@ -34,6 +34,11 @@ def run_video(ctx, payload: dict) -> dict:
                                       has_audio=has_audio)
         negative = join_negative(proj.negative, style.negative if style else "")
         h = video_input_hash(shot, proj, style, ff.id, engine_name, has_audio)
+        if not payload.get("force"):
+            cur = selected_candidate(s, "shot", shot.id, "video")
+            if cur is not None and cur.input_hash == h:  # hash 里含首帧候选 id
+                ctx.log(f"视频 {shot.code}：输入没变，跳过（要重出用 --force）")
+                return {"skipped": True, "candidate_ids": []}
         slot = get_or_create_slot(s, "shot", shot.id, "video")
         seed = shot_seed(proj.seed, shot.id, len(slot.candidates))
         seconds = max(1.0, min(float(shot.duration), engine.caps.max_seconds))

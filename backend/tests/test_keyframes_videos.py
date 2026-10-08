@@ -61,8 +61,8 @@ def test_keyframe_creates_selected_candidate(tmp_path, db):
 
 def test_second_keyframe_keeps_selection_and_changes_seed(tmp_path, db):
     ctx, runner, shot_id = setup(tmp_path, db)
-    first = run_keyframe(ctx, {"shot_id": shot_id})["candidate_ids"][0]
-    run_keyframe(ctx, {"shot_id": shot_id})
+    first = run_keyframe(ctx, {"shot_id": shot_id, "candidates": 2})["candidate_ids"][0]
+    run_keyframe(ctx, {"shot_id": shot_id, "candidates": 2})
     assert runner.calls[0].meta["seed"] != runner.calls[1].meta["seed"]
     with db.session() as s:
         assert selected_candidate(s, "shot", shot_id, "first_frame").id == first
@@ -118,3 +118,58 @@ def test_missing_comfy_raises(tmp_path, db):
         sid = sh.id
     with pytest.raises(JobError, match="ComfyUI"):
         run_keyframe(FakeCtx(sv), {"shot_id": sid})
+
+
+def test_keyframe_rerun_unchanged_is_skipped(tmp_path, db):
+    ctx, runner, shot_id = setup(tmp_path, db)
+    first = run_keyframe(ctx, {"shot_id": shot_id, "candidates": 1})["candidate_ids"][0]
+    res = run_keyframe(ctx, {"shot_id": shot_id, "candidates": 1, "force": False})
+    assert res == {"skipped": True, "candidate_ids": []}
+    assert len(runner.calls) == 1
+    assert any("跳过" in m for m in ctx.logs)
+    with db.session() as s:
+        assert selected_candidate(s, "shot", shot_id, "first_frame").id == first
+
+
+def test_keyframe_force_regenerates(tmp_path, db):
+    ctx, runner, shot_id = setup(tmp_path, db)
+    run_keyframe(ctx, {"shot_id": shot_id})
+    res = run_keyframe(ctx, {"shot_id": shot_id, "force": True})
+    assert len(runner.calls) == 2 and len(res["candidate_ids"]) == 1
+
+
+def test_keyframe_prompt_change_regenerates(tmp_path, db):
+    ctx, runner, shot_id = setup(tmp_path, db)
+    run_keyframe(ctx, {"shot_id": shot_id})
+    with db.session() as s:
+        s.get(Shot, shot_id).image_prompt = IMG + ", rain"
+    assert run_keyframe(ctx, {"shot_id": shot_id}).get("skipped") is None
+    assert len(runner.calls) == 2
+
+
+def test_keyframe_multiple_candidates_still_generate(tmp_path, db):
+    ctx, runner, shot_id = setup(tmp_path, db)
+    run_keyframe(ctx, {"shot_id": shot_id})
+    run_keyframe(ctx, {"shot_id": shot_id, "candidates": 2})
+    run_keyframe(ctx, {"shot_id": shot_id, "candidates": 2})
+    assert len(runner.calls) == 3
+
+
+def test_video_rerun_skip_force_and_new_first_frame(tmp_path, db):
+    ctx, runner, shot_id = setup(tmp_path, db)
+    run_keyframe(ctx, {"shot_id": shot_id})
+    run_video(ctx, {"shot_id": shot_id})
+    assert run_video(ctx, {"shot_id": shot_id}) == {"skipped": True, "candidate_ids": []}
+    assert len(runner.calls) == 2
+    assert len(run_video(ctx, {"shot_id": shot_id, "force": True})["candidate_ids"]) == 1
+    assert len(runner.calls) == 3
+    # 新首帧（输入变了）→ 视频 hash 变了，要重出
+    with db.session() as s:
+        s.get(Shot, shot_id).image_prompt = IMG + ", rain"
+    run_keyframe(ctx, {"shot_id": shot_id})
+    assert run_video(ctx, {"shot_id": shot_id}).get("skipped") is None
+    assert len(runner.calls) == 5
+    # 只改运动提示词也会重出
+    with db.session() as s:
+        s.get(Shot, shot_id).motion_prompt = "she turns away"
+    assert run_video(ctx, {"shot_id": shot_id}).get("skipped") is None

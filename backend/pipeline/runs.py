@@ -91,14 +91,16 @@ def submit_chain(manager, db: Database, engines, episode_id: int, stages: list[s
     if "keyframes" in stages:
         for sid, _, _ in picked:
             fam = img_fam[sid]
-            kf[sid] = [manager.submit("image.keyframe", {"shot_id": sid}, owner_type="shot",
+            kf_payload = {"shot_id": sid, "force": opts.force, "candidates": max(1, opts.candidates)}
+            kf[sid] = [manager.submit("image.keyframe", kf_payload, owner_type="shot",
                                       owner_id=sid, model_family=fam, depends_on=deps, **common)
                        for _ in range(max(1, opts.candidates))]
             ids += kf[sid]
     if "videos" in stages:
         for sid, _, _ in picked:
             fam = vid_fam[sid]
-            jid = manager.submit("video.shot", {"shot_id": sid}, owner_type="shot", owner_id=sid,
+            jid = manager.submit("video.shot", {"shot_id": sid, "force": opts.force},
+                                 owner_type="shot", owner_id=sid,
                                  model_family=fam, depends_on=deps + kf.get(sid, []), **common)
             vids.append(jid)
             ids.append(jid)
