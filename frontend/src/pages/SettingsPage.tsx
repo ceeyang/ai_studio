@@ -91,6 +91,7 @@ export function SettingsPage() {
       <section className="panel">
         <h2>当前配置（只读）</h2>
         <p className="muted">修改请编辑仓库根目录的 config.yaml 后重启服务。密钥只在环境变量里，这里看不到。</p>
+        {config.error && <p className="error">{errorText(config.error)}</p>}
         <pre data-testid="config">{config.data ? JSON.stringify(config.data, null, 2) : '加载中…'}</pre>
       </section>
     </div>

@@ -1,7 +1,7 @@
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
-import { installFetch } from '../test/fetch';
+import { installFetch, json } from '../test/fetch';
 import { renderAt } from '../test/render';
 import { SettingsPage } from './SettingsPage';
 
@@ -38,5 +38,15 @@ describe('SettingsPage', () => {
     installFetch({ 'GET /api/doctor': [DOCTOR[0]], 'GET /api/engines': ENGINES, 'GET /api/config': {} });
     renderAt(<SettingsPage />, { route: '/settings', path: '/settings' });
     expect((await screen.findByTestId('doctor-summary')).textContent).toBe('全部通过');
+  });
+
+  it('配置读取失败时显示错误', async () => {
+    installFetch({
+      'GET /api/doctor': DOCTOR,
+      'GET /api/engines': ENGINES,
+      'GET /api/config': () => json({ detail: '读不到配置文件' }, 500),
+    });
+    renderAt(<SettingsPage />, { route: '/settings', path: '/settings' });
+    expect(await screen.findByText('读不到配置文件（HTTP 500）')).toBeTruthy();
   });
 });
