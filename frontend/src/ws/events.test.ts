@@ -37,6 +37,8 @@ describe('invalidationsFor', () => {
     const keysDone = invalidationsFor({ type: 'job', job: makeJob({ id: 3, type: 'export.episode', status: 'done' }) });
     expect(keysDone).toContainEqual(['episode']);
     expect(keysDone).toContainEqual(['exports']);
+    // 导出任务结束会把这一集的状态改成 exported，项目页的剧集列表要跟着刷新
+    expect(keysDone).toContainEqual(['episodes']);
     expect(keysDone).not.toContainEqual(['characters']);
     const keysScript = invalidationsFor({ type: 'job', job: makeJob({ id: 4, type: 'script', status: 'waiting_input' }) });
     expect(keysScript).toEqual(expect.arrayContaining([['episodes'], ['characters'], ['locations'], ['style']]));
