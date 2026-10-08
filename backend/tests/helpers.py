@@ -75,3 +75,24 @@ def seed_episode(db, *, slug="demo", source="林夏在直播间发现提词器�
         s.add(ep)
         s.flush()
         return p.id, ep.id
+
+
+class FakeRunner:
+    """代替 ComfyRunner：不连 ComfyUI，直接写一个产物文件。"""
+
+    def __init__(self, fail: Exception | None = None):
+        self.calls = []
+        self.fail = fail
+
+    def run(self, call, *, run_dir, cancel, on_progress=None, timeout=3600.0):
+        self.calls.append(call)
+        if self.fail:
+            raise self.fail
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "workflow.api.json").write_text("{}", encoding="utf-8")
+        ext = ".png" if call.output_kind == "image" else ".mp4"
+        f = run_dir / f"out_{len(self.calls)}{ext}"
+        f.write_bytes(b"x")
+        if on_progress:
+            on_progress(1, 1)
+        return [f]
