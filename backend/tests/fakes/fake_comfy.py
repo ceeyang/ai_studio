@@ -116,8 +116,10 @@ class FakeComfy:
 
         @app.websocket("/ws")
         async def ws(sock: WebSocket):
+            sent = len(self.events)  # 只推连上之后产生的事件；必须在 accept() 之前读，
+            # 否则客户端握手一结束就能发 POST /prompt 追加事件，而这里还没读到旧长度，
+            # 会把刚追加的新事件当成"连接前就有的"而漏推
             await sock.accept()
-            sent = len(self.events)  # 只推连上之后产生的事件
             try:
                 while True:
                     while sent < len(self.events):

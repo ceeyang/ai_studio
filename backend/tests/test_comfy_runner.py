@@ -21,11 +21,17 @@ def make_call(wf=None):
 
 def test_run_downloads_and_reports_progress(tmp_path, fake_comfy):
     fake_comfy.hold = True
-    threading.Timer(0.5, fake_comfy.finish_all).start()
     progress = []
+
+    def record(value, maximum):
+        # 收到最后一条进度后才放开任务，不靠固定延时和真实耗时赛跑（在满载的全量测试里
+        # 固定延时会偶发跑不赢，导致任务提前"完成"，没来得及推完剩下的进度事件）。
+        progress.append((value, maximum))
+        if value >= maximum:
+            fake_comfy.finish_all()
+
     files = runner_for(fake_comfy).run(make_call(), run_dir=tmp_path / "run",
-                                       cancel=threading.Event(),
-                                       on_progress=lambda v, m: progress.append((v, m)))
+                                       cancel=threading.Event(), on_progress=record)
     assert [f.name for f in files] == ["out_00001_.png"]
     assert files[0].read_bytes() == b"fake-output"
     assert (tmp_path / "run" / "workflow.api.json").exists()
