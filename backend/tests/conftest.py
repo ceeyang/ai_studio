@@ -10,3 +10,14 @@ def db(tmp_path):
     d.create_all()
     yield d
     d.engine.dispose()
+
+
+from backend.tests.fakes.fake_comfy import FakeComfy
+
+
+@pytest.fixture
+def fake_comfy():
+    fc = FakeComfy()
+    fc.start()
+    yield fc
+    fc.stop()
