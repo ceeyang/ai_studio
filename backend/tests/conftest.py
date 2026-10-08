@@ -34,7 +34,8 @@ def api(tmp_path):
 
     cfg = Config(server=ServerCfg(data_dir=tmp_path / "data"), log_dir=tmp_path / "logs",
                  comfyui=ComfyCfg(url="http://127.0.0.1:9", max_retries=1),
-                 llm=LLMCfg(default="manual", providers=[ProviderCfg(id="manual", kind="manual")]))
+                 llm=LLMCfg(default="manual", providers=[ProviderCfg(id="manual", kind="manual")]),
+                 frontend_dist=None)
     app = create_app(cfg, start_workers=False, configure_logging=False)
     with TestClient(app) as client:
         yield client

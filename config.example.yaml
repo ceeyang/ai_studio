@@ -38,3 +38,6 @@ engines:
 ffmpeg:
   ffmpeg: ffmpeg
   ffprobe: ffprobe
+
+# 生产态由后端托管的前端构建目录（cd frontend; npm run build 生成）；目录不存在就只提供 API
+frontend_dist: frontend/dist

@@ -81,6 +81,8 @@ class Config(BaseModel):
     ffmpeg: FfmpegCfg = Field(default_factory=FfmpegCfg)
     workflows_dir: Path = ROOT / "workflows"
     log_dir: Path = ROOT / "logs"
+    # 生产态由后端托管的前端构建目录（cd frontend; npm run build 生成）；不存在就只提供 API
+    frontend_dist: Path | None = ROOT / "frontend" / "dist"
 
     def engine(self, name: str) -> EngineCfg:
         return self.engines.get(name) or EngineCfg()
@@ -100,6 +102,7 @@ def _absolutize(cfg: Config, base: Path) -> Config:
     cfg.comfyui.models_dir = fix(cfg.comfyui.models_dir)
     cfg.workflows_dir = fix(cfg.workflows_dir)
     cfg.log_dir = fix(cfg.log_dir)
+    cfg.frontend_dist = fix(cfg.frontend_dist)
     return cfg
 
 
