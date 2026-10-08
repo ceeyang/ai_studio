@@ -1,6 +1,8 @@
 """路由公用：取服务、按 id/slug 查找、引擎校验、异常映射。"""
 from __future__ import annotations
 
+import re
+
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
@@ -8,6 +10,13 @@ from sqlalchemy.orm import Session
 
 from backend.domain.models import Project
 from backend.queue.errors import JobError
+
+LOCAL_ORIGIN = re.compile(r"^https?://(127\.0\.0\.1|localhost)(:\d+)?$")
+
+
+def is_local_origin(origin: str) -> bool:
+    """浏览器页面来自本机（127.0.0.1 / localhost，任意端口）。HTTP 写请求和 WebSocket 共用。"""
+    return bool(LOCAL_ORIGIN.match(origin))
 
 
 def services(request: Request):

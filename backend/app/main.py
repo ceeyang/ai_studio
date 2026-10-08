@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import asyncio
-import re
 from contextlib import asynccontextmanager
 
 import uvicorn
@@ -11,7 +10,7 @@ from fastapi.responses import JSONResponse
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 import backend.pipeline  # noqa: F401  注册各阶段处理器
-from backend.app.deps import install_error_handlers
+from backend.app.deps import install_error_handlers, is_local_origin
 from backend.app.routes import ROUTERS
 from backend.config import Config, load_config
 from backend.domain.db import Database
@@ -22,7 +21,6 @@ from backend.queue.manager import JobManager
 from backend.services import build_services
 
 ALLOWED_HOSTS = ["127.0.0.1", "localhost", "testserver"]  # testserver 是 TestClient 的默认 Host
-LOCAL_ORIGIN = re.compile(r"^https?://(127\.0\.0\.1|localhost)(:\d+)?$")
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 
 
@@ -34,7 +32,7 @@ def install_local_guards(app: FastAPI) -> None:
     async def reject_cross_origin_writes(request: Request, call_next):
         origin = request.headers.get("origin")
         if (request.method not in SAFE_METHODS and origin is not None
-                and not LOCAL_ORIGIN.match(origin)):
+                and not is_local_origin(origin)):
             return JSONResponse({"detail": f"拒绝来自 {origin} 的跨站写请求"}, status_code=403)
         return await call_next(request)
 
