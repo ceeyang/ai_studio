@@ -1,5 +1,6 @@
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import type { ComponentProps } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { makeCandidate, makeShot, makeSlot } from '../../test/factories';
 import { ShotTable } from './ShotTable';
@@ -24,12 +25,12 @@ const SHOTS = [
   makeShot({ id: 12, code: 'S02', action: '', slots: [] }),
 ];
 
-function setup() {
+function setup(extra: Partial<ComponentProps<typeof ShotTable>> = {}) {
   const h = {
     onToggle: vi.fn(), onToggleAll: vi.fn(), onOpen: vi.fn(), onMove: vi.fn(), onSplit: vi.fn(),
     onInsertAfter: vi.fn(), onDelete: vi.fn(), onGenerate: vi.fn(),
   };
-  render(<ShotTable shots={SHOTS} selected={new Set([12])} {...h} />);
+  render(<ShotTable shots={SHOTS} selected={new Set([12])} {...h} {...extra} />);
   return h;
 }
 
@@ -68,5 +69,17 @@ describe('ShotTable', () => {
     expect((screen.getByLabelText('选择 S01') as HTMLInputElement).checked).toBe(false);
     await userEvent.setup().click(screen.getByLabelText('选择 S01'));
     expect(h.onToggle).toHaveBeenCalledWith(11);
+  });
+
+  it('提交运行中时，生成首帧/生成视频按钮禁用，点击不触发回调', async () => {
+    const h = setup({ generating: true });
+    const user = userEvent.setup();
+    const genFrame = screen.getByRole('button', { name: '生成首帧 S01' }) as HTMLButtonElement;
+    const genVideo = screen.getByRole('button', { name: '生成视频 S01' }) as HTMLButtonElement;
+    expect(genFrame.disabled).toBe(true);
+    expect(genVideo.disabled).toBe(true);
+    await user.click(genFrame);
+    await user.click(genVideo);
+    expect(h.onGenerate).not.toHaveBeenCalled();
   });
 });

@@ -7,6 +7,8 @@ export interface ShotTableProps {
   shots: ShotDetail[];
   selected: ReadonlySet<number>;
   busy?: boolean;
+  /** 生成任务（首帧/视频）提交后、还没拿到响应期间为 true：生成按钮禁用，防止重复点击提交两次。 */
+  generating?: boolean;
   onToggle(id: number): void;
   onToggleAll(): void;
   onOpen(id: number): void;
@@ -42,7 +44,7 @@ function MediaCell({ shot, kind }: { shot: ShotDetail; kind: 'first_frame' | 'vi
 }
 
 export function ShotTable(props: ShotTableProps) {
-  const { shots, selected, busy = false } = props;
+  const { shots, selected, busy = false, generating = false } = props;
   const allChecked = shots.length > 0 && shots.every((s) => selected.has(s.id));
   return (
     <table className="table shots">
@@ -110,10 +112,20 @@ export function ShotTable(props: ShotTableProps) {
                 <button type="button" className="danger" aria-label={`删除 ${s.code}`} disabled={busy} onClick={() => props.onDelete(s.id)}>
                   删除
                 </button>
-                <button type="button" aria-label={`生成首帧 ${s.code}`} onClick={() => props.onGenerate(s.id, 'keyframes')}>
+                <button
+                  type="button"
+                  aria-label={`生成首帧 ${s.code}`}
+                  disabled={generating}
+                  onClick={() => props.onGenerate(s.id, 'keyframes')}
+                >
                   生成首帧
                 </button>
-                <button type="button" aria-label={`生成视频 ${s.code}`} onClick={() => props.onGenerate(s.id, 'videos')}>
+                <button
+                  type="button"
+                  aria-label={`生成视频 ${s.code}`}
+                  disabled={generating}
+                  onClick={() => props.onGenerate(s.id, 'videos')}
+                >
                   生成视频
                 </button>
               </div>

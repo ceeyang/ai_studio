@@ -68,6 +68,20 @@ describe('ShotDrawer', () => {
     expect(onClose).toHaveBeenCalled();
   });
 
+  it('提交运行中时，生成按钮禁用，点击不触发回调', async () => {
+    installFetch({ 'GET /api/engines': ENGINES });
+    const onGenerate = vi.fn();
+    renderAt(<ShotDrawer shot={SHOT} episodeId={1} onClose={() => {}} onGenerate={onGenerate} generating />);
+    const user = userEvent.setup();
+    const genFrame = screen.getByRole('button', { name: '生成首帧' }) as HTMLButtonElement;
+    const genVideo = screen.getByRole('button', { name: '生成视频' }) as HTMLButtonElement;
+    expect(genFrame.disabled).toBe(true);
+    expect(genVideo.disabled).toBe(true);
+    await user.click(genFrame);
+    await user.click(genVideo);
+    expect(onGenerate).not.toHaveBeenCalled();
+  });
+
   it('toShotPatch：时长转数字，引擎留空表示回到项目默认', () => {
     expect(toShotPatch({ duration: '6.5', image_engine: '', video_engine: 'h3_video', action: '抬头' })).toEqual({
       duration: 6.5,

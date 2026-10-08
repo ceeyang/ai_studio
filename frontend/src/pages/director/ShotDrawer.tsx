@@ -56,11 +56,13 @@ export function toShotPatch(changed: FieldValues): ShotPatch {
 export interface ShotDrawerProps {
   shot: ShotDetail;
   episodeId: number;
+  /** 生成任务（首帧/视频）提交后、还没拿到响应期间为 true：生成按钮禁用，防止重复点击提交两次。 */
+  generating?: boolean;
   onClose(): void;
   onGenerate(stage: GenStage): void;
 }
 
-export function ShotDrawer({ shot, episodeId, onClose, onGenerate }: ShotDrawerProps) {
+export function ShotDrawer({ shot, episodeId, onClose, onGenerate, generating = false }: ShotDrawerProps) {
   const engines = useEngines();
   const patch = usePatchShot(episodeId);
   const select = useSelectCandidate(episodeId);
@@ -87,10 +89,10 @@ export function ShotDrawer({ shot, episodeId, onClose, onGenerate }: ShotDrawerP
         </button>
       </header>
       <div className="row">
-        <button type="button" onClick={() => onGenerate('keyframes')}>
+        <button type="button" disabled={generating} onClick={() => onGenerate('keyframes')}>
           生成首帧
         </button>
-        <button type="button" onClick={() => onGenerate('videos')}>
+        <button type="button" disabled={generating} onClick={() => onGenerate('videos')}>
           生成视频
         </button>
         <span className="muted">候选数和"强制重跑"用导演台工具栏上的设置</span>

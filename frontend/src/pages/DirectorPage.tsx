@@ -170,6 +170,7 @@ export function DirectorPage() {
           shots={shots}
           selected={selected}
           busy={busy}
+          generating={run.isPending}
           onToggle={toggle}
           onToggleAll={toggleAll}
           onOpen={(shotId) => setParams({ shot: String(shotId) })}
@@ -187,6 +188,7 @@ export function DirectorPage() {
         <ShotDrawer
           shot={openShot}
           episodeId={id}
+          generating={run.isPending}
           onClose={() => setParams({})}
           onGenerate={(stage) => generate(stage, [openShot.id])}
         />
