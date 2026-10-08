@@ -9,7 +9,8 @@ from sqlalchemy import select
 from backend.app.deps import check_engines, get_or_404, project_by_slug, services
 from backend.app.schemas import (CharacterOut, CharacterPatch, LocationOut, LocationPatch,
                                  ProjectIn, ProjectOut, ProjectPatch, StyleIO)
-from backend.domain.models import Character, Location, Project, StyleBible
+from backend.domain.models import Character, Episode, Location, Project, Shot, StyleBible
+from backend.domain.slots import delete_slots
 from backend.queue.errors import JobError
 
 router = APIRouter(prefix="/api", tags=["projects"])
@@ -69,7 +70,10 @@ def patch_project(slug: str, body: ProjectPatch, request: Request):
 @router.delete("/projects/{slug}", status_code=204)
 def delete_project(slug: str, request: Request):
     with services(request).db.session() as s:
-        s.delete(project_by_slug(s, slug))
+        p = project_by_slug(s, slug)
+        delete_slots(s, "shot", s.scalars(select(Shot.id).join(Episode, Shot.episode_id == Episode.id)
+                                          .where(Episode.project_id == p.id)).all())
+        s.delete(p)
     return Response(status_code=204)
 
 

@@ -6,6 +6,7 @@ from sqlalchemy import delete, func, select
 from backend.domain.hashing import input_hash
 from backend.domain.models import Episode, Shot
 from backend.domain.shots import renumber_shots
+from backend.domain.slots import delete_slots
 from backend.llm.schemas import StoryboardOut
 from backend.pipeline.common import continue_chain, load_episode
 from backend.queue.errors import JobError
@@ -103,6 +104,8 @@ def run_storyboard(ctx, payload: dict) -> dict:
         out = sv.llm.generate("storyboard", system, user, StoryboardOut, check=check,
                               log=ctx.log, manual=manual, key=key)
         with sv.db.session() as s:
+            gone = s.scalars(select(Shot.id).where(Shot.scene_block_id == blk["id"])).all()
+            delete_slots(s, "shot", gone)
             s.execute(delete(Shot).where(Shot.scene_block_id == blk["id"]))
             trimmed = 0
             for j, sh in enumerate(out.shots):
@@ -135,8 +138,9 @@ def run_storyboard(ctx, payload: dict) -> dict:
         ep = s.get(Episode, episode_id)
         if done:
             if not only:
-                s.execute(delete(Shot).where(Shot.episode_id == episode_id,
-                                             Shot.scene_block_id.is_(None)))
+                orphan = (Shot.episode_id == episode_id, Shot.scene_block_id.is_(None))
+                delete_slots(s, "shot", s.scalars(select(Shot.id).where(*orphan)).all())
+                s.execute(delete(Shot).where(*orphan))
             block_order = {b.id: b.order for b in ep.scene_blocks}
             shots = list(s.scalars(select(Shot).where(Shot.episode_id == episode_id)))
             shots.sort(key=lambda x: (block_order.get(x.scene_block_id, 10**6), x.order, x.id))

@@ -97,3 +97,40 @@ def test_video_stale_after_new_first_frame(api):
     assert api.post(f"/api/candidates/{ff2_id}/select").status_code == 200
     slots = {x["kind"]: x for x in api.get(f"/api/shots/{ids[0]}").json()["slots"]}
     assert slots["first_frame"]["stale"] is False and slots["video"]["stale"] is True
+
+
+def _slot_count(api):
+    from sqlalchemy import func, select
+
+    from backend.domain.models import Candidate, Slot
+    with api.app.state.services.db.session() as s:
+        return (s.scalar(select(func.count()).select_from(Slot)),
+                s.scalar(select(func.count()).select_from(Candidate)))
+
+
+def test_deleted_shot_slots_not_inherited(api):
+    ep_id, ids = seed(api)
+    with api.app.state.services.db.session() as s:
+        _candidate(s, ids[-1], "video", "h")
+        _candidate(s, ids[-1], "first_frame", "h")
+    assert api.delete(f"/api/shots/{ids[-1]}").status_code == 204
+    assert _slot_count(api) == (0, 0)
+    new = api.post(f"/api/episodes/{ep_id}/shots", json={"action": "新镜头"}).json()
+    assert new["id"] not in ids
+    assert new["slots"] == []
+
+
+def test_episode_and_project_delete_drop_slots(api):
+    ep_id, ids = seed(api)
+    with api.app.state.services.db.session() as s:
+        _candidate(s, ids[0], "video", "h")
+    assert api.delete(f"/api/episodes/{ep_id}").status_code == 204
+    assert _slot_count(api) == (0, 0)
+    ep2 = api.post("/api/projects/demo/episodes", json={"source_text": "y"}).json()
+    with api.app.state.services.db.session() as s:
+        sh = Shot(episode_id=ep2["id"], order=0)
+        s.add(sh)
+        s.flush()
+        _candidate(s, sh.id, "first_frame", "h")
+    assert api.delete("/api/projects/demo").status_code == 204
+    assert _slot_count(api) == (0, 0)

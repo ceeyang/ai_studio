@@ -145,3 +145,28 @@ def test_no_blocks_raises(tmp_path, db):
     _, ep_id = seed_episode(db)
     with pytest.raises(JobError, match="script"):
         run_storyboard(ctx, {"episode_id": ep_id})
+
+
+def test_restoryboard_drops_slots_of_removed_shots(tmp_path, db):
+    from sqlalchemy import func
+
+    from backend.domain.models import Candidate, Slot
+    from backend.domain.slots import add_candidate, get_or_create_slot, slots_for
+
+    ctx, ep_id, _ = setup(tmp_path, db, [shots_json(2), shots_json(2), shots_json(2)])
+    run_storyboard(ctx, {"episode_id": ep_id})
+    with db.session() as s:
+        ep = s.get(Episode, ep_id)
+        b2 = ep.scene_blocks[1].id
+        old = [x.id for x in ep.shots[2:]]
+        for sid in old:
+            add_candidate(s, get_or_create_slot(s, "shot", sid, "video"),
+                          file_path=f"demo/media/video/{sid}.mp4", engine="x", params={},
+                          input_hash="h", job_id=None)
+    run_storyboard(ctx, {"episode_id": ep_id, "scene_block_ids": [b2], "force": True})
+    with db.session() as s:
+        ids = [x.id for x in s.get(Episode, ep_id).shots]
+        assert not set(old) & set(ids)  # AUTOINCREMENT：删掉的 id 不再复用
+        assert all(slots_for(s, "shot", i) == [] for i in ids)
+        assert s.scalar(select(func.count()).select_from(Slot)) == 0
+        assert s.scalar(select(func.count()).select_from(Candidate)) == 0

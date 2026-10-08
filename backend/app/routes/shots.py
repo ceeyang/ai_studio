@@ -8,6 +8,7 @@ from backend.app.schemas import ReorderIn, ShotDetail, ShotFields, ShotIn, ShotO
 from backend.app.views import shot_detail
 from backend.domain.models import Episode, Shot
 from backend.domain.shots import renumber_shots
+from backend.domain.slots import delete_slots
 
 router = APIRouter(prefix="/api", tags=["shots"])
 
@@ -71,6 +72,7 @@ def delete_shot(shot_id: int, request: Request):
     with services(request).db.session() as s:
         shot = get_or_404(s, Shot, shot_id, "镜头")
         ep_id = shot.episode_id
+        delete_slots(s, "shot", [shot.id])
         s.delete(shot)
         s.flush()
         renumber_shots(s, ep_id)

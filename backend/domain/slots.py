@@ -1,7 +1,7 @@
 """槽位与候选。下游只使用槽位里选定的那个候选。"""
 from __future__ import annotations
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from backend.domain.models import Candidate, Slot
@@ -51,3 +51,14 @@ def selected_candidate(s: Session, owner_type: str, owner_id: int, kind: str) ->
 def slots_for(s: Session, owner_type: str, owner_id: int) -> list[Slot]:
     return list(s.scalars(select(Slot).where(Slot.owner_type == owner_type,
                                              Slot.owner_id == owner_id).order_by(Slot.id)))
+
+
+def delete_slots(s: Session, owner_type: str, owner_ids) -> None:
+    """删掉这些对象的槽位和候选（槽位没有外键，删对象时必须手动清）。媒体文件留在磁盘上。"""
+    ids = list(owner_ids)
+    if not ids:
+        return
+    slot_ids = select(Slot.id).where(Slot.owner_type == owner_type, Slot.owner_id.in_(ids))
+    s.execute(delete(Candidate).where(Candidate.slot_id.in_(slot_ids)))
+    s.execute(delete(Slot).where(Slot.owner_type == owner_type, Slot.owner_id.in_(ids)))
+    s.flush()

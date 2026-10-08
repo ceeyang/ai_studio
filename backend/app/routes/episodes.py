@@ -8,7 +8,8 @@ from backend.app.deps import get_or_404, project_by_slug, services
 from backend.app.schemas import (EpisodeDetail, EpisodeIn, EpisodeOut, EpisodePatch,
                                  SceneBlockOut, SceneBlockPatch)
 from backend.app.views import episode_detail
-from backend.domain.models import Episode, SceneBlock
+from backend.domain.models import Episode, SceneBlock, Shot
+from backend.domain.slots import delete_slots
 
 router = APIRouter(prefix="/api", tags=["episodes"])
 
@@ -66,7 +67,9 @@ def patch_episode(episode_id: int, body: EpisodePatch, request: Request):
 @router.delete("/episodes/{episode_id}", status_code=204)
 def delete_episode(episode_id: int, request: Request):
     with services(request).db.session() as s:
-        s.delete(get_or_404(s, Episode, episode_id, "剧集"))
+        ep = get_or_404(s, Episode, episode_id, "剧集")
+        delete_slots(s, "shot", s.scalars(select(Shot.id).where(Shot.episode_id == ep.id)).all())
+        s.delete(ep)
     return Response(status_code=204)
 
 

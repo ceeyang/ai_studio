@@ -128,6 +128,8 @@ class SceneBlock(Base):
 
 class Shot(Base):
     __tablename__ = "shots"
+    # 槽位按 (owner_type, owner_id) 挂在镜头上、没有外键；id 不能复用，否则新镜头会继承旧镜头的候选。
+    __table_args__ = {"sqlite_autoincrement": True}
     id: Mapped[int] = mapped_column(primary_key=True)
     episode_id: Mapped[int] = mapped_column(ForeignKey("episodes.id", ondelete="CASCADE"))
     scene_block_id: Mapped[int | None] = mapped_column(
