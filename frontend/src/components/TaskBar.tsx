@@ -17,7 +17,7 @@ export function TaskBar() {
 
   return (
     <header className="taskbar" aria-label="任务条">
-      {everConnected && !connected && <span className="warn">实时连接已断开，正在重连…</span>}
+      {everConnected && !connected && <span className="pill warn">实时连接已断开，正在重连…</span>}
       {current ? (
         <span className="current" data-testid="taskbar-current">
           运行中：#{current.id} {jobTypeLabel(current.type)}
@@ -28,27 +28,27 @@ export function TaskBar() {
             </>
           )}
           {jobs.length > 1 && <span className="muted">（另有 {jobs.length - 1} 个）</span>}{' '}
-          <button type="button" disabled={cancel.isPending} onClick={() => cancel.mutate(current.id)}>
+          <button type="button" className="ghost" disabled={cancel.isPending} onClick={() => cancel.mutate(current.id)}>
             取消
           </button>
         </span>
       ) : (
-        <span className="muted">没有运行中的任务</span>
+        <span className="idle">没有运行中的任务</span>
       )}
-      {q && <span>排队 {q.counts.queued}</span>}
+      {q && <span className="pill job-queued">排队 {q.counts.queued}</span>}
       {q && q.counts.waiting_input > 0 && (
-        <Link to="/jobs?status=waiting_input">等待输入 {q.counts.waiting_input}</Link>
+        <Link to="/jobs?status=waiting_input" className="pill job-waiting_input">等待输入 {q.counts.waiting_input}</Link>
       )}
       {q &&
         (q.paused ? (
           <>
-            <span className="warn">队列已暂停</span>
-            <button type="button" disabled={resume.isPending} onClick={() => resume.mutate()}>
+            <span className="pill warn">队列已暂停</span>
+            <button type="button" className="soft" disabled={resume.isPending} onClick={() => resume.mutate()}>
               恢复队列
             </button>
           </>
         ) : (
-          <button type="button" disabled={pause.isPending} onClick={() => pause.mutate()}>
+          <button type="button" className="ghost" disabled={pause.isPending} onClick={() => pause.mutate()}>
             暂停队列
           </button>
         ))}

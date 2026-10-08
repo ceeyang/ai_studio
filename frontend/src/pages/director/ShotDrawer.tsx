@@ -83,16 +83,18 @@ export function ShotDrawer({ shot, episodeId, onClose, onGenerate, generating = 
   return (
     <aside className="drawer" role="dialog" aria-label={`镜头 ${shot.code} 详情`}>
       <header className="drawer-head">
-        <h3>镜头 {shot.code}</h3>
-        <button type="button" onClick={onClose}>
+        <h3>
+          镜头 <span className="code">{shot.code}</span>
+        </h3>
+        <button type="button" className="ghost" onClick={onClose}>
           关闭
         </button>
       </header>
-      <div className="row">
-        <button type="button" disabled={generating} onClick={() => onGenerate('keyframes')}>
+      <div className="row gen-row">
+        <button type="button" className="soft" disabled={generating} onClick={() => onGenerate('keyframes')}>
           生成首帧
         </button>
-        <button type="button" disabled={generating} onClick={() => onGenerate('videos')}>
+        <button type="button" className="soft" disabled={generating} onClick={() => onGenerate('videos')}>
           生成视频
         </button>
         <span className="muted">候选数和"强制重跑"用导演台工具栏上的设置</span>
@@ -112,10 +114,13 @@ export function ShotDrawer({ shot, episodeId, onClose, onGenerate, generating = 
       {shot.dialogue.length > 0 && (
         <section>
           <h4>对白</h4>
-          <ul className="list">
+          <ul className="list dialogue-list">
             {shot.dialogue.map((d, i) => (
-              <li key={i}>
-                {d.start.toFixed(1)}–{d.end.toFixed(1)}s　{d.speaker}：{d.zh}
+              <li key={i} className="dialogue-line">
+                <span className="t">
+                  {d.start.toFixed(1)}–{d.end.toFixed(1)}s
+                </span>
+                {d.speaker}：{d.zh}
               </li>
             ))}
           </ul>

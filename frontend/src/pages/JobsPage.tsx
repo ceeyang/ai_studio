@@ -26,7 +26,7 @@ function JobDetail({ id, onRetried }: { id: number; onRetried: (newId: number) =
     if (el) el.scrollTop = el.scrollHeight;
   }, [log]);
 
-  if (job.isLoading) return <section className="panel muted">加载中…</section>;
+  if (job.isLoading) return <section className="panel loading">加载中…</section>;
   if (job.error || !job.data) {
     return <section className="panel error">{job.error ? errorText(job.error) : `找不到任务 ${id}`}</section>;
   }
@@ -40,19 +40,38 @@ function JobDetail({ id, onRetried }: { id: number; onRetried: (newId: number) =
         <h3>
           任务 #{j.id} · {jobTypeLabel(j.type)}
         </h3>
-        <span data-testid="job-status" className={`job-${j.status}`}>
+        <span data-testid="job-status" className={`pill job-${j.status}`}>
           {jobStatusLabel(j.status)}
         </span>
       </div>
-      <p className="muted">
-        创建 {fmtTime(j.created_at)} · 开始 {fmtTime(j.started_at)} · 结束 {fmtTime(j.finished_at)} · 耗时{' '}
-        {fmtDuration(j.started_at, j.finished_at)}
-        {j.model_family ? ` · 模型族 ${j.model_family}` : ''}
-        {j.depends_on.length > 0 ? ` · 依赖 #${j.depends_on.join(', #')}` : ''}
-      </p>
+      <dl className="job-meta">
+        <div>
+          <dt>创建</dt>
+          <dd>{fmtTime(j.created_at)}</dd>
+        </div>
+        <div>
+          <dt>开始</dt>
+          <dd>{fmtTime(j.started_at)}</dd>
+        </div>
+        <div>
+          <dt>结束</dt>
+          <dd>{fmtTime(j.finished_at)}</dd>
+        </div>
+        <div>
+          <dt>耗时</dt>
+          <dd>{fmtDuration(j.started_at, j.finished_at)}</dd>
+        </div>
+      </dl>
+      {(j.model_family || j.depends_on.length > 0) && (
+        <p className="muted job-extra">
+          {j.model_family ? `模型族 ${j.model_family}` : ''}
+          {j.model_family && j.depends_on.length > 0 ? ' · ' : ''}
+          {j.depends_on.length > 0 ? `依赖 #${j.depends_on.join(', #')}` : ''}
+        </p>
+      )}
       <div className="row">
         {active && (
-          <button type="button" disabled={cancel.isPending} onClick={() => cancel.mutate(j.id)}>
+          <button type="button" className="danger" disabled={cancel.isPending} onClick={() => cancel.mutate(j.id)}>
             取消
           </button>
         )}
@@ -124,7 +143,7 @@ export function JobsPage() {
         </div>
         {jobs.error && <p className="error">{errorText(jobs.error)}</p>}
         {jobs.data && jobs.data.length === 0 && <p className="muted">没有任务。</p>}
-        <table className="table">
+        <table className="table jobs-table">
           <thead>
             <tr>
               <th>#</th>
@@ -143,8 +162,8 @@ export function JobsPage() {
               >
                 <td>{j.id}</td>
                 <td>{jobTypeLabel(j.type)}</td>
-                <td className={`job-${j.status}`}>
-                  {jobStatusLabel(j.status)}
+                <td>
+                  <span className={`pill job-${j.status}`}>{jobStatusLabel(j.status)}</span>
                   {j.error && <div className="error">{j.error.split('\n')[0].slice(0, 60)}</div>}
                 </td>
                 <td>{fmtDuration(j.started_at, j.finished_at)}</td>
@@ -156,7 +175,7 @@ export function JobsPage() {
       {selectedId ? (
         <JobDetail key={selectedId} id={selectedId} onRetried={(nid) => update({ job: String(nid), status: null })} />
       ) : (
-        <section className="panel muted">点左侧的任务查看日志和详情。</section>
+        <section className="panel empty">点左侧的任务查看日志和详情。</section>
       )}
     </div>
   );

@@ -23,9 +23,9 @@ function ExportsPanel({ rows }: { rows: ExportRow[] }) {
       {rows.length === 0 ? (
         <p className="muted">还没有导出。所有镜头都有选定视频后点"合成导出"。</p>
       ) : (
-        <>
+        <div className="export-body">
           <video className="export-preview" src={rows[0].url} controls preload="metadata" />
-          <ul className="list">
+          <ul className="list export-list">
             {rows.map((x) => (
               <li key={x.id}>
                 <a data-testid="export-link" href={x.url} download>
@@ -37,7 +37,7 @@ function ExportsPanel({ rows }: { rows: ExportRow[] }) {
               </li>
             ))}
           </ul>
-        </>
+        </div>
       )}
     </section>
   );
@@ -59,7 +59,7 @@ export function DirectorPage() {
   const [force, setForce] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
 
-  if (ep.isLoading) return <p className="muted">加载中…</p>;
+  if (ep.isLoading) return <p className="loading">加载中…</p>;
   if (ep.error || !ep.data) return <p className="error">{ep.error ? errorText(ep.error) : '找不到这一集'}</p>;
   const e = ep.data;
   const shots = e.shots;
@@ -119,13 +119,16 @@ export function DirectorPage() {
   return (
     <div className="page">
       <header className="page-head">
+        <span className="eyebrow">03 · 导演台</span>
         <h2>
           导演台 · 第 {e.number} 集 {e.title}
         </h2>
-        <span className="muted">
+        <span className="chip">
           {shots.length} 个镜头，共 {total.toFixed(1)} 秒
         </span>
-        <Link to={`/projects/${enc(slug)}/episodes/${id}/script`}>回剧本页</Link>
+        <Link className="btn ghost" to={`/projects/${enc(slug)}/episodes/${id}/script`}>
+          回剧本页
+        </Link>
       </header>
 
       <div className="toolbar">
@@ -142,13 +145,15 @@ export function DirectorPage() {
         <label>
           <input type="checkbox" aria-label="强制重跑" checked={force} onChange={(ev) => setForce(ev.target.checked)} /> 强制重跑
         </label>
+        <span className="sep" aria-hidden="true" />
         <button type="button" className="primary" disabled={shots.length === 0 || run.isPending} onClick={() => generate('keyframes', selIds)}>
           生成首帧（{scope}）
         </button>
         <button type="button" className="primary" disabled={shots.length === 0 || run.isPending} onClick={() => generate('videos', selIds)}>
           生成视频（{scope}）
         </button>
-        <button type="button" disabled={busy} onClick={() => report(create.mutateAsync({}), '已在末尾新增镜头')}>
+        <span className="grow" aria-hidden="true" />
+        <button type="button" className="ghost" disabled={busy} onClick={() => report(create.mutateAsync({}), '已在末尾新增镜头')}>
           新增镜头
         </button>
         <button type="button" disabled={shots.length === 0 || run.isPending} onClick={() => generate('export')}>
@@ -162,7 +167,7 @@ export function DirectorPage() {
       )}
 
       {shots.length === 0 ? (
-        <p className="muted">
+        <p className="panel empty">
           这一集还没有分镜。<Link to={`/projects/${enc(slug)}/episodes/${id}/script`}>去剧本页运行分镜</Link>
         </p>
       ) : (
@@ -184,6 +189,7 @@ export function DirectorPage() {
 
       <ExportsPanel rows={exportsQ.data ?? []} />
 
+      {openShot && <div className="drawer-scrim" aria-hidden="true" />}
       {openShot && (
         <ShotDrawer
           shot={openShot}

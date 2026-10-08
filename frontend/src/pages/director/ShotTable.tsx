@@ -26,14 +26,15 @@ function MediaCell({ shot, kind }: { shot: ShotDetail; kind: 'first_frame' | 'vi
   const mark = slotMark(slot);
   const cand = selectedOf(slot);
   const label = kind === 'first_frame' ? '首帧' : '视频';
-  if (mark === 'none' || !cand) return <span className="muted">未生成</span>;
+  if (mark === 'none' || !cand) return <span className="media-none">未生成</span>;
   return (
-    <div className="media-cell">
+    <div className={mark === 'stale' ? 'media-cell is-stale' : 'media-cell'}>
       {kind === 'video' ? (
         <video className="thumb" src={cand.url} muted preload="metadata" aria-label={`${shot.code} ${label}`} />
       ) : (
         <img className="thumb" src={cand.url} alt={`${shot.code} ${label}`} loading="lazy" />
       )}
+      {mark === 'ok' && <span className="mark-ok" title="最新：按当前输入生成" aria-hidden="true" />}
       {mark === 'stale' && (
         <span className="badge stale" title={STALE_TIP}>
           已过期
@@ -47,7 +48,8 @@ export function ShotTable(props: ShotTableProps) {
   const { shots, selected, busy = false, generating = false } = props;
   const allChecked = shots.length > 0 && shots.every((s) => selected.has(s.id));
   return (
-    <table className="table shots">
+    <div className="shots-wrap">
+      <table className="table shots">
       <thead>
         <tr>
           <th>
@@ -72,12 +74,12 @@ export function ShotTable(props: ShotTableProps) {
                 onChange={() => props.onToggle(s.id)}
               />
             </td>
-            <td>
+            <td className="code-cell">
               <button type="button" className="link" aria-label={`打开 ${s.code}`} onClick={() => props.onOpen(s.id)}>
                 {s.code}
               </button>
             </td>
-            <td>{s.duration.toFixed(1)}s</td>
+            <td className="num">{s.duration.toFixed(1)}s</td>
             <td>
               <MediaCell shot={s} kind="first_frame" />
             </td>
@@ -85,54 +87,66 @@ export function ShotTable(props: ShotTableProps) {
               <MediaCell shot={s} kind="video" />
             </td>
             <td className="text-cell">
-              <div>{s.action || <span className="muted">（没有动作描述）</span>}</div>
+              <div className="action-text">{s.action || <span className="muted">（没有动作描述）</span>}</div>
               {s.dialogue.length > 0 && (
-                <div className="dialogue">{s.dialogue.map((d) => `${d.speaker}：${d.zh}`).join(' / ')}</div>
+                <div className="dialogue">
+                  {s.dialogue.map((d, k) => (
+                    <div key={k} className="dialogue-line">{`${d.speaker}：${d.zh}`}</div>
+                  ))}
+                </div>
               )}
             </td>
             <td>
               <div className="actions">
-                <button type="button" aria-label={`上移 ${s.code}`} disabled={busy || i === 0} onClick={() => props.onMove(s.id, -1)}>
-                  ↑
-                </button>
-                <button
-                  type="button"
-                  aria-label={`下移 ${s.code}`}
-                  disabled={busy || i === shots.length - 1}
-                  onClick={() => props.onMove(s.id, 1)}
-                >
-                  ↓
-                </button>
-                <button type="button" aria-label={`拆分 ${s.code}`} disabled={busy} onClick={() => props.onSplit(s.id)}>
-                  拆分
-                </button>
-                <button type="button" aria-label={`在 ${s.code} 后插入`} disabled={busy} onClick={() => props.onInsertAfter(s.id)}>
-                  插入
-                </button>
-                <button type="button" className="danger" aria-label={`删除 ${s.code}`} disabled={busy} onClick={() => props.onDelete(s.id)}>
-                  删除
-                </button>
-                <button
-                  type="button"
-                  aria-label={`生成首帧 ${s.code}`}
-                  disabled={generating}
-                  onClick={() => props.onGenerate(s.id, 'keyframes')}
-                >
-                  生成首帧
-                </button>
-                <button
-                  type="button"
-                  aria-label={`生成视频 ${s.code}`}
-                  disabled={generating}
-                  onClick={() => props.onGenerate(s.id, 'videos')}
-                >
-                  生成视频
-                </button>
+                <div className="btn-group">
+                  <button
+                    type="button"
+                    className="sm soft"
+                    aria-label={`生成首帧 ${s.code}`}
+                    disabled={generating}
+                    onClick={() => props.onGenerate(s.id, 'keyframes')}
+                  >
+                    生成首帧
+                  </button>
+                  <button
+                    type="button"
+                    className="sm soft"
+                    aria-label={`生成视频 ${s.code}`}
+                    disabled={generating}
+                    onClick={() => props.onGenerate(s.id, 'videos')}
+                  >
+                    生成视频
+                  </button>
+                </div>
+                <div className="btn-group">
+                  <button type="button" className="sm icon" aria-label={`上移 ${s.code}`} disabled={busy || i === 0} onClick={() => props.onMove(s.id, -1)}>
+                    ↑
+                  </button>
+                  <button
+                    type="button"
+                    className="sm icon"
+                    aria-label={`下移 ${s.code}`}
+                    disabled={busy || i === shots.length - 1}
+                    onClick={() => props.onMove(s.id, 1)}
+                  >
+                    ↓
+                  </button>
+                  <button type="button" className="sm ghost" aria-label={`拆分 ${s.code}`} disabled={busy} onClick={() => props.onSplit(s.id)}>
+                    拆分
+                  </button>
+                  <button type="button" className="sm ghost" aria-label={`在 ${s.code} 后插入`} disabled={busy} onClick={() => props.onInsertAfter(s.id)}>
+                    插入
+                  </button>
+                  <button type="button" className="sm danger" aria-label={`删除 ${s.code}`} disabled={busy} onClick={() => props.onDelete(s.id)}>
+                    删除
+                  </button>
+                </div>
               </div>
             </td>
           </tr>
         ))}
       </tbody>
     </table>
+    </div>
   );
 }

@@ -12,15 +12,15 @@ function pickDefault(rows: EngineRow[] | undefined, preferred: string): string {
 
 function ProjectList({ active }: { active?: string }) {
   const projects = useProjects();
-  if (projects.isLoading) return <p className="muted">加载中…</p>;
+  if (projects.isLoading) return <p className="loading">加载中…</p>;
   if (projects.error) return <p className="error">{errorText(projects.error)}</p>;
   const rows = projects.data ?? [];
   if (rows.length === 0) return <p className="muted">还没有项目。</p>;
   return (
-    <ul className="list">
+    <ul className="list project-list">
       {rows.map((p) => (
         <li key={p.id} className={p.slug === active ? 'active' : undefined}>
-          <Link to={`/projects/${enc(p.slug)}`}>{p.title}</Link>{' '}
+          <Link to={`/projects/${enc(p.slug)}`}>{p.title}</Link>
           <span className="muted">
             {p.aspect} · {p.image_engine} / {p.video_engine}
           </span>
@@ -124,23 +124,41 @@ function ProjectEpisodes({ slug }: { slug: string }) {
     <section className="panel">
       <h2>{project.data?.title ?? slug}</h2>
       {project.data && (
-        <p className="muted">
-          目录 {project.data.slug} · 画幅 {project.data.aspect} · 图像 {project.data.image_engine} · 视频{' '}
-          {project.data.video_engine}
-        </p>
+        <div className="meta">
+          <span className="chip">
+            <b>目录</b> {project.data.slug}
+          </span>
+          <span className="chip">
+            <b>画幅</b> {project.data.aspect}
+          </span>
+          <span className="chip">
+            <b>图像</b> {project.data.image_engine}
+          </span>
+          <span className="chip">
+            <b>视频</b> {project.data.video_engine}
+          </span>
+        </div>
       )}
       <h3>剧集</h3>
       {episodes.error && <p className="error">{errorText(episodes.error)}</p>}
       {episodes.data && episodes.data.length === 0 && <p className="muted">还没有剧集，在下面粘贴梗概新建第一集。</p>}
-      <ul className="list">
+      <ul className="list episode-list">
         {(episodes.data ?? []).map((ep) => (
           <li key={ep.id}>
-            第 {ep.number} 集 {ep.title || '（未命名）'}{' '}
+            <span className="ep-title">
+              第 {ep.number} 集 {ep.title || '（未命名）'}
+            </span>
             <span className="muted">
               · {EPISODE_STATUS_LABEL[ep.status] ?? ep.status} · 目标 {ep.target_seconds} 秒
-            </span>{' '}
-            <Link to={`/projects/${enc(slug)}/episodes/${ep.id}/script`}>剧本</Link>{' '}
-            <Link to={`/projects/${enc(slug)}/episodes/${ep.id}/director`}>导演台</Link>
+            </span>
+            <span className="ep-actions">
+              <Link className="btn sm" to={`/projects/${enc(slug)}/episodes/${ep.id}/script`}>
+                剧本
+              </Link>
+              <Link className="btn sm primary" to={`/projects/${enc(slug)}/episodes/${ep.id}/director`}>
+                导演台
+              </Link>
+            </span>
           </li>
         ))}
       </ul>
@@ -181,7 +199,7 @@ export function ProjectsPage() {
       {slug ? (
         <ProjectEpisodes key={slug} slug={slug} />
       ) : (
-        <section className="panel muted">选择左侧的项目，或新建一个。</section>
+        <section className="panel empty">选择左侧的项目，或新建一个。</section>
       )}
     </div>
   );

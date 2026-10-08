@@ -65,7 +65,7 @@ function ExportComfyButton({ candidateId, engine }: { candidateId: number; engin
 
   return (
     <>
-      <button type="button" disabled={busy} onClick={onClick}>
+      <button type="button" className="ghost sm" disabled={busy} onClick={onClick}>
         导出到 ComfyUI
       </button>
       {error && <span className="error">导出失败：{error}</span>}
@@ -100,7 +100,7 @@ export function CandidateGrid({ slot, onSelect, selecting = false }: CandidateGr
               {selected ? (
                 <span className="badge ok">已选定</span>
               ) : (
-                <button type="button" disabled={selecting} onClick={() => onSelect(c.id)}>
+                <button type="button" className="sm" disabled={selecting} onClick={() => onSelect(c.id)}>
                   选定
                 </button>
               )}

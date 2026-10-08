@@ -90,7 +90,7 @@ export function ScriptPage() {
   const [force, setForce] = useState(false);
   const [notice, setNotice] = useState<{ text: string; jobId?: number } | null>(null);
 
-  if (ep.isLoading) return <p className="muted">加载中…</p>;
+  if (ep.isLoading) return <p className="loading">加载中…</p>;
   if (ep.error || !ep.data) return <p className="error">{ep.error ? errorText(ep.error) : '找不到这一集'}</p>;
   const e = ep.data;
   const locationOptions = [
@@ -113,13 +113,16 @@ export function ScriptPage() {
   return (
     <div className="page">
       <header className="page-head">
+        <span className="eyebrow">02 · 剧本</span>
         <h2>
           剧本 · 第 {e.number} 集 {e.title}
         </h2>
-        <span className="muted">
+        <span className="chip">
           {EPISODE_STATUS_LABEL[e.status] ?? e.status} · 已有 {e.shots.length} 个镜头
         </span>
-        <Link to={`/projects/${enc(slug)}/episodes/${id}/director`}>去导演台</Link>
+        <Link className="btn" to={`/projects/${enc(slug)}/episodes/${id}/director`}>
+          去导演台
+        </Link>
       </header>
 
       <div className="toolbar">
@@ -134,6 +137,7 @@ export function ScriptPage() {
         >
           运行分镜
         </button>
+        <span className="sep" aria-hidden="true" />
         <label>
           <input type="checkbox" checked={force} onChange={(ev) => setForce(ev.target.checked)} /> 强制重跑（输入没变也重新生成）
         </label>

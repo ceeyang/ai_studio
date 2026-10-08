@@ -40,8 +40,14 @@ export function SettingsPage() {
           </button>
         </div>
         {doctor.error && <p className="error">{errorText(doctor.error)}</p>}
-        {doctor.data && <p data-testid="doctor-summary">{summary(rows)}</p>}
-        <table className="table">
+        {doctor.data && (
+          <p>
+            <span data-testid="doctor-summary" className={`doctor-summary ${rows.some((r) => r.status !== 'ok') ? 'bad' : 'ok'}`}>
+              {summary(rows)}
+            </span>
+          </p>
+        )}
+        <table className="table doctor-table">
           <thead>
             <tr>
               <th />
@@ -52,8 +58,10 @@ export function SettingsPage() {
           </thead>
           <tbody>
             {rows.map((r, i) => (
-              <tr key={i}>
-                <td className={`status-${r.status}`}>{ICON[r.status]}</td>
+              <tr key={i} className={`row-${r.status}`}>
+                <td>
+                  <span className={`status-icon status-${r.status}`}>{ICON[r.status]}</span>
+                </td>
                 <td>{r.group}</td>
                 <td>{r.name}</td>
                 <td>{r.detail}</td>
@@ -66,7 +74,7 @@ export function SettingsPage() {
       <section className="panel">
         <h2>引擎</h2>
         {engines.error && <p className="error">{errorText(engines.error)}</p>}
-        <table className="table">
+        <table className="table engine-table">
           <thead>
             <tr>
               <th>名称</th>
