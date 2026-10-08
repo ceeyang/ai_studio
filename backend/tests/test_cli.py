@@ -95,3 +95,15 @@ def test_job_input(cli, api, tmp_path):
 def test_doctor_exit_code(cli):
     r = cli("doctor")
     assert r.exit_code == 1 and "ComfyUI" in r.output
+
+
+def test_server_timeout_message(monkeypatch):
+    import httpx
+
+    def boom(request):
+        raise httpx.ReadTimeout("timed out", request=request)
+
+    monkeypatch.setattr(studio, "_client", lambda: httpx.Client(
+        base_url="http://127.0.0.1:8700", transport=httpx.MockTransport(boom)))
+    r = runner.invoke(studio.app, ["project", "list"])
+    assert r.exit_code == 2 and "工作台响应超时" in r.output and "连不上" not in r.output

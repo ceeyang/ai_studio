@@ -41,6 +41,10 @@ def _client() -> httpx.Client:
 def _call(method: str, path: str, **kw) -> Any:
     try:
         r = _client().request(method, path, **kw)
+    except httpx.TimeoutException:
+        typer.echo(f"工作台响应超时（{_base_url()} {method} {path}），服务可能正忙，稍后用 "
+                   "studio jobs 查看", err=True)
+        raise typer.Exit(2)
     except httpx.TransportError:
         typer.echo(f"连不上工作台服务（{_base_url()}），先运行：uv run studio-server", err=True)
         raise typer.Exit(2)

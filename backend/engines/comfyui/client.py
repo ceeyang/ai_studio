@@ -58,8 +58,8 @@ class ComfyClient:
     def system_stats(self, *, tries: int | None = None, timeout: float | None = None) -> dict:
         return self._request("GET", "/system_stats", tries=tries, timeout=timeout).json()
 
-    def object_info(self) -> dict:
-        return self._request("GET", "/object_info", timeout=120).json()
+    def object_info(self, *, tries: int | None = None, timeout: float = 120) -> dict:
+        return self._request("GET", "/object_info", tries=tries, timeout=timeout).json()
 
     def queue_prompt(self, workflow: dict) -> str:
         r = self._request("POST", "/prompt", json={"prompt": workflow, "client_id": self.client_id})

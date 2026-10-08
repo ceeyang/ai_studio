@@ -53,9 +53,13 @@ def run_doctor(cfg: Config, engines, comfy, ffmpeg, *,
             out.append(Check("ComfyUI", "服务", "ok",
                              f"{cfg.comfyui.url} · {dev.get('name', '?')} · 显存空闲 "
                              f"{dev.get('vram_free', 0) / 2**30:.1f}/{dev.get('vram_total', 0) / 2**30:.1f} GB"))
-            info = comfy.object_info()
         except ComfyError as e:
             out.append(Check("ComfyUI", "服务", "fail", str(e)))
+        else:
+            try:
+                info = comfy.object_info(tries=1, timeout=15)
+            except ComfyError as e:
+                out.append(Check("ComfyUI", "节点信息", "fail", str(e)))
 
     index = _model_index(cfg.comfyui.models_dir)
     if index is None:
@@ -98,8 +102,10 @@ def run_doctor(cfg: Config, engines, comfy, ffmpeg, *,
     except Exception as e:
         out.append(Check("工具", "ffmpeg", "fail", str(e)))
 
-    cfg.data_dir.mkdir(parents=True, exist_ok=True)
-    free = shutil.disk_usage(cfg.data_dir).free / 2**30
+    probe = Path(cfg.data_dir).resolve()
+    while not probe.exists() and probe != probe.parent:  # 数据目录还没建时看它所在的盘
+        probe = probe.parent
+    free = shutil.disk_usage(probe).free / 2**30
     out.append(Check("系统", "磁盘", "ok" if free >= 50 else "warn",
                      f"{cfg.data_dir} 所在盘剩余 {free:.0f} GB"))
     mem = psutil.virtual_memory()

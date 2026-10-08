@@ -84,3 +84,41 @@ def test_doctor_endpoint(api):
     rows = api.get("/api/doctor").json()
     assert any(r["group"] == "ComfyUI" and r["status"] == "fail" for r in rows)
     assert {"group", "name", "status", "detail"} <= set(rows[0])
+
+
+class StatsOnlyComfy:
+    """system_stats 正常、object_info 失败的 ComfyUI。"""
+
+    def __init__(self):
+        self.info_kw = None
+
+    def system_stats(self, *, tries=None, timeout=None):
+        return {"devices": [{"name": "GPU", "vram_free": 2**30, "vram_total": 2**31}]}
+
+    def object_info(self, **kw):
+        from backend.engines.comfyui.errors import ComfyError
+        self.info_kw = kw
+        raise ComfyError("超时")
+
+
+def test_doctor_object_info_failure_is_its_own_row(tmp_path):
+    cfg = make_cfg(tmp_path, "http://127.0.0.1:9")
+    comfy = StatsOnlyComfy()
+    checks = run_doctor(cfg, EngineRegistry(cfg), comfy, FakeFF(),
+                        http_get=lambda u: {"data": []}, which=lambda n: "x")
+    rows = [(x.group, x.name, x.status) for x in checks if x.group == "ComfyUI"]
+    assert rows == [("ComfyUI", "服务", "ok"), ("ComfyUI", "节点信息", "fail")]
+    assert comfy.info_kw == {"tries": 1, "timeout": 15}
+
+
+def test_doctor_does_not_create_data_dir(tmp_path):
+    cfg = make_cfg(tmp_path, "http://127.0.0.1:9")
+    checks = run_doctor(cfg, EngineRegistry(cfg), None, FakeFF(),
+                        http_get=lambda u: {"data": []}, which=lambda n: "x")
+    assert not cfg.data_dir.exists()
+    assert by_key(checks)[("系统", "磁盘")].status in ("ok", "warn")
+
+
+def test_object_info_accepts_tries_and_timeout(fake_comfy):
+    fake_comfy.object_info = {"KSampler": {}}
+    assert "KSampler" in ComfyClient(fake_comfy.url, backoff=0).object_info(tries=1, timeout=15)
