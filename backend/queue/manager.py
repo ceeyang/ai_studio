@@ -114,7 +114,9 @@ class JobManager:
 
     def cancel(self, job_id: int) -> bool:
         d = None
-        with self.db.session() as s:
+        # 与 _claim() 共用同一把锁，避免「排队中」被判定的同时被 claim 成
+        # running，二者互相覆盖导致取消丢失、任务仍被执行。
+        with self._claim_lock, self.db.session() as s:
             j = s.get(Job, job_id)
             if j is None:
                 raise LookupError(f"找不到任务 {job_id}")
@@ -147,7 +149,9 @@ class JobManager:
         return self.submit(job_type, payload, **meta)
 
     def provide_input(self, job_id: int, text: str) -> dict:
-        with self.db.session() as s:
+        # 同样与 _claim() 共用 _claim_lock：防止写入 manual 输入、改回 queued
+        # 的同时被 claim 抢先改成 running 再被这里覆盖掉。
+        with self._claim_lock, self.db.session() as s:
             j = s.get(Job, job_id)
             if j is None:
                 raise LookupError(f"找不到任务 {job_id}")
@@ -235,28 +239,37 @@ class JobManager:
     # ------------------------------------------------------------ worker
     def _gpu_loop(self) -> None:
         while not self._stop.is_set():
-            if self._paused.is_set() or self._llm_waiting:
-                self._sleep()
-                continue
-            ran = False
-            with self._gpu_lock:
-                jid = self._claim(gpu=True)
-                if jid is not None:
-                    self._execute(jid)
-                    ran = True
-            if not ran:
+            try:
+                if self._paused.is_set() or self._llm_waiting:
+                    self._sleep()
+                    continue
+                ran = False
+                with self._gpu_lock:
+                    jid = self._claim(gpu=True)
+                    if jid is not None:
+                        self._execute(jid)
+                        ran = True
+                if not ran:
+                    self._sleep()
+            except Exception:
+                # 任何一轮出错都不能让 worker 线程退出，否则队列会整体卡死。
+                log.exception("GPU worker 本轮出错")
                 self._sleep()
 
     def _cpu_loop(self) -> None:
         while not self._stop.is_set():
-            if self._paused.is_set():
+            try:
+                if self._paused.is_set():
+                    self._sleep()
+                    continue
+                jid = self._claim(gpu=False)
+                if jid is None:
+                    self._sleep()
+                    continue
+                self._execute(jid)
+            except Exception:
+                log.exception("CPU worker 本轮出错")
                 self._sleep()
-                continue
-            jid = self._claim(gpu=False)
-            if jid is None:
-                self._sleep()
-                continue
-            self._execute(jid)
 
     def _claim(self, *, gpu: bool) -> int | None:
         events: list[dict] = []
@@ -314,21 +327,38 @@ class JobManager:
             status, result = "waiting_input", {"input_request": e.request}
         except JobError as e:
             status, error = "failed", str(e)
-        except Exception as e:
+        except BaseException as e:
+            # 处理器可能抛出任何东西（包括非 Exception 的 BaseException）；
+            # 不管是什么，都要把任务标记失败，不能让它一直停在 running。
             status, error = "failed", f"{type(e).__name__}: {e}"
             log.exception("任务 %s 失败", jid)
-            self.append_log(jid, traceback.format_exc())
+            try:
+                self.append_log(jid, traceback.format_exc())
+            except Exception:
+                log.exception("任务 %s 记录失败日志时又出错，忽略", jid)
         finally:
             self._cancel.pop(jid, None)
-        with self.db.session() as s:
-            j = s.get(Job, jid)
-            j.status = status
-            j.error = error
-            if result is not None:
-                j.result = result
-            if status != "waiting_input":
+        try:
+            with self.db.session() as s:
+                j = s.get(Job, jid)
+                j.status = status
+                j.error = error
+                if result is not None:
+                    j.result = result
+                if status != "waiting_input":
+                    j.finished_at = utcnow()
+                d = job_to_dict(j)
+        except Exception as e:
+            # 结果写不进去（比如不可序列化、数据库被锁）也不能让任务停在
+            # running：退化成失败，不带 result，再写一次。
+            log.exception("任务 %s 写入最终状态失败，降级为 failed", jid)
+            with self.db.session() as s:
+                j = s.get(Job, jid)
+                j.status = "failed"
+                j.error = f"{type(e).__name__}: 写入结果失败 {e}"
+                j.result = None
                 j.finished_at = utcnow()
-            d = job_to_dict(j)
+                d = job_to_dict(j)
         self._publish(d)
         self._notify()
 

@@ -1,5 +1,6 @@
 import threading
 import time
+from pathlib import Path
 
 import pytest
 
@@ -109,7 +110,7 @@ def test_cancel_running(db, managers):
     m = make(db, reg, managers)
     jid = m.submit("loop")
     assert started.wait(3)
-    m.cancel(jid)
+    assert m.cancel(jid) is True
     wait_status(m, jid, "canceled")
 
 
@@ -267,3 +268,99 @@ def test_queue_state_and_list(db, managers):
     assert len(m.list_jobs(statuses=["queued"])) == 2
     with pytest.raises(LookupError):
         m.get(9999)
+
+
+def test_gpu_worker_survives_unserializable_result(db, managers):
+    reg = HandlerRegistry()
+
+    @reg.register("bad_result", gpu=True)
+    def bad_result(ctx, payload):
+        return {"path": Path("x")}  # 不能被 JSON 列序列化，commit 时会炸
+
+    reg.register("g", gpu=True)(lambda ctx, p: None)
+
+    m = make(db, reg, managers)
+    jid = m.submit("bad_result")
+    d = wait_status(m, jid, "failed")
+    assert d["error"]
+
+    gpu_thread = next(t for t in m._threads if t.name == "gpu-worker")
+    assert gpu_thread.is_alive()
+
+    # worker 没死，后续任务要能正常跑完
+    jid2 = m.submit("g")
+    wait_status(m, jid2, "done")
+
+
+def test_cancel_serializes_with_claim(db, managers):
+    reg = HandlerRegistry()
+    reg.register("noop")(lambda ctx, p: None)
+    m = make(db, reg, managers, start=False)
+    jid = m.submit("noop")
+
+    acquired = threading.Event()
+    release = threading.Event()
+
+    def hold_claim_lock():
+        with m._claim_lock:
+            acquired.set()
+            release.wait(5)
+
+    holder = threading.Thread(target=hold_claim_lock)
+    holder.start()
+    assert acquired.wait(2)
+
+    result = {}
+
+    def do_cancel():
+        result["ok"] = m.cancel(jid)
+
+    canceler = threading.Thread(target=do_cancel)
+    canceler.start()
+    time.sleep(0.1)
+    assert "ok" not in result  # cancel() 应该在等 _claim_lock，没能跑完
+    release.set()
+    canceler.join(2)
+    holder.join(2)
+
+    assert result["ok"] is True
+    assert m.get(jid)["status"] == "canceled"
+
+
+def test_provide_input_serializes_with_claim(db, managers):
+    reg = HandlerRegistry()
+    reg.register("noop")(lambda ctx, p: None)
+    m = make(db, reg, managers, start=False)
+    jid = m.submit("noop")
+    with db.session() as s:
+        j = s.get(Job, jid)
+        j.status = "waiting_input"
+        j.result = {"input_request": {"key": "k"}}
+
+    acquired = threading.Event()
+    release = threading.Event()
+
+    def hold_claim_lock():
+        with m._claim_lock:
+            acquired.set()
+            release.wait(5)
+
+    holder = threading.Thread(target=hold_claim_lock)
+    holder.start()
+    assert acquired.wait(2)
+
+    result = {}
+
+    def do_provide():
+        result["d"] = m.provide_input(jid, "答案")
+
+    provider = threading.Thread(target=do_provide)
+    provider.start()
+    time.sleep(0.1)
+    assert "d" not in result  # provide_input() 应该在等 _claim_lock
+    release.set()
+    provider.join(2)
+    holder.join(2)
+
+    assert result["d"]["status"] == "queued"
+    assert result["d"]["payload"]["manual"]["k"] == "答案"
