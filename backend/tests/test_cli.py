@@ -130,3 +130,18 @@ def test_console_script_points_at_main():
 
     meta = tomllib.loads((Path(__file__).parents[2] / "pyproject.toml").read_text(encoding="utf-8"))
     assert meta["project"]["scripts"]["studio"] == "cli.studio:main"
+
+
+def test_jobs_watch_stops_on_waiting_input(cli, api):
+    jid = api.app.state.manager.submit("script", {"episode_id": 1})
+    with api.app.state.services.db.session() as s:
+        s.get(Job, jid).status = "waiting_input"
+    r = cli("jobs", "--watch")
+    assert r.exit_code == 0
+    assert "有任务在等待人工输入，用 studio job show <id> 查看" in r.output
+    assert "队列已空" not in r.output
+
+
+def test_jobs_watch_empty_queue(cli):
+    r = cli("jobs", "--watch")
+    assert r.exit_code == 0 and "队列已空" in r.output

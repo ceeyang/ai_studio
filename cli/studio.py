@@ -176,7 +176,10 @@ def jobs(status: Optional[str] = typer.Option(None, help="逗号分隔，如 que
             return
         counts = _call("GET", "/api/queue")["counts"]
         if counts["queued"] + counts["running"] == 0:
-            typer.echo("队列已空")
+            if counts.get("waiting_input"):
+                typer.echo("有任务在等待人工输入，用 studio job show <id> 查看")
+            else:
+                typer.echo("队列已空")
             return
         time.sleep(2)
         typer.echo("")
