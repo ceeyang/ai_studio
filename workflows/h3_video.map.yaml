@@ -1,0 +1,23 @@
+# MiniMax H3 参考图 -> 视频 + 原生立体声（移植自 vglib build_minimax_h3）
+# ref_image_0 是首帧；额外参考图 ref_<i> 从 ref_image_1 排起，turbo LoRA（节点 1b）由引擎追加
+params:
+  prompt: [["6", "prompt"]]
+  width: [["6", "width"]]
+  height: [["6", "height"]]
+  frames: [["6", "length"]]
+  fps: [["14", "fps"]]
+  seed: [["10", "noise_seed"]]
+  steps: [["9", "steps"]]
+  prefix: [["15", "filename_prefix"]]
+  first_frame: [["5", "image"]]
+  unet: [["1", "unet_name"]]
+  clip: [["2", "clip_name"]]
+  video_vae: [["3", "vae_name"]]
+  audio_vae: [["4", "vae_name"]]
+defaults:
+  unet: 'MiniMaxH3\minimax_h3_ref2va_pruned_int8_convrot.safetensors'
+  clip: qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors
+  video_vae: 'MiniMaxH3\minimax_h3_video_vae_fp16.safetensors'
+  audio_vae: 'MiniMaxH3\minimax_h3_audio_vae_fp32.safetensors'
+  turbo_lora: minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors
+models: [unet, clip, video_vae, audio_vae]

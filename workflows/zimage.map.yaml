@@ -1,0 +1,19 @@
+# Z-Image Turbo 文生图（移植自 vglib build_zimage）
+params:
+  prompt: [["5", "text"]]
+  negative: [["6", "text"]]
+  width: [["7", "width"]]
+  height: [["7", "height"]]
+  seed: [["8", "seed"]]
+  steps: [["8", "steps"]]
+  prefix: [["10", "filename_prefix"]]
+  unet: [["1", "unet_name"]]
+  clip: [["2", "clip_name"]]
+  vae: [["3", "vae_name"]]
+defaults:
+  negative: ""
+  steps: 10
+  unet: z_image_turbo_bf16.safetensors
+  clip: qwen_3_4b.safetensors
+  vae: ae.safetensors
+models: [unet, clip, vae]

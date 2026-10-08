@@ -1,0 +1,26 @@
+# Wan2.2 I2V 14B fp8 + lightx2v 4 步，高噪/低噪各 2 步，无声（移植自 vglib build_wan22）
+params:
+  prompt: [["9", "text"]]
+  negative: [["10", "text"]]
+  first_frame: [["11", "image"]]
+  width: [["12", "width"]]
+  height: [["12", "height"]]
+  frames: [["12", "length"]]
+  seed: [["13", "noise_seed"], ["14", "noise_seed"]]
+  fps: [["16", "fps"]]
+  prefix: [["17", "filename_prefix"]]
+  high_unet: [["1", "unet_name"]]
+  high_lora: [["2", "lora_name"]]
+  low_unet: [["4", "unet_name"]]
+  low_lora: [["5", "lora_name"]]
+  clip: [["7", "clip_name"]]
+  vae: [["8", "vae_name"]]
+defaults:
+  negative: "lowres, blurry, deformed hands, extra fingers, extra limbs, mutated, bad anatomy, nude, nsfw, text, watermark, logo, jpeg artifacts, distorted face, changing face"
+  high_unet: wan2.2_i2v_high_noise_14B_fp8_scaled.safetensors
+  high_lora: wan2.2_i2v_lightx2v_4steps_lora_v1_high_noise.safetensors
+  low_unet: wan2.2_i2v_low_noise_14B_fp8_scaled.safetensors
+  low_lora: wan2.2_i2v_lightx2v_4steps_lora_v1_low_noise.safetensors
+  clip: umt5_xxl_fp8_e4m3fn_scaled.safetensors
+  vae: wan_2.1_vae.safetensors
+models: [high_unet, high_lora, low_unet, low_lora, clip, vae]
