@@ -30,12 +30,18 @@ describe('ProjectsPage', () => {
     });
     renderAt(<ProjectsPage />, { route: '/', path: '/' });
     const user = userEvent.setup();
+    expect(await screen.findByText(/还没有项目/)).toBeTruthy();
+    expect(screen.queryByLabelText('项目标题')).toBeNull();
+    await user.click(screen.getByRole('button', { name: '新建项目' }));
+    const dialog = screen.getByRole('dialog', { name: '新建项目' });
     await screen.findByRole('option', { name: 'zimage' });
     expect((screen.getByLabelText('图像引擎') as HTMLSelectElement).value).toBe('zimage');
     expect((screen.getByLabelText('视频引擎') as HTMLSelectElement).value).toBe('h3_video');
-    expect((screen.getByRole('button', { name: '新建项目' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(document.activeElement).toBe(screen.getByLabelText('项目标题'));
+    expect((screen.getByRole('button', { name: '创建项目' }) as HTMLButtonElement).disabled).toBe(true);
     await user.type(screen.getByLabelText('项目标题'), '冒烟');
-    await user.click(screen.getByRole('button', { name: '新建项目' }));
+    expect(dialog.contains(screen.getByRole('button', { name: '创建项目' }))).toBe(true);
+    await user.click(screen.getByRole('button', { name: '创建项目' }));
     await waitFor(() => expect(where()).toBe('/projects/冒烟'));
     expect(calls.find((c) => c.method === 'POST')?.body).toEqual({
       title: '冒烟',
@@ -53,9 +59,10 @@ describe('ProjectsPage', () => {
     });
     renderAt(<ProjectsPage />, { route: '/', path: '/' });
     const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: '新建项目' }));
     await screen.findByRole('option', { name: 'zimage' });
     await user.type(screen.getByLabelText('项目标题'), 'demo');
-    await user.click(screen.getByRole('button', { name: '新建项目' }));
+    await user.click(screen.getByRole('button', { name: '创建项目' }));
     expect(await screen.findByText('项目 demo 已存在（HTTP 409）')).toBeTruthy();
   });
 
@@ -67,6 +74,16 @@ describe('ProjectsPage', () => {
       'GET /api/projects/demo/episodes': [
         { id: 3, project_id: 1, number: 1, title: '旧的一集', source_text: 'x', target_seconds: 60, status: 'storyboarded' },
       ],
+      'GET /api/projects/demo/overview': {
+        episode_count: 1,
+        cover_url: '/media/demo/media/first_frame/a.png',
+        episodes: [
+          { id: 3, number: 1, title: '旧的一集', status: 'storyboarded', shot_count: 4, export_count: 2, cover_url: '/media/demo/media/first_frame/a.png' },
+        ],
+      },
+      'GET /api/projects/demo/characters': [],
+      'GET /api/projects/demo/locations': [],
+      'GET /api/projects/demo/style': null,
       'POST /api/projects/demo/episodes': {
         id: 5, project_id: 1, number: 2, title: '', source_text: '深夜的直播间', target_seconds: 10, status: 'draft',
       },
@@ -75,8 +92,15 @@ describe('ProjectsPage', () => {
     const user = userEvent.setup();
     expect(await screen.findByText(/旧的一集/)).toBeTruthy();
     expect(screen.getByText(/已分镜/)).toBeTruthy();
-    expect(screen.getByRole('link', { name: '导演台' }).getAttribute('href')).toBe('/projects/demo/episodes/3/director');
-    const btn = screen.getByRole('button', { name: '新建剧集' }) as HTMLButtonElement;
+    expect(screen.getByRole('link', { name: '去导演台' }).getAttribute('href')).toBe('/projects/demo/episodes/3/director');
+    expect(screen.getByRole('link', { name: '去剧本' }).getAttribute('href')).toBe('/projects/demo/episodes/3/script');
+    expect(screen.getByRole('link', { name: /全部项目/ }).getAttribute('href')).toBe('/');
+    expect(await screen.findByText('2 个成片')).toBeTruthy();
+    expect(screen.getByText('4 个镜头')).toBeTruthy();
+    expect(screen.queryByLabelText('原文或梗概')).toBeNull();
+    await user.click(screen.getByRole('button', { name: '新建剧集' }));
+    expect(screen.getByRole('dialog', { name: '新建剧集 · 第 2 集' })).toBeTruthy();
+    const btn = screen.getByRole('button', { name: '创建剧集' }) as HTMLButtonElement;
     expect(btn.disabled).toBe(true);
     await user.type(screen.getByLabelText('原文或梗概'), '深夜的直播间');
     const secs = screen.getByLabelText('目标时长（秒）');
@@ -89,5 +113,42 @@ describe('ProjectsPage', () => {
       source_text: '深夜的直播间',
       target_seconds: 10,
     });
+  });
+
+  it('项目总览：卡片带封面、集数和最新一集的导演台入口；没有首帧时用首字占位', async () => {
+    installFetch({
+      'GET /api/projects': [makeProject(), makeProject({ id: 2, slug: 'b', title: '夜班' })],
+      'GET /api/projects/demo/overview': {
+        episode_count: 2,
+        cover_url: '/media/demo/c.png',
+        episodes: [
+          { id: 3, number: 1, title: '', status: 'exported', shot_count: 2, export_count: 1, cover_url: null },
+          { id: 7, number: 2, title: '', status: 'scripted', shot_count: 0, export_count: 0, cover_url: '/media/demo/c.png' },
+        ],
+      },
+      'GET /api/projects/b/overview': { episode_count: 0, cover_url: null, episodes: [] },
+    });
+    const { container } = renderAt(<ProjectsPage />, { route: '/', path: '/' });
+    const card = await screen.findByTestId('project-demo');
+    await waitFor(() => expect(card.querySelector('img')?.getAttribute('src')).toBe('/media/demo/c.png'));
+    expect(card.textContent).toContain('2 集');
+    expect(card.textContent).toContain('已出剧本');
+    expect(screen.getByRole('link', { name: '导演台 · 第 2 集' }).getAttribute('href')).toBe('/projects/demo/episodes/7/director');
+    const other = screen.getByTestId('project-b');
+    expect(other.querySelector('img')).toBeNull();
+    expect(other.querySelector('.cover-gen')?.textContent).toBe('夜');
+    // 继续制作：没有上次记录时取最新一集
+    expect(screen.getByRole('region', { name: '继续制作' }).textContent).toContain('第 2 集');
+    expect(container.querySelector('.stat-tiles')?.textContent).toContain('剧集2');
+  });
+
+  it('新建项目对话框：Esc 关闭', async () => {
+    installFetch({ 'GET /api/projects': [], 'GET /api/engines': ENGINES });
+    renderAt(<ProjectsPage />, { route: '/', path: '/' });
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: '新建项目' }));
+    expect(screen.getByRole('dialog')).toBeTruthy();
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog')).toBeNull();
   });
 });

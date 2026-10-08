@@ -31,8 +31,8 @@ export function SettingsPage() {
   ];
 
   return (
-    <div className="page">
-      <section className="panel">
+    <div className="page settings-layout">
+      <section className="panel area-doctor">
         <div className="page-head">
           <h2>环境检查（doctor）</h2>
           <button type="button" disabled={doctor.isFetching} onClick={() => void doctor.refetch()}>
@@ -71,7 +71,7 @@ export function SettingsPage() {
         </table>
       </section>
 
-      <section className="panel">
+      <section className="panel area-engines">
         <h2>引擎</h2>
         {engines.error && <p className="error">{errorText(engines.error)}</p>}
         <table className="table engine-table">
@@ -96,7 +96,7 @@ export function SettingsPage() {
         </table>
       </section>
 
-      <section className="panel">
+      <section className="panel area-config">
         <h2>当前配置（只读）</h2>
         <p className="muted">修改请编辑仓库根目录的 config.yaml 后重启服务。密钥只在环境变量里，这里看不到。</p>
         {config.error && <p className="error">{errorText(config.error)}</p>}

@@ -45,6 +45,23 @@ export interface Episode {
   status: string;
 }
 
+/** GET /api/projects/{slug}/overview：项目中心卡片用的封面和统计。 */
+export interface EpisodeStats {
+  id: number;
+  number: number;
+  title: string;
+  status: string;
+  shot_count: number;
+  export_count: number;
+  cover_url: string | null;
+}
+
+export interface ProjectOverview {
+  episode_count: number;
+  cover_url: string | null;
+  episodes: EpisodeStats[];
+}
+
 export interface EpisodeIn {
   title: string;
   source_text: string;

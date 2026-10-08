@@ -25,14 +25,16 @@ async function waitQueueIdle(page: Page, slug: string) {
 test('真实环境：梗概 → 带 H3 原生声音的成片', async ({ page }) => {
   const slug = `网页验收${Date.now() % 100000}`;
   await page.goto('/');
+  await page.getByRole('button', { name: '新建项目' }).click();
   await page.getByLabel('项目标题').fill(slug);
   await page.getByLabel('画幅').selectOption('9:16');
   await page.getByLabel('图像引擎').selectOption('zimage');
   await page.getByLabel('视频引擎').selectOption('h3_video');
-  await page.getByRole('button', { name: '新建项目' }).click();
+  await page.getByRole('button', { name: '创建项目' }).click();
+  await page.getByRole('button', { name: '新建剧集' }).click();
   await page.getByLabel('原文或梗概').fill(SYNOPSIS);
   await page.getByLabel('目标时长（秒）').fill('15');
-  await page.getByRole('button', { name: '新建剧集' }).click();
+  await page.getByRole('button', { name: '创建剧集' }).click();
 
   await page.getByRole('button', { name: '运行剧本' }).click();
   await waitQueueIdle(page, slug);

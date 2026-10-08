@@ -154,8 +154,8 @@ export function ScriptPage() {
         </p>
       )}
 
-      <div className="cols">
-        <section className="panel">
+      <div className="script-layout">
+        <section className="panel area-src">
           <h3>原文</h3>
           <EditableFields
             fields={EPISODE_FIELDS}
@@ -165,7 +165,7 @@ export function ScriptPage() {
             onSave={(_v, c) => patchEp.mutate(toEpisodePatch(c))}
           />
         </section>
-        <section className="panel">
+        <section className="panel area-blocks">
           <h3>剧本段落（{e.scene_blocks.length}）</h3>
           {e.scene_blocks.length === 0 && <p className="muted">还没有段落。点"运行剧本"由模型拆分。</p>}
           {e.scene_blocks.map((b) => (
@@ -189,61 +189,61 @@ export function ScriptPage() {
           ))}
           {patchBlock.error && <p className="error">{errorText(patchBlock.error)}</p>}
         </section>
+
+        <section className="panel area-chars">
+          <h3>角色（{chars.length}）</h3>
+          {chars.length === 0 && <p className="muted">运行剧本后自动抽取。</p>}
+          <div className="cards">
+            {chars.map((c) => (
+              <div key={c.id} className="card" data-testid={`character-${c.id}`}>
+                <EditableFields
+                  fields={CHARACTER_FIELDS}
+                  initial={{ name: c.name, description: c.description, visual_prompt: c.visual_prompt, core_features: c.core_features }}
+                  onSave={(_v, ch) => patchChar.mutate({ id: c.id, ...(ch as CharacterPatch) })}
+                />
+              </div>
+            ))}
+          </div>
+          {patchChar.error && <p className="error">{errorText(patchChar.error)}</p>}
+        </section>
+
+        <section className="panel area-locs">
+          <h3>场景（{locs.length}）</h3>
+          {locs.length === 0 && <p className="muted">运行剧本后自动抽取。</p>}
+          <div className="cards">
+            {locs.map((l) => (
+              <div key={l.id} className="card" data-testid={`location-${l.id}`}>
+                <EditableFields
+                  fields={LOCATION_FIELDS}
+                  initial={{ name: l.name, time_of_day: l.time_of_day, atmosphere: l.atmosphere, visual_prompt: l.visual_prompt }}
+                  onSave={(_v, ch) => patchLoc.mutate({ id: l.id, ...(ch as LocationPatch) })}
+                />
+              </div>
+            ))}
+          </div>
+          {patchLoc.error && <p className="error">{errorText(patchLoc.error)}</p>}
+        </section>
+
+        <section className="panel area-style">
+          <h3>风格</h3>
+          {!style.data && <p className="muted">还没有风格设定，运行剧本后自动生成，也可以直接填写保存。</p>}
+          <EditableFields
+            fields={STYLE_FIELDS}
+            initial={{
+              anchor_text: st.anchor_text,
+              palette: st.palette,
+              lighting: st.lighting,
+              texture: st.texture,
+              character_rules: st.character_rules,
+              mood_keywords: st.mood_keywords.join(', '),
+              negative: st.negative,
+            }}
+            saving={putStyle.isPending}
+            error={putStyle.error ? errorText(putStyle.error) : null}
+            onSave={(v) => putStyle.mutate(toStyle(v))}
+          />
+        </section>
       </div>
-
-      <section className="panel">
-        <h3>角色（{chars.length}）</h3>
-        {chars.length === 0 && <p className="muted">运行剧本后自动抽取。</p>}
-        <div className="cards">
-          {chars.map((c) => (
-            <div key={c.id} className="card" data-testid={`character-${c.id}`}>
-              <EditableFields
-                fields={CHARACTER_FIELDS}
-                initial={{ name: c.name, description: c.description, visual_prompt: c.visual_prompt, core_features: c.core_features }}
-                onSave={(_v, ch) => patchChar.mutate({ id: c.id, ...(ch as CharacterPatch) })}
-              />
-            </div>
-          ))}
-        </div>
-        {patchChar.error && <p className="error">{errorText(patchChar.error)}</p>}
-      </section>
-
-      <section className="panel">
-        <h3>场景（{locs.length}）</h3>
-        {locs.length === 0 && <p className="muted">运行剧本后自动抽取。</p>}
-        <div className="cards">
-          {locs.map((l) => (
-            <div key={l.id} className="card" data-testid={`location-${l.id}`}>
-              <EditableFields
-                fields={LOCATION_FIELDS}
-                initial={{ name: l.name, time_of_day: l.time_of_day, atmosphere: l.atmosphere, visual_prompt: l.visual_prompt }}
-                onSave={(_v, ch) => patchLoc.mutate({ id: l.id, ...(ch as LocationPatch) })}
-              />
-            </div>
-          ))}
-        </div>
-        {patchLoc.error && <p className="error">{errorText(patchLoc.error)}</p>}
-      </section>
-
-      <section className="panel">
-        <h3>风格</h3>
-        {!style.data && <p className="muted">还没有风格设定，运行剧本后自动生成，也可以直接填写保存。</p>}
-        <EditableFields
-          fields={STYLE_FIELDS}
-          initial={{
-            anchor_text: st.anchor_text,
-            palette: st.palette,
-            lighting: st.lighting,
-            texture: st.texture,
-            character_rules: st.character_rules,
-            mood_keywords: st.mood_keywords.join(', '),
-            negative: st.negative,
-          }}
-          saving={putStyle.isPending}
-          error={putStyle.error ? errorText(putStyle.error) : null}
-          onSave={(v) => putStyle.mutate(toStyle(v))}
-        />
-      </section>
     </div>
   );
 }

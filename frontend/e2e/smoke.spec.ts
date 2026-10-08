@@ -16,13 +16,15 @@ async function answerWaitingJob(page: Page, key: RegExp, text: string) {
 
 test('新建项目 → 剧本 → 分镜 → 导演台（manual LLM，不需要显卡）', async ({ page }) => {
   await page.goto('/');
-  await page.getByLabel('项目标题').fill('冒烟');
   await page.getByRole('button', { name: '新建项目' }).click();
+  await page.getByLabel('项目标题').fill('冒烟');
+  await page.getByRole('button', { name: '创建项目' }).click();
   await expect(page.getByRole('heading', { name: '冒烟' })).toBeVisible();
 
+  await page.getByRole('button', { name: '新建剧集' }).click();
   await page.getByLabel('原文或梗概').fill(SYNOPSIS);
   await page.getByLabel('目标时长（秒）').fill('10');
-  await page.getByRole('button', { name: '新建剧集' }).click();
+  await page.getByRole('button', { name: '创建剧集' }).click();
   await expect(page.getByRole('heading', { name: /剧本 · 第 1 集/ })).toBeVisible();
 
   await page.getByRole('button', { name: '运行剧本' }).click();

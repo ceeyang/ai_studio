@@ -166,28 +166,29 @@ export function DirectorPage() {
         </p>
       )}
 
-      {shots.length === 0 ? (
-        <p className="panel empty">
-          这一集还没有分镜。<Link to={`/projects/${enc(slug)}/episodes/${id}/script`}>去剧本页运行分镜</Link>
-        </p>
-      ) : (
-        <ShotTable
-          shots={shots}
-          selected={selected}
-          busy={busy}
-          generating={run.isPending}
-          onToggle={toggle}
-          onToggleAll={toggleAll}
-          onOpen={(shotId) => setParams({ shot: String(shotId) })}
-          onMove={move}
-          onSplit={(shotId) => report(split.mutateAsync(shotId), '已拆分')}
-          onInsertAfter={(shotId) => report(create.mutateAsync({ after_shot_id: shotId }), '已插入新镜头')}
-          onDelete={remove}
-          onGenerate={(shotId, stage) => generate(stage, [shotId])}
-        />
-      )}
-
-      <ExportsPanel rows={exportsQ.data ?? []} />
+      <div className="director-body">
+        {shots.length === 0 ? (
+          <p className="panel empty">
+            这一集还没有分镜。<Link to={`/projects/${enc(slug)}/episodes/${id}/script`}>去剧本页运行分镜</Link>
+          </p>
+        ) : (
+          <ShotTable
+            shots={shots}
+            selected={selected}
+            busy={busy}
+            generating={run.isPending}
+            onToggle={toggle}
+            onToggleAll={toggleAll}
+            onOpen={(shotId) => setParams({ shot: String(shotId) })}
+            onMove={move}
+            onSplit={(shotId) => report(split.mutateAsync(shotId), '已拆分')}
+            onInsertAfter={(shotId) => report(create.mutateAsync({ after_shot_id: shotId }), '已插入新镜头')}
+            onDelete={remove}
+            onGenerate={(shotId, stage) => generate(stage, [shotId])}
+          />
+        )}
+        <ExportsPanel rows={exportsQ.data ?? []} />
+      </div>
 
       {openShot && <div className="drawer-scrim" aria-hidden="true" />}
       {openShot && (

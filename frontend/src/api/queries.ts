@@ -17,6 +17,7 @@ import type {
   LocationPatch,
   Project,
   ProjectIn,
+  ProjectOverview,
   QueueState,
   RunIn,
   RunOut,
@@ -35,6 +36,8 @@ export const keys = {
   engines: ['engines'] as const,
   episodes: (slug: string) => ['episodes', slug] as const,
   episode: (id: number) => ['episode', id] as const,
+  // 挂在 ['episode'] 前缀下：任何任务结束（首帧、成片落地）都会让封面和统计刷新
+  projectOverview: (slug: string) => ['episode', 'overview', slug] as const,
   characters: (slug: string) => ['characters', slug] as const,
   locations: (slug: string) => ['locations', slug] as const,
   style: (slug: string) => ['style', slug] as const,
@@ -72,6 +75,14 @@ export function useEpisodes(slug: string) {
   return useQuery({
     queryKey: keys.episodes(slug),
     queryFn: () => api.get<Episode[]>(`/api/projects/${enc(slug)}/episodes`),
+    enabled: slug !== '',
+  });
+}
+
+export function useProjectOverview(slug: string) {
+  return useQuery({
+    queryKey: keys.projectOverview(slug),
+    queryFn: () => api.get<ProjectOverview>(`/api/projects/${enc(slug)}/overview`),
     enabled: slug !== '',
   });
 }
@@ -172,7 +183,7 @@ export function useCreateEpisode(slug: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: EpisodeIn) => api.post<Episode>(`/api/projects/${enc(slug)}/episodes`, body),
-    onSuccess: () => invalidate(qc, keys.episodes(slug)),
+    onSuccess: () => invalidate(qc, keys.episodes(slug), keys.projectOverview(slug)),
   });
 }
 
