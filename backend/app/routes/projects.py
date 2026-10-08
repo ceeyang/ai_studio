@@ -3,13 +3,17 @@ from __future__ import annotations
 
 import re
 
+from urllib.parse import quote
+
 from fastapi import APIRouter, HTTPException, Request, Response
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from backend.app.deps import check_engines, get_or_404, project_by_slug, services
-from backend.app.schemas import (CharacterOut, CharacterPatch, LocationOut, LocationPatch,
-                                 ProjectIn, ProjectOut, ProjectPatch, StyleIO)
-from backend.domain.models import Character, Episode, Location, Project, Shot, StyleBible
+from backend.app.schemas import (CharacterOut, CharacterPatch, EpisodeStats, LocationOut,
+                                 LocationPatch, ProjectIn, ProjectOut, ProjectOverview, ProjectPatch,
+                                 StyleIO)
+from backend.domain.models import (Candidate, Character, Episode, Export, Location, Project, Shot,
+                                   Slot, StyleBible)
 from backend.domain.slots import delete_slots
 from backend.queue.errors import JobError
 
@@ -51,6 +55,35 @@ def create_project(body: ProjectIn, request: Request):
 def get_project(slug: str, request: Request):
     with services(request).db.session() as s:
         return ProjectOut.model_validate(project_by_slug(s, slug))
+
+
+@router.get("/projects/{slug}/overview", response_model=ProjectOverview)
+def project_overview(slug: str, request: Request):
+    """项目中心卡片用：每集镜头数、成片数和封面（按镜头顺序第一张选定的首帧）。"""
+    with services(request).db.session() as s:
+        p = project_by_slug(s, slug)
+        eps = list(p.episodes)
+        ep_ids = [e.id for e in eps]
+        shots = dict(s.execute(select(Shot.episode_id, func.count(Shot.id))
+                               .where(Shot.episode_id.in_(ep_ids)).group_by(Shot.episode_id)).all())
+        exports = dict(s.execute(select(Export.episode_id, func.count(Export.id))
+                                 .where(Export.episode_id.in_(ep_ids))
+                                 .group_by(Export.episode_id)).all())
+        covers: dict[int, str] = {}
+        rows = s.execute(
+            select(Shot.episode_id, Candidate.file_path)
+            .join(Slot, (Slot.owner_type == "shot") & (Slot.owner_id == Shot.id)
+                  & (Slot.kind == "first_frame"))
+            .join(Candidate, Candidate.id == Slot.selected_candidate_id)
+            .where(Shot.episode_id.in_(ep_ids))
+            .order_by(Shot.episode_id, Shot.order))
+        for ep_id, path in rows:
+            covers.setdefault(ep_id, "/media/" + quote(path))
+        stats = [EpisodeStats(id=e.id, number=e.number, title=e.title, status=e.status,
+                              shot_count=shots.get(e.id, 0), export_count=exports.get(e.id, 0),
+                              cover_url=covers.get(e.id)) for e in eps]
+        cover = next((x.cover_url for x in reversed(stats) if x.cover_url), None)
+        return ProjectOverview(episode_count=len(stats), cover_url=cover, episodes=stats)
 
 
 @router.patch("/projects/{slug}", response_model=ProjectOut)

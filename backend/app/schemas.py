@@ -115,6 +115,22 @@ class EpisodeOut(ORM):
     status: str
 
 
+class EpisodeStats(BaseModel):
+    id: int
+    number: int
+    title: str
+    status: str
+    shot_count: int
+    export_count: int
+    cover_url: str | None
+
+
+class ProjectOverview(BaseModel):
+    episode_count: int
+    cover_url: str | None
+    episodes: list[EpisodeStats]
+
+
 class SceneBlockOut(ORM):
     id: int
     order: int
