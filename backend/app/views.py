@@ -5,13 +5,18 @@ from urllib.parse import quote
 
 from sqlalchemy.orm import Session
 
-from backend.app.schemas import (CandidateOut, EpisodeDetail, SceneBlockOut, ShotDetail, SlotOut)
+from backend.app.schemas import (CandidateOut, EpisodeDetail, ExportOut, SceneBlockOut, ShotDetail,
+                                 SlotOut)
 from backend.domain.slots import slots_for
 from backend.pipeline.prompting import keyframe_input_hash, video_input_hash
 
 
 def candidate_out(c) -> CandidateOut:
     return CandidateOut.model_validate(c).model_copy(update={"url": "/media/" + quote(c.file_path)})
+
+
+def export_out(e) -> ExportOut:
+    return ExportOut.model_validate(e).model_copy(update={"url": "/media/" + quote(e.file_path)})
 
 
 def shot_detail(s: Session, sv, shot, proj, style) -> ShotDetail:

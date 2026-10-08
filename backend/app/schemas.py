@@ -141,6 +141,16 @@ class CandidateOut(ORM):
     created_at: datetime
 
 
+class ExportOut(ORM):
+    id: int
+    episode_id: int
+    variant: str
+    file_path: str
+    url: str = ""
+    settings: dict
+    created_at: datetime
+
+
 class SlotOut(BaseModel):
     id: int
     kind: str

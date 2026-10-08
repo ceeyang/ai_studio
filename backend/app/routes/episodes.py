@@ -5,10 +5,10 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from sqlalchemy import func, select
 
 from backend.app.deps import get_or_404, project_by_slug, services
-from backend.app.schemas import (EpisodeDetail, EpisodeIn, EpisodeOut, EpisodePatch,
+from backend.app.schemas import (EpisodeDetail, EpisodeIn, EpisodeOut, EpisodePatch, ExportOut,
                                  SceneBlockOut, SceneBlockPatch)
-from backend.app.views import episode_detail
-from backend.domain.models import Episode, SceneBlock, Shot
+from backend.app.views import episode_detail, export_out
+from backend.domain.models import Episode, Export, SceneBlock, Shot
 from backend.domain.slots import delete_slots
 
 router = APIRouter(prefix="/api", tags=["episodes"])
@@ -71,6 +71,15 @@ def delete_episode(episode_id: int, request: Request):
         delete_slots(s, "shot", s.scalars(select(Shot.id).where(Shot.episode_id == ep.id)).all())
         s.delete(ep)
     return Response(status_code=204)
+
+
+@router.get("/episodes/{episode_id}/exports", response_model=list[ExportOut])
+def list_exports(episode_id: int, request: Request):
+    with services(request).db.session() as s:
+        get_or_404(s, Episode, episode_id, "剧集")
+        rows = s.scalars(select(Export).where(Export.episode_id == episode_id)
+                         .order_by(Export.id.desc()))
+        return [export_out(e) for e in rows]
 
 
 @router.patch("/scene-blocks/{block_id}", response_model=SceneBlockOut)
