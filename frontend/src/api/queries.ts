@@ -213,6 +213,18 @@ export function usePatchCharacter(slug: string) {
   });
 }
 
+export function useUploadPortrait(slug: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, file }: { id: number; file: File }) => {
+      const form = new FormData();
+      form.append('file', file);
+      return api.post<Character>(`/api/characters/${id}/portrait`, form);
+    },
+    onSuccess: () => invalidate(qc, keys.characters(slug)),
+  });
+}
+
 export function usePatchLocation(slug: string) {
   const qc = useQueryClient();
   return useMutation({

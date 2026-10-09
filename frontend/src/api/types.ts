@@ -200,6 +200,9 @@ export interface Character {
   visual_prompt: string;
   core_features: string;
   voice: string | null;
+  /** 选定的定妆照（首帧/视频按在场角色当参考图），没有时为 null */
+  portrait_candidate_id?: number | null;
+  portrait_url?: string | null;
 }
 
 export type CharacterPatch = Partial<Pick<Character, 'name' | 'description' | 'visual_prompt' | 'core_features'>>;

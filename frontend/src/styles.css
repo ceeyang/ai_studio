@@ -231,6 +231,11 @@ progress::-moz-progress-bar { background: var(--accent); border-radius: var(--r-
   transition: border-color 140ms ease-out;
 }
 .card:hover { border-color: var(--border-strong); }
+.portrait { display: flex; gap: var(--s-3); align-items: flex-start; margin-bottom: var(--s-3); }
+.portrait .media-none { font-size: 12px; text-align: center; }
+.portrait-side { display: flex; flex-direction: column; gap: var(--s-2); align-items: flex-start; font-size: 12px; }
+.portrait-side .btn { cursor: pointer; }
+.portrait-side .btn.is-disabled { opacity: 0.42; cursor: not-allowed; }
 .block { border-top: 1px solid var(--divider); padding-top: var(--s-3); margin-top: var(--s-4); }
 .block:first-of-type { border-top: 0; margin-top: 0; padding-top: 0; }
 .block h4 { margin-top: 0; }

@@ -66,6 +66,19 @@ class CharacterOut(ORM):
     visual_prompt: str
     core_features: str
     voice: str | None
+    portrait_candidate_id: int | None = None
+    portrait_url: str | None = None
+
+
+class CharacterIn(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    description: str = ""
+    visual_prompt: str = ""
+    core_features: str = ""
+
+
+class PortraitPathIn(BaseModel):
+    path: str = Field(min_length=1)
 
 
 class CharacterPatch(BaseModel):

@@ -21,11 +21,13 @@ episode_app = typer.Typer(help="剧集", no_args_is_help=True)
 job_app = typer.Typer(help="单个任务", no_args_is_help=True)
 candidate_app = typer.Typer(help="候选", no_args_is_help=True)
 queue_app = typer.Typer(help="队列", no_args_is_help=True)
+character_app = typer.Typer(help="角色", no_args_is_help=True)
 app.add_typer(project_app, name="project")
 app.add_typer(episode_app, name="episode")
 app.add_typer(job_app, name="job")
 app.add_typer(candidate_app, name="candidate")
 app.add_typer(queue_app, name="queue")
+app.add_typer(character_app, name="character")
 
 STATE = {"json": False}
 ICON = {"ok": "√", "warn": "!", "fail": "×"}
@@ -223,6 +225,44 @@ def job_input(job_id: int,
                                         help="模型输出（UTF-8 文本）")):
     _emit(_call("POST", f"/api/jobs/{job_id}/input", json={"text": file.read_text(encoding="utf-8")}),
           lambda j: typer.echo(f"已提交，任务 #{j['id']} 重新排队"))
+
+
+# ------------------------------------------------------------ 角色
+def _print_characters(cs: list[dict]) -> None:
+    if not cs:
+        typer.echo("（还没有角色）")
+    for c in cs:
+        typer.echo(f"#{c['id']:<5}{c['name']}	定妆照 {'√' if c.get('portrait_url') else '·'}")
+
+
+@character_app.command("list")
+def character_list(project: str):
+    _emit(_call("GET", f"/api/projects/{project}/characters"), _print_characters)
+
+
+@character_app.command("create")
+def character_create(project: str, name: str,
+                     description: str = typer.Option("", help="人物小传"),
+                     visual_prompt: str = typer.Option("", "--visual-prompt", help="外貌提示词（英文）")):
+    body = {"name": name, "description": description, "visual_prompt": visual_prompt}
+    _emit(_call("POST", f"/api/projects/{project}/characters", json=body),
+          lambda c: typer.echo(f"已创建角色 #{c['id']} {c['name']}"))
+
+
+@character_app.command("portrait")
+def character_portrait(project: str, name: str,
+                       file: Path = typer.Option(..., "--file", "-f", exists=True, dir_okay=False,
+                                                 help="定妆照（png / jpg / webp）")):
+    chars = _call("GET", f"/api/projects/{project}/characters")
+    ch = next((c for c in chars if c["name"] == name), None)
+    if ch is None:
+        typer.echo(f"项目 {project} 里没有角色 {name}，现有：{', '.join(c['name'] for c in chars) or '无'}",
+                   err=True)
+        raise typer.Exit(1)
+    with file.open("rb") as fh:
+        out = _call("POST", f"/api/characters/{ch['id']}/portrait",
+                    files={"file": (file.name, fh.read())})
+    _emit(out, lambda c: typer.echo(f"已设定 {c['name']} 的定妆照：{c['portrait_url']}"))
 
 
 # ------------------------------------------------------------ 候选、队列、体检

@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from backend.app.schemas import (CandidateOut, EpisodeDetail, ExportOut, SceneBlockOut, ShotDetail,
                                  SlotOut)
+from backend.domain.characters import cast_portraits
 from backend.domain.slots import slots_for
 from backend.pipeline.prompting import keyframe_input_hash, video_input_hash
 
@@ -19,10 +20,20 @@ def export_out(e) -> ExportOut:
     return ExportOut.model_validate(e).model_copy(update={"url": "/media/" + quote(e.file_path)})
 
 
+def _max_refs(sv, kind: str, engine_name: str) -> int:
+    try:
+        return getattr(sv.engines, kind)(engine_name).caps.max_refs
+    except KeyError:
+        return 0
+
+
 def shot_detail(s: Session, sv, shot, proj, style) -> ShotDetail:
     slots = slots_for(s, "shot", shot.id)
+    portrait_ids = [c.id for c in cast_portraits(s, shot)]
+    ie = shot.image_engine or proj.image_engine
     current: dict[str, str] = {
-        "first_frame": keyframe_input_hash(shot, proj, style, shot.image_engine or proj.image_engine)}
+        "first_frame": keyframe_input_hash(shot, proj, style, ie,
+                                           portrait_ids[:_max_refs(sv, "image", ie)])}
     ff = next((x for x in slots if x.kind == "first_frame"), None)
     if ff is not None and ff.selected_candidate_id:
         ve = shot.video_engine or proj.video_engine
@@ -32,7 +43,8 @@ def shot_detail(s: Session, sv, shot, proj, style) -> ShotDetail:
             has_audio = None
         if has_audio is not None:
             current["video"] = video_input_hash(shot, proj, style, ff.selected_candidate_id, ve,
-                                                has_audio)
+                                                has_audio,
+                                                portrait_ids[:_max_refs(sv, "video", ve)])
     outs = []
     for sl in slots:
         sel = next((c for c in sl.candidates if c.id == sl.selected_candidate_id), None)

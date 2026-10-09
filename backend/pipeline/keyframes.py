@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import shutil
 
+from backend.domain.characters import cast_portraits
 from backend.domain.models import Shot
 from backend.domain.slots import add_candidate, get_or_create_slot, selected_candidate
 from backend.engines.base import ImageRequest
@@ -46,7 +47,10 @@ def run_keyframe(ctx, payload: dict) -> dict:
         anchor = style.anchor_text if style else ""
         prompt = compose_image_prompt(shot.image_prompt, anchor)
         negative = join_negative(proj.negative, style.negative if style else "")
-        h = keyframe_input_hash(shot, proj, style, engine_name)
+        portraits = cast_portraits(s, shot)
+        refs = [sv.media.abs(c.file_path) for c in portraits]
+        h = keyframe_input_hash(shot, proj, style, engine_name,
+                                [c.id for c in portraits[:engine.caps.max_refs]])
         # 只要一个候选、又不强制时，输入没变就不重出（多候选是用户明确要抽卡）
         if not payload.get("force") and int(payload.get("candidates") or 1) == 1:
             cur = selected_candidate(s, "shot", shot.id, "first_frame")
@@ -59,8 +63,8 @@ def run_keyframe(ctx, payload: dict) -> dict:
     if not shot.image_prompt.strip():
         raise JobError(f"镜头 {code} 没有 image_prompt")
     call = engine.build(ImageRequest(prompt=prompt, negative=negative, aspect=aspect, seed=seed,
-                                     prefix=f"studio/{slug}/kf_{code}"))
-    ctx.log(f"首帧 {code} · {engine_name} · seed {seed}")
+                                     refs=refs, prefix=f"studio/{slug}/kf_{code}"))
+    ctx.log(f"首帧 {code} · {engine_name} · seed {seed} · 参考图 {len(refs)} 张")
     files, run_dir = run_comfy(ctx, call, slug)
     dst = sv.media.new_media_path(slug, "first_frame", files[0].suffix)
     shutil.copyfile(files[0], dst)

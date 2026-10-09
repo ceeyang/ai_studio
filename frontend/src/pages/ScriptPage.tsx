@@ -12,8 +12,9 @@ import {
   usePutStyle,
   useRunStage,
   useStyle,
+  useUploadPortrait,
 } from '../api/queries';
-import type { CharacterPatch, EpisodePatch, LocationPatch, Style } from '../api/types';
+import type { Character, CharacterPatch, EpisodePatch, LocationPatch, Style } from '../api/types';
 import { EditableFields, type FieldSpec, type FieldValues } from '../components/EditableFields';
 import { EPISODE_STATUS_LABEL } from '../format';
 
@@ -74,6 +75,36 @@ function toStyle(v: FieldValues): Style {
   };
 }
 
+function Portrait({ c, uploading, onUpload }: { c: Character; uploading: boolean; onUpload: (f: File) => void }) {
+  return (
+    <div className="portrait">
+      {c.portrait_url ? (
+        <img className="thumb" src={c.portrait_url} alt={`${c.name} 定妆照`} />
+      ) : (
+        <div className="media-none muted">还没有定妆照</div>
+      )}
+      <div className="portrait-side">
+        <span className="muted">定妆照：出场镜头的首帧和视频会带上它锁脸（H3 引擎）。</span>
+        <label className={`btn${uploading ? ' is-disabled' : ''}`}>
+          {uploading ? '上传中…' : c.portrait_url ? '更换定妆照' : '上传定妆照'}
+          <input
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            aria-label="上传定妆照"
+            hidden
+            disabled={uploading}
+            onChange={(ev) => {
+              const f = ev.target.files?.[0];
+              ev.target.value = '';
+              if (f) onUpload(f);
+            }}
+          />
+        </label>
+      </div>
+    </div>
+  );
+}
+
 export function ScriptPage() {
   const { slug = '', episodeId = '' } = useParams();
   const id = Number(episodeId);
@@ -85,6 +116,7 @@ export function ScriptPage() {
   const patchBlock = usePatchSceneBlock(id);
   const patchChar = usePatchCharacter(slug);
   const patchLoc = usePatchLocation(slug);
+  const upload = useUploadPortrait(slug);
   const putStyle = usePutStyle(slug);
   const run = useRunStage(id);
   const [force, setForce] = useState(false);
@@ -196,6 +228,11 @@ export function ScriptPage() {
           <div className="cards">
             {chars.map((c) => (
               <div key={c.id} className="card" data-testid={`character-${c.id}`}>
+                <Portrait
+                  c={c}
+                  uploading={upload.isPending && upload.variables?.id === c.id}
+                  onUpload={(file) => upload.mutate({ id: c.id, file })}
+                />
                 <EditableFields
                   fields={CHARACTER_FIELDS}
                   initial={{ name: c.name, description: c.description, visual_prompt: c.visual_prompt, core_features: c.core_features }}
@@ -205,6 +242,7 @@ export function ScriptPage() {
             ))}
           </div>
           {patchChar.error && <p className="error">{errorText(patchChar.error)}</p>}
+          {upload.error && <p className="error">{errorText(upload.error)}</p>}
         </section>
 
         <section className="panel area-locs">

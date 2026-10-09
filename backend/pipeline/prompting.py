@@ -37,14 +37,20 @@ def _negative(project, style) -> str:
     return join_negative(project.negative, style.negative if style else "")
 
 
-def keyframe_input_hash(shot, project, style, engine_name: str) -> str:
+def _refs(ref_ids) -> dict:
+    # 没有参考图时哈希与加参考图之前完全一样，老候选不会因此被判过期
+    return {"refs": list(ref_ids)} if ref_ids else {}
+
+
+def keyframe_input_hash(shot, project, style, engine_name: str, ref_ids=()) -> str:
+    """ref_ids：引擎实际用到的定妆照候选 id，换了定妆照首帧就过期。"""
     return input_hash("first_frame", compose_image_prompt(shot.image_prompt, _anchor(style)),
-                      _negative(project, style), engine_name, project.aspect)
+                      _negative(project, style), engine_name, project.aspect, **_refs(ref_ids))
 
 
 def video_input_hash(shot, project, style, first_frame_candidate_id: int, engine_name: str,
-                     has_audio: bool) -> str:
+                     has_audio: bool, ref_ids=()) -> str:
     prompt = compose_video_prompt(shot.motion_prompt, shot.image_prompt, shot.audio_prompt,
                                   shot.dialogue, anchor=_anchor(style), has_audio=has_audio)
     return input_hash("video", prompt, first_frame_candidate_id, engine_name, project.aspect,
-                      round(float(shot.duration), 2))
+                      round(float(shot.duration), 2), **_refs(ref_ids))

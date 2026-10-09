@@ -33,13 +33,15 @@ export function detailText(detail: unknown): string {
   return JSON.stringify(detail);
 }
 
+/** body 是 FormData 时原样发送（multipart，浏览器自己带 boundary），否则按 JSON 发。 */
 export async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
   let res: Response;
+  const form = body instanceof FormData;
   try {
     res = await fetch(path, {
       method,
-      headers: body === undefined ? undefined : { 'Content-Type': 'application/json' },
-      body: body === undefined ? undefined : JSON.stringify(body),
+      headers: body === undefined || form ? undefined : { 'Content-Type': 'application/json' },
+      body: body === undefined ? undefined : form ? body : JSON.stringify(body),
     });
   } catch {
     throw new ApiError(0, '连不上工作台服务，确认 uv run studio-server 正在运行');

@@ -2,16 +2,17 @@
 from __future__ import annotations
 
 import re
-
+from pathlib import Path
 from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from sqlalchemy import func, select
 
 from backend.app.deps import check_engines, get_or_404, project_by_slug, services
-from backend.app.schemas import (CharacterOut, CharacterPatch, EpisodeStats, LocationOut,
-                                 LocationPatch, ProjectIn, ProjectOut, ProjectOverview, ProjectPatch,
-                                 StyleIO)
+from backend.app.schemas import (CharacterIn, CharacterOut, CharacterPatch, EpisodeStats,
+                                 LocationOut, LocationPatch, PortraitPathIn, ProjectIn, ProjectOut,
+                                 ProjectOverview, ProjectPatch, StyleIO)
+from backend.domain.characters import portrait_ext, portrait_of, set_portrait
 from backend.domain.models import (Candidate, Character, Episode, Export, Location, Project, Shot,
                                    Slot, StyleBible)
 from backend.domain.slots import delete_slots
@@ -106,14 +107,34 @@ def delete_project(slug: str, request: Request):
         p = project_by_slug(s, slug)
         delete_slots(s, "shot", s.scalars(select(Shot.id).join(Episode, Shot.episode_id == Episode.id)
                                           .where(Episode.project_id == p.id)).all())
+        delete_slots(s, "character", [c.id for c in p.characters])
         s.delete(p)
     return Response(status_code=204)
+
+
+def character_out(s, c: Character) -> CharacterOut:
+    pc = portrait_of(s, c.id)
+    return CharacterOut.model_validate(c).model_copy(update={
+        "portrait_candidate_id": pc.id if pc else None,
+        "portrait_url": "/media/" + quote(pc.file_path) if pc else None})
 
 
 @router.get("/projects/{slug}/characters", response_model=list[CharacterOut])
 def list_characters(slug: str, request: Request):
     with services(request).db.session() as s:
-        return [CharacterOut.model_validate(c) for c in project_by_slug(s, slug).characters]
+        return [character_out(s, c) for c in project_by_slug(s, slug).characters]
+
+
+@router.post("/projects/{slug}/characters", status_code=201, response_model=CharacterOut)
+def create_character(slug: str, body: CharacterIn, request: Request):
+    with services(request).db.session() as s:
+        p = project_by_slug(s, slug)
+        if any(c.name == body.name for c in p.characters):
+            raise HTTPException(409, f"角色 {body.name} 已存在")
+        c = Character(project_id=p.id, **body.model_dump())
+        s.add(c)
+        s.flush()
+        return character_out(s, c)
 
 
 @router.patch("/characters/{char_id}", response_model=CharacterOut)
@@ -123,7 +144,30 @@ def patch_character(char_id: int, body: CharacterPatch, request: Request):
         for k, v in body.model_dump(exclude_unset=True).items():
             setattr(c, k, v)
         s.flush()
-        return CharacterOut.model_validate(c)
+        return character_out(s, c)
+
+
+@router.post("/characters/{char_id}/portrait", response_model=CharacterOut)
+async def upload_portrait(char_id: int, request: Request):
+    """设定妆照：multipart 上传 file 字段，或 JSON {"path": 本机图片路径}。新图成为选定候选。"""
+    if request.headers.get("content-type", "").startswith("multipart/form-data"):
+        form = await request.form()
+        up = form.get("file")
+        if up is None or isinstance(up, str):
+            raise JobError("缺少上传文件字段 file")
+        data, name = await up.read(), up.filename or ""
+    else:
+        body = PortraitPathIn.model_validate(await request.json())
+        src = Path(body.path)
+        portrait_ext(src.name)  # 先校验扩展名，只读图片
+        if not src.is_file():
+            raise LookupError(f"找不到文件：{body.path}")
+        data, name = src.read_bytes(), src.name
+    sv = services(request)
+    with sv.db.session() as s:
+        c = get_or_404(s, Character, char_id, "角色")
+        set_portrait(s, sv.media, c, data, name)
+        return character_out(s, c)
 
 
 @router.get("/projects/{slug}/locations", response_model=list[LocationOut])

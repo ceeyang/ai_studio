@@ -19,6 +19,7 @@ dependencies = [
     { name = "psutil" },
     { name = "pydantic" },
     { name = "python-dotenv" },
+    { name = "python-multipart" },
     { name = "pyyaml" },
     { name = "sqlalchemy" },
     { name = "typer" },
@@ -30,7 +31,6 @@ dependencies = [
 dev = [
     { name = "pytest" },
     { name = "pytest-timeout" },
-    { name = "python-multipart" },
 ]
 
 [package.metadata]
@@ -43,6 +43,7 @@ requires-dist = [
     { name = "psutil", specifier = ">=5.9" },
     { name = "pydantic", specifier = ">=2.7" },
     { name = "python-dotenv", specifier = ">=1.0" },
+    { name = "python-multipart", specifier = ">=0.0.9" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "sqlalchemy", specifier = ">=2.0.30" },
     { name = "typer", specifier = ">=0.12" },
@@ -54,7 +55,6 @@ requires-dist = [
 dev = [
     { name = "pytest", specifier = ">=8.2" },
     { name = "pytest-timeout", specifier = ">=2.3" },
-    { name = "python-multipart", specifier = ">=0.0.9" },
 ]
 
 [[package]]

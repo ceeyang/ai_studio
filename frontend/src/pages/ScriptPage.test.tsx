@@ -1,6 +1,6 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { installFetch } from '../test/fetch';
 import { makeEpisode } from '../test/factories';
 import { renderAt } from '../test/render';
@@ -73,5 +73,33 @@ describe('ScriptPage', () => {
     await user.click(within(card).getByRole('button', { name: '保存' }));
     await waitFor(() => expect(calls.some((c) => c.method === 'PATCH')).toBe(true));
     expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({ description: '新主播' });
+  });
+
+  it('角色定妆照：显示缩略图，上传后提交 multipart 并刷新', async () => {
+    const withPortrait = {
+      id: 8, project_id: 1, name: '林夏', description: '女主播', visual_prompt: 'young woman', core_features: '',
+      voice: null, portrait_candidate_id: 31, portrait_url: '/media/demo/media/portrait/a.png',
+    };
+    let uploaded = false;
+    const calls = installFetch({
+      ...ROUTES,
+      'GET /api/projects/demo/characters': () => [uploaded ? withPortrait : { ...withPortrait, portrait_candidate_id: null, portrait_url: null }],
+      'POST /api/characters/8/portrait': () => {
+        uploaded = true;
+        return withPortrait;
+      },
+    });
+    renderAt(<ScriptPage />, AT);
+    const user = userEvent.setup();
+    const card = await screen.findByTestId('character-8');
+    expect(within(card).getByText('还没有定妆照')).toBeTruthy();
+    const file = new File(['png'], 'lin.png', { type: 'image/png' });
+    await user.upload(within(card).getByLabelText('上传定妆照'), file);
+    const img = (await within(card).findByRole('img', { name: '林夏 定妆照' })) as HTMLImageElement;
+    expect(img.getAttribute('src')).toBe('/media/demo/media/portrait/a.png');
+    expect(calls.find((c) => c.method === 'POST')?.url).toBe('/api/characters/8/portrait');
+    const init = vi.mocked(fetch).mock.calls.find(([, i]) => i?.method === 'POST')?.[1];
+    expect(init?.body).toBeInstanceOf(FormData);
+    expect((init?.body as FormData).get('file')).toBeInstanceOf(File);
   });
 });
