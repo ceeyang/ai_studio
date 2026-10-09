@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from backend.app.schemas import (CandidateOut, EpisodeDetail, ExportOut, SceneBlockOut, ShotDetail,
                                  SlotOut)
-from backend.domain.characters import cast_portraits
+from backend.domain.refs import shot_refs
 from backend.domain.slots import slots_for
 from backend.pipeline.prompting import keyframe_input_hash, video_input_hash
 
@@ -29,11 +29,11 @@ def _max_refs(sv, kind: str, engine_name: str) -> int:
 
 def shot_detail(s: Session, sv, shot, proj, style) -> ShotDetail:
     slots = slots_for(s, "shot", shot.id)
-    portrait_ids = [c.id for c in cast_portraits(s, shot)]
+    ref_ids = [r.candidate_id for r in shot_refs(s, shot)]
     ie = shot.image_engine or proj.image_engine
     current: dict[str, str] = {
         "first_frame": keyframe_input_hash(shot, proj, style, ie,
-                                           portrait_ids[:_max_refs(sv, "image", ie)])}
+                                           ref_ids[:_max_refs(sv, "image", ie)])}
     ff = next((x for x in slots if x.kind == "first_frame"), None)
     if ff is not None and ff.selected_candidate_id:
         ve = shot.video_engine or proj.video_engine
@@ -44,7 +44,7 @@ def shot_detail(s: Session, sv, shot, proj, style) -> ShotDetail:
         if has_audio is not None:
             current["video"] = video_input_hash(shot, proj, style, ff.selected_candidate_id, ve,
                                                 has_audio,
-                                                portrait_ids[:_max_refs(sv, "video", ve)])
+                                                ref_ids[:_max_refs(sv, "video", ve)])
     outs = []
     for sl in slots:
         sel = next((c for c in sl.candidates if c.id == sl.selected_candidate_id), None)

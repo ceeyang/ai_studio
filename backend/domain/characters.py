@@ -1,4 +1,5 @@
-"""角色定妆照：存在 Slot(owner_type="character", kind="portrait") 里，选定的那张给首帧/视频当参考图。"""
+"""角色定妆照：存在 Slot(owner_type="character", kind="portrait") 里，选定的那张给首帧/视频当参考图
+（打包见 domain/refs.py）。"""
 from __future__ import annotations
 
 import hashlib
@@ -38,22 +39,6 @@ def set_portrait(s: Session, media: MediaStore, char: Character, data: bytes,
 
 def portrait_of(s: Session, char_id: int) -> Candidate | None:
     return selected_candidate(s, "character", char_id, "portrait")
-
-
-def cast_portraits(s: Session, shot) -> list[Candidate]:
-    """镜头在场角色（按 cast 顺序、去重）的选定定妆照，没有定妆照的跳过。
-    全部交给引擎，超出上限的由引擎丢弃并记日志；输入哈希只算引擎实际用到的前 max_refs 张。"""
-    out: list[Candidate] = []
-    seen: set[int] = set()
-    for entry in shot.cast or []:
-        cid = entry.get("character_id") if isinstance(entry, dict) else None
-        if cid is None or cid in seen:
-            continue
-        seen.add(cid)
-        c = portrait_of(s, cid)
-        if c is not None:
-            out.append(c)
-    return out
 
 
 def add_portrait(s: Session, char_id: int, *, file_path: str, engine: str, params: dict,

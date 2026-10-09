@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import shutil
 
-from backend.domain.characters import cast_portraits
+from backend.domain.refs import shot_refs
 from backend.domain.models import Shot
 from backend.domain.slots import add_candidate, get_or_create_slot, selected_candidate
 from backend.engines.base import ImageRequest
@@ -22,15 +22,21 @@ def load_shot(s, shot_id: int):
     return shot, ep, proj, proj.style_bible
 
 
-def run_comfy(ctx, call, slug: str):
+def run_comfy(ctx, call, slug: str, ref_labels: dict[str, str] | None = None):
     sv = ctx.services
     if sv.comfy is None:
         raise JobError("ComfyUI 未配置")
+    labels = ref_labels or {}
     for ref in call.dropped_refs:
-        ctx.log(f"超出引擎参考图上限，已丢弃：{ref}")
+        ctx.log(f"超出引擎参考图上限，已丢弃：{labels.get(ref, ref)}")
     run_dir = sv.media.run_dir(slug, ctx.job_id)
     files = sv.comfy.run(call, run_dir=run_dir, cancel=ctx.cancel_event, on_progress=ctx.progress)
     return files, run_dir
+
+
+def ref_labels(packed, paths) -> dict[str, str]:
+    """引擎丢弃参考图时报的是路径，换成"陈师傅 三视图·背面"这样的名字记日志。"""
+    return {str(p): r.label for r, p in zip(packed, paths)}
 
 
 @HANDLERS.register("image.keyframe", gpu=True)
@@ -47,10 +53,11 @@ def run_keyframe(ctx, payload: dict) -> dict:
         anchor = style.anchor_text if style else ""
         prompt = compose_image_prompt(shot.image_prompt, anchor)
         negative = join_negative(proj.negative, style.negative if style else "")
-        portraits = cast_portraits(s, shot)
-        refs = [sv.media.abs(c.file_path) for c in portraits]
+        packed = shot_refs(s, shot)
+        refs = [sv.media.abs(r.file_path) for r in packed]
+        labels = ref_labels(packed, refs)
         h = keyframe_input_hash(shot, proj, style, engine_name,
-                                [c.id for c in portraits[:engine.caps.max_refs]])
+                                [r.candidate_id for r in packed[:engine.caps.max_refs]])
         # 只要一个候选、又不强制时，输入没变就不重出（多候选是用户明确要抽卡）
         if not payload.get("force") and int(payload.get("candidates") or 1) == 1:
             cur = selected_candidate(s, "shot", shot.id, "first_frame")
@@ -64,8 +71,9 @@ def run_keyframe(ctx, payload: dict) -> dict:
         raise JobError(f"镜头 {code} 没有 image_prompt")
     call = engine.build(ImageRequest(prompt=prompt, negative=negative, aspect=aspect, seed=seed,
                                      refs=refs, prefix=f"studio/{slug}/kf_{code}"))
-    ctx.log(f"首帧 {code} · {engine_name} · seed {seed} · 参考图 {len(refs)} 张")
-    files, run_dir = run_comfy(ctx, call, slug)
+    ctx.log(f"首帧 {code} · {engine_name} · seed {seed} · 参考图 {len(refs)} 张"
+            f"{'：' + '、'.join(labels.values()) if labels else ''}")
+    files, run_dir = run_comfy(ctx, call, slug, labels)
     dst = sv.media.new_media_path(slug, "first_frame", files[0].suffix)
     shutil.copyfile(files[0], dst)
     with sv.db.session() as s:

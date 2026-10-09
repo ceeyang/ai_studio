@@ -6,7 +6,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from backend.llm.schemas import Transition
+from backend.llm.schemas import Transition, TurnaroundView
 from backend.post.options import ExportOptions
 
 Aspect = Literal["9:16", "16:9"]
@@ -71,13 +71,33 @@ class CharacterOut(ORM):
     portrait_url: str | None = None
     portraits: list[CandidateOut] = Field(default_factory=list)   # 全部定妆照候选（上传的 + AI 抽的）
     design_options: list[dict] = Field(default_factory=list)      # AI 推荐造型
-    active_jobs: list[JobBrief] = Field(default_factory=list)     # 进行中的抽卡 / 推荐造型任务
+    active_jobs: list[JobBrief] = Field(default_factory=list)     # 进行中的抽卡 / 推荐造型 / 三视图任务
+    turnaround: list[TurnaroundCellOut] = Field(default_factory=list)  # 三视图 9 格，固定顺序
 
 
 class JobBrief(BaseModel):
     id: int
     type: str
     status: str
+    view: str | None = None              # image.turnaround 任务出的是哪一格
+
+
+class TurnaroundCellOut(BaseModel):
+    view: str
+    label: str
+    description: str                     # 视角描述（英文），空表示还没写
+    selected_candidate_id: int | None
+    url: str | None
+    stale: bool                          # 选定的这张是按旧定妆照 / 旧描述出的
+    candidates: list[CandidateOut]
+
+
+class TurnaroundPlanPatch(BaseModel):
+    views: dict[TurnaroundView, str]
+
+
+class TurnaroundGenerateIn(BaseModel):
+    views: list[TurnaroundView] | None = None   # 不给就 9 格全出
 
 
 class PortraitDrawIn(BaseModel):
@@ -331,4 +351,5 @@ class InputIn(BaseModel):
     text: str = Field(min_length=1)
 
 
-CharacterOut.model_rebuild()  # portraits 引用了后面定义的 CandidateOut
+TurnaroundCellOut.model_rebuild()
+CharacterOut.model_rebuild()  # portraits / turnaround 引用了后面定义的 CandidateOut

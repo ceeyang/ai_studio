@@ -66,6 +66,8 @@ class Character(Base):
     voice: Mapped[str | None] = mapped_column(String(100), nullable=True)
     # AI 推荐造型：[{label, visual_prompt, core_features}]，用户挑一个去抽卡或设为提示词
     design_options: Mapped[list] = mapped_column(JSON, default=list)
+    # 三视图 9 格的视角描述（英文）：{view_key: description}，view_key 见 domain/turnaround.VIEWS
+    turnaround_plan: Mapped[dict] = mapped_column(JSON, default=dict)
 
     project: Mapped[Project] = relationship(back_populates="characters")
     variations: Mapped[list[Variation]] = relationship(cascade="all, delete-orphan",

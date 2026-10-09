@@ -1,12 +1,14 @@
-"""角色卡：本地 AI 抽定妆照、切换造型、AI 推荐造型、按剧本推荐角色。"""
+"""角色卡：本地 AI 抽定妆照、切换造型、AI 推荐造型、按剧本推荐角色、三视图。"""
 from __future__ import annotations
 
 from fastapi import APIRouter, Request
 
 from backend.app.deps import get_or_404, manager, services
 from backend.app.routes.projects import character_out
-from backend.app.schemas import CharacterOut, PortraitDrawIn, RecommendIn, RunOut, SuggestIn
-from backend.domain.characters import use_portrait
+from backend.app.schemas import (CharacterOut, PortraitDrawIn, RecommendIn, RunOut, SuggestIn,
+                                 TurnaroundGenerateIn, TurnaroundPlanPatch)
+from backend.domain.characters import portrait_of, use_portrait
+from backend.domain.turnaround import VIEW_KEYS, VIEW_LABELS
 from backend.domain.models import Character, Episode
 from backend.queue.errors import JobError
 
@@ -72,3 +74,53 @@ def recommend(episode_id: int, body: RecommendIn, request: Request):
     jid = manager(request).submit("character.recommend", {"episode_id": episode_id, "count": body.count},
                                   project_id=project_id, owner_type="episode", owner_id=episode_id)
     return RunOut(job_ids=[jid])
+
+
+@router.post("/characters/{char_id}/turnaround/plan", response_model=RunOut)
+def turnaround_plan(char_id: int, request: Request):
+    """三视图第一步：LLM 按外貌提示词写 9 格视角描述，写好后用户可以改，再逐格出图。"""
+    sv = services(request)
+    with sv.db.session() as s:
+        c = get_or_404(s, Character, char_id, "角色")
+        if not c.visual_prompt.strip():
+            raise JobError(f"角色 {c.name} 还没有外貌提示词，先写一个或用 AI 推荐造型")
+        project_id = c.project_id
+    jid = manager(request).submit("character.turnaround_plan", {"character_id": char_id},
+                                  project_id=project_id, owner_type="character", owner_id=char_id)
+    return RunOut(job_ids=[jid])
+
+
+@router.patch("/characters/{char_id}/turnaround/plan", response_model=CharacterOut)
+def patch_turnaround_plan(char_id: int, body: TurnaroundPlanPatch, request: Request):
+    """改某几格的视角描述（只改给出的格）。改了的格已出的图按哈希规则变过期。"""
+    with services(request).db.session() as s:
+        c = get_or_404(s, Character, char_id, "角色")
+        c.turnaround_plan = {**(c.turnaround_plan or {}),
+                             **{k: v.strip() for k, v in body.views.items()}}
+        s.flush()
+        return character_out(s, c)
+
+
+@router.post("/characters/{char_id}/turnaround/generate", response_model=RunOut)
+def turnaround_generate(char_id: int, body: TurnaroundGenerateIn, request: Request):
+    """逐格出三视图：每格一个 GPU 任务，不给 views 就 9 格全出。"""
+    sv = services(request)
+    views = list(dict.fromkeys(body.views)) if body.views else list(VIEW_KEYS)
+    with sv.db.session() as s:
+        c = get_or_404(s, Character, char_id, "角色")
+        plan = c.turnaround_plan or {}
+        missing = [VIEW_LABELS[v] for v in views if not (plan.get(v) or "").strip()]
+        if missing:
+            raise JobError(f"角色 {c.name} 的三视图还缺视角描述：{'、'.join(missing)}，先生成视角描述")
+        if portrait_of(s, char_id) is None:
+            raise JobError(f"角色 {c.name} 还没有选定定妆照，三视图要用它锁脸")
+        project_id, engine_name = c.project_id, c.project.image_engine
+    try:
+        family = sv.engines.image(engine_name).family
+    except KeyError:
+        family = None
+    m = manager(request)
+    return RunOut(job_ids=[m.submit("image.turnaround", {"character_id": char_id, "view": v},
+                                    project_id=project_id, owner_type="character",
+                                    owner_id=char_id, model_family=family)
+                           for v in views])

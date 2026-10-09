@@ -11,8 +11,9 @@ from sqlalchemy import func, select
 from backend.app.deps import check_engines, get_or_404, project_by_slug, services
 from backend.app.schemas import (CharacterIn, CharacterOut, CharacterPatch, EndCardIO,
                                  EpisodeStats, JobBrief, LocationOut, LocationPatch, PortraitPathIn, ProjectIn, ProjectOut,
-                                 ProjectOverview, ProjectPatch, StyleIO)
+                                 ProjectOverview, ProjectPatch, StyleIO, TurnaroundCellOut)
 from backend.domain.characters import portrait_ext, portrait_of, set_portrait
+from backend.domain.turnaround import VIEW_KEYS, VIEW_LABELS, cell_state, slot_kind
 from backend.domain.models import (Candidate, Character, Episode, Export, Job, Location, Project,
                                    Shot, Slot, StyleBible)
 from backend.app.views import candidate_out
@@ -114,12 +115,28 @@ def delete_project(slug: str, request: Request):
     return Response(status_code=204)
 
 
-CHARACTER_JOB_TYPES = ("image.portrait", "character.suggest")
+CHARACTER_JOB_TYPES = ("image.portrait", "character.suggest", "character.turnaround_plan",
+                       "image.turnaround")
+
+
+def turnaround_out(s, c: Character, slots: dict) -> list[TurnaroundCellOut]:
+    plan = c.turnaround_plan or {}
+    out = []
+    for view in VIEW_KEYS:
+        slot = slots.get(slot_kind(view))
+        sel, is_stale = cell_state(s, c, view)
+        out.append(TurnaroundCellOut(
+            view=view, label=VIEW_LABELS[view], description=plan.get(view) or "",
+            selected_candidate_id=sel.id if sel else None,
+            url="/media/" + quote(sel.file_path) if sel else None, stale=is_stale,
+            candidates=[candidate_out(x) for x in slot.candidates] if slot else []))
+    return out
 
 
 def character_out(s, c: Character) -> CharacterOut:
     pc = portrait_of(s, c.id)
-    slot = next((x for x in slots_for(s, "character", c.id) if x.kind == "portrait"), None)
+    slots = {x.kind: x for x in slots_for(s, "character", c.id)}
+    slot = slots.get("portrait")
     jobs = s.scalars(select(Job).where(Job.owner_type == "character", Job.owner_id == c.id,
                                        Job.type.in_(CHARACTER_JOB_TYPES),
                                        Job.status.in_(ACTIVE)).order_by(Job.id))
@@ -128,7 +145,9 @@ def character_out(s, c: Character) -> CharacterOut:
         "portrait_url": "/media/" + quote(pc.file_path) if pc else None,
         "portraits": [candidate_out(x) for x in slot.candidates] if slot else [],
         "design_options": list(c.design_options or []),
-        "active_jobs": [JobBrief(id=j.id, type=j.type, status=j.status) for j in jobs]})
+        "active_jobs": [JobBrief(id=j.id, type=j.type, status=j.status,
+                                 view=(j.payload or {}).get("view")) for j in jobs],
+        "turnaround": turnaround_out(s, c, slots)})
 
 
 @router.get("/projects/{slug}/characters", response_model=list[CharacterOut])
