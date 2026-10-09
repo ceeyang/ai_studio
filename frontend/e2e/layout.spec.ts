@@ -1,17 +1,16 @@
-// 布局守卫：每个页面在 1280 / 1580 / 1920 宽下都不能横向溢出，主要面板里的内容也不能被挤出面板。
-// 数据走 API + manual LLM 准备（剧本、分镜、造型方案、三视图描述、一个带长报错的失败任务），不需要显卡。
+// 布局守卫：每个页面在 1280 / 1580 / 1920 / 3412 宽下都不能横向溢出，主要面板里的内容也不能被挤出面板。
+// 数据走 API + manual LLM 准备（剧本、分镜、造型方案、三视图全身描述、一个带长报错的失败任务），不需要显卡。
 import { type APIRequestContext, expect, type Page, test } from '@playwright/test';
 import { STORYBOARD, STRUCTURE, SYNOPSIS, VISUAL } from './fixtures';
 
 const SLUG = 'layout-check';
-const WIDTHS = [1280, 1580, 1920];
+const WIDTHS = [1280, 1580, 1920, 3412];
 // 1×1 透明 PNG
 const PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
   'base64',
 );
 const LOOK = Array.from({ length: 70 }, (_, i) => (i % 7 === 0 ? 'navy-cotton-twill-workjacket' : 'detail')).join(' ');
-const VIEWS = ['front_full', 'front_half', 'face_closeup', 'left_profile', 'right_profile', 'three_quarter', 'back', 'low_angle', 'high_angle'];
 
 async function waitJob(api: APIRequestContext, id: number, until: string[]) {
   for (let i = 0; i < 100; i++) {
@@ -52,10 +51,10 @@ test.beforeAll(async ({ playwright, baseURL }) => {
   const option = (label: string) => ({ label, visual_prompt: LOOK, core_features: '灰色开衫、齐肩黑发、银色耳钉、一个很长的标志性细节描述' });
   const sug = (await (await api.post(`/api/characters/${ch.id}/suggest`, { data: { count: 3 } })).json()).job_ids[0];
   await answer(api, sug, [{ options: [option('知性主播款'), option('清冷夜班款'), option('邻家学生款')] }]);
-  const plan = (await (await api.post(`/api/characters/${ch.id}/turnaround/plan`, { data: {} })).json()).job_ids[0];
-  await answer(api, plan, [{ views: VIEWS.map((view) => ({ view, description: `${view} ${LOOK}`.split(' ').slice(0, 40).join(' ') })) }]);
-  // 没有 ComfyUI：这一格会失败，任务页里留一条带长报错的失败任务
-  failedJob = (await (await api.post(`/api/characters/${ch.id}/turnaround/generate`, { data: { views: ['back'] } })).json()).job_ids[0];
+  const look = (await (await api.post(`/api/characters/${ch.id}/turnaround/look`, { data: {} })).json()).job_ids[0];
+  await answer(api, look, [{ description: LOOK.split(' ').slice(0, 60).join(' ') }]);
+  // 没有 ComfyUI：设定图会失败，任务页里留一条带长报错的失败任务
+  failedJob = (await (await api.post(`/api/characters/${ch.id}/turnaround/generate`, { data: { sheets: ['face'] } })).json()).job_ids[0];
   await waitJob(api, failedJob, ['failed']);
   await api.dispose();
 });
@@ -65,7 +64,7 @@ async function expectNoOverflow(page: Page, label: string) {
   const r = await page.evaluate(() => {
     const iw = window.innerWidth;
     const bad: string[] = [];
-    const sel = '.content, .panel, .toolbar, .shots-wrap, .drawer, .char-card, .turn-cell, .option-card, .project-card, .episode-card, .bible, .modal';
+    const sel = '.content, .panel, .toolbar, .shots-wrap, .drawer, .char-card, .turn-sheet, .turn-cell, .turn-look, .option-card, .project-card, .episode-card, .bible, .modal';
     for (const el of Array.from(document.querySelectorAll<HTMLElement>(sel))) {
       const rc = el.getBoundingClientRect();
       if (rc.width === 0) continue;

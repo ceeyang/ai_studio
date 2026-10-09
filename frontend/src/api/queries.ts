@@ -31,7 +31,7 @@ import type {
   ShotPatch,
   Style,
   TranslateIn,
-  TurnaroundView,
+  TurnaroundSheetKey,
 } from './types';
 
 export const keys = {
@@ -275,40 +275,51 @@ export function useSuggestDesigns(slug: string) {
   });
 }
 
-/** 三视图第一步：LLM 写 9 格视角描述。 */
-export function usePlanTurnaround(slug: string) {
+/** 三视图：LLM 把外貌提示词整理成从头到脚的全身描述。 */
+export function useTurnaroundLook(slug: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (id: number) => api.post<RunOut>(`/api/characters/${id}/turnaround/plan`, {}),
+    mutationFn: (id: number) => api.post<RunOut>(`/api/characters/${id}/turnaround/look`, {}),
     onSuccess: () => invalidate(qc, keys.characters(slug), ['jobs'], keys.queue),
   });
 }
 
-/** 改某几格的视角描述。 */
-export function usePatchTurnaroundPlan(slug: string) {
+/** 改全身描述（已出的设定图会变过期）。 */
+export function usePatchTurnaroundLook(slug: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, views }: { id: number; views: Partial<Record<TurnaroundView, string>> }) =>
-      api.patch<Character>(`/api/characters/${id}/turnaround/plan`, { views }),
+    mutationFn: ({ id, look }: { id: number; look: string }) =>
+      api.patch<Character>(`/api/characters/${id}/turnaround/look`, { look }),
     onSuccess: () => invalidate(qc, keys.characters(slug)),
   });
 }
 
-/** 逐格出三视图：不给 views 就 9 格全出，每格一个 GPU 任务。 */
+/** 出设定图：不给 sheets 就全身 + 头像各一张，每张一个 GPU 任务。 */
 export function useGenerateTurnaround(slug: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, views }: { id: number; views?: TurnaroundView[] }) =>
-      api.post<RunOut>(`/api/characters/${id}/turnaround/generate`, views ? { views } : {}),
+    mutationFn: ({ id, sheets }: { id: number; sheets?: TurnaroundSheetKey[] }) =>
+      api.post<RunOut>(`/api/characters/${id}/turnaround/generate`, sheets ? { sheets } : {}),
     onSuccess: () => invalidate(qc, keys.characters(slug), ['jobs'], keys.queue),
   });
 }
 
-/** 三视图某一格换选定的候选。首帧 / 视频用到这一格的镜头会变过期。 */
-export function useSelectTurnaround(slug: string) {
+/** 换选定的设定图（后端立即重新切图）。用到这些格子的镜头会变过期。 */
+export function useSelectTurnaroundSheet(slug: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (candidateId: number) => api.post<Candidate>(`/api/candidates/${candidateId}/select`),
+    mutationFn: ({ id, sheet, candidateId }: { id: number; sheet: TurnaroundSheetKey; candidateId: number }) =>
+      api.post<Character>(`/api/characters/${id}/turnaround/sheets/${sheet}/select`, { candidate_id: candidateId }),
+    onSuccess: () => invalidate(qc, keys.characters(slug), ['episode']),
+  });
+}
+
+/** 重新切图：auto 按人物切（找不准自动退回等宽），equal 直接等宽切。 */
+export function useCropTurnaround(slug: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, sheet, method = 'auto' }: { id: number; sheet: TurnaroundSheetKey; method?: 'auto' | 'equal' }) =>
+      api.post<Character>(`/api/characters/${id}/turnaround/sheets/${sheet}/crop`, { method }),
     onSuccess: () => invalidate(qc, keys.characters(slug), ['episode']),
   });
 }

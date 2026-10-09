@@ -15,6 +15,7 @@ const CHEN: Character = {
   id: 6, project_id: 1, name: '陈师傅', description: '汽修师傅', visual_prompt: 'lean mechanic', core_features: '',
   voice: null, portrait_candidate_id: 19, portrait_url: '/media/p/up.png', portraits: [UPLOAD, DRAWN],
   design_options: [], active_jobs: [],
+  turnaround: { look: '', default_engine: 'h3_image', sheets: [], cells: [] },
 };
 const ROUTES = {
   'GET /api/episodes/5': makeEpisode({ id: 5, scene_blocks: [{ id: 1, order: 0, location_id: null, text: '修车厂' }] }),
@@ -131,7 +132,7 @@ describe('角色卡', () => {
     setup(CHEN);
     const card = await screen.findByTestId('character-6');
     expect(within(card).getByRole('region', { name: '陈师傅 的三视图' })).toBeTruthy();
-    expect(within(card).getByRole('button', { name: '生成视角描述' })).toBeTruthy();
+    expect(within(card).getByRole('button', { name: '全部生成' })).toBeTruthy();
   });
 
   it('右栏分页：场景和风格在各自的页里', async () => {

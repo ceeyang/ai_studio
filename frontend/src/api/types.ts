@@ -247,31 +247,53 @@ export interface Character {
   design_options?: DesignOption[];
   /** 进行中的抽卡（image.portrait）/ 推荐造型（character.suggest）/ 三视图任务 */
   active_jobs?: JobBrief[];
-  /** 三视图 9 格，固定顺序（见 TURNAROUND_VIEWS） */
-  turnaround?: TurnaroundCell[];
+  /** 三视图设定图和切出来的格子 */
+  turnaround?: Turnaround | null;
 }
+
+export type TurnaroundSheetKey = 'body' | 'face';
 
 export type TurnaroundView =
   | 'front_full'
-  | 'front_half'
-  | 'face_closeup'
-  | 'left_profile'
-  | 'right_profile'
   | 'three_quarter'
+  | 'profile'
   | 'back'
-  | 'low_angle'
-  | 'high_angle';
+  | 'face_front'
+  | 'face_three_quarter'
+  | 'face_profile';
 
+/** 一种设定图：全身 4 视角（body）或头像 3 视角（face），一张图一起出，候选可切换 */
+export interface TurnaroundSheet {
+  sheet: TurnaroundSheetKey;
+  label: string;
+  /** 从左到右切出来的视角 */
+  views: TurnaroundView[];
+  selected_candidate_id: number | null;
+  url: string | null;
+  /** 选定的这张是按旧定妆照 / 旧全身描述出的 */
+  stale: boolean;
+  /** segment 按人物切 / equal 等宽切 / null 还没切 */
+  crop_method: 'segment' | 'equal' | null;
+  candidates: Candidate[];
+}
+
+/** 从选定的设定图自动切出来的单个视角，首帧 / 视频按镜头挑一格当参考图 */
 export interface TurnaroundCell {
   view: TurnaroundView;
   label: string;
-  /** 视角描述（英文），空表示还没写 */
-  description: string;
+  sheet: TurnaroundSheetKey;
   selected_candidate_id: number | null;
   url: string | null;
-  /** 选定的这张是按旧定妆照 / 旧描述出的 */
+  /** 切自的设定图过期了 */
   stale: boolean;
-  candidates: Candidate[];
+}
+
+export interface Turnaround {
+  /** 出设定图用的全身描述（英文），空表示用外貌提示词 */
+  look: string;
+  default_engine: string;
+  sheets: TurnaroundSheet[];
+  cells: TurnaroundCell[];
 }
 
 export interface DesignOption {
@@ -284,8 +306,8 @@ export interface JobBrief {
   id: number;
   type: string;
   status: JobStatus;
-  /** image.turnaround 任务出的是哪一格 */
-  view?: TurnaroundView | null;
+  /** image.turnaround 任务出的是哪种设定图 */
+  sheet?: TurnaroundSheetKey | null;
 }
 
 export interface CharacterIn {
