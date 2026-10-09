@@ -73,12 +73,38 @@ class FfmpegCfg(BaseModel):
     font: str | None = None
 
 
+def _windows_fonts() -> Path:
+    return Path(os.environ.get("WINDIR", r"C:\Windows")) / "Fonts"
+
+
+class SubtitlesCfg(BaseModel):
+    """字幕和片尾卡的字体。libass 按字体族名找字；fonts_dir 里的 font_files 会拷进产物工作目录
+    （滤镜串里的盘符冒号没法可靠转义，只能用相对路径的 fontsdir）。"""
+    zh_font: str = "Microsoft YaHei"
+    km_font: str = "Khmer UI"          # 也可以用 "Leelawadee UI"
+    latin_font: str = "Arial"
+    fonts_dir: Path = Field(default_factory=_windows_fonts)
+    font_files: list[str] = Field(default_factory=lambda: [
+        "msyh.ttc", "msyhbd.ttc", "KhmerUI.ttf", "KhmerUIb.ttf", "LeelawUI.ttf", "LeelaUIb.ttf",
+        "arial.ttf", "arialbd.ttf"])
+
+
+class DubCfg(BaseModel):
+    """外挂配音（Edge TTS）。原音轨在台词窗口外压到 bed_db 当环境底，窗口内再压到 duck_db。"""
+    bed_db: float = -14.0
+    duck_db: float = -30.0
+    max_rate: int = 35                 # 台词塞不进窗口时最多提速 +35%
+    gap: float = 0.1                   # 每句至少比下一句（或镜头结尾）早结束这么多秒
+
+
 class Config(BaseModel):
     server: ServerCfg = Field(default_factory=ServerCfg)
     comfyui: ComfyCfg = Field(default_factory=ComfyCfg)
     llm: LLMCfg = Field(default_factory=LLMCfg)
     engines: dict[str, EngineCfg] = Field(default_factory=dict)
     ffmpeg: FfmpegCfg = Field(default_factory=FfmpegCfg)
+    subtitles: SubtitlesCfg = Field(default_factory=SubtitlesCfg)
+    dub: DubCfg = Field(default_factory=DubCfg)
     workflows_dir: Path = ROOT / "workflows"
     log_dir: Path = ROOT / "logs"
     # 生产态由后端托管的前端构建目录（cd frontend; npm run build 生成）；不存在就只提供 API
@@ -103,6 +129,7 @@ def _absolutize(cfg: Config, base: Path) -> Config:
     cfg.workflows_dir = fix(cfg.workflows_dir)
     cfg.log_dir = fix(cfg.log_dir)
     cfg.frontend_dist = fix(cfg.frontend_dist)
+    cfg.subtitles.fonts_dir = fix(cfg.subtitles.fonts_dir)
     return cfg
 
 

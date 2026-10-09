@@ -5,7 +5,7 @@ import subprocess
 import pytest
 
 from backend.engines.ffmpeg import (FFmpeg, FFmpegError, build_normalize_cmd, build_xfade_graph,
-                                    parse_transition)
+                                    parse_transition, xfade_timeline)
 
 needs_ffmpeg = pytest.mark.skipif(not (shutil.which("ffmpeg") and shutil.which("ffprobe")),
                                   reason="没有 ffmpeg")
@@ -28,6 +28,25 @@ def test_xfade_offsets_and_audio():
     assert "[0:a][1:a]acrossfade=d=0.500[a0]" in graph
     assert "[vout]" in graph and "[aout]" in graph
     assert abs(total - 14.3667) < 1e-3
+
+
+def test_xfade_timeline_starts_match_graph_offsets():
+    joins, starts, total = xfade_timeline([5.0, 5.0, 5.0], ["dissolve_0.5", "hard_cut"], 24)
+    assert [round(j[2], 3) for j in joins] == [4.458, 9.367]
+    assert starts == [0.0, joins[0][2], joins[1][2]]
+    assert abs(total - 14.3667) < 1e-3
+    assert xfade_timeline([2.0], [], 24) == ([], [0.0], 2.0)
+
+
+@needs_ffmpeg
+def test_assemble_trims_clips_to_max_seconds(tmp_path):
+    ff = FFmpeg()
+    clips = [make_clip(tmp_path / "a.mp4", 2.0, True), make_clip(tmp_path / "b.mp4", 2.0, True)]
+    res = ff.assemble(clips, tmp_path / "o.mp4", width=270, height=480, fps=24,
+                      transitions=["hard_cut"], work_dir=tmp_path / "w", max_seconds=[1.5, None])
+    assert abs(res.durations[0] - 1.5) < 0.05 and abs(res.durations[1] - 2.0) < 0.05
+    assert abs(res.starts[1] - (res.durations[0] - 0.05 - 1 / 24)) < 1e-6
+    assert abs(ff.video_duration(res.path) - res.total) < 0.1
 
 
 def test_xfade_without_audio():
@@ -85,8 +104,10 @@ def test_assemble_mixed_audio_keeps_sound(tmp_path):
 def test_single_clip_and_last_frame(tmp_path):
     ff = FFmpeg()
     clip = make_clip(tmp_path / "a.mp4", 1.0, False)
-    out = ff.assemble([clip], tmp_path / "o.mp4", width=270, height=480, fps=24,
+    res = ff.assemble([clip], tmp_path / "o.mp4", width=270, height=480, fps=24,
                       transitions=[], work_dir=tmp_path / "w")
+    out = res.path
+    assert res.starts == [0.0] and abs(res.total - 1.0) < 0.05
     assert out.exists() and not ff.has_audio(out)
     png = ff.last_frame(clip, tmp_path / "尾帧.png")
     assert png.stat().st_size > 0

@@ -69,3 +69,17 @@ def test_example_config_loads():
     assert cfg.server.port == 8700
     assert cfg.server.host == "127.0.0.1"
     assert {"zimage", "h3_image", "h3_video", "wan22_i2v"} <= set(cfg.engines)
+
+
+def test_subtitle_fonts_and_dub_settings(tmp_path):
+    p = tmp_path / "config.yaml"
+    p.write_text(textwrap.dedent("""
+        subtitles: {km_font: Leelawadee UI, fonts_dir: fonts}
+        dub: {bed_db: -12, max_rate: 30}
+        llm: {routes: {subtitles.translate: claude}}
+    """), encoding="utf-8")
+    cfg = load_config(p)
+    assert cfg.subtitles.km_font == "Leelawadee UI" and cfg.subtitles.zh_font == "Microsoft YaHei"
+    assert cfg.subtitles.fonts_dir == (tmp_path / "fonts").resolve()
+    assert cfg.dub.bed_db == -12 and cfg.dub.max_rate == 30 and cfg.dub.duck_db == -30
+    assert cfg.llm.routes["subtitles.translate"] == "claude"

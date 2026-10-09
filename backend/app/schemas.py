@@ -4,9 +4,10 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from backend.llm.schemas import Transition
+from backend.post.options import ExportOptions
 
 Aspect = Literal["9:16", "16:9"]
 Stage = Literal["script", "storyboard", "keyframes", "videos", "export", "all"]
@@ -188,11 +189,28 @@ class SlotOut(BaseModel):
     candidates: list[CandidateOut] = Field(default_factory=list)
 
 
+class DialogueIn(BaseModel):
+    """一句台词。km 是高棉语字幕/配音稿；km_review：ai_draft = AI 译稿待母语校对，checked = 已校对。"""
+    model_config = ConfigDict(extra="allow")
+    speaker: str = ""
+    zh: str = ""
+    start: float = Field(0.0, ge=0)
+    end: float = Field(0.0, ge=0)
+    km: str | None = None
+    km_review: Literal["ai_draft", "checked"] | None = None
+
+    @model_validator(mode="after")
+    def _order(self):
+        if self.end < self.start:
+            raise ValueError(f"台词「{self.zh}」的 end 不能早于 start")
+        return self
+
+
 class ShotFields(BaseModel):
     shot_size: str | None = None
     camera_move: str | None = None
     action: str | None = None
-    dialogue: list[dict] | None = None
+    dialogue: list[DialogueIn] | None = None
     cast: list[dict] | None = None
     props: list | None = None
     image_prompt: str | None = None
@@ -252,6 +270,25 @@ class RunIn(BaseModel):
     candidates: int = Field(1, ge=1, le=4)
     force: bool = False
     priority: int = 0
+    export: ExportOptions | None = None   # 只对 export 阶段有效：字幕 / 配音 / 片尾卡 / 裁尾
+
+
+class TranslateIn(BaseModel):
+    force: bool = False                                   # 已有译文的也重翻
+    glossary: dict[str, str] = Field(default_factory=dict)  # 固定译名，如店名
+
+
+class EndCardLine(BaseModel):
+    text: str = Field("", max_length=200)
+    font: str | None = Field(None, max_length=100)        # 留空用 subtitles.latin_font
+    size: int = Field(40, ge=8, le=240)                   # 1080×1920 画面上的像素字号
+    bold: bool = False
+
+
+class EndCardIO(BaseModel):
+    seconds: float = Field(3.0, ge=1, le=10)
+    background: str = Field("#0b1a33", pattern=r"^#[0-9a-fA-F]{6}$")
+    lines: list[EndCardLine] = Field(default_factory=list, max_length=16)
 
 
 class RunOut(BaseModel):

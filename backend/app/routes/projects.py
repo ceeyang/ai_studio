@@ -9,8 +9,8 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from sqlalchemy import func, select
 
 from backend.app.deps import check_engines, get_or_404, project_by_slug, services
-from backend.app.schemas import (CharacterIn, CharacterOut, CharacterPatch, EpisodeStats,
-                                 LocationOut, LocationPatch, PortraitPathIn, ProjectIn, ProjectOut,
+from backend.app.schemas import (CharacterIn, CharacterOut, CharacterPatch, EndCardIO,
+                                 EpisodeStats, LocationOut, LocationPatch, PortraitPathIn, ProjectIn, ProjectOut,
                                  ProjectOverview, ProjectPatch, StyleIO)
 from backend.domain.characters import portrait_ext, portrait_of, set_portrait
 from backend.domain.models import (Candidate, Character, Episode, Export, Location, Project, Shot,
@@ -206,3 +206,18 @@ def put_style(slug: str, body: StyleIO, request: Request):
             setattr(sb, k, v)
         s.flush()
         return StyleIO.model_validate(sb)
+
+
+@router.get("/projects/{slug}/end-card", response_model=EndCardIO | None)
+def get_end_card(slug: str, request: Request):
+    with services(request).db.session() as s:
+        card = project_by_slug(s, slug).end_card
+        return EndCardIO.model_validate(card) if card else None
+
+
+@router.put("/projects/{slug}/end-card", response_model=EndCardIO)
+def put_end_card(slug: str, body: EndCardIO, request: Request):
+    """片尾卡（三语店名、地址、营业时间、联系方式），导出勾选"片尾卡"时接在成片末尾。"""
+    with services(request).db.session() as s:
+        project_by_slug(s, slug).end_card = body.model_dump()
+        return body

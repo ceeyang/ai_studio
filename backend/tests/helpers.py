@@ -8,7 +8,7 @@ from pathlib import Path
 from backend.config import Config, LLMCfg, ProviderCfg, ServerCfg
 from backend.domain.media import MediaStore
 from backend.domain.models import Episode, Project
-from backend.engines.ffmpeg import FFmpeg
+from backend.engines.ffmpeg import Assembled, FFmpeg, xfade_timeline
 from backend.engines.registry import EngineRegistry
 from backend.llm.base import LLMResult
 from backend.llm.gateway import LLMGateway
@@ -100,12 +100,25 @@ class FakeRunner:
 
 
 class FakeFFmpeg:
+    """不跑 ffmpeg：每段视频都当 5 秒，合成只写一个占位文件。"""
+
+    ffmpeg = "ffmpeg"
+
     def __init__(self):
         self.calls: list[dict] = []
 
-    def assemble(self, clips, out, *, width, height, fps, transitions, work_dir):
+    def video_duration(self, path) -> float:
+        return 5.0
+
+    def has_audio(self, path) -> bool:
+        return True
+
+    def assemble(self, clips, out, *, width, height, fps, transitions, work_dir, max_seconds=None):
         self.calls.append({"clips": list(clips), "out": Path(out), "width": width,
-                           "height": height, "fps": fps, "transitions": list(transitions)})
+                           "height": height, "fps": fps, "transitions": list(transitions),
+                           "max_seconds": list(max_seconds or [])})
         Path(out).parent.mkdir(parents=True, exist_ok=True)
         Path(out).write_bytes(b"mp4")
-        return Path(out)
+        durs = [min(5.0, m) if m else 5.0 for m in (max_seconds or [None] * len(clips))]
+        _, starts, total = xfade_timeline(durs, transitions, fps)
+        return Assembled(Path(out), durs, starts, total)

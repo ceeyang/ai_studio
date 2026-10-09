@@ -28,6 +28,7 @@ llm:
   routes:
     script: claude
     storyboard: claude
+    subtitles.translate: claude   # 高棉语字幕译稿（AI 草稿，发布前要母语者校对）
 
 engines:
   zimage: {enabled: true, params: {}}
@@ -38,6 +39,21 @@ engines:
 ffmpeg:
   ffmpeg: ffmpeg
   ffprobe: ffprobe
+
+# 字幕和片尾卡的字体（libass 按字体族名找字）。fonts_dir 默认 %WINDIR%\Fonts，
+# font_files 里的文件会拷进导出工作目录给 libass 用。
+subtitles:
+  zh_font: Microsoft YaHei
+  km_font: Khmer UI          # 也可以用 Leelawadee UI
+  latin_font: Arial
+  # fonts_dir: C:\Windows\Fonts
+  # font_files: [msyh.ttc, msyhbd.ttc, KhmerUI.ttf, KhmerUIb.ttf, LeelawUI.ttf, LeelaUIb.ttf, arial.ttf, arialbd.ttf]
+
+# 高棉语外挂配音（Edge TTS，需要联网）。音色写在角色上（studio character voice）。
+dub:
+  bed_db: -14      # 原音轨压低多少当环境底
+  duck_db: -30     # 台词窗口内原音轨再压到多少（盖住 H3 的普通话人声）
+  max_rate: 35     # 台词塞不进窗口时最多提速 +35%
 
 # 生产态由后端托管的前端构建目录（cd frontend; npm run build 生成）；目录不存在就只提供 API
 frontend_dist: frontend/dist

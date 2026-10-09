@@ -40,6 +40,8 @@ class Project(Base):
     negative: Mapped[str] = mapped_column(Text, default="")
     style_bible_id: Mapped[int | None] = mapped_column(
         ForeignKey("style_bibles.id", ondelete="SET NULL"), nullable=True)
+    # 片尾卡：{"seconds": 3, "background": "#0b1a33", "lines": [{text, font, size, bold}]}
+    end_card: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     style_bible: Mapped[StyleBible | None] = relationship()

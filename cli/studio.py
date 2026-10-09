@@ -22,12 +22,14 @@ job_app = typer.Typer(help="单个任务", no_args_is_help=True)
 candidate_app = typer.Typer(help="候选", no_args_is_help=True)
 queue_app = typer.Typer(help="队列", no_args_is_help=True)
 character_app = typer.Typer(help="角色", no_args_is_help=True)
+subtitles_app = typer.Typer(help="字幕（中文 / 高棉语）", no_args_is_help=True)
 app.add_typer(project_app, name="project")
 app.add_typer(episode_app, name="episode")
 app.add_typer(job_app, name="job")
 app.add_typer(candidate_app, name="candidate")
 app.add_typer(queue_app, name="queue")
 app.add_typer(character_app, name="character")
+app.add_typer(subtitles_app, name="subtitles")
 
 STATE = {"json": False}
 ICON = {"ok": "√", "warn": "!", "fail": "×"}
@@ -144,11 +146,20 @@ def run(stage: str = typer.Argument(..., help="script / storyboard / keyframes /
         episode: int = typer.Option(1, "--episode", "-e", help="集数"),
         shots: Optional[str] = typer.Option(None, help="只跑这些镜头，逗号分隔，如 S01,S03"),
         candidates: int = typer.Option(1, help="每个镜头出几张首帧候选（1–4）"),
-        force: bool = typer.Option(False, help="输入没变也重新生成")):
+        force: bool = typer.Option(False, help="输入没变也重新生成"),
+        subtitles: str = typer.Option("none", help="导出：烧字幕 none / zh / zh+km（中文在上、高棉语在下）"),
+        dub: str = typer.Option("off", help="导出：off / km（高棉语外挂配音，原音轨压低当底）"),
+        end_card: bool = typer.Option(False, "--end-card/--no-end-card", help="导出：接项目片尾卡"),
+        trim: bool = typer.Option(True, "--trim/--no-trim", help="导出：按分镜时长裁掉台词后的多余尾巴")):
+    if subtitles not in ("none", "zh", "zh+km") or dub not in ("off", "km"):
+        typer.echo("--subtitles 只能是 none / zh / zh+km，--dub 只能是 off / km", err=True)
+        raise typer.Exit(2)
     ep = _call("GET", f"/api/projects/{project}/episodes/by-number/{episode}")
     body: dict = {"stage": stage, "candidates": candidates, "force": force}
     if shots:
         body["shots"] = [x.strip() for x in shots.split(",") if x.strip()]
+    if stage in ("export", "all"):
+        body["export"] = {"subtitles": subtitles, "dub": dub, "end_card": end_card, "trim": trim}
     _emit(_call("POST", f"/api/episodes/{ep['id']}/run", json=body),
           lambda r: typer.echo(f"已提交 {len(r['job_ids'])} 个任务：{', '.join(map(str, r['job_ids']))}"))
 
@@ -253,16 +264,114 @@ def character_create(project: str, name: str,
 def character_portrait(project: str, name: str,
                        file: Path = typer.Option(..., "--file", "-f", exists=True, dir_okay=False,
                                                  help="定妆照（png / jpg / webp）")):
+    ch = _find_character(project, name)
+    with file.open("rb") as fh:
+        out = _call("POST", f"/api/characters/{ch['id']}/portrait",
+                    files={"file": (file.name, fh.read())})
+    _emit(out, lambda c: typer.echo(f"已设定 {c['name']} 的定妆照：{c['portrait_url']}"))
+
+
+@character_app.command("voice")
+def character_voice(project: str, name: str,
+                    voice: str = typer.Argument(..., help="Edge TTS 音色，如 km-KH-PisethNeural；传空串清除")):
+    ch = _find_character(project, name)
+    out = _call("PATCH", f"/api/characters/{ch['id']}", json={"voice": voice or None})
+    _emit(out, lambda c: typer.echo(f"{c['name']} 的配音音色：{c['voice'] or '（无）'}"))
+
+
+def _find_character(project: str, name: str) -> dict:
     chars = _call("GET", f"/api/projects/{project}/characters")
     ch = next((c for c in chars if c["name"] == name), None)
     if ch is None:
         typer.echo(f"项目 {project} 里没有角色 {name}，现有：{', '.join(c['name'] for c in chars) or '无'}",
                    err=True)
         raise typer.Exit(1)
-    with file.open("rb") as fh:
-        out = _call("POST", f"/api/characters/{ch['id']}/portrait",
-                    files={"file": (file.name, fh.read())})
-    _emit(out, lambda c: typer.echo(f"已设定 {c['name']} 的定妆照：{c['portrait_url']}"))
+    return ch
+
+
+# ------------------------------------------------------------ 片尾卡
+def _print_card(card: dict | None) -> None:
+    if not card:
+        typer.echo("（还没有片尾卡）")
+        return
+    typer.echo(f"片尾卡 {card['seconds']:g} 秒，底色 {card['background']}")
+    for ln in card["lines"]:
+        bold = " 粗" if ln.get("bold") else ""
+        typer.echo(f"  {ln['text'] or '（空行）'}    [{ln.get('font') or '默认字体'} {ln['size']}px{bold}]")
+
+
+@project_app.command("end-card")
+def project_end_card(project: str,
+                     file: Optional[Path] = typer.Option(None, "--file", "-f", exists=True, dir_okay=False,
+                                                         help="片尾卡 JSON：{seconds, background, lines: "
+                                                              "[{text, font, size, bold}]}；不给就显示当前设置")):
+    if file is None:
+        _emit(_call("GET", f"/api/projects/{project}/end-card"), _print_card)
+        return
+    body = json.loads(file.read_text(encoding="utf-8"))
+    _emit(_call("PUT", f"/api/projects/{project}/end-card", json=body), _print_card)
+
+
+# ------------------------------------------------------------ 字幕
+REVIEW = {"ai_draft": "AI 译稿·待母语校对", "checked": "已校对"}
+
+
+def _print_subtitles(ep: dict) -> None:
+    for sh in ep["shots"]:
+        for i, d in enumerate(sh["dialogue"], start=1):
+            km = (d.get("km") or "").strip()
+            state = REVIEW.get(d.get("km_review") or "", "") if km else "缺高棉语"
+            typer.echo(f"{sh['code']}.{i:<3}{d['start']:>5.1f}–{d['end']:<5.1f}"
+                       f"{d.get('speaker', '')}：{d['zh']}")
+            typer.echo(f"{'':>20}{km or '—'}  [{state}]")
+
+
+@subtitles_app.command("show")
+def subtitles_show(project: str, episode: int = typer.Option(1, "--episode", "-e")):
+    _emit(_call("GET", f"/api/projects/{project}/episodes/by-number/{episode}"), _print_subtitles)
+
+
+@subtitles_app.command("translate")
+def subtitles_translate(project: str, episode: int = typer.Option(1, "--episode", "-e"),
+                        force: bool = typer.Option(False, help="已有译文的也重翻"),
+                        glossary: Optional[list[str]] = typer.Option(None, help="固定译名 中文=高棉语，可重复")):
+    ep = _call("GET", f"/api/projects/{project}/episodes/by-number/{episode}")
+    terms = {}
+    for g in glossary or []:
+        k, sep, v = g.partition("=")
+        if not sep or not k.strip() or not v.strip():
+            typer.echo(f"--glossary 要写成 中文=高棉语：{g}", err=True)
+            raise typer.Exit(2)
+        terms[k.strip()] = v.strip()
+    out = _call("POST", f"/api/episodes/{ep['id']}/subtitles/translate",
+                json={"force": force, "glossary": terms})
+    _emit(out, lambda r: typer.echo(f"已提交翻译任务 #{r['job_ids'][0]}。译文是 AI 草稿，发布前要请母语者校对"))
+
+
+@subtitles_app.command("set")
+def subtitles_set(project: str, shot: str = typer.Argument(..., help="镜头编号，如 S02"),
+                  line: int = typer.Argument(..., help="第几句（从 1 起）"),
+                  episode: int = typer.Option(1, "--episode", "-e"),
+                  km: Optional[str] = typer.Option(None, help="高棉语"),
+                  zh: Optional[str] = typer.Option(None, help="中文（改了会让视频过期）"),
+                  start: Optional[float] = typer.Option(None, help="开始秒数（相对本镜）"),
+                  end: Optional[float] = typer.Option(None, help="结束秒数（相对本镜）"),
+                  checked: Optional[bool] = typer.Option(None, "--checked/--draft",
+                                                         help="高棉语是否已由母语者校对")):
+    ep = _call("GET", f"/api/projects/{project}/episodes/by-number/{episode}")
+    sh = next((x for x in ep["shots"] if x["code"].upper() == shot.upper()), None)
+    if sh is None or not 1 <= line <= len(sh["dialogue"]):
+        typer.echo(f"找不到 {shot} 的第 {line} 句", err=True)
+        raise typer.Exit(1)
+    dialogue = [dict(d) for d in sh["dialogue"]]
+    d = dialogue[line - 1]
+    for key, val in (("km", km), ("zh", zh), ("start", start), ("end", end)):
+        if val is not None:
+            d[key] = val
+    if checked is not None:
+        d["km_review"] = "checked" if checked else "ai_draft"
+    out = _call("PATCH", f"/api/shots/{sh['id']}", json={"dialogue": dialogue})
+    _emit(out, lambda x: typer.echo(f"{x['code']}.{line} 已更新"))
 
 
 # ------------------------------------------------------------ 候选、队列、体检

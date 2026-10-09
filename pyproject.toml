@@ -18,6 +18,7 @@ dependencies = [
   "psutil>=5.9",
   "claude-agent-sdk>=0.1",
   "python-multipart>=0.0.9",
+  "edge-tts>=7.2.8",
 ]
 
 [project.scripts]

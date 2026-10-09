@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import shutil
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
@@ -17,6 +18,15 @@ XFADE = {"dissolve": "fade", "white_flash": "fadewhite", "black_dip": "fadeblack
 
 class FFmpegError(RuntimeError):
     pass
+
+
+@dataclass
+class Assembled:
+    """合成结果：durations 是每镜实际用了多少秒（裁过尾），starts 是每镜在成片里的起点。"""
+    path: Path
+    durations: list[float]
+    starts: list[float]
+    total: float
 
 
 def parse_transition(raw: str | None) -> tuple[str, float]:
@@ -31,23 +41,38 @@ def parse_transition(raw: str | None) -> tuple[str, float]:
     return XFADE.get(name, "fade"), dur
 
 
-def build_xfade_graph(durs: list[float], transitions: list[str], fps: int,
-                      with_audio: bool) -> tuple[str, float]:
+def xfade_timeline(durs: list[float], transitions: list[str], fps: int
+                   ) -> tuple[list[tuple[str, float, float]], list[float], float]:
+    """xfade 拼接的时间轴：每个接缝的 (转场, 时长, offset)、每镜在成片里的起点、成片总长。
+
+    字幕和配音的时间也按它算，必须和 build_xfade_graph 用同一套数。
+    """
     eps = 1.0 / max(fps, 1)
-    filters: list[str] = []
-    last_v, last_a = "0:v", "0:a"
-    acc = durs[0]
+    joins: list[tuple[str, float, float]] = []
+    starts = [0.0]
+    acc = durs[0] if durs else 0.0
     for i in range(len(durs) - 1):
         kind, dur = parse_transition(transitions[i] if i < len(transitions) else None)
         dur = max(min(dur, acc - 2 * eps, durs[i + 1] - 2 * eps), eps)
         offset = max(acc - dur - eps, 0.0)
+        joins.append((kind, dur, offset))
+        starts.append(offset)
+        acc = offset + durs[i + 1]
+    return joins, starts, acc
+
+
+def build_xfade_graph(durs: list[float], transitions: list[str], fps: int,
+                      with_audio: bool) -> tuple[str, float]:
+    filters: list[str] = []
+    last_v, last_a = "0:v", "0:a"
+    joins, _, acc = xfade_timeline(durs, transitions, fps)
+    for i, (kind, dur, offset) in enumerate(joins):
         filters.append(f"[{last_v}][{i + 1}:v]xfade=transition={kind}:duration={dur:.3f}"
                        f":offset={offset:.3f}[v{i}]")
         last_v = f"v{i}"
         if with_audio:
             filters.append(f"[{last_a}][{i + 1}:a]acrossfade=d={dur:.3f}[a{i}]")
             last_a = f"a{i}"
-        acc = offset + durs[i + 1]
     fade_out = max(acc - 0.8, 0.0)
     filters.append(f"[{last_v}]fade=t=in:st=0:d=0.6,fade=t=out:st={fade_out:.3f}:d=0.8[vout]")
     if with_audio:
@@ -80,10 +105,10 @@ class FFmpeg:
         self.ffmpeg = ffmpeg
         self.ffprobe = ffprobe
 
-    def run(self, args: list[str]) -> str:
+    def run(self, args: list[str], cwd: Path | None = None) -> str:
         try:
             p = subprocess.run([str(a) for a in args], capture_output=True, text=True,
-                               encoding="utf-8", errors="replace")
+                               encoding="utf-8", errors="replace", cwd=cwd)
         except FileNotFoundError as e:
             raise FFmpegError(f"找不到 {args[0]}：{e}") from e
         if p.returncode != 0:
@@ -130,13 +155,25 @@ class FFmpeg:
             raise FFmpegError(f"没截到尾帧：{video}")
         return out_png
 
+    def duration(self, path: Path) -> float:
+        """容器时长（音频文件用）。"""
+        out = self.run([self.ffprobe, "-v", "error", "-show_entries", "format=duration",
+                        "-of", "csv=p=0", str(path)])
+        try:
+            return float(out.strip())
+        except ValueError:
+            raise FFmpegError(f"读不出时长：{path}") from None
+
     def assemble(self, clips: list[Path], out: Path, *, width: int, height: int, fps: int,
-                 transitions: list[str], work_dir: Path) -> Path:
+                 transitions: list[str], work_dir: Path,
+                 max_seconds: list[float | None] | None = None) -> Assembled:
+        """max_seconds[i] 不为空时第 i 镜只取前这么多秒（按分镜时长裁尾）。"""
         if not clips:
             raise FFmpegError("没有片段可合成")
         out, work_dir = Path(out), Path(work_dir)
         out.parent.mkdir(parents=True, exist_ok=True)
         work_dir.mkdir(parents=True, exist_ok=True)
+        limits = list(max_seconds or [])
         flags = [self.has_audio(c) for c in clips]
         any_audio = any(flags)
         norm: list[Path] = []
@@ -144,13 +181,18 @@ class FFmpeg:
         for i, (clip, has) in enumerate(zip(clips, flags)):
             dst = work_dir / f"n{i:03d}.mp4"
             mode = "keep" if has else ("silent" if any_audio else "none")
+            src_dur = self.video_duration(clip)
+            lim = limits[i] if i < len(limits) else None
+            dur = min(src_dur, lim) if lim else src_dur
             self.run(build_normalize_cmd(self.ffmpeg, clip, dst, width=width, height=height,
-                                         fps=fps, duration=self.video_duration(clip), audio=mode))
+                                         fps=fps, duration=dur, audio=mode))
             norm.append(dst)
             durs.append(self.video_duration(dst))
+        _, starts, total = xfade_timeline(durs, transitions, fps)
+        result = Assembled(out, durs, starts, total)
         if len(norm) == 1:
             shutil.copyfile(norm[0], out)
-            return out
+            return result
         graph, _ = build_xfade_graph(durs, transitions, fps, any_audio)
         cmd = [self.ffmpeg, "-y"]
         for p in norm:
@@ -161,4 +203,4 @@ class FFmpeg:
         cmd += ["-c:v", "libx264", "-preset", "medium", "-crf", "18", "-pix_fmt", "yuv420p",
                 "-r", str(fps), "-movflags", "+faststart", str(out)]
         self.run(cmd)
-        return out
+        return result

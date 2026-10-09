@@ -115,3 +115,13 @@ class ShotOut(BaseModel):
 
 class StoryboardOut(BaseModel):
     shots: list[ShotOut] = Field(min_length=1)
+
+
+# ---------------------------------------------------------------- 字幕翻译
+class TranslatedLine(BaseModel):
+    id: str
+    km: str = Field(min_length=1)
+
+
+class TranslationOut(BaseModel):
+    lines: list[TranslatedLine] = Field(min_length=1)

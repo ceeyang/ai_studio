@@ -5,6 +5,8 @@ from dataclasses import asdict, dataclass
 
 from backend.domain.db import Database
 from backend.domain.models import Episode
+from backend.pipeline.post import lines_missing_km, speakers_without_voice
+from backend.post.options import ExportOptions
 from backend.queue.errors import JobError
 
 STAGES = ("script", "storyboard", "keyframes", "videos", "export")
@@ -17,6 +19,7 @@ class RunOptions:
     candidates: int = 1
     force: bool = False
     priority: int = 0
+    export: dict | None = None   # ExportOptions 的字段：subtitles / dub / end_card / trim
 
 
 def _pick_shots(shots, wanted: list[str] | None):
@@ -62,6 +65,9 @@ def submit_chain(manager, db: Database, engines, episode_id: int, stages: list[s
         picked = [] if stages[0] in LLM_STAGES else [
             (sh.id, sh.image_engine or proj.image_engine, sh.video_engine or proj.video_engine)
             for sh in _pick_shots(ep.shots, opts.shots)]
+        dialogue = [list(sh.dialogue or []) for sh in ep.shots]
+        codes = [sh.code for sh in ep.shots]
+        voices = {c.name: c.voice for c in proj.characters}
 
     first = stages[0]
     if first in LLM_STAGES:
@@ -106,7 +112,26 @@ def submit_chain(manager, db: Database, engines, episode_id: int, stages: list[s
             ids.append(jid)
     if "export" in stages:
         upstream = vids or [j for js in kf.values() for j in js]
-        ids.append(manager.submit("export.episode", {"episode_id": episode_id},
-                                  owner_type="episode", owner_id=episode_id,
-                                  depends_on=deps + upstream, **common))
+        exp = ExportOptions(**(opts.export or {}))
+        if exp.dub == "km":
+            nov = speakers_without_voice(dialogue, voices)
+            if nov:
+                raise JobError(f"角色 {', '.join(nov)} 没有设置配音音色（如 km-KH-PisethNeural），"
+                               "先在剧本页角色卡或 studio character voice 里填写")
+        pre: list[int] = []
+        if exp.needs_km and lines_missing_km(dialogue, codes):
+            pre.append(manager.submit("subtitles.translate", {"episode_id": episode_id},
+                                      owner_type="episode", owner_id=episode_id,
+                                      depends_on=list(deps), **common))
+        if exp.dub == "km":
+            pre.append(manager.submit("post.dub", {"episode_id": episode_id,
+                                                   "options": exp.model_dump()},
+                                      owner_type="episode", owner_id=episode_id,
+                                      depends_on=deps + upstream + pre, **common))
+        payload = {"episode_id": episode_id}
+        if exp != ExportOptions():
+            payload["options"] = exp.model_dump()
+        ids += pre
+        ids.append(manager.submit("export.episode", payload, owner_type="episode",
+                                  owner_id=episode_id, depends_on=deps + upstream + pre, **common))
     return ids

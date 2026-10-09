@@ -145,3 +145,63 @@ def test_jobs_watch_stops_on_waiting_input(cli, api):
 def test_jobs_watch_empty_queue(cli):
     r = cli("jobs", "--watch")
     assert r.exit_code == 0 and "队列已空" in r.output
+
+
+# ---------------------------------------------------------------- 后期
+def _post_setup(cli, api):
+    cli("project", "create", "demo")
+    ep = api.post("/api/projects/demo/episodes", json={"source_text": "x"}).json()
+    api.post(f"/api/episodes/{ep['id']}/shots", json={"dialogue": [
+        {"speaker": "陈师傅", "zh": "换？", "start": 2.0, "end": 2.6},
+        {"speaker": "陈师傅", "zh": "先让我看看。", "start": 2.8, "end": 4.6}]})
+    api.post("/api/projects/demo/characters", json={"name": "陈师傅"})
+    return ep
+
+
+def _jobs(api):
+    with api.app.state.services.db.session() as s:
+        return [(j.type, j.payload) for j in s.query(Job).order_by(Job.id)]
+
+
+def test_run_export_with_post_options(cli, api):
+    ep = _post_setup(cli, api)
+    r = cli("character", "voice", "demo", "陈师傅", "km-KH-PisethNeural")
+    assert r.exit_code == 0 and "km-KH-PisethNeural" in r.stdout
+    r = cli("--json", "run", "export", "demo", "--subtitles", "zh+km", "--dub", "km", "--end-card")
+    assert r.exit_code == 0, r.output
+    assert len(json.loads(r.stdout)["job_ids"]) == 3
+    types = [t for t, _ in _jobs(api)]
+    assert types == ["subtitles.translate", "post.dub", "export.episode"]
+    assert _jobs(api)[-1][1] == {"episode_id": ep["id"], "options": {
+        "subtitles": "zh+km", "dub": "km", "end_card": True, "trim": True}}
+    r = cli("run", "export", "demo", "--subtitles", "fr")
+    assert r.exit_code != 0
+
+
+def test_subtitles_translate_show_and_set(cli, api):
+    ep = _post_setup(cli, api)
+    r = cli("--json", "subtitles", "translate", "demo", "--force",
+            "--glossary", "柬埔寨1号铭车=កម្ពុជារថយន្តលេខរៀងទី1")
+    assert r.exit_code == 0, r.output
+    assert _jobs(api)[-1] == ("subtitles.translate", {
+        "episode_id": ep["id"], "force": True, "glossary": {"柬埔寨1号铭车": "កម្ពុជារថយន្តលេខរៀងទី1"}})
+    r = cli("subtitles", "set", "demo", "S01", "2", "--km", "សុំមើលសិន។", "--checked")
+    assert r.exit_code == 0, r.output
+    with api.app.state.services.db.session() as s:
+        d = s.query(Shot).one().dialogue
+    assert d[1]["km"] == "សុំមើលសិន។" and d[1]["km_review"] == "checked" and "km" not in d[0]
+    out = cli("subtitles", "show", "demo").stdout
+    assert "S01.2" in out and "សុំមើលសិន។" in out and "已校对" in out and "缺高棉语" in out
+    assert cli("subtitles", "set", "demo", "S01", "9", "--km", "x").exit_code == 1
+
+
+def test_project_end_card_set_and_show(cli, api, tmp_path):
+    cli("project", "create", "demo")
+    f = tmp_path / "card.json"
+    f.write_text(json.dumps({"seconds": 3, "lines": [{"text": "Telegram 0318891666", "size": 60}]},
+                            ensure_ascii=False), encoding="utf-8")
+    r = cli("project", "end-card", "demo", "--file", f)
+    assert r.exit_code == 0, r.output
+    r = cli("--json", "project", "end-card", "demo")
+    assert json.loads(r.stdout)["lines"][0]["text"] == "Telegram 0318891666"
+    assert "Telegram 0318891666" in cli("project", "end-card", "demo").stdout
