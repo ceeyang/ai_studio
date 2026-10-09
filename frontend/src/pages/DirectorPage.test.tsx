@@ -109,14 +109,50 @@ describe('DirectorPage', () => {
     const runs = calls.filter((c) => c.method === 'POST');
     expect(runs[0].body).toEqual({
       stage: 'export', candidates: 1, force: false,
-      export: { subtitles: 'none', dub: 'off', end_card: false },
+      export: { subtitles: 'none', dub: 'off', end_card: false, bed: true, align: 'timeline' },
     });
     expect(runs[1].body).toEqual({
       stage: 'export', candidates: 1, force: false,
-      export: { subtitles: 'zh+km', dub: 'km', end_card: true },
+      export: { subtitles: 'zh+km', dub: 'km', end_card: true, bed: true, align: 'timeline' },
     });
     await user.click(screen.getByLabelText('中文字幕'));
     expect((screen.getByLabelText('高棉语字幕') as HTMLInputElement).checked).toBe(false);
+  });
+
+  it('不保留原声底、配音对齐实际说话；对齐只在勾了配音时可选', async () => {
+    const calls = installFetch(routes({ 'POST /api/episodes/4/run': { job_ids: [44] } }));
+    renderAt(<DirectorPage />, AT);
+    const user = userEvent.setup();
+    await screen.findByTestId('shot-S01');
+    const bed = screen.getByLabelText('保留原声底') as HTMLInputElement;
+    const align = screen.getByLabelText('配音对齐实际说话') as HTMLInputElement;
+    expect(bed.checked).toBe(true);
+    expect(align.disabled).toBe(true);
+    await user.click(screen.getByLabelText('高棉语配音'));
+    expect(align.disabled).toBe(false);
+    await user.click(align);
+    await user.click(bed);
+    await user.click(screen.getByRole('button', { name: '合成导出' }));
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST')).toBe(true));
+    expect(calls.find((c) => c.method === 'POST')?.body).toEqual({
+      stage: 'export', candidates: 1, force: false,
+      export: { subtitles: 'none', dub: 'km', end_card: false, bed: false, align: 'detected' },
+    });
+  });
+
+  it('按高棉语时长改写中文：没勾选时整集，勾选后只提交选中镜头', async () => {
+    const calls = installFetch(routes({ 'POST /api/episodes/4/dialogue/fit-khmer': { job_ids: [60] } }));
+    renderAt(<DirectorPage />, AT);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: '按高棉语时长改写中文' }));
+    expect((await screen.findByRole('status')).textContent).toContain('#60');
+    await user.click(screen.getByLabelText('选择 S02'));
+    await user.click(screen.getByRole('button', { name: '按高棉语时长改写中文' }));
+    await waitFor(() => expect(calls.filter((c) => c.method === 'POST')).toHaveLength(2));
+    const posts = calls.filter((c) => c.method === 'POST');
+    expect(posts[0].url).toBe('/api/episodes/4/dialogue/fit-khmer');
+    expect(posts[0].body).toEqual({});
+    expect(posts[1].body).toEqual({ shot_ids: [12] });
   });
 
   it('翻译高棉语字幕提交翻译任务', async () => {
@@ -135,7 +171,10 @@ describe('DirectorPage', () => {
           {
             id: 2, episode_id: 4, variant: '9x16', file_path: 'demo/exports/ep01_9x16_zhkm_dubkm_card_x.mp4',
             url: '/media/demo/exports/ep01_9x16_zhkm_dubkm_card_x.mp4',
-            settings: { clips: 6, subtitles: 'zh+km', dub: 'km', end_card: true, duration: 33.6, km_review: 'ai_draft' },
+            settings: {
+              clips: 6, subtitles: 'zh+km', dub: 'km', end_card: true, duration: 33.6, km_review: 'ai_draft',
+              bed: false, align: 'detected',
+            },
             created_at: '2026-10-09T12:00:00',
           },
         ],
@@ -148,5 +187,7 @@ describe('DirectorPage', () => {
     expect(row.textContent).toContain('片尾卡');
     expect(row.textContent).toContain('33.6 秒');
     expect(row.textContent).toContain('高棉语待母语校对');
+    expect(row.textContent).toContain('无原声底');
+    expect(row.textContent).toContain('配音对齐说话');
   });
 });

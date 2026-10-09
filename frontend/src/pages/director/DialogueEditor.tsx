@@ -12,6 +12,18 @@ export interface DialogueEditorProps {
  * 对白编辑：中文台词和高棉语字幕/配音稿。高棉语多半是 AI 译稿（km_review = ai_draft），
  * 发布前要请柬籍母语者校对，校对过的勾"母语已校对"。改中文会让视频过期（视频提示词里有台词）。
  */
+/** 按高棉语时长改写过的句子：原中文和两边的实测时长。 */
+export function fitNote(d: DialogueLine): string | null {
+  const orig = (d.zh_original ?? '').trim();
+  if (!orig) return null;
+  const parts = [orig === d.zh.trim() ? '原句未改' : `原中文：${orig}`];
+  if (typeof d.km_seconds === 'number' && typeof d.zh_seconds === 'number') {
+    const ratio = typeof d.fit_ratio === 'number' ? `（${d.fit_ratio.toFixed(2)}）` : '';
+    parts.push(`高棉语 ${d.km_seconds.toFixed(2)}s / 中文 ${d.zh_seconds.toFixed(2)}s${ratio}`);
+  }
+  return parts.join(' · ');
+}
+
 export function DialogueEditor({ dialogue, onSave, saving = false, error = null }: DialogueEditorProps) {
   const key = JSON.stringify(dialogue);
   const [lines, setLines] = useState<DialogueLine[]>(dialogue);
@@ -47,6 +59,11 @@ export function DialogueEditor({ dialogue, onSave, saving = false, error = null 
               <span>中文</span>
               <input aria-label={`第 ${n} 句中文`} value={d.zh} onChange={(e) => set(i, { zh: e.target.value })} />
             </label>
+            {fitNote(d) && (
+              <p className="muted fit-note" data-testid={`fit-note-${n}`}>
+                {fitNote(d)}
+              </p>
+            )}
             <label className="field">
               <span>高棉语</span>
               <textarea

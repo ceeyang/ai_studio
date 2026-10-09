@@ -6,6 +6,7 @@ import {
   useDeleteShot,
   useEpisode,
   useExports,
+  useFitKhmer,
   useReorderShots,
   useRunStage,
   useSplitShot,
@@ -26,6 +27,8 @@ export function exportTags(settings: Record<string, unknown>): string[] {
   const subs = SUBTITLE_TAG[String(settings.subtitles ?? '')];
   if (subs) tags.push(subs);
   if (settings.dub === 'km') tags.push('高棉语配音');
+  if (settings.bed === false) tags.push('无原声底');
+  if (settings.align === 'detected') tags.push('配音对齐说话');
   if (settings.end_card === true) tags.push('片尾卡');
   if (typeof settings.duration === 'number') tags.push(`${settings.duration.toFixed(1)} 秒`);
   return tags;
@@ -75,6 +78,7 @@ export function DirectorPage() {
   const del = useDeleteShot(id);
   const create = useCreateShot(id);
   const translate = useTranslateSubtitles(id);
+  const fit = useFitKhmer(id);
   const [selected, setSelected] = useState<Set<number>>(() => new Set());
   const [count, setCount] = useState(1);
   const [force, setForce] = useState(false);
@@ -83,6 +87,8 @@ export function DirectorPage() {
   const [subKm, setSubKm] = useState(false);
   const [dubKm, setDubKm] = useState(false);
   const [endCard, setEndCard] = useState(false);
+  const [bed, setBed] = useState(true);
+  const [alignDetected, setAlignDetected] = useState(false);
 
   if (ep.isLoading) return <p className="loading">加载中…</p>;
   if (ep.error || !ep.data) return <p className="error">{ep.error ? errorText(ep.error) : '找不到这一集'}</p>;
@@ -107,7 +113,18 @@ export function DirectorPage() {
     subtitles: subKm ? 'zh+km' : subZh ? 'zh' : 'none',
     dub: dubKm ? 'km' : 'off',
     end_card: endCard,
+    bed,
+    align: dubKm && alignDetected ? 'detected' : 'timeline',
   };
+
+  const fitKhmer = () =>
+    fit.mutate(selIds.length > 0 ? { shot_ids: selIds } : {}, {
+      onSuccess: (r) =>
+        setNotice(
+          `已提交改写任务 #${r.job_ids.join(', #')}（${scope}）：中文会改成和高棉语配音一样长，原句留在镜头抽屉里；改完要重新生成这些镜头的视频`,
+        ),
+      onError: (err) => setNotice(errorText(err)),
+    });
 
   const generate = (stage: GenStage | 'export', ids: number[] = []) => {
     const body: RunIn = { stage, candidates: count, force };
@@ -224,7 +241,29 @@ export function DirectorPage() {
         <label>
           <input type="checkbox" aria-label="片尾卡" checked={endCard} onChange={(ev) => setEndCard(ev.target.checked)} /> 片尾卡
         </label>
+        <label title="取消后 H3 原音轨（含普通话）整条静音，成片里只有高棉语配音">
+          <input type="checkbox" aria-label="保留原声底" checked={bed} onChange={(ev) => setBed(ev.target.checked)} /> 保留原声底
+        </label>
+        <label title="配音放到 H3 音轨里实际开口的位置（检测不到就用台词时间）">
+          <input
+            type="checkbox"
+            aria-label="配音对齐实际说话"
+            checked={dubKm && alignDetected}
+            disabled={!dubKm}
+            onChange={(ev) => setAlignDetected(ev.target.checked)}
+          />{' '}
+          配音对齐实际说话
+        </label>
         <span className="grow" aria-hidden="true" />
+        <button
+          type="button"
+          className="ghost"
+          disabled={shots.length === 0 || fit.isPending}
+          title={`把中文台词改写成和高棉语配音一样长（${scope}），之后重新生成视频，嘴型就跟着高棉语的时长走`}
+          onClick={fitKhmer}
+        >
+          按高棉语时长改写中文
+        </button>
         <button
           type="button"
           className="ghost"

@@ -31,6 +31,7 @@ import type {
   ShotIn,
   ShotPatch,
   Style,
+  FitKhmerIn,
   TranslateIn,
   TurnaroundSheetKey,
 } from './types';
@@ -405,6 +406,14 @@ export function usePutEndCard(slug: string) {
   return useMutation({
     mutationFn: (body: EndCard) => api.put<EndCard>(`/api/projects/${enc(slug)}/end-card`, body),
     onSuccess: () => invalidate(qc, keys.endCard(slug)),
+  });
+}
+
+export function useFitKhmer(episodeId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: FitKhmerIn) => api.post<RunOut>(`/api/episodes/${episodeId}/dialogue/fit-khmer`, body),
+    onSuccess: () => invalidate(qc, ['jobs'], keys.queue),
   });
 }
 

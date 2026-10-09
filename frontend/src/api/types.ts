@@ -119,6 +119,12 @@ export interface DialogueLine {
   /** 高棉语字幕 / 配音稿 */
   km?: string | null;
   km_review?: KmReview | null;
+  /** 按高棉语时长改写前的原中文（dialogue.fit_khmer 写入） */
+  zh_original?: string | null;
+  /** 高棉语 / 现在的中文用 Edge TTS 念出来多少秒，以及两者之比（中文 / 高棉语） */
+  km_seconds?: number | null;
+  zh_seconds?: number | null;
+  fit_ratio?: number | null;
 }
 
 export interface CastEntry {
@@ -185,10 +191,12 @@ export interface ShotIn extends ShotPatch {
   after_shot_id?: number | null;
 }
 
-export type Stage = 'script' | 'storyboard' | 'keyframes' | 'videos' | 'export' | 'all';
+export type Stage = 'script' | 'storyboard' | 'keyframes' | 'videos' | 'export' | 'all' | 'fit_khmer';
+export type NextStage = 'keyframes' | 'videos' | 'export';
 
 export type SubtitleMode = 'none' | 'zh' | 'zh+km';
 export type DubMode = 'off' | 'km';
+export type AlignMode = 'timeline' | 'detected';
 
 /** 导出选项（backend/post/options.py::ExportOptions）。 */
 export interface ExportOptions {
@@ -196,6 +204,10 @@ export interface ExportOptions {
   dub: DubMode;
   end_card: boolean;
   trim?: boolean;
+  /** 保留原声底（压低的 H3 原音轨）；false = 原音轨整条静音 */
+  bed?: boolean;
+  /** detected：配音放到 H3 音轨里实际开口的位置 */
+  align?: AlignMode;
 }
 
 export interface RunIn {
@@ -204,6 +216,14 @@ export interface RunIn {
   candidates?: number;
   force?: boolean;
   priority?: number;
+  export?: ExportOptions;
+}
+
+/** 按高棉语时长改写中文（POST /api/episodes/{id}/dialogue/fit-khmer）。 */
+export interface FitKhmerIn {
+  shot_ids?: number[];
+  force?: boolean;
+  then?: NextStage[];
   export?: ExportOptions;
 }
 

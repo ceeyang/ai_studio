@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { DialogueLine } from '../../api/types';
 import { renderAt } from '../../test/render';
-import { DialogueEditor } from './DialogueEditor';
+import { DialogueEditor, fitNote } from './DialogueEditor';
 
 const LINES: DialogueLine[] = [
   { speaker: '陈师傅', zh: '换？', start: 2, end: 2.6, km: 'ដូរ?', km_review: 'ai_draft' },
@@ -26,6 +26,17 @@ describe('DialogueEditor', () => {
       { ...LINES[0], km_review: 'checked' },
       { ...LINES[1], km: 'សុំមើលសិន។' },
     ]);
+  });
+
+  it('按高棉语时长改写过的句子在中文旁边显示原中文和实测时长', () => {
+    const fitted: DialogueLine = {
+      speaker: '陈师傅', zh: '换？要换吗', zh_original: '换？', start: 1.6, end: 2.6, km: 'ប្ដូរ?',
+      km_seconds: 0.42, zh_seconds: 0.44, fit_ratio: 1.048,
+    };
+    renderAt(<DialogueEditor dialogue={[fitted, LINES[1]]} onSave={vi.fn()} />);
+    expect(screen.getByTestId('fit-note-1').textContent).toBe('原中文：换？ · 高棉语 0.42s / 中文 0.44s（1.05）');
+    expect(screen.queryByTestId('fit-note-2')).toBeNull();
+    expect(fitNote({ ...fitted, zh: '换？' })).toBe('原句未改 · 高棉语 0.42s / 中文 0.44s（1.05）');
   });
 
   it('改中文会提示视频过期；取消校对回到 AI 译稿', async () => {
