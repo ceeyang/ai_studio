@@ -207,3 +207,21 @@ def test_chain_plain_export_payload_unchanged(tmp_path, db, manager):
     ep_id, _ = seed(db)
     submit_chain(manager, db, sv.engines, ep_id, ["export"], RunOptions())
     assert jobs(db)[0][2] == {"episode_id": ep_id}
+
+
+class DbLogCtx(FakeCtx):
+    """像真正的 JobContext 一样，日志另开一个会话写库。"""
+
+    def log(self, msg):
+        super().log(msg)
+        with self.services.db.session() as s:
+            s.add(Job(type="log-probe", payload={"msg": msg}))
+
+
+@pytest.mark.timeout(20)  # 在写事务里记日志会卡在 SQLite 写锁上，直到超时
+def test_translate_does_not_log_inside_its_write_transaction(tmp_path, db):
+    gw, _ = make_gateway([{"lines": [{"id": "S01.1", "km": "ជាង!"}, {"id": "S02.1", "km": "ដូរ?"}]}])
+    sv = make_services(tmp_path, db, llm=gw)
+    ep_id, ids = seed(db)
+    run_translate(DbLogCtx(sv), {"episode_id": ep_id})
+    assert dialogue(db, ids[0])[0]["km"] == "ជាង!"

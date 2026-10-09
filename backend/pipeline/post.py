@@ -171,6 +171,7 @@ def run_translate(ctx, payload: dict) -> dict:
     out = sv.llm.generate(TRANSLATE_TASK, system, user, TranslationOut, check=check, log=ctx.log,
                           manual=payload.get("manual") or {}, key=f"{TRANSLATE_TASK}:{episode_id}")
     km = {x.id: x.km.strip() for x in out.lines}
+    written = []
     with sv.db.session() as s:
         for t in todo:
             sh = s.get(Shot, t["shot_id"])
@@ -179,7 +180,10 @@ def run_translate(ctx, payload: dict) -> dict:
             dlg = [dict(d) for d in sh.dialogue]
             dlg[t["index"]].update(km=km[t["id"]], km_review="ai_draft")
             sh.dialogue = dlg
-            ctx.log(f"{t['id']} {t['zh']} → {km[t['id']]}")
+            written.append(f"{t['id']} {t['zh']} → {km[t['id']]}")
+    # 日志要等写事务提交后再记：ctx.log 另开连接写 jobs 表，事务里调用会和自己抢 SQLite 写锁
+    for line in written:
+        ctx.log(line)
     return {"translated": len(todo), "skipped": skipped}
 
 
