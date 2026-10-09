@@ -173,9 +173,26 @@ def test_run_export_with_post_options(cli, api):
     types = [t for t, _ in _jobs(api)]
     assert types == ["subtitles.translate", "post.dub", "export.episode"]
     assert _jobs(api)[-1][1] == {"episode_id": ep["id"], "options": {
-        "subtitles": "zh+km", "dub": "km", "end_card": True, "trim": True}}
+        "subtitles": "zh+km", "dub": "km", "end_card": True, "trim": True, "bed": True,
+        "align": "timeline"}}
     r = cli("run", "export", "demo", "--subtitles", "fr")
     assert r.exit_code != 0
+    r = cli("run", "export", "demo", "--dub", "km", "--align", "lips")
+    assert r.exit_code != 0
+
+
+def test_run_fit_khmer_then_videos_and_export(cli, api):
+    ep = _post_setup(cli, api)
+    cli("character", "voice", "demo", "陈师傅", "km-KH-PisethNeural")
+    r = cli("--json", "run", "fit-khmer", "demo", "--shots", "S01", "--then", "videos,export",
+            "--subtitles", "zh+km", "--dub", "km", "--no-bed", "--align", "detected", "--end-card")
+    assert r.exit_code == 0, r.output
+    (jtype, payload), = _jobs(api)
+    assert jtype == "dialogue.fit_khmer"
+    assert payload["episode_id"] == ep["id"] and payload["then"] == ["videos", "export"]
+    assert len(payload["shot_ids"]) == 1
+    assert payload["options"]["export"] == {"subtitles": "zh+km", "dub": "km", "end_card": True,
+                                            "trim": True, "bed": False, "align": "detected"}
 
 
 def test_subtitles_translate_show_and_set(cli, api):

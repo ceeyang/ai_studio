@@ -63,6 +63,24 @@ def timeline_cues(shots_dialogue: list[list[dict]], starts: list[float],
     return cues
 
 
+def dub_cues(rows: list[dict], starts: list[float], shots_dialogue: list[list[dict]], *,
+             min_seconds: float = 1.0, tail: float = 0.3) -> list[Cue]:
+    """配音版的字幕跟着高棉语配音走：每条从这句配音开始播的地方起，到配音结束再留 tail 秒
+    （至少 min_seconds，好读），不压到下一条。rows 是配音清单（shot / index / offset / seconds）。"""
+    cues: list[Cue] = []
+    for r in rows:
+        dlg = shots_dialogue[r["shot"]] if r["shot"] < len(shots_dialogue) else []
+        d = dlg[r["index"]] if r["index"] < len(dlg) else {}
+        a = starts[r["shot"]] + float(r["offset"])
+        b = a + max(float(r["seconds"]) + tail, min_seconds)
+        cues.append(Cue(a, b, (d.get("zh") or "").strip(), (d.get("km") or "").strip(),
+                        d.get("speaker") or ""))
+    cues.sort(key=lambda c: c.start)
+    for cur, nxt in zip(cues, cues[1:]):
+        cur.end = min(cur.end, nxt.start)
+    return cues
+
+
 def _head(width: int, height: int, styles: list[str]) -> list[str]:
     return ["[Script Info]", "ScriptType: v4.00+", f"PlayResX: {width}", f"PlayResY: {height}",
             "WrapStyle: 0", "ScaledBorderAndShadow: yes", "", "[V4+ Styles]", STYLE_FORMAT,

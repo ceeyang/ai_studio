@@ -141,7 +141,8 @@ def episode_show(project: str, number: int):
 
 # ------------------------------------------------------------ 运行
 @app.command("run")
-def run(stage: str = typer.Argument(..., help="script / storyboard / keyframes / videos / export / all"),
+def run(stage: str = typer.Argument(..., help="script / storyboard / keyframes / videos / export / all，"
+                                              "或 fit-khmer（按高棉语时长改写中文，不在 all 里）"),
         project: str = typer.Argument(...),
         episode: int = typer.Option(1, "--episode", "-e", help="集数"),
         shots: Optional[str] = typer.Option(None, help="只跑这些镜头，逗号分隔，如 S01,S03"),
@@ -150,16 +151,26 @@ def run(stage: str = typer.Argument(..., help="script / storyboard / keyframes /
         subtitles: str = typer.Option("none", help="导出：烧字幕 none / zh / zh+km（中文在上、高棉语在下）"),
         dub: str = typer.Option("off", help="导出：off / km（高棉语外挂配音，原音轨压低当底）"),
         end_card: bool = typer.Option(False, "--end-card/--no-end-card", help="导出：接项目片尾卡"),
-        trim: bool = typer.Option(True, "--trim/--no-trim", help="导出：按分镜时长裁掉台词后的多余尾巴")):
-    if subtitles not in ("none", "zh", "zh+km") or dub not in ("off", "km"):
-        typer.echo("--subtitles 只能是 none / zh / zh+km，--dub 只能是 off / km", err=True)
+        trim: bool = typer.Option(True, "--trim/--no-trim", help="导出：按分镜时长裁掉台词后的多余尾巴"),
+        bed: bool = typer.Option(True, "--bed/--no-bed", help="导出：配音时保留压低的原声底；--no-bed 原音轨整条静音"),
+        align: str = typer.Option("timeline", help="导出：配音放在 timeline（台词时间）或 detected（H3 实际开口处）"),
+        then: Optional[str] = typer.Option(None, help="本阶段完成后接着跑，逗号分隔，如 videos,export")):
+    if subtitles not in ("none", "zh", "zh+km") or dub not in ("off", "km") \
+            or align not in ("timeline", "detected"):
+        typer.echo("--subtitles 只能是 none / zh / zh+km，--dub 只能是 off / km，"
+                   "--align 只能是 timeline / detected", err=True)
         raise typer.Exit(2)
+    stage = stage.replace("-", "_")
+    nxt = [x.strip() for x in (then or "").split(",") if x.strip()]
     ep = _call("GET", f"/api/projects/{project}/episodes/by-number/{episode}")
     body: dict = {"stage": stage, "candidates": candidates, "force": force}
     if shots:
         body["shots"] = [x.strip() for x in shots.split(",") if x.strip()]
-    if stage in ("export", "all"):
-        body["export"] = {"subtitles": subtitles, "dub": dub, "end_card": end_card, "trim": trim}
+    if nxt:
+        body["then"] = nxt
+    if "export" in (stage, *nxt) or stage == "all":
+        body["export"] = {"subtitles": subtitles, "dub": dub, "end_card": end_card, "trim": trim,
+                          "bed": bed, "align": align}
     _emit(_call("POST", f"/api/episodes/{ep['id']}/run", json=body),
           lambda r: typer.echo(f"已提交 {len(r['job_ids'])} 个任务：{', '.join(map(str, r['job_ids']))}"))
 

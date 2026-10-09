@@ -127,6 +127,16 @@ class TranslationOut(BaseModel):
     lines: list[TranslatedLine] = Field(min_length=1)
 
 
+# ---------------------------------------------------------------- 按高棉语时长改写中文
+class FittedLine(BaseModel):
+    id: str
+    zh: str = Field(min_length=1, max_length=60)
+
+
+class FitOut(BaseModel):
+    lines: list[FittedLine] = Field(min_length=1)
+
+
 # ---------------------------------------------------------------- 角色造型
 def _look_words(v: str) -> str:
     n = len(v.split())

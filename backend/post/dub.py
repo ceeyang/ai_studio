@@ -46,9 +46,11 @@ def plan_dub_lines(shots_dialogue: list[list[dict]], starts: list[float], durati
     return out
 
 
-def build_dub_mix_cmd(ffmpeg: str, src, lines: list[tuple], out, *, bed_db: float,
+def build_dub_mix_cmd(ffmpeg: str, src, lines: list[tuple], out, *, bed_db: float | None,
                       duck_db: float, loudness: float | None = None) -> list[str]:
     """lines：[(音频文件, 成片起点秒, 时长秒)]。画面直接拷贝，只重编码音轨。
+
+    bed_db=None：不要原声底，原音轨乘 0（只当时间轴用，保证成片长度不变），成片里只剩配音。
 
     loudness：混好后用 loudnorm 拉到这个响度（LUFS）。原音轨压低后整体会比普通话版轻十来个 LU。
     """
@@ -56,8 +58,8 @@ def build_dub_mix_cmd(ffmpeg: str, src, lines: list[tuple], out, *, bed_db: floa
     for path, _, _ in lines:
         cmd += ["-i", str(path)]
     fmt = f"aformat=sample_fmts=fltp:sample_rates={SAMPLE_RATE}:channel_layouts=stereo"
-    bed = f"[0:a]volume={float(bed_db):.1f}dB"
-    extra = float(duck_db) - float(bed_db)
+    bed = "[0:a]volume=0" if bed_db is None else f"[0:a]volume={float(bed_db):.1f}dB"
+    extra = 0.0 if bed_db is None else float(duck_db) - float(bed_db)
     if lines and extra < 0:
         windows = "+".join(f"between(t,{max(st - 0.15, 0.0):.2f},{st + du + 0.25:.2f})"
                            for _, st, du in lines)

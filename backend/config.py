@@ -98,6 +98,16 @@ class DubCfg(BaseModel):
     max_rate: int = 35                 # 台词塞不进窗口时最多提速 +35%
     gap: float = 0.1                   # 每句至少比下一句（或镜头结尾）早结束这么多秒
     loudness: float | None = -14.0     # 配音版整体响度（LUFS，loudnorm）；null 不处理
+    # dialogue.fit_khmer：按高棉语时长改写中文时，用哪个普通话音色实测（按角色的高棉语音色对应）
+    zh_voices: dict[str, str] = Field(default_factory=lambda: {
+        "km-KH-PisethNeural": "zh-CN-YunxiNeural", "km-KH-SreymomNeural": "zh-CN-XiaoxiaoNeural"})
+    zh_voice_default: str = "zh-CN-YunxiNeural"
+    fit_tolerance: float = 0.10        # 中文实测时长和高棉语相差在 ±10% 以内算合格
+    fit_rounds: int = 3                # 最多改写几轮
+    # align=detected：在 H3 音轨里找说话段（带通到人声频段后 silencedetect）
+    speech_noise_db: float = -30.0
+    speech_min_silence: float = 0.2
+    align_max_shift: float = 1.5       # 只在台词计划起点前后这么多秒内找说话段
 
 
 class Config(BaseModel):

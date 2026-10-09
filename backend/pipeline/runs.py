@@ -11,6 +11,10 @@ from backend.queue.errors import JobError
 
 STAGES = ("script", "storyboard", "keyframes", "videos", "export")
 LLM_STAGES = ("script", "storyboard")
+# 不在 all 里的阶段：按高棉语时长改写中文（之后通常接 videos、export）
+FIT_STAGE = "fit_khmer"
+EXTRA_STAGES = (FIT_STAGE,)
+FIT_TASK = "dialogue.fit_khmer"
 
 
 @dataclass
@@ -48,13 +52,15 @@ def _family(engines, kind: str, name: str) -> str:
 def submit_chain(manager, db: Database, engines, episode_id: int, stages: list[str],
                  opts: RunOptions, depends_on: list[int] | None = None) -> list[int]:
     stages = list(stages)
-    bad = [x for x in stages if x not in STAGES]
+    bad = [x for x in stages if x not in STAGES + EXTRA_STAGES]
     if bad:
-        raise JobError(f"未知阶段：{', '.join(bad)}，可选：{', '.join(STAGES)}")
+        raise JobError(f"未知阶段：{', '.join(bad)}，可选：{', '.join(STAGES + EXTRA_STAGES)}")
     if not stages:
         return []
     if any(x in LLM_STAGES for x in stages[1:]) and stages[0] not in LLM_STAGES:
         raise JobError("script / storyboard 必须排在最前面")
+    if FIT_STAGE in stages[1:]:
+        raise JobError(f"{FIT_STAGE} 必须排在最前面（它改完台词才能出视频、导出）")
     deps = list(depends_on or [])
     with db.session() as s:
         ep = s.get(Episode, episode_id)
@@ -70,6 +76,15 @@ def submit_chain(manager, db: Database, engines, episode_id: int, stages: list[s
         voices = {c.name: c.voice for c in proj.characters}
 
     first = stages[0]
+    if first == FIT_STAGE:
+        fit: dict = {"episode_id": episode_id, "force": opts.force}
+        if opts.shots:
+            fit["shot_ids"] = [sid for sid, _, _ in picked]
+        if stages[1:]:
+            fit["then"] = stages[1:]
+            fit["options"] = asdict(opts)
+        return [manager.submit(FIT_TASK, fit, owner_type="episode", owner_id=episode_id,
+                               depends_on=deps, **common)]
     if first in LLM_STAGES:
         payload: dict = {"episode_id": episode_id, "force": opts.force}
         if stages[1:]:

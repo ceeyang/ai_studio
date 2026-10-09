@@ -10,7 +10,8 @@ from backend.llm.schemas import Transition
 from backend.post.options import ExportOptions
 
 Aspect = Literal["9:16", "16:9"]
-Stage = Literal["script", "storyboard", "keyframes", "videos", "export", "all"]
+Stage = Literal["script", "storyboard", "keyframes", "videos", "export", "all", "fit_khmer"]
+NextStage = Literal["keyframes", "videos", "export"]
 
 
 class ORM(BaseModel):
@@ -341,6 +342,15 @@ class RunIn(BaseModel):
     force: bool = False
     priority: int = 0
     export: ExportOptions | None = None   # 只对 export 阶段有效：字幕 / 配音 / 片尾卡 / 裁尾
+    then: list[NextStage] | None = None   # 本阶段完成后接着跑，如 fit_khmer → videos → export
+
+
+class FitKhmerIn(BaseModel):
+    """按高棉语时长改写中文；then 可接 videos / export（export 用 export 选项）。"""
+    shot_ids: list[int] | None = None
+    force: bool = False
+    then: list[NextStage] = Field(default_factory=list)
+    export: ExportOptions | None = None
 
 
 class TranslateIn(BaseModel):

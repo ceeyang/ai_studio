@@ -18,8 +18,9 @@ from backend.domain.slots import selected_candidate
 from backend.engines.ffmpeg import xfade_timeline
 from backend.llm.schemas import TranslationOut
 from backend.pipeline.common import load_episode
-from backend.post.dub import edge_tts_save, fit_rate, plan_dub_lines
+from backend.post.dub import DubLine, edge_tts_save, fit_rate, plan_dub_lines
 from backend.post.options import ExportOptions
+from backend.post.speech import align_onsets
 from backend.post.timeline import trim_limit
 from backend.queue.errors import JobError
 from backend.queue.handlers import HANDLERS
@@ -109,11 +110,12 @@ def speakers_without_voice(dialogue: list[list[dict]], voices: dict[str, str | N
     return sorted(n for n in names if not (voices.get(n) or "").strip())
 
 
-def dub_key(cut: Cut, limits: list[float | None]) -> str:
-    """配音清单对应的输入：换了视频、裁剪点、台词时间、译文或音色，清单就作废。"""
+def dub_key(cut: Cut, limits: list[float | None], align: str = "timeline") -> str:
+    """配音清单对应的输入：换了视频、裁剪点、台词时间、译文、音色或对齐方式，清单就作废。"""
     lines = [[(d.get("speaker"), d.get("km"), d.get("start")) for d in dlg] for dlg in cut.dialogue]
+    extra = {"align": align} if align != "timeline" else {}   # 老清单（只有 timeline）的 key 不变
     return input_hash("dub", cut.clip_rels, [round(x, 3) if x else None for x in limits], lines,
-                      sorted((k, v) for k, v in cut.voices.items() if v))
+                      sorted((k, v) for k, v in cut.voices.items() if v), **extra)
 
 
 def dub_manifest_path(sv, cut: Cut) -> Path:
@@ -148,8 +150,32 @@ def run_translate(ctx, payload: dict) -> dict:
     if not todo:
         ctx.log("没有需要翻译的台词")
         return {"translated": 0, "skipped": skipped}
-    system, user = sv.prompts(slug).render("subtitles_translate", title=title,
-                                           glossary=payload.get("glossary") or {}, lines=todo)
+    ctx.log(f"翻译 {len(todo)} 句台词（已有译文跳过 {skipped} 句）")
+    km = translate_lines(ctx, slug=slug, title=title, todo=todo,
+                         glossary=payload.get("glossary") or {},
+                         manual=payload.get("manual") or {}, key=f"{TRANSLATE_TASK}:{episode_id}")
+    written = []
+    with sv.db.session() as s:
+        for t in todo:
+            sh = s.get(Shot, t["shot_id"])
+            if sh is None or t["index"] >= len(sh.dialogue or []):
+                continue
+            dlg = [dict(d) for d in sh.dialogue]
+            dlg[t["index"]].update(km=km[t["id"]], km_review="ai_draft")
+            sh.dialogue = dlg
+            written.append(f"{t['id']} {t['zh']} → {km[t['id']]}")
+    # 日志要等写事务提交后再记：ctx.log 另开连接写 jobs 表，事务里调用会和自己抢 SQLite 写锁
+    for line in written:
+        ctx.log(line)
+    return {"translated": len(todo), "skipped": skipped}
+
+
+def translate_lines(ctx, *, slug: str, title: str, todo: list[dict], glossary: dict, manual: dict,
+                    key: str) -> dict[str, str]:
+    """todo：[{id, speaker, zh, seconds}] → {id: 高棉语}。dialogue.fit_khmer 也用它补缺的译文。"""
+    sv = ctx.services
+    system, user = sv.prompts(slug).render("subtitles_translate", title=title, glossary=glossary,
+                                           lines=todo)
     want = [t["id"] for t in todo]
 
     def check(out: TranslationOut) -> None:
@@ -167,24 +193,9 @@ def run_translate(ctx, payload: dict) -> dict:
         if problems:
             raise ValueError("；".join(problems))
 
-    ctx.log(f"翻译 {len(todo)} 句台词（已有译文跳过 {skipped} 句）")
     out = sv.llm.generate(TRANSLATE_TASK, system, user, TranslationOut, check=check, log=ctx.log,
-                          manual=payload.get("manual") or {}, key=f"{TRANSLATE_TASK}:{episode_id}")
-    km = {x.id: x.km.strip() for x in out.lines}
-    written = []
-    with sv.db.session() as s:
-        for t in todo:
-            sh = s.get(Shot, t["shot_id"])
-            if sh is None or t["index"] >= len(sh.dialogue or []):
-                continue
-            dlg = [dict(d) for d in sh.dialogue]
-            dlg[t["index"]].update(km=km[t["id"]], km_review="ai_draft")
-            sh.dialogue = dlg
-            written.append(f"{t['id']} {t['zh']} → {km[t['id']]}")
-    # 日志要等写事务提交后再记：ctx.log 另开连接写 jobs 表，事务里调用会和自己抢 SQLite 写锁
-    for line in written:
-        ctx.log(line)
-    return {"translated": len(todo), "skipped": skipped}
+                          manual=manual, key=key)
+    return {x.id: x.km.strip() for x in out.lines}
 
 
 # ---------------------------------------------------------------- 配音
@@ -218,6 +229,10 @@ def run_dub(ctx, payload: dict) -> dict:
     secs, limits = clip_limits(sv, cut, opts.trim)
     durs, starts = planned_timeline(secs, limits, cut.transitions)
     lines = plan_dub_lines(cut.dialogue, starts, durs, gap=cfg.gap)
+    planned = {(ln.shot, ln.index): round(ln.start - starts[ln.shot], 3) for ln in lines}
+    detected: set[tuple[int, int]] = set()
+    if opts.align == "detected":
+        lines, detected = align_to_speech(ctx, cut, lines, starts, durs)
     manifest = dub_manifest_path(sv, cut)
     cache = manifest.parent
     rows = []
@@ -236,21 +251,50 @@ def run_dub(ctx, payload: dict) -> dict:
         ctx.progress(n, len(lines))
         rows.append({"shot": line.shot, "code": code, "index": line.index,
                      "offset": round(line.start - starts[line.shot], 3),
+                     "planned": planned[(line.shot, line.index)],
+                     "detected": (line.shot, line.index) in detected,
                      "file": sv.media.rel(mp3), "seconds": round(dur, 3), "rate": rate,
                      "window": round(line.window, 3), "over": over, "voice": voice,
                      "text": line.text})
-    manifest.write_text(json.dumps({"key": dub_key(cut, limits), "lines": rows}, ensure_ascii=False,
-                                   indent=2), encoding="utf-8")
+    manifest.write_text(json.dumps({"key": dub_key(cut, limits, opts.align), "align": opts.align,
+                                    "lines": rows}, ensure_ascii=False, indent=2), encoding="utf-8")
     over = sum(1 for r in rows if r["over"])
     return {"manifest": sv.media.rel(manifest), "lines": len(rows), "over": over}
 
 
-def load_dub_manifest(sv, cut: Cut, limits) -> dict:
+def align_to_speech(ctx, cut: Cut, lines: list[DubLine], starts: list[float],
+                    durs: list[float]) -> tuple[list[DubLine], set[tuple[int, int]]]:
+    """把每句配音挪到 H3 片段音轨里实际开口的位置（找不到就留在台词 start），窗口按新起点重算。"""
+    sv = ctx.services
+    cfg = sv.cfg.dub
+    out: list[DubLine] = []
+    detected: set[tuple[int, int]] = set()
+    for i in sorted({ln.shot for ln in lines}):
+        mine = [ln for ln in lines if ln.shot == i]
+        segs = sv.ffmpeg.speech_segments(cut.clips[i], noise_db=cfg.speech_noise_db,
+                                         min_silence=cfg.speech_min_silence, limit=durs[i])
+        plan = [ln.start - starts[i] for ln in mine]
+        onsets = align_onsets(plan, segs, max_shift=cfg.align_max_shift)
+        notes = []
+        for n, (ln, p, t) in enumerate(zip(mine, plan, onsets)):
+            nxt = onsets[n + 1] if n + 1 < len(onsets) else durs[i]
+            hit = any(abs(a - t) < 1e-6 for a, _ in segs)
+            if hit:
+                detected.add((ln.shot, ln.index))
+            notes.append(f"{t:.2f}s（计划 {p:.2f}{'' if hit else '，没对上说话段，用台词时间'}）")
+            out.append(DubLine(ln.shot, ln.index, ln.speaker, ln.text, starts[i] + t,
+                               max(min(nxt, durs[i]) - t - cfg.gap, 0.5)))
+        found = "、".join(f"{a:.2f}–{b:.2f}" for a, b in segs) or "（没检测到）"
+        ctx.log(f"{cut.codes[i]} 说话段 {found}；配音起点 {'、'.join(notes)}")
+    return out, detected
+
+
+def load_dub_manifest(sv, cut: Cut, limits, align: str = "timeline") -> dict:
     p = dub_manifest_path(sv, cut)
     if not p.exists():
         raise JobError("还没有高棉语配音，先跑 post.dub（导出时勾选配音会自动排上）")
     data = json.loads(p.read_text(encoding="utf-8"))
-    if data.get("key") != dub_key(cut, limits):
+    if data.get("key") != dub_key(cut, limits, align):
         raise JobError("配音和当前的视频、台词或音色对不上了，重跑 post.dub")
     return data
 

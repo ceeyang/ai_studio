@@ -181,6 +181,26 @@ class FFmpeg:
             raise FFmpegError(f"silencedetect 失败：\n{p.stderr[-1500:]}")
         return parse_sound_end(p.stderr, self.duration(path))
 
+    def speech_segments(self, path: Path, *, noise_db: float = -30.0, min_silence: float = 0.2,
+                        limit: float | None = None, merge_gap: float = 0.25,
+                        min_len: float = 0.12) -> list[tuple[float, float]]:
+        """音轨里"在说话"的段落（秒，带通到人声频段后的能量检测）。没有音轨返回 []。"""
+        from backend.post.speech import build_speech_detect_cmd, parse_speech_segments
+        if not self.has_audio(path):
+            return []
+        cmd = build_speech_detect_cmd(self.ffmpeg, path, noise_db=noise_db,
+                                      min_silence=min_silence, limit=limit)
+        try:
+            p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
+                               errors="replace")
+        except FileNotFoundError as e:
+            raise FFmpegError(f"找不到 {self.ffmpeg}：{e}") from e
+        if p.returncode != 0:
+            raise FFmpegError(f"silencedetect 失败：\n{p.stderr[-1500:]}")
+        total = self.duration(path)
+        return parse_speech_segments(p.stderr, min(total, limit) if limit else total,
+                                     merge_gap=merge_gap, min_len=min_len)
+
     def trim_silence(self, src: Path, dst: Path) -> Path:
         """剪掉音频首尾静音（配音用）。"""
         from backend.post.dub import build_trim_silence_cmd

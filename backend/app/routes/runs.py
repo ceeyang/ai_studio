@@ -4,9 +4,9 @@ from __future__ import annotations
 from fastapi import APIRouter, Request
 
 from backend.app.deps import get_or_404, manager, services
-from backend.app.schemas import RunIn, RunOut, TranslateIn
+from backend.app.schemas import FitKhmerIn, RunIn, RunOut, TranslateIn
 from backend.domain.models import Episode
-from backend.pipeline.runs import STAGES, RunOptions, submit_chain
+from backend.pipeline.runs import FIT_STAGE, STAGES, RunOptions, submit_chain
 
 router = APIRouter(prefix="/api", tags=["runs"])
 
@@ -14,11 +14,22 @@ router = APIRouter(prefix="/api", tags=["runs"])
 @router.post("/episodes/{episode_id}/run", response_model=RunOut)
 def run_stage(episode_id: int, body: RunIn, request: Request):
     sv = services(request)
-    stages = list(STAGES) if body.stage == "all" else [body.stage]
+    stages = list(STAGES) if body.stage == "all" else [body.stage, *(body.then or [])]
     opts = RunOptions(shots=body.shots, candidates=body.candidates, force=body.force,
                       priority=body.priority,
                       export=body.export.model_dump() if body.export else None)
     return RunOut(job_ids=submit_chain(manager(request), sv.db, sv.engines, episode_id, stages, opts))
+
+
+@router.post("/episodes/{episode_id}/dialogue/fit-khmer", response_model=RunOut)
+def fit_khmer(episode_id: int, body: FitKhmerIn, request: Request):
+    """按高棉语配音时长改写中文台词（dialogue.fit_khmer），可接着重出视频、导出。"""
+    sv = services(request)
+    opts = RunOptions(shots=[str(i) for i in body.shot_ids] if body.shot_ids else None,
+                      force=body.force,
+                      export=body.export.model_dump() if body.export else None)
+    return RunOut(job_ids=submit_chain(manager(request), sv.db, sv.engines, episode_id,
+                                       [FIT_STAGE, *body.then], opts))
 
 
 @router.post("/episodes/{episode_id}/subtitles/translate", response_model=RunOut)
