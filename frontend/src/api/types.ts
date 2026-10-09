@@ -108,11 +108,17 @@ export interface Slot {
   candidates: Candidate[];
 }
 
+/** km_review：ai_draft = AI 译稿，发布前要母语者校对；checked = 已校对。 */
+export type KmReview = 'ai_draft' | 'checked';
+
 export interface DialogueLine {
   speaker: string;
   zh: string;
   start: number;
   end: number;
+  /** 高棉语字幕 / 配音稿 */
+  km?: string | null;
+  km_review?: KmReview | null;
 }
 
 export interface CastEntry {
@@ -172,6 +178,7 @@ export interface ShotPatch {
   video_engine?: string | null;
   duration?: number;
   transition_out?: Transition;
+  dialogue?: DialogueLine[];
 }
 
 export interface ShotIn extends ShotPatch {
@@ -180,12 +187,43 @@ export interface ShotIn extends ShotPatch {
 
 export type Stage = 'script' | 'storyboard' | 'keyframes' | 'videos' | 'export' | 'all';
 
+export type SubtitleMode = 'none' | 'zh' | 'zh+km';
+export type DubMode = 'off' | 'km';
+
+/** 导出选项（backend/post/options.py::ExportOptions）。 */
+export interface ExportOptions {
+  subtitles: SubtitleMode;
+  dub: DubMode;
+  end_card: boolean;
+  trim?: boolean;
+}
+
 export interface RunIn {
   stage: Stage;
   shots?: string[];
   candidates?: number;
   force?: boolean;
   priority?: number;
+  export?: ExportOptions;
+}
+
+export interface TranslateIn {
+  force?: boolean;
+  glossary?: Record<string, string>;
+}
+
+export interface EndCardLine {
+  text: string;
+  font: string | null;
+  size: number;
+  bold: boolean;
+}
+
+/** 项目片尾卡（GET/PUT /api/projects/{slug}/end-card）。字号是 1080×1920 画面上的像素。 */
+export interface EndCard {
+  seconds: number;
+  background: string;
+  lines: EndCardLine[];
 }
 
 export interface RunOut {
@@ -205,7 +243,7 @@ export interface Character {
   portrait_url?: string | null;
 }
 
-export type CharacterPatch = Partial<Pick<Character, 'name' | 'description' | 'visual_prompt' | 'core_features'>>;
+export type CharacterPatch = Partial<Pick<Character, 'name' | 'description' | 'visual_prompt' | 'core_features' | 'voice'>>;
 
 export interface Location {
   id: number;

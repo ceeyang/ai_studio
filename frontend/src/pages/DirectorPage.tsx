@@ -9,14 +9,29 @@ import {
   useReorderShots,
   useRunStage,
   useSplitShot,
+  useTranslateSubtitles,
 } from '../api/queries';
-import type { ExportRow, RunIn } from '../api/types';
+import type { ExportOptions, ExportRow, RunIn } from '../api/types';
 import { fmtTime } from '../format';
+import { EndCardPanel } from './director/EndCardPanel';
 import { ShotDrawer } from './director/ShotDrawer';
 import { type GenStage, ShotTable } from './director/ShotTable';
 import { moveId } from './director/slots';
 
-function ExportsPanel({ rows }: { rows: ExportRow[] }) {
+const SUBTITLE_TAG: Record<string, string> = { zh: '中文字幕', 'zh+km': '中高字幕' };
+
+/** 成片的变体标签：字幕、配音、片尾卡、时长；高棉语是 AI 译稿时提醒校对。 */
+export function exportTags(settings: Record<string, unknown>): string[] {
+  const tags: string[] = [];
+  const subs = SUBTITLE_TAG[String(settings.subtitles ?? '')];
+  if (subs) tags.push(subs);
+  if (settings.dub === 'km') tags.push('高棉语配音');
+  if (settings.end_card === true) tags.push('片尾卡');
+  if (typeof settings.duration === 'number') tags.push(`${settings.duration.toFixed(1)} 秒`);
+  return tags;
+}
+
+function ExportsPanel({ rows, slug }: { rows: ExportRow[]; slug: string }) {
   return (
     <section className="panel">
       <h3>成片</h3>
@@ -32,13 +47,18 @@ function ExportsPanel({ rows }: { rows: ExportRow[] }) {
                   {x.file_path.split('/').pop()}
                 </a>{' '}
                 <span className="muted">
-                  {x.variant} · {String(x.settings.clips ?? '?')} 镜 · {fmtTime(x.created_at)}
+                  {[x.variant, `${String(x.settings.clips ?? '?')} 镜`, ...exportTags(x.settings), fmtTime(x.created_at)].join(' · ')}
                 </span>
+                {x.settings.km_review === 'ai_draft' && <span className="badge stale">高棉语待母语校对</span>}
               </li>
             ))}
           </ul>
         </div>
       )}
+      <details className="end-card-box">
+        <summary>片尾卡设置</summary>
+        <EndCardPanel slug={slug} />
+      </details>
     </section>
   );
 }
@@ -54,10 +74,15 @@ export function DirectorPage() {
   const split = useSplitShot(id);
   const del = useDeleteShot(id);
   const create = useCreateShot(id);
+  const translate = useTranslateSubtitles(id);
   const [selected, setSelected] = useState<Set<number>>(() => new Set());
   const [count, setCount] = useState(1);
   const [force, setForce] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [subZh, setSubZh] = useState(false);
+  const [subKm, setSubKm] = useState(false);
+  const [dubKm, setDubKm] = useState(false);
+  const [endCard, setEndCard] = useState(false);
 
   if (ep.isLoading) return <p className="loading">加载中…</p>;
   if (ep.error || !ep.data) return <p className="error">{ep.error ? errorText(ep.error) : '找不到这一集'}</p>;
@@ -78,9 +103,16 @@ export function DirectorPage() {
   };
 
   // 镜头用 id 而不是 S01 这类编号：编号在排序、拆分、删除后会变
+  const exportOptions: ExportOptions = {
+    subtitles: subKm ? 'zh+km' : subZh ? 'zh' : 'none',
+    dub: dubKm ? 'km' : 'off',
+    end_card: endCard,
+  };
+
   const generate = (stage: GenStage | 'export', ids: number[] = []) => {
     const body: RunIn = { stage, candidates: count, force };
     if (ids.length > 0) body.shots = ids.map(String);
+    if (stage === 'export') body.export = exportOptions;
     run.mutate(body, {
       onSuccess: (r) => setNotice(`已提交 ${r.job_ids.length} 个任务（#${r.job_ids.join(', #')}），进度见顶部任务条`),
       onError: (err) => setNotice(errorText(err)),
@@ -160,6 +192,56 @@ export function DirectorPage() {
           合成导出
         </button>
       </div>
+      <div className="toolbar export-options" role="group" aria-label="导出选项">
+        <span className="muted">导出选项</span>
+        <label>
+          <input
+            type="checkbox"
+            aria-label="中文字幕"
+            checked={subZh}
+            onChange={(ev) => {
+              setSubZh(ev.target.checked);
+              if (!ev.target.checked) setSubKm(false);
+            }}
+          />{' '}
+          中文字幕
+        </label>
+        <label>
+          <input
+            type="checkbox"
+            aria-label="高棉语字幕"
+            checked={subKm}
+            onChange={(ev) => {
+              setSubKm(ev.target.checked);
+              if (ev.target.checked) setSubZh(true);
+            }}
+          />{' '}
+          高棉语字幕（在中文下面）
+        </label>
+        <label>
+          <input type="checkbox" aria-label="高棉语配音" checked={dubKm} onChange={(ev) => setDubKm(ev.target.checked)} /> 高棉语配音（Edge TTS，原声压低当底）
+        </label>
+        <label>
+          <input type="checkbox" aria-label="片尾卡" checked={endCard} onChange={(ev) => setEndCard(ev.target.checked)} /> 片尾卡
+        </label>
+        <span className="grow" aria-hidden="true" />
+        <button
+          type="button"
+          className="ghost"
+          disabled={shots.length === 0 || translate.isPending}
+          onClick={() =>
+            translate.mutate(
+              { force: false },
+              {
+                onSuccess: (r) => setNotice(`已提交翻译任务 #${r.job_ids.join(', #')}：只补缺的句子，译文是 AI 草稿，发布前请母语者校对`),
+                onError: (err) => setNotice(errorText(err)),
+              },
+            )
+          }
+        >
+          翻译高棉语字幕
+        </button>
+      </div>
       {notice && (
         <p className="notice" role="status">
           {notice}
@@ -187,7 +269,7 @@ export function DirectorPage() {
             onGenerate={(shotId, stage) => generate(stage, [shotId])}
           />
         )}
-        <ExportsPanel rows={exportsQ.data ?? []} />
+        <ExportsPanel rows={exportsQ.data ?? []} slug={slug} />
       </div>
 
       {openShot && <div className="drawer-scrim" aria-hidden="true" />}

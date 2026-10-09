@@ -3,6 +3,7 @@ import { useEngines, usePatchShot, useSelectCandidate } from '../../api/queries'
 import { type EngineRow, type ShotDetail, type ShotPatch, TRANSITIONS, type Transition } from '../../api/types';
 import { EditableFields, type FieldSpec, type FieldValues } from '../../components/EditableFields';
 import { CandidateGrid } from './CandidateGrid';
+import { DialogueEditor } from './DialogueEditor';
 import type { GenStage } from './ShotTable';
 import { SLOT_LABEL } from './slots';
 
@@ -65,6 +66,7 @@ export interface ShotDrawerProps {
 export function ShotDrawer({ shot, episodeId, onClose, onGenerate, generating = false }: ShotDrawerProps) {
   const engines = useEngines();
   const patch = usePatchShot(episodeId);
+  const patchDialogue = usePatchShot(episodeId);
   const select = useSelectCandidate(episodeId);
   const initial: FieldValues = {
     action: shot.action,
@@ -113,17 +115,13 @@ export function ShotDrawer({ shot, episodeId, onClose, onGenerate, generating = 
 
       {shot.dialogue.length > 0 && (
         <section>
-          <h4>对白</h4>
-          <ul className="list dialogue-list">
-            {shot.dialogue.map((d, i) => (
-              <li key={i} className="dialogue-line">
-                <span className="t">
-                  {d.start.toFixed(1)}–{d.end.toFixed(1)}s
-                </span>
-                {d.speaker}：{d.zh}
-              </li>
-            ))}
-          </ul>
+          <h4>对白与字幕</h4>
+          <DialogueEditor
+            dialogue={shot.dialogue}
+            saving={patchDialogue.isPending}
+            error={patchDialogue.error ? errorText(patchDialogue.error) : null}
+            onSave={(lines) => patchDialogue.mutate({ id: shot.id, dialogue: lines })}
+          />
         </section>
       )}
 

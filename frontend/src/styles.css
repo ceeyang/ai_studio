@@ -980,3 +980,18 @@ pre.error { background: rgba(255, 90, 95, 0.06); border-color: rgba(255, 90, 95,
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
 }
+
+/* ---------- 后期：对白与高棉语字幕、导出选项、片尾卡 ---------- */
+.dialogue-editor fieldset.dialogue-line { display: flex; flex-direction: column; gap: var(--s-2); margin: 0; padding: var(--s-3); border: 1px solid var(--border); border-radius: var(--r-md); }
+.dialogue-editor legend { padding: 0 6px; font-size: 13px; color: var(--text-2); }
+.dialogue-editor legend .t { font-family: var(--mono); font-size: 12px; color: var(--muted); margin-right: 8px; }
+.dialogue-editor textarea[lang="km"] { font-family: "Khmer UI", "Leelawadee UI", var(--font); font-size: 15px; line-height: 1.7; }
+.check { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-2); }
+.toolbar.export-options { margin-top: calc(var(--s-2) * -1); }
+.export-list .badge { align-self: flex-start; margin-left: 0; }
+.end-card-box { margin-top: var(--s-4); border-top: 1px solid var(--divider); padding-top: var(--s-3); }
+.end-card-box > summary { cursor: pointer; color: var(--text-2); font-size: 13px; margin-bottom: var(--s-3); }
+.end-card-line { flex-wrap: nowrap; }
+.end-card-line .grow { flex: 1; min-width: 0; }
+.end-card-line input[type="number"] { width: 72px; }
+.end-card-line input:not([type]) { min-width: 0; }

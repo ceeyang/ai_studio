@@ -90,4 +90,20 @@ describe('ShotDrawer', () => {
       action: '抬头',
     });
   });
+
+  it('对白里填高棉语，保存时 PATCH 整段对白', async () => {
+    const shot = makeShot({ id: 6, code: 'S02', dialogue: [{ speaker: '陈师傅', zh: '换？', start: 2, end: 2.6 }] });
+    const calls = installFetch({
+      'GET /api/engines': ENGINES,
+      'PATCH /api/shots/6': (c: { body: unknown }) => ({ ...shot, ...(c.body as object) }),
+    });
+    renderAt(<ShotDrawer shot={shot} episodeId={1} onClose={() => {}} onGenerate={() => {}} />);
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText('第 1 句高棉语'), 'ដូរ?');
+    await user.click(screen.getByRole('button', { name: '保存对白' }));
+    await waitFor(() => expect(calls.some((c) => c.method === 'PATCH')).toBe(true));
+    expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({
+      dialogue: [{ speaker: '陈师傅', zh: '换？', start: 2, end: 2.6, km: 'ដូរ?' }],
+    });
+  });
 });

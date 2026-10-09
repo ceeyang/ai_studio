@@ -4,7 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { installFetch } from '../test/fetch';
 import { makeEpisode } from '../test/factories';
 import { renderAt } from '../test/render';
-import { ScriptPage } from './ScriptPage';
+import { ScriptPage, toCharacterPatch } from './ScriptPage';
 
 const EP = makeEpisode({
   id: 4,
@@ -73,6 +73,19 @@ describe('ScriptPage', () => {
     await user.click(within(card).getByRole('button', { name: '保存' }));
     await waitFor(() => expect(calls.some((c) => c.method === 'PATCH')).toBe(true));
     expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({ description: '新主播' });
+  });
+
+  it('角色卡填配音音色；清空音色提交 null', async () => {
+    const calls = installFetch({ ...ROUTES, 'PATCH /api/characters/8': ROUTES['GET /api/projects/demo/characters'][0] });
+    renderAt(<ScriptPage />, AT);
+    const user = userEvent.setup();
+    const card = await screen.findByTestId('character-8');
+    const voice = within(card).getByLabelText(/配音音色/);
+    await user.type(voice, 'km-KH-SreymomNeural');
+    await user.click(within(card).getByRole('button', { name: '保存' }));
+    await waitFor(() => expect(calls.some((c) => c.method === 'PATCH')).toBe(true));
+    expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({ voice: 'km-KH-SreymomNeural' });
+    expect(toCharacterPatch({ voice: '', name: '林夏' })).toEqual({ voice: null, name: '林夏' });
   });
 
   it('角色定妆照：显示缩略图，上传后提交 multipart 并刷新', async () => {

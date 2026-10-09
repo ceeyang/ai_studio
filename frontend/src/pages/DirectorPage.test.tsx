@@ -14,7 +14,13 @@ const ENGINES = { image: [], video: [] };
 const AT = { route: '/projects/demo/episodes/4/director', path: '/projects/:slug/episodes/:episodeId/director' };
 
 function routes(extra: Record<string, unknown> = {}) {
-  return { 'GET /api/episodes/4': EP, 'GET /api/episodes/4/exports': [], 'GET /api/engines': ENGINES, ...extra };
+  return {
+    'GET /api/episodes/4': EP,
+    'GET /api/episodes/4/exports': [],
+    'GET /api/engines': ENGINES,
+    'GET /api/projects/demo/end-card': null,
+    ...extra,
+  };
 }
 
 describe('DirectorPage', () => {
@@ -86,5 +92,61 @@ describe('DirectorPage', () => {
     expect(await screen.findByRole('dialog', { name: '镜头 S02 详情' })).toBeTruthy();
     await user.click(screen.getByRole('button', { name: '关闭' }));
     expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('合成导出带上字幕、配音、片尾卡选项；勾高棉语字幕会连带勾中文字幕', async () => {
+    const calls = installFetch(routes({ 'POST /api/episodes/4/run': { job_ids: [41, 42, 43] } }));
+    renderAt(<DirectorPage />, AT);
+    const user = userEvent.setup();
+    await screen.findByTestId('shot-S01');
+    await user.click(screen.getByRole('button', { name: '合成导出' }));
+    await user.click(screen.getByLabelText('高棉语字幕'));
+    expect((screen.getByLabelText('中文字幕') as HTMLInputElement).checked).toBe(true);
+    await user.click(screen.getByLabelText('高棉语配音'));
+    await user.click(screen.getByLabelText('片尾卡'));
+    await user.click(screen.getByRole('button', { name: '合成导出' }));
+    await waitFor(() => expect(calls.filter((c) => c.method === 'POST')).toHaveLength(2));
+    const runs = calls.filter((c) => c.method === 'POST');
+    expect(runs[0].body).toEqual({
+      stage: 'export', candidates: 1, force: false,
+      export: { subtitles: 'none', dub: 'off', end_card: false },
+    });
+    expect(runs[1].body).toEqual({
+      stage: 'export', candidates: 1, force: false,
+      export: { subtitles: 'zh+km', dub: 'km', end_card: true },
+    });
+    await user.click(screen.getByLabelText('中文字幕'));
+    expect((screen.getByLabelText('高棉语字幕') as HTMLInputElement).checked).toBe(false);
+  });
+
+  it('翻译高棉语字幕提交翻译任务', async () => {
+    const calls = installFetch(routes({ 'POST /api/episodes/4/subtitles/translate': { job_ids: [50] } }));
+    renderAt(<DirectorPage />, AT);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: '翻译高棉语字幕' }));
+    expect((await screen.findByRole('status')).textContent).toContain('#50');
+    expect(calls.find((c) => c.method === 'POST')?.body).toEqual({ force: false });
+  });
+
+  it('成片列表标出字幕、配音、片尾卡和待校对', async () => {
+    installFetch(
+      routes({
+        'GET /api/episodes/4/exports': [
+          {
+            id: 2, episode_id: 4, variant: '9x16', file_path: 'demo/exports/ep01_9x16_zhkm_dubkm_card_x.mp4',
+            url: '/media/demo/exports/ep01_9x16_zhkm_dubkm_card_x.mp4',
+            settings: { clips: 6, subtitles: 'zh+km', dub: 'km', end_card: true, duration: 33.6, km_review: 'ai_draft' },
+            created_at: '2026-10-09T12:00:00',
+          },
+        ],
+      }),
+    );
+    renderAt(<DirectorPage />, AT);
+    const row = (await screen.findByTestId('export-link')).closest('li') as HTMLElement;
+    expect(row.textContent).toContain('中高字幕');
+    expect(row.textContent).toContain('高棉语配音');
+    expect(row.textContent).toContain('片尾卡');
+    expect(row.textContent).toContain('33.6 秒');
+    expect(row.textContent).toContain('高棉语待母语校对');
   });
 });

@@ -6,6 +6,7 @@ import type {
   Character,
   CharacterPatch,
   DoctorCheck,
+  EndCard,
   Engines,
   Episode,
   EpisodeDetail,
@@ -28,6 +29,7 @@ import type {
   ShotIn,
   ShotPatch,
   Style,
+  TranslateIn,
 } from './types';
 
 export const keys = {
@@ -41,6 +43,7 @@ export const keys = {
   characters: (slug: string) => ['characters', slug] as const,
   locations: (slug: string) => ['locations', slug] as const,
   style: (slug: string) => ['style', slug] as const,
+  endCard: (slug: string) => ['endCard', slug] as const,
   exports: (episodeId: number) => ['exports', episodeId] as const,
   jobs: (status: string, limit: number) => ['jobs', status, limit] as const,
   job: (id: number) => ['job', id] as const,
@@ -115,6 +118,14 @@ export function useStyle(slug: string) {
   return useQuery({
     queryKey: keys.style(slug),
     queryFn: () => api.get<Style | null>(`/api/projects/${enc(slug)}/style`),
+    enabled: slug !== '',
+  });
+}
+
+export function useEndCard(slug: string) {
+  return useQuery({
+    queryKey: keys.endCard(slug),
+    queryFn: () => api.get<EndCard | null>(`/api/projects/${enc(slug)}/end-card`),
     enabled: slug !== '',
   });
 }
@@ -289,6 +300,22 @@ export function useSelectCandidate(episodeId: number) {
   return useMutation({
     mutationFn: (candidateId: number) => api.post<Candidate>(`/api/candidates/${candidateId}/select`),
     onSuccess: () => invalidate(qc, keys.episode(episodeId)),
+  });
+}
+
+export function usePutEndCard(slug: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: EndCard) => api.put<EndCard>(`/api/projects/${enc(slug)}/end-card`, body),
+    onSuccess: () => invalidate(qc, keys.endCard(slug)),
+  });
+}
+
+export function useTranslateSubtitles(episodeId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: TranslateIn) => api.post<RunOut>(`/api/episodes/${episodeId}/subtitles/translate`, body),
+    onSuccess: () => invalidate(qc, ['jobs'], keys.queue),
   });
 }
 
