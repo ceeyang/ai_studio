@@ -21,13 +21,11 @@ episode_app = typer.Typer(help="剧集", no_args_is_help=True)
 job_app = typer.Typer(help="单个任务", no_args_is_help=True)
 candidate_app = typer.Typer(help="候选", no_args_is_help=True)
 queue_app = typer.Typer(help="队列", no_args_is_help=True)
-import_app = typer.Typer(help="从旧工具导入项目", no_args_is_help=True)
 app.add_typer(project_app, name="project")
 app.add_typer(episode_app, name="episode")
 app.add_typer(job_app, name="job")
 app.add_typer(candidate_app, name="candidate")
 app.add_typer(queue_app, name="queue")
-app.add_typer(import_app, name="import")
 
 STATE = {"json": False}
 ICON = {"ok": "√", "warn": "!", "fail": "×"}
@@ -37,14 +35,13 @@ def _base_url() -> str:
     return os.environ.get("STUDIO_URL", DEFAULT_URL)
 
 
-def _client(timeout: float = 120) -> httpx.Client:
-    return httpx.Client(base_url=_base_url(), timeout=timeout, trust_env=False)
+def _client() -> httpx.Client:
+    return httpx.Client(base_url=_base_url(), timeout=120, trust_env=False)
 
 
-def _call(method: str, path: str, *, timeout: float | None = None, **kw) -> Any:
+def _call(method: str, path: str, **kw) -> Any:
     try:
-        client = _client(timeout) if timeout else _client()
-        r = client.request(method, path, **kw)
+        r = _client().request(method, path, **kw)
     except httpx.TimeoutException:
         typer.echo(f"工作台响应超时（{_base_url()} {method} {path}），服务可能正忙，稍后用 "
                    "studio jobs 查看", err=True)
@@ -254,29 +251,6 @@ def queue_pause():
 @queue_app.command("resume")
 def queue_resume():
     _emit(_call("POST", "/api/queue/resume"), _print_queue)
-
-
-COUNT_LABEL = {"characters": "角色", "portraits": "定妆照", "shots": "镜头", "keyframes": "首帧",
-               "videos": "视频", "dub_videos": "配音版视频", "exports": "成片"}
-
-
-def _print_import(r: dict) -> None:
-    c = r["counts"]
-    typer.echo(f"已导入项目 {r['slug']}（{r['project_title']}）")
-    typer.echo("  " + "  ".join(f"{COUNT_LABEL.get(k, k)} {v}" for k, v in c.items()))
-    typer.echo(f"  打开：{_base_url()}{r['url']}")
-    for w in r.get("warnings") or []:
-        typer.echo(f"  ! {w}")
-
-
-@import_app.command("ai-videos")
-def import_ai_videos(path: Path = typer.Argument(..., exists=True, file_okay=False,
-                                                 help="ai_videos 的项目目录（含 project.yaml），只读不改"),
-                     slug: Optional[str] = typer.Option(None, help="新项目 slug，默认用目录名")):
-    body: dict = {"path": str(path.resolve())}
-    if slug:
-        body["slug"] = slug
-    _emit(_call("POST", "/api/import/ai-videos", json=body, timeout=900), _print_import)
 
 
 def _print_doctor(rows: list[dict]) -> None:
