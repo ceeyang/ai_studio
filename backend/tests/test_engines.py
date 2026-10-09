@@ -90,6 +90,21 @@ def test_h3_video_frames_and_first_frame(reg, tmp_path):
     assert eng.caps.has_audio and call.model_family == "h3" and call.output_kind == "video"
 
 
+def test_h3_video_frames_round_to_nearest_grid_point(reg):
+    """4.5s/6s 的镜头不再一律往上取到 5.17s/6.58s：取最近的 17k+5，最少 5 帧。"""
+    eng = reg.video("h3_video")
+    assert eng.frames_for(4.5) == 107      # 108 帧离 107 近，不是 124
+    assert eng.frames_for(6) == 141        # 144 帧离 141 近，不是 158
+    assert eng.frames_for(5) == 124        # 120 帧离 124 近（107 更远）
+    assert eng.frames_for(5.5) == 124 and eng.frames_for(6.5) == 158
+    assert eng.frames_for(0) == 5 and eng.frames_for(0.3) == 5
+    assert eng.frames_for(4.1) == 90       # 98 帧：离 90 差 8，离 107 差 9
+    for s in (0.5, 1, 2.2, 3.7, 4.5, 7.3, 9.9):
+        f = eng.frames_for(s)
+        assert f >= 5 and (f - 5) % 17 == 0
+        assert abs(f - s * 24) <= 8.5      # 离目标帧数不超过半个网格
+
+
 def test_h3_video_clamps_to_max_seconds(reg, tmp_path):
     eng = reg.video("h3_video")
     wf = eng.build(VideoRequest(prompt="p", first_frame=tmp_path / "f.png", seconds=30)).workflow

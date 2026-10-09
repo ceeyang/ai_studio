@@ -1,6 +1,7 @@
 """第一版四个 ComfyUI 引擎。参数与帧数规则移植自 vglib/engines.py（已实测）。"""
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 from backend.engines.base import (EngineCall, ImageCaps, ImageRequest, VideoCaps, VideoRequest,
@@ -90,8 +91,14 @@ class H3VideoEngine(_ComfyEngine):
                      default_seconds=5.0, max_seconds=10.0)
 
     def frames_for(self, seconds: float) -> int:
-        n = max(1, round(seconds * self.caps.fps))
-        return max(5, n + (5 - n % 17) % 17)
+        """取离目标帧数最近的 17k+5（等距时取长的），最少 5 帧。
+
+        以前一律往上取：4.5s/5s 都出成 124 帧（5.17s）、6s 出成 158 帧（6.58s），成片比分镜长 8%。
+        往下取最多短半个网格（17 帧 ÷ 2 ≈ 0.35s），分镜时长本来就是估计值，台词留了 0.4s 余量。
+        """
+        n = seconds * self.caps.fps
+        k = math.floor((n - 5) / 17 + 0.5)
+        return max(5, 17 * k + 5)
 
     def build(self, req: VideoRequest) -> EngineCall:
         w, h = size_for(self.caps.sizes, req.aspect)
