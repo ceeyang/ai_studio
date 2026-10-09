@@ -181,25 +181,25 @@ class FFmpeg:
             raise FFmpegError(f"silencedetect 失败：\n{p.stderr[-1500:]}")
         return parse_sound_end(p.stderr, self.duration(path))
 
-    def speech_segments(self, path: Path, *, noise_db: float = -30.0, min_silence: float = 0.2,
+    def speech_segments(self, path: Path, *, min_db: float = -45.0, periodicity: float = 0.5,
                         limit: float | None = None, merge_gap: float = 0.25,
                         min_len: float = 0.12) -> list[tuple[float, float]]:
-        """音轨里"在说话"的段落（秒，带通到人声频段后的能量检测）。没有音轨返回 []。"""
-        from backend.post.speech import build_speech_detect_cmd, parse_speech_segments
+        """音轨里"在说话"的段落（秒）：带通到人声频段后按帧找浊音（能量 + 周期性），见 post/speech.py。
+        没有音轨返回 []。"""
+        import numpy as np
+
+        from backend.post.speech import SAMPLE_RATE, build_pcm_cmd, speech_segments_from_pcm
         if not self.has_audio(path):
             return []
-        cmd = build_speech_detect_cmd(self.ffmpeg, path, noise_db=noise_db,
-                                      min_silence=min_silence, limit=limit)
         try:
-            p = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8",
-                               errors="replace")
+            p = subprocess.run(build_pcm_cmd(self.ffmpeg, path, limit=limit), capture_output=True)
         except FileNotFoundError as e:
             raise FFmpegError(f"找不到 {self.ffmpeg}：{e}") from e
         if p.returncode != 0:
-            raise FFmpegError(f"silencedetect 失败：\n{p.stderr[-1500:]}")
-        total = self.duration(path)
-        return parse_speech_segments(p.stderr, min(total, limit) if limit else total,
-                                     merge_gap=merge_gap, min_len=min_len)
+            raise FFmpegError(f"解音轨失败：\n{p.stderr.decode('utf-8', 'replace')[-1500:]}")
+        x = np.frombuffer(p.stdout, dtype=np.float32)
+        return speech_segments_from_pcm(x, SAMPLE_RATE, min_db=min_db, periodicity=periodicity,
+                                        merge_gap=merge_gap, min_len=min_len)
 
     def trim_silence(self, src: Path, dst: Path) -> Path:
         """剪掉音频首尾静音（配音用）。"""

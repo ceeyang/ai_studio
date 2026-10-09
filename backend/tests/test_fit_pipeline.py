@@ -254,7 +254,7 @@ def test_export_without_bed_keeps_only_the_dub(tmp_path, db, monkeypatch):
     res = run_export(FakeCtx(sv, job_id=3), {"episode_id": ep_id, "options": opts})
     out = sv.media.abs(res["file"])
     assert "_zhkm_dubkm_nobed_" in out.name
-    segs = ff.speech_segments(out, noise_db=-45)
+    segs = ff.speech_segments(out)
     # 原音轨整段 300Hz 都没了，只剩 1.0s 处 0.6s 的配音
     assert len(segs) == 1
     assert segs[0][0] == pytest.approx(1.0, abs=0.12) and segs[0][1] == pytest.approx(1.6, abs=0.12)

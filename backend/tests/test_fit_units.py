@@ -2,12 +2,13 @@
 import shutil
 import subprocess
 
+import numpy as np
 import pytest
 
 from backend.post.dub import build_dub_mix_cmd
 from backend.post.fit import (FitLine, fit_lines, speech_chars, update_audio_prompt, retime_shot)
 from backend.post.options import ExportOptions
-from backend.post.speech import align_onsets, parse_speech_segments
+from backend.post.speech import align_onsets, frames_to_segments, speech_segments_from_pcm
 
 
 # ---------------------------------------------------------------- 改写循环
@@ -133,28 +134,32 @@ def test_audio_prompt_swaps_lines_and_replaces_pacing():
 
 
 # ---------------------------------------------------------------- 说话起点
-SILENCE_LOG = """
-[silencedetect @ 0x1] silence_start: 0
-[silencedetect @ 0x1] silence_end: 0.82 | silence_duration: 0.82
-[silencedetect @ 0x1] silence_start: 1.10
-[silencedetect @ 0x1] silence_end: 1.30 | silence_duration: 0.2
-[silencedetect @ 0x1] silence_start: 2.40
-[silencedetect @ 0x1] silence_end: 3.05 | silence_duration: 0.65
-[silencedetect @ 0x1] silence_start: 3.08
-[silencedetect @ 0x1] silence_end: 3.60 | silence_duration: 0.52
-[silencedetect @ 0x1] silence_start: 4.50
-[silencedetect @ 0x1] silence_end: 5.0 | silence_duration: 0.5
-"""
+def test_frames_to_segments_merges_short_gaps_and_drops_blips():
+    v = np.zeros(500, dtype=bool)          # 10ms 一帧
+    v[82:110] = True                       # 0.82–1.10
+    v[130:240] = True                      # 1.30–2.40：和上一段只隔 0.2s，并成一句
+    v[305:308] = True                      # 太短，丢掉
+    v[360:450] = True
+    segs = frames_to_segments(v, 0.01, 0.0, merge_gap=0.25, min_len=0.12)
+    assert segs == [(0.82, 2.39), (3.6, 4.49)]
 
 
-def test_parse_speech_segments_merges_short_gaps_and_drops_blips():
-    segs = parse_speech_segments(SILENCE_LOG, 5.0, merge_gap=0.25, min_len=0.12)
-    # 0.82–1.10 和 1.30–2.40 之间只停了 0.2s，算一句；3.05–3.08 太短丢掉
-    assert segs == [(0.82, 2.40), (3.60, 4.50)]
+def tones_noise_silence(sr=16000, seed=0):
+    """0.5s 静 + 1.0s 200Hz 带谐波的"嗓音" + 0.8s 响白噪声（环境声）+ 0.7s 嗓音 + 0.5s 静。"""
+    rng = np.random.default_rng(seed)
+    t = lambda d: np.arange(int(d * sr)) / sr  # noqa: E731
+    voice = lambda d: 0.2 * (np.sin(2 * np.pi * 200 * t(d)) + 0.5 * np.sin(2 * np.pi * 400 * t(d))  # noqa: E731
+                             + 0.3 * np.sin(2 * np.pi * 600 * t(d)))
+    parts = [np.zeros(int(0.5 * sr)), voice(1.0), 0.3 * rng.standard_normal(int(0.8 * sr)),
+             voice(0.7), np.zeros(int(0.5 * sr))]
+    return np.concatenate(parts).astype(np.float32)
 
 
-def test_parse_speech_segments_without_silence_is_one_segment():
-    assert parse_speech_segments("", 4.0) == [(0.0, 4.0)]
+def test_speech_segments_find_voiced_tones_and_ignore_loud_noise():
+    segs = speech_segments_from_pcm(tones_noise_silence(), 16000, merge_gap=0.25)
+    assert len(segs) == 2
+    assert segs[0][0] == pytest.approx(0.5, abs=0.05) and segs[0][1] == pytest.approx(1.5, abs=0.05)
+    assert segs[1][0] == pytest.approx(2.3, abs=0.05) and segs[1][1] == pytest.approx(3.0, abs=0.05)
 
 
 def test_align_onsets_picks_nearest_segment_in_order_and_falls_back():
@@ -170,9 +175,9 @@ def test_align_onsets_picks_nearest_segment_in_order_and_falls_back():
 def test_speech_segments_on_synthetic_tones(tmp_path):
     from backend.engines.ffmpeg import FFmpeg
     wav = tmp_path / "tones.wav"
-    # 0.5s 静 + 1.0s 音 + 0.8s 静 + 0.7s 音 + 0.5s 静
+    # 0.5s 静 + 1.0s 音 + 0.8s 响噪声 + 0.7s 音 + 0.5s 静
     graph = ("anullsrc=r=48000:cl=mono:d=0.5[s1];sine=f=300:r=48000:d=1.0[t1];"
-             "anullsrc=r=48000:cl=mono:d=0.8[s2];sine=f=500:r=48000:d=0.7[t2];"
+             "anoisesrc=r=48000:a=0.3:d=0.8[s2];sine=f=250:r=48000:d=0.7[t2];"
              "anullsrc=r=48000:cl=mono:d=0.5[s3];[s1][t1][s2][t2][s3]concat=n=5:v=0:a=1[a]")
     subprocess.run(["ffmpeg", "-y", "-filter_complex", graph, "-map", "[a]", str(wav)],
                    check=True, capture_output=True)

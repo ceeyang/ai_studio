@@ -104,9 +104,9 @@ class DubCfg(BaseModel):
     zh_voice_default: str = "zh-CN-YunxiNeural"
     fit_tolerance: float = 0.10        # 中文实测时长和高棉语相差在 ±10% 以内算合格
     fit_rounds: int = 3                # 最多改写几轮
-    # align=detected：在 H3 音轨里找说话段（带通到人声频段后 silencedetect）
-    speech_noise_db: float = -30.0
-    speech_min_silence: float = 0.2
+    # align=detected：在 H3 音轨里找说话段（带通后按帧找浊音：能量 ≥ speech_min_db 且有周期性）
+    speech_min_db: float = -45.0
+    speech_periodicity: float = 0.5
     align_max_shift: float = 1.5       # 只在台词计划起点前后这么多秒内找说话段
 
 

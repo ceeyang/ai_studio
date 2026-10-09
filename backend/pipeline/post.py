@@ -271,8 +271,8 @@ def align_to_speech(ctx, cut: Cut, lines: list[DubLine], starts: list[float],
     detected: set[tuple[int, int]] = set()
     for i in sorted({ln.shot for ln in lines}):
         mine = [ln for ln in lines if ln.shot == i]
-        segs = sv.ffmpeg.speech_segments(cut.clips[i], noise_db=cfg.speech_noise_db,
-                                         min_silence=cfg.speech_min_silence, limit=durs[i])
+        segs = sv.ffmpeg.speech_segments(cut.clips[i], min_db=cfg.speech_min_db,
+                                         periodicity=cfg.speech_periodicity, limit=durs[i])
         plan = [ln.start - starts[i] for ln in mine]
         onsets = align_onsets(plan, segs, max_shift=cfg.align_max_shift)
         notes = []
