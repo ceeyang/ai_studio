@@ -95,6 +95,7 @@ class DubCfg(BaseModel):
     duck_db: float = -30.0
     max_rate: int = 35                 # 台词塞不进窗口时最多提速 +35%
     gap: float = 0.1                   # 每句至少比下一句（或镜头结尾）早结束这么多秒
+    loudness: float | None = -14.0     # 配音版整体响度（LUFS，loudnorm）；null 不处理
 
 
 class Config(BaseModel):

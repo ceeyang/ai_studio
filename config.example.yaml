@@ -54,6 +54,7 @@ dub:
   bed_db: -14      # 原音轨压低多少当环境底
   duck_db: -30     # 台词窗口内原音轨再压到多少（盖住 H3 的普通话人声）
   max_rate: 35     # 台词塞不进窗口时最多提速 +35%
+  loudness: -14    # 配音版整体响度（LUFS）
 
 # 生产态由后端托管的前端构建目录（cd frontend; npm run build 生成）；目录不存在就只提供 API
 frontend_dist: frontend/dist

@@ -72,7 +72,8 @@ def run_export(ctx, payload: dict) -> dict:
         ctx.log(f"叠高棉语配音 {len(lines)} 句，原音轨压到 {sv.cfg.dub.bed_db:g} dB")
         dubbed = work / "dub.mp4"
         sv.ffmpeg.run(build_dub_mix_cmd(sv.ffmpeg.ffmpeg, cur, lines, dubbed,
-                                        bed_db=sv.cfg.dub.bed_db, duck_db=sv.cfg.dub.duck_db))
+                                        bed_db=sv.cfg.dub.bed_db, duck_db=sv.cfg.dub.duck_db,
+                                        loudness=sv.cfg.dub.loudness))
         cur = dubbed
     card_seconds = 0.0
     if opts.subtitles != "none" or opts.end_card:

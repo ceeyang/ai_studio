@@ -47,8 +47,11 @@ def plan_dub_lines(shots_dialogue: list[list[dict]], starts: list[float], durati
 
 
 def build_dub_mix_cmd(ffmpeg: str, src, lines: list[tuple], out, *, bed_db: float,
-                      duck_db: float) -> list[str]:
-    """lines：[(音频文件, 成片起点秒, 时长秒)]。画面直接拷贝，只重编码音轨。"""
+                      duck_db: float, loudness: float | None = None) -> list[str]:
+    """lines：[(音频文件, 成片起点秒, 时长秒)]。画面直接拷贝，只重编码音轨。
+
+    loudness：混好后用 loudnorm 拉到这个响度（LUFS）。原音轨压低后整体会比普通话版轻十来个 LU。
+    """
     cmd = [ffmpeg, "-y", "-i", str(src)]
     for path, _, _ in lines:
         cmd += ["-i", str(path)]
@@ -64,8 +67,11 @@ def build_dub_mix_cmd(ffmpeg: str, src, lines: list[tuple], out, *, bed_db: floa
     for i, (_, st, _) in enumerate(lines, start=1):
         parts.append(f"[{i}:a]{fmt},adelay={int(round(max(st, 0.0) * 1000))}:all=1[v{i}]")
         labels.append(f"[v{i}]")
+    mixed = "[a]" if loudness is None else "[mix]"
     parts.append("".join(labels) + f"amix=inputs={len(labels)}:normalize=0:dropout_transition=0"
-                 ":duration=first[a]")
+                 f":duration=first{mixed}")
+    if loudness is not None:
+        parts.append(f"[mix]loudnorm=I={loudness:g}:TP=-1.5:LRA=11[a]")
     return cmd + ["-filter_complex", ";".join(parts), "-map", "0:v", "-map", "[a]",
                   "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-ar", str(SAMPLE_RATE),
                   "-movflags", "+faststart", str(out)]

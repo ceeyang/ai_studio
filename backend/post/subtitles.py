@@ -75,7 +75,7 @@ def build_subtitles_ass(cues: list[Cue], width: int, height: int, *, mode: str, 
     if mode not in MODES:
         raise ValueError(f"字幕模式只能是 {MODES}，收到 {mode!r}")
     zh_size = max(36, int(height * 0.038))
-    km_size = max(28, int(height * 0.028))
+    km_size = max(28, int(height * 0.031))
     margin = int(height * 0.215)
     styles = [
         f"Style: ZH,{zh_font},{zh_size},&H00FFFFFF,&H000000FF,&H00000000,&H80000000,"
@@ -91,8 +91,9 @@ def build_subtitles_ass(cues: list[Cue], width: int, height: int, *, mode: str, 
         if mode == "zh+km" and c.km:
             parts.append("{\\rKM}" + c.km)
         if parts:
+            # 中高两行之间插一行小字号空行：高棉文的上标元音不会顶到中文
             events.append(f"Dialogue: 0,{ass_time(c.start)},{ass_time(c.end)},ZH,,0,0,0,,"
-                          + "\\N".join(parts))
+                          + "\\N{\\fs14}\\h\\N".join(parts))
     return "\n".join(_head(width, height, styles) + events) + "\n"
 
 

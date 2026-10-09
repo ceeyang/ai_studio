@@ -89,8 +89,10 @@ def test_subtitles_ass_two_lines_zh_on_top_km_below():
     assert "PlayResX: 1080" in ass and "PlayResY: 1920" in ass
     assert "Style: ZH,Microsoft YaHei," in ass and "Style: KM,Khmer UI," in ass
     ev = [x for x in ass.splitlines() if x.startswith("Dialogue:")]
+    # 两行之间插一行小字号空行拉开间距：高棉文的上标元音不会顶到中文
     assert ev == ["Dialogue: 0,0:00:11.40,0:00:13.80,ZH,,0,0,0,,"
-                  "能修的，我们绝对不换。\\N{\\rKM}អ្វីដែលជួសជុលបាន យើងមិនដូរឡើយ។"]
+                  "能修的，我们绝对不换。\\N{\\fs14}\\h\\N{\\rKM}អ្វីដែលជួសជុលបាន យើងមិនដូរឡើយ។"]
+    assert "Style: KM,Khmer UI,59," in ass      # 高棉文比中文小一号，但不能太小（1920 高时 59px）
 
 
 def test_subtitles_ass_zh_only_and_skips_empty():
@@ -189,6 +191,13 @@ def test_dub_mix_cmd_ducks_bed_and_delays_lines():
     assert "adelay=4000:all=1[v2]" in graph
     assert "[bed][v1][v2]amix=inputs=3:normalize=0:dropout_transition=0:duration=first[a]" in graph
     assert cmd[cmd.index("-c:v") + 1] == "copy"
+
+
+def test_dub_mix_cmd_normalizes_loudness():
+    cmd = build_dub_mix_cmd("ffmpeg", "in.mp4", [("a.mp3", 1.5, 2.0)], "out.mp4", bed_db=-14,
+                            duck_db=-30, loudness=-14)
+    graph = cmd[cmd.index("-filter_complex") + 1]
+    assert graph.endswith("duration=first[mix];[mix]loudnorm=I=-14:TP=-1.5:LRA=11[a]")
 
 
 def test_trim_silence_cmd_strips_both_ends():
