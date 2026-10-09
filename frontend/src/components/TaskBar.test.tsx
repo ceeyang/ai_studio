@@ -31,6 +31,17 @@ describe('TaskBar', () => {
     expect(screen.queryByText(/实时连接已断开/)).toBeNull();
   });
 
+  it('采样进度到头（value>=max）但任务还在跑：显示"解码保存中"而不是卡在 20/20', async () => {
+    installFetch({ 'GET /api/queue': QUEUE, 'GET /api/jobs': [makeJob({ id: 7, type: 'video.shot', status: 'running' })] });
+    renderBar({ connected: true, everConnected: true, progress: { 7: { value: 20, max: 20 } } });
+    const current = await screen.findByTestId('taskbar-current');
+    expect(current.textContent).toContain('采样完成，解码保存中…');
+    expect(current.textContent).not.toContain('20/20');
+    const bar = within(current).getByRole('progressbar') as HTMLProgressElement;
+    expect(bar.value).toBe(bar.max);
+    expect(bar.className).toContain('is-decoding');
+  });
+
   it('暂停队列后显示"恢复队列"；可以取消当前任务', async () => {
     const calls = installFetch({
       'GET /api/queue': QUEUE,

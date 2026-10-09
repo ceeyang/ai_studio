@@ -14,6 +14,7 @@ import {
 } from '../../api/queries';
 import type { Character, JobBrief, TurnaroundCell, TurnaroundSheet } from '../../api/types';
 import { useEvents } from '../../ws/EventsContext';
+import { isDecoding } from '../../ws/events';
 
 function SheetBlock({
   c,
@@ -74,8 +75,14 @@ function SheetBlock({
         {job ? (
           <div className="turn-pending" data-testid="sheet-pending">
             <span className="spinner" aria-hidden="true" />
-            <span>{job.status === 'running' ? '生成中' : '排队中'}</span>
-            {pr && pr.max > 0 && <span className="muted">{Math.round((pr.value / pr.max) * 100)}%</span>}
+            {isDecoding(pr) ? (
+              <span>解码保存中…</span>
+            ) : (
+              <>
+                <span>{job.status === 'running' ? '生成中' : '排队中'}</span>
+                {pr && pr.max > 0 && <span className="muted">{Math.round((pr.value / pr.max) * 100)}%</span>}
+              </>
+            )}
           </div>
         ) : has ? (
           <a href={sheet.url!} target="_blank" rel="noreferrer" title="打开原图">

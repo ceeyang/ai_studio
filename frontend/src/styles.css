@@ -198,6 +198,8 @@ progress {
 progress::-webkit-progress-bar { background: var(--surface-3); border-radius: var(--r-pill); }
 progress::-webkit-progress-value { background: linear-gradient(90deg, #ff5a2a, var(--accent)); border-radius: var(--r-pill); transition: width 300ms var(--ease); }
 progress::-moz-progress-bar { background: var(--accent); border-radius: var(--r-pill); }
+/* 采样步数到头但 VAE 解码/保存还在跑：条填满，脉冲提示没卡死 */
+progress.is-decoding { animation: pulse 1.6s ease-in-out infinite; }
 
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
 

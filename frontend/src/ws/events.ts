@@ -13,6 +13,14 @@ export interface Progress {
   max: number;
 }
 
+/**
+ * ComfyUI 的进度事件只覆盖采样步数，value 到 max 后 VAE 解码/保存还要跑（内存紧张时能到几分钟）。
+ * 这段时间前端收不到新的进度事件，value/max 会一直停在满格——用这个判断是不是进了这个"看着卡住"的阶段。
+ */
+export function isDecoding(p: Progress | undefined): boolean {
+  return !!p && p.max > 0 && p.value >= p.max;
+}
+
 export interface EventsState {
   connected: boolean;
   /** 连上过至少一次就一直是 true（哪怕后来断开）：区分"还没连上过"和"断线了"。 */

@@ -13,6 +13,7 @@ import {
 import type { Candidate, Character, CharacterPatch, DesignOption } from '../../api/types';
 import { EditableFields, type FieldSpec, type FieldValues } from '../../components/EditableFields';
 import { useEvents } from '../../ws/EventsContext';
+import { isDecoding } from '../../ws/events';
 import { TurnaroundPanel } from './TurnaroundPanel';
 
 const CHARACTER_FIELDS: FieldSpec[] = [
@@ -89,8 +90,14 @@ function PortraitStrip({
         return (
           <div key={j.id} role="listitem" className="pcard pcard-pending" data-testid={`drawing-${j.id}`}>
             <span className="spinner" aria-hidden="true" />
-            <span>{j.status === 'running' ? '生成中' : '排队中'}</span>
-            {pr && pr.max > 0 && <span className="muted">{Math.round((pr.value / pr.max) * 100)}%</span>}
+            {isDecoding(pr) ? (
+              <span>解码保存中…</span>
+            ) : (
+              <>
+                <span>{j.status === 'running' ? '生成中' : '排队中'}</span>
+                {pr && pr.max > 0 && <span className="muted">{Math.round((pr.value / pr.max) * 100)}%</span>}
+              </>
+            )}
           </div>
         );
       })}

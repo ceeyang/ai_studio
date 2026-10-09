@@ -68,6 +68,22 @@ describe('角色卡', () => {
     expect(JSON.parse(init!.body as string)).toEqual({ count: 3 });
   });
 
+  it('抽卡采样完成（value>=max）但任务还在跑：占位显示"解码保存中"而不是卡在 100%', async () => {
+    const running = { ...CHEN, active_jobs: [{ id: 80, type: 'image.portrait', status: 'running' as const }] };
+    installFetch({ ...ROUTES, 'GET /api/projects/demo/characters': [running] });
+    renderAt(
+      <EventsContext.Provider value={{ ...initialEvents, progress: { 80: { value: 20, max: 20 } } }}>
+        <ScriptPage />
+      </EventsContext.Provider>,
+      AT,
+    );
+    const card = await screen.findByTestId('character-6');
+    const placeholder = within(card).getByTestId('drawing-80');
+    expect(placeholder.textContent).toContain('解码保存中');
+    expect(placeholder.textContent).not.toContain('100%');
+    expect(placeholder.querySelector('.spinner')).toBeTruthy(); // spinner 还在
+  });
+
   it('AI 推荐造型：提交 suggest；方案卡可改提示词后抽卡或设为角色提示词', async () => {
     const opts = [
       { label: '老练精干款', visual_prompt: 'buzz cut mechanic', core_features: '寸头、藏青工装' },

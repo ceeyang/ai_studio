@@ -180,6 +180,18 @@ describe('三视图', () => {
     expect((screen.getByRole('button', { name: '整理中…' }) as HTMLButtonElement).disabled).toBe(true);
   });
 
+  it('设定图采样完成（value>=max）但任务还在跑：显示"解码保存中"而不是卡在 100%', () => {
+    const busy: Character = {
+      ...DONE,
+      active_jobs: [{ id: 80, type: 'image.turnaround', status: 'running', sheet: 'body' }],
+    };
+    setup(busy, {}, { 80: { value: 20, max: 20 } });
+    const pending = within(screen.getByTestId('sheet-body')).getByTestId('sheet-pending');
+    expect(pending.textContent).toContain('解码保存中');
+    expect(pending.textContent).not.toContain('100%');
+    expect(pending.querySelector('.spinner')).toBeTruthy();
+  });
+
   it('默认引擎要定妆照锁脸：没有定妆照时不能出图', () => {
     setup({ ...CHEN, portrait_candidate_id: null, portrait_url: null });
     expect((screen.getByRole('button', { name: '全部生成' }) as HTMLButtonElement).disabled).toBe(true);

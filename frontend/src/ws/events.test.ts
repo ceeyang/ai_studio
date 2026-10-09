@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { makeJob } from '../test/factories';
-import { eventsReducer, initialEvents, invalidationsFor } from './events';
+import { eventsReducer, initialEvents, invalidationsFor, isDecoding } from './events';
 
 describe('eventsReducer', () => {
   it('记录连接状态；只要连上过一次，everConnected 就一直是 true（哪怕后来断开）', () => {
@@ -26,6 +26,22 @@ describe('eventsReducer', () => {
   it('日志和队列事件不改 reducer 状态', () => {
     const s = eventsReducer(initialEvents, { type: 'log', job_id: 1, line: 'x' });
     expect(s).toBe(initialEvents);
+  });
+});
+
+describe('isDecoding', () => {
+  it('采样还没到 max：不是解码阶段', () => {
+    expect(isDecoding({ value: 3, max: 20 })).toBe(false);
+  });
+
+  it('value 到了 max：进了解码/保存阶段（WS 的采样进度到头之后，后面没有事件覆盖）', () => {
+    expect(isDecoding({ value: 20, max: 20 })).toBe(true);
+    expect(isDecoding({ value: 21, max: 20 })).toBe(true); // 容错：万一超一点也当作到头
+  });
+
+  it('没有进度或 max 是 0（还没收到真的进度事件）：不是解码阶段', () => {
+    expect(isDecoding(undefined)).toBe(false);
+    expect(isDecoding({ value: 0, max: 0 })).toBe(false);
   });
 });
 

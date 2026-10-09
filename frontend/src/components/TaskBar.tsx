@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom';
 import { useCancelJob, useJobs, usePauseQueue, useQueue, useResumeQueue } from '../api/queries';
 import { jobTypeLabel } from '../format';
 import { useEvents } from '../ws/EventsContext';
+import { isDecoding } from '../ws/events';
 
 export function TaskBar() {
   const { connected, everConnected, progress } = useEvents();
@@ -21,12 +22,18 @@ export function TaskBar() {
       {current ? (
         <span className="current" data-testid="taskbar-current">
           运行中：#{current.id} {jobTypeLabel(current.type)}
-          {p && (
-            <>
-              {' '}
-              <progress value={p.value} max={p.max} /> {p.value}/{p.max}
-            </>
-          )}
+          {p &&
+            (isDecoding(p) ? (
+              <>
+                {' '}
+                <progress className="is-decoding" value={p.max} max={p.max} /> 采样完成，解码保存中…
+              </>
+            ) : (
+              <>
+                {' '}
+                <progress value={p.value} max={p.max} /> {p.value}/{p.max}
+              </>
+            ))}
           {jobs.length > 1 && <span className="muted">（另有 {jobs.length - 1} 个）</span>}{' '}
           <button type="button" className="ghost" disabled={cancel.isPending} onClick={() => cancel.mutate(current.id)}>
             取消
