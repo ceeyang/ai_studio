@@ -5,39 +5,26 @@ import {
   useCharacters,
   useEpisode,
   useLocations,
-  usePatchCharacter,
   usePatchEpisode,
   usePatchLocation,
   usePatchSceneBlock,
   usePutStyle,
   useRunStage,
   useStyle,
-  useUploadPortrait,
 } from '../api/queries';
-import type { Character, CharacterPatch, EpisodePatch, LocationPatch, Style } from '../api/types';
+import type { EpisodePatch, LocationPatch, SceneBlock, Style } from '../api/types';
 import { EditableFields, type FieldSpec, type FieldValues } from '../components/EditableFields';
 import { EPISODE_STATUS_LABEL } from '../format';
+import { CharacterCard } from './script/CharacterCard';
+import { RecommendPanel } from './script/RecommendPanel';
+
+export { toCharacterPatch } from './script/CharacterCard';
 
 const EPISODE_FIELDS: FieldSpec[] = [
   { name: 'title', label: '本集标题' },
   { name: 'target_seconds', label: '目标时长（秒）', kind: 'number', step: '1' },
-  { name: 'source_text', label: '原文 / 梗概', kind: 'textarea', rows: 18 },
+  { name: 'source_text', label: '原文 / 梗概', kind: 'textarea', rows: 14 },
 ];
-
-const CHARACTER_FIELDS: FieldSpec[] = [
-  { name: 'name', label: '名字' },
-  { name: 'description', label: '人物描述', kind: 'textarea', rows: 2 },
-  { name: 'visual_prompt', label: '外貌提示词（英文，会原样写进每个出场镜头）', kind: 'textarea', rows: 4 },
-  { name: 'core_features', label: '核心特征', kind: 'textarea', rows: 2 },
-  { name: 'voice', label: '配音音色（Edge TTS，如 km-KH-PisethNeural 男 / km-KH-SreymomNeural 女）' },
-];
-
-/** 角色卡改动转 PATCH 体：音色留空表示不配音（null）。 */
-export function toCharacterPatch(changed: FieldValues): CharacterPatch {
-  const out: CharacterPatch = { ...changed };
-  if (changed.voice !== undefined) out.voice = changed.voice.trim() === '' ? null : changed.voice.trim();
-  return out;
-}
 
 const LOCATION_FIELDS: FieldSpec[] = [
   { name: 'name', label: '名字' },
@@ -83,32 +70,44 @@ function toStyle(v: FieldValues): Style {
   };
 }
 
-function Portrait({ c, uploading, onUpload }: { c: Character; uploading: boolean; onUpload: (f: File) => void }) {
+type Tab = 'chars' | 'locs' | 'style';
+
+/** 一个段落：收起时一行摘要（编号 · 场景 · 正文开头），点开编辑。 */
+function BlockRow({
+  b,
+  locationName,
+  locationOptions,
+  open,
+  onToggle,
+  onSave,
+}: {
+  b: SceneBlock;
+  locationName: string;
+  locationOptions: { value: string; label: string }[];
+  open: boolean;
+  onToggle: () => void;
+  onSave: (v: FieldValues) => void;
+}) {
   return (
-    <div className="portrait">
-      {c.portrait_url ? (
-        <img className="thumb" src={c.portrait_url} alt={`${c.name} 定妆照`} />
-      ) : (
-        <div className="media-none muted">还没有定妆照</div>
-      )}
-      <div className="portrait-side">
-        <span className="muted">定妆照：出场镜头的首帧和视频会带上它锁脸（H3 引擎）。</span>
-        <label className={`btn${uploading ? ' is-disabled' : ''}`}>
-          {uploading ? '上传中…' : c.portrait_url ? '更换定妆照' : '上传定妆照'}
-          <input
-            type="file"
-            accept="image/png,image/jpeg,image/webp"
-            aria-label="上传定妆照"
-            hidden
-            disabled={uploading}
-            onChange={(ev) => {
-              const f = ev.target.files?.[0];
-              ev.target.value = '';
-              if (f) onUpload(f);
-            }}
+    <div className={`block${open ? ' is-open' : ''}`} data-testid={`block-${b.id}`}>
+      <button type="button" className="block-row" aria-expanded={open} onClick={onToggle}>
+        <span className="block-no">段落 {b.order + 1}</span>
+        <span className="block-loc">{locationName}</span>
+        <span className="block-sum">{b.text}</span>
+        <span className="chev" aria-hidden="true" />
+      </button>
+      {open && (
+        <div className="block-edit">
+          <EditableFields
+            fields={[
+              { name: 'location_id', label: '场景', kind: 'select', options: locationOptions },
+              { name: 'text', label: '段落内容', kind: 'textarea', rows: 8 },
+            ]}
+            initial={{ location_id: b.location_id == null ? '' : String(b.location_id), text: b.text }}
+            onSave={onSave}
           />
-        </label>
-      </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -122,13 +121,14 @@ export function ScriptPage() {
   const style = useStyle(slug);
   const patchEp = usePatchEpisode(id);
   const patchBlock = usePatchSceneBlock(id);
-  const patchChar = usePatchCharacter(slug);
   const patchLoc = usePatchLocation(slug);
-  const upload = useUploadPortrait(slug);
   const putStyle = usePutStyle(slug);
   const run = useRunStage(id);
   const [force, setForce] = useState(false);
   const [notice, setNotice] = useState<{ text: string; jobId?: number } | null>(null);
+  const [tab, setTab] = useState<Tab>('chars');
+  const [openBlocks, setOpenBlocks] = useState<Set<number>>(new Set());
+  const [srcOpen, setSrcOpen] = useState<boolean | null>(null);
 
   if (ep.isLoading) return <p className="loading">加载中…</p>;
   if (ep.error || !ep.data) return <p className="error">{ep.error ? errorText(ep.error) : '找不到这一集'}</p>;
@@ -139,7 +139,18 @@ export function ScriptPage() {
   ];
   const chars = characters.data ?? [];
   const locs = locations.data ?? [];
+  const locName = new Map(locs.map((l) => [l.id, l.name]));
   const st = style.data ?? EMPTY_STYLE;
+  // 还没有段落或原文时默认展开原文：要先写原文才能运行剧本
+  const sourceOpen = srcOpen ?? (e.scene_blocks.length === 0 || !e.source_text.trim());
+  const allOpen = e.scene_blocks.length > 0 && e.scene_blocks.every((b) => openBlocks.has(b.id));
+  const toggleBlock = (bid: number) =>
+    setOpenBlocks((prev) => {
+      const next = new Set(prev);
+      if (next.has(bid)) next.delete(bid);
+      else next.add(bid);
+      return next;
+    });
 
   const runStage = (stage: 'script' | 'storyboard') =>
     run.mutate(
@@ -150,8 +161,14 @@ export function ScriptPage() {
       },
     );
 
+  const tabs: { key: Tab; label: string }[] = [
+    { key: 'chars', label: `角色（${chars.length}）` },
+    { key: 'locs', label: `场景（${locs.length}）` },
+    { key: 'style', label: '风格' },
+  ];
+
   return (
-    <div className="page">
+    <div className="page script-page">
       <header className="page-head">
         <span className="eyebrow">02 · 剧本</span>
         <h2>
@@ -194,29 +211,50 @@ export function ScriptPage() {
         </p>
       )}
 
-      <div className="script-layout">
-        <section className="panel area-src">
-          <h3>原文</h3>
-          <EditableFields
-            fields={EPISODE_FIELDS}
-            initial={{ title: e.title, target_seconds: String(e.target_seconds), source_text: e.source_text }}
-            saving={patchEp.isPending}
-            error={patchEp.error ? errorText(patchEp.error) : null}
-            onSave={(_v, c) => patchEp.mutate(toEpisodePatch(c))}
-          />
-        </section>
-        <section className="panel area-blocks">
-          <h3>剧本段落（{e.scene_blocks.length}）</h3>
+      <div className="script-workspace">
+        <section className="panel script-pane" aria-label="剧本">
+          <div className={`block src-box${sourceOpen ? ' is-open' : ''}`}>
+            <button type="button" className="block-row" aria-expanded={sourceOpen} onClick={() => setSrcOpen(!sourceOpen)}>
+              <span className="block-no">原文 / 梗概</span>
+              <span className="block-loc">目标 {e.target_seconds} 秒</span>
+              <span className="block-sum">{e.source_text.trim() ? `${e.source_text.length} 字 · ${e.source_text}` : '还没有原文'}</span>
+              <span className="chev" aria-hidden="true" />
+            </button>
+            {sourceOpen && (
+              <div className="block-edit">
+                <EditableFields
+                  fields={EPISODE_FIELDS}
+                  initial={{ title: e.title, target_seconds: String(e.target_seconds), source_text: e.source_text }}
+                  saving={patchEp.isPending}
+                  error={patchEp.error ? errorText(patchEp.error) : null}
+                  onSave={(_v, c) => patchEp.mutate(toEpisodePatch(c))}
+                />
+              </div>
+            )}
+          </div>
+
+          <div className="pane-head">
+            <h3>剧本段落（{e.scene_blocks.length}）</h3>
+            {e.scene_blocks.length > 0 && (
+              <button
+                type="button"
+                className="ghost"
+                onClick={() => setOpenBlocks(allOpen ? new Set() : new Set(e.scene_blocks.map((b) => b.id)))}
+              >
+                {allOpen ? '全部收起' : '全部展开'}
+              </button>
+            )}
+          </div>
           {e.scene_blocks.length === 0 && <p className="muted">还没有段落。点"运行剧本"由模型拆分。</p>}
-          {e.scene_blocks.map((b) => (
-            <div key={b.id} className="block" data-testid={`block-${b.id}`}>
-              <h4>段落 {b.order + 1}</h4>
-              <EditableFields
-                fields={[
-                  { name: 'location_id', label: '场景', kind: 'select', options: locationOptions },
-                  { name: 'text', label: '段落内容', kind: 'textarea', rows: 5 },
-                ]}
-                initial={{ location_id: b.location_id == null ? '' : String(b.location_id), text: b.text }}
+          <div className="blocks">
+            {e.scene_blocks.map((b) => (
+              <BlockRow
+                key={b.id}
+                b={b}
+                locationName={(b.location_id != null && locName.get(b.location_id)) || '未指定场景'}
+                locationOptions={locationOptions}
+                open={openBlocks.has(b.id)}
+                onToggle={() => toggleBlock(b.id)}
                 onSave={(v) =>
                   patchBlock.mutate({
                     id: b.id,
@@ -225,75 +263,79 @@ export function ScriptPage() {
                   })
                 }
               />
-            </div>
-          ))}
+            ))}
+          </div>
           {patchBlock.error && <p className="error">{errorText(patchBlock.error)}</p>}
         </section>
 
-        <section className="panel area-chars">
-          <h3>角色（{chars.length}）</h3>
-          {chars.length === 0 && <p className="muted">运行剧本后自动抽取。</p>}
-          <div className="cards">
-            {chars.map((c) => (
-              <div key={c.id} className="card" data-testid={`character-${c.id}`}>
-                <Portrait
-                  c={c}
-                  uploading={upload.isPending && upload.variables?.id === c.id}
-                  onUpload={(file) => upload.mutate({ id: c.id, file })}
-                />
-                <EditableFields
-                  fields={CHARACTER_FIELDS}
-                  initial={{
-                    name: c.name,
-                    description: c.description,
-                    visual_prompt: c.visual_prompt,
-                    core_features: c.core_features,
-                    voice: c.voice ?? '',
-                  }}
-                  onSave={(_v, ch) => patchChar.mutate({ id: c.id, ...toCharacterPatch(ch) })}
-                />
-              </div>
+        <section className="panel assets-pane" aria-label="角色、场景与风格">
+          <div className="tabs" role="tablist" aria-label="设定">
+            {tabs.map((t) => (
+              <button
+                key={t.key}
+                type="button"
+                role="tab"
+                id={`tab-${t.key}`}
+                aria-selected={tab === t.key}
+                aria-controls={`tabpanel-${t.key}`}
+                className={tab === t.key ? 'is-active' : undefined}
+                onClick={() => setTab(t.key)}
+              >
+                {t.label}
+              </button>
             ))}
           </div>
-          {patchChar.error && <p className="error">{errorText(patchChar.error)}</p>}
-          {upload.error && <p className="error">{errorText(upload.error)}</p>}
-        </section>
 
-        <section className="panel area-locs">
-          <h3>场景（{locs.length}）</h3>
-          {locs.length === 0 && <p className="muted">运行剧本后自动抽取。</p>}
-          <div className="cards">
-            {locs.map((l) => (
-              <div key={l.id} className="card" data-testid={`location-${l.id}`}>
-                <EditableFields
-                  fields={LOCATION_FIELDS}
-                  initial={{ name: l.name, time_of_day: l.time_of_day, atmosphere: l.atmosphere, visual_prompt: l.visual_prompt }}
-                  onSave={(_v, ch) => patchLoc.mutate({ id: l.id, ...(ch as LocationPatch) })}
-                />
+          {tab === 'chars' && (
+            <div role="tabpanel" id="tabpanel-chars" aria-labelledby="tab-chars" className="tab-body">
+              <RecommendPanel slug={slug} episodeId={id} existing={chars} />
+              {chars.length === 0 && <p className="muted">运行剧本后自动抽取，也可以按剧本推荐角色。</p>}
+              <div className="char-list">
+                {chars.map((c) => (
+                  <CharacterCard key={c.id} c={c} slug={slug} episodeId={id} />
+                ))}
               </div>
-            ))}
-          </div>
-          {patchLoc.error && <p className="error">{errorText(patchLoc.error)}</p>}
-        </section>
+            </div>
+          )}
 
-        <section className="panel area-style">
-          <h3>风格</h3>
-          {!style.data && <p className="muted">还没有风格设定，运行剧本后自动生成，也可以直接填写保存。</p>}
-          <EditableFields
-            fields={STYLE_FIELDS}
-            initial={{
-              anchor_text: st.anchor_text,
-              palette: st.palette,
-              lighting: st.lighting,
-              texture: st.texture,
-              character_rules: st.character_rules,
-              mood_keywords: st.mood_keywords.join(', '),
-              negative: st.negative,
-            }}
-            saving={putStyle.isPending}
-            error={putStyle.error ? errorText(putStyle.error) : null}
-            onSave={(v) => putStyle.mutate(toStyle(v))}
-          />
+          {tab === 'locs' && (
+            <div role="tabpanel" id="tabpanel-locs" aria-labelledby="tab-locs" className="tab-body">
+              {locs.length === 0 && <p className="muted">运行剧本后自动抽取。</p>}
+              <div className="cards">
+                {locs.map((l) => (
+                  <div key={l.id} className="card" data-testid={`location-${l.id}`}>
+                    <EditableFields
+                      fields={LOCATION_FIELDS}
+                      initial={{ name: l.name, time_of_day: l.time_of_day, atmosphere: l.atmosphere, visual_prompt: l.visual_prompt }}
+                      onSave={(_v, ch) => patchLoc.mutate({ id: l.id, ...(ch as LocationPatch) })}
+                    />
+                  </div>
+                ))}
+              </div>
+              {patchLoc.error && <p className="error">{errorText(patchLoc.error)}</p>}
+            </div>
+          )}
+
+          {tab === 'style' && (
+            <div role="tabpanel" id="tabpanel-style" aria-labelledby="tab-style" className="tab-body style-body">
+              {!style.data && <p className="muted">还没有风格设定，运行剧本后自动生成，也可以直接填写保存。</p>}
+              <EditableFields
+                fields={STYLE_FIELDS}
+                initial={{
+                  anchor_text: st.anchor_text,
+                  palette: st.palette,
+                  lighting: st.lighting,
+                  texture: st.texture,
+                  character_rules: st.character_rules,
+                  mood_keywords: st.mood_keywords.join(', '),
+                  negative: st.negative,
+                }}
+                saving={putStyle.isPending}
+                error={putStyle.error ? errorText(putStyle.error) : null}
+                onSave={(v) => putStyle.mutate(toStyle(v))}
+              />
+            </div>
+          )}
         </section>
       </div>
     </div>

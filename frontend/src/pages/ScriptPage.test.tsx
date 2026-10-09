@@ -44,6 +44,11 @@ describe('ScriptPage', () => {
     renderAt(<ScriptPage />, AT);
     const user = userEvent.setup();
     const block = await screen.findByTestId('block-21');
+    // 段落默认收起成一行摘要（编号 · 场景 · 正文开头），点开才编辑
+    const row = within(block).getByRole('button', { name: /段落 1/ });
+    expect(row.getAttribute('aria-expanded')).toBe('false');
+    expect(within(block).queryByLabelText('段落内容')).toBeNull();
+    await user.click(row);
     await within(block).findByRole('option', { name: '直播间' });
     const ta = within(block).getByLabelText('段落内容');
     await user.clear(ta);

@@ -47,6 +47,7 @@ export function eventsReducer(state: EventsState, action: EventsAction): EventsS
 /** 任务停下来（完成、失败、取消、等人工输入）时，它可能改了剧集、镜头、候选、成片。 */
 const SETTLED: JobStatus[] = ['done', 'failed', 'canceled', 'waiting_input'];
 const LLM_TYPES = ['script', 'storyboard'];
+const CHARACTER_TYPES = ['image.portrait', 'character.suggest'];
 // 这些任务结束后会改一集的状态（分镜数、exported 等），项目页的剧集列表要跟着刷新
 const EPISODES_TYPES = [...LLM_TYPES, 'export.episode'];
 
@@ -54,6 +55,8 @@ export function invalidationsFor(ev: WsEvent): QueryKey[] {
   switch (ev.type) {
     case 'job': {
       const out: QueryKey[] = [['jobs'], ['queue'], ['job', ev.job.id]];
+      // 角色卡显示进行中的抽卡/推荐造型：排队、开跑、结束都要刷新角色
+      if (CHARACTER_TYPES.includes(ev.job.type)) out.push(['characters']);
       if (SETTLED.includes(ev.job.status)) {
         out.push(['episode'], ['exports']);
         if (EPISODES_TYPES.includes(ev.job.type)) out.push(['episodes']);

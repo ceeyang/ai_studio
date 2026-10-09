@@ -49,6 +49,15 @@ describe('invalidationsFor', () => {
     expect(keysScript).toEqual(expect.arrayContaining([['episodes'], ['characters'], ['locations'], ['style']]));
   });
 
+  it('抽卡和推荐造型任务一有状态变化就刷新角色（显示进行中）', () => {
+    for (const type of ['image.portrait', 'character.suggest']) {
+      expect(invalidationsFor({ type: 'job', job: makeJob({ id: 5, type, status: 'running' }) })).toContainEqual(['characters']);
+    }
+    expect(invalidationsFor({ type: 'job', job: makeJob({ id: 5, type: 'image.keyframe', status: 'running' }) })).not.toContainEqual([
+      'characters',
+    ]);
+  });
+
   it('日志事件只刷新那个任务；进度和队列事件不刷新任何查询', () => {
     expect(invalidationsFor({ type: 'log', job_id: 9, line: 'x' })).toEqual([['job', 9]]);
     expect(invalidationsFor({ type: 'progress', job_id: 9, value: 1, max: 2 })).toEqual([]);

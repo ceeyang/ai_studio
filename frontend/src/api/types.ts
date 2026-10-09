@@ -241,6 +241,39 @@ export interface Character {
   /** 选定的定妆照（首帧/视频按在场角色当参考图），没有时为 null */
   portrait_candidate_id?: number | null;
   portrait_url?: string | null;
+  /** 全部定妆照候选（上传的 + 本地 AI 抽的），params.visual_prompt 记着抽卡用的提示词 */
+  portraits?: Candidate[];
+  /** AI 推荐造型 */
+  design_options?: DesignOption[];
+  /** 进行中的抽卡（image.portrait）/ 推荐造型（character.suggest）任务 */
+  active_jobs?: JobBrief[];
+}
+
+export interface DesignOption {
+  label: string;
+  visual_prompt: string;
+  core_features: string;
+}
+
+export interface JobBrief {
+  id: number;
+  type: string;
+  status: JobStatus;
+}
+
+export interface CharacterIn {
+  name: string;
+  description?: string;
+  visual_prompt?: string;
+  core_features?: string;
+}
+
+/** character.recommend 任务 result.characters 的一项 */
+export interface RecommendedCharacter {
+  name: string;
+  description: string;
+  visual_prompt: string;
+  core_features: string;
 }
 
 export type CharacterPatch = Partial<Pick<Character, 'name' | 'description' | 'visual_prompt' | 'core_features' | 'voice'>>;

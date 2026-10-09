@@ -4,6 +4,7 @@ import { api, enc } from './client';
 import type {
   Candidate,
   Character,
+  CharacterIn,
   CharacterPatch,
   DoctorCheck,
   EndCard,
@@ -233,6 +234,51 @@ export function useUploadPortrait(slug: string) {
       return api.post<Character>(`/api/characters/${id}/portrait`, form);
     },
     onSuccess: () => invalidate(qc, keys.characters(slug)),
+  });
+}
+
+export function useCreateCharacter(slug: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: CharacterIn) => api.post<Character>(`/api/projects/${enc(slug)}/characters`, body),
+    onSuccess: () => invalidate(qc, keys.characters(slug)),
+  });
+}
+
+/** 抽卡：本地图像引擎出 count 张定妆照候选（每张一个 GPU 任务）。 */
+export function useDrawPortraits(slug: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, count, visual_prompt }: { id: number; count: number; visual_prompt?: string }) =>
+      api.post<RunOut>(`/api/characters/${id}/portraits/draw`, visual_prompt ? { count, visual_prompt } : { count }),
+    onSuccess: () => invalidate(qc, keys.characters(slug), ['jobs'], keys.queue),
+  });
+}
+
+/** 切换角色造型：选定这张定妆照（带提示词时角色提示词一起换）。出场镜头的首帧/视频会变过期。 */
+export function useUsePortrait(slug: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, candidateId }: { id: number; candidateId: number }) =>
+      api.post<Character>(`/api/characters/${id}/portraits/${candidateId}/use`),
+    onSuccess: () => invalidate(qc, keys.characters(slug), ['episode']),
+  });
+}
+
+export function useSuggestDesigns(slug: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, count = 3, episode_id }: { id: number; count?: number; episode_id?: number }) =>
+      api.post<RunOut>(`/api/characters/${id}/suggest`, episode_id ? { count, episode_id } : { count }),
+    onSuccess: () => invalidate(qc, keys.characters(slug), ['jobs'], keys.queue),
+  });
+}
+
+export function useRecommendCharacters(episodeId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (count: number = 3) => api.post<RunOut>(`/api/episodes/${episodeId}/characters/recommend`, { count }),
+    onSuccess: () => invalidate(qc, ['jobs'], keys.queue),
   });
 }
 
