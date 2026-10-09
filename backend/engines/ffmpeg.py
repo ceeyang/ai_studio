@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import subprocess
 from dataclasses import dataclass
@@ -80,6 +81,24 @@ def build_xfade_graph(durs: list[float], transitions: list[str], fps: int,
     return ";".join(filters), acc
 
 
+SILENCE_START = re.compile(r"silence_start:\s*(-?[\d.]+)")
+SILENCE_END = re.compile(r"silence_end:\s*(-?[\d.]+)")
+
+
+def parse_sound_end(silencedetect_log: str, duration: float) -> float:
+    """silencedetect 的输出 → 最后一段声音在哪里结束。
+
+    结尾那段静音的起点就是答案：老版本 ffmpeg 不给它 silence_end，8.x 在流结束时补一个 ≈ 时长的 silence_end。
+    """
+    starts = [float(x) for x in SILENCE_START.findall(silencedetect_log)]
+    ends = [float(x) for x in SILENCE_END.findall(silencedetect_log)]
+    if not starts:
+        return duration
+    if len(starts) > len(ends) or ends[-1] >= duration - 0.1:
+        return max(starts[-1], 0.0)
+    return duration
+
+
 def build_normalize_cmd(ffmpeg: str, src, dst, *, width: int, height: int, fps: int,
                         duration: float, audio: Literal["keep", "silent", "none"]) -> list[str]:
     vf = (f"scale={width}:{height}:force_original_aspect_ratio=increase,"
@@ -145,6 +164,22 @@ class FFmpeg:
         out = self.run([self.ffprobe, "-v", "error", "-select_streams", "a", "-show_entries",
                         "stream=codec_name", "-of", "csv=p=0", str(path)])
         return bool(out.strip())
+
+    def sound_end(self, path: Path, *, noise_db: float = -30.0, min_silence: float = 0.25
+                  ) -> float | None:
+        """音轨里最后一段声音（台词、动作声）在第几秒结束；低于 noise_db 当作环境底噪。没有音轨返回 None。"""
+        if not self.has_audio(path):
+            return None
+        try:
+            p = subprocess.run([self.ffmpeg, "-hide_banner", "-nostats", "-i", str(path), "-map", "0:a:0",
+                                "-af", f"silencedetect=noise={noise_db}dB:d={min_silence}",
+                                "-f", "null", "-"], capture_output=True, text=True, encoding="utf-8",
+                               errors="replace")
+        except FileNotFoundError as e:
+            raise FFmpegError(f"找不到 {self.ffmpeg}：{e}") from e
+        if p.returncode != 0:
+            raise FFmpegError(f"silencedetect 失败：\n{p.stderr[-1500:]}")
+        return parse_sound_end(p.stderr, self.duration(path))
 
     def last_frame(self, video: Path, out_png: Path) -> Path:
         out_png = Path(out_png)

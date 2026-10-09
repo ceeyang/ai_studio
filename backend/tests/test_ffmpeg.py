@@ -111,3 +111,16 @@ def test_single_clip_and_last_frame(tmp_path):
     assert out.exists() and not ff.has_audio(out)
     png = ff.last_frame(clip, tmp_path / "尾帧.png")
     assert png.stat().st_size > 0
+
+
+@needs_ffmpeg
+def test_sound_end_finds_trailing_silence(tmp_path):
+    ff = FFmpeg()
+    clip = tmp_path / "a.mp4"
+    subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "testsrc=size=160x120:rate=24:duration=3",
+                    "-f", "lavfi", "-i", "sine=frequency=440:duration=1.2", "-af", "apad",
+                    "-t", "3", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", str(clip)],
+                   check=True, capture_output=True)
+    assert abs(ff.sound_end(clip) - 1.2) < 0.1
+    silent = make_clip(tmp_path / "b.mp4", 1.0, False)
+    assert ff.sound_end(silent) is None

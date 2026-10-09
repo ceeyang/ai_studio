@@ -79,8 +79,12 @@ def load_cut(sv, episode_id: int, *, allow_missing: bool = False) -> Cut:
 def clip_limits(sv, cut: Cut, trim: bool) -> tuple[list[float], list[float | None]]:
     """每段视频的实际时长，和合成时最多用多少秒（None = 整段）。规则见 backend/post/timeline.py。"""
     secs = [sv.ffmpeg.video_duration(c) for c in cut.clips]
-    limits = [trim_limit(sec, dur, dlg) if trim else None
-              for sec, dur, dlg in zip(secs, cut.shot_seconds, cut.dialogue)]
+    limits: list[float | None] = []
+    for clip, sec, dur, dlg in zip(cut.clips, secs, cut.shot_seconds, cut.dialogue):
+        if not trim or trim_limit(sec, dur, dlg) is None:   # 按分镜就不该裁的，不用再量音轨
+            limits.append(None)
+            continue
+        limits.append(trim_limit(sec, dur, dlg, audio_end=sv.ffmpeg.sound_end(clip)))
     return secs, limits
 
 

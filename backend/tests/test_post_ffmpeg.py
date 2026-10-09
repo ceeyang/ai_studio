@@ -21,10 +21,11 @@ CARD = {"seconds": 1.5, "background": "#0b1a33", "lines": [
     {"text": "Telegram 0318891666", "font": "Arial", "size": 60}]}
 
 
-def gray_clip(path, seconds):
+def gray_clip(path, seconds, voiced=1.0):
+    """灰底；前 voiced 秒有"人声"（正弦波），后面静音。"""
     subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", f"color=c=0x404040:s=270x480:r=24:d={seconds}",
-                    "-f", "lavfi", "-i", f"sine=frequency=330:duration={seconds}",
-                    "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", str(path)],
+                    "-f", "lavfi", "-i", f"sine=frequency=330:duration={voiced}", "-af", "apad",
+                    "-t", str(seconds), "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", str(path)],
                    check=True, capture_output=True)
     return path
 
@@ -46,7 +47,7 @@ def test_export_with_subtitles_dub_and_end_card(tmp_path, db, monkeypatch):
     ff = FFmpeg()
     sv = make_services(tmp_path, db, ffmpeg=ff)
     pid, ep_id = seed_episode(db)
-    src = [gray_clip(tmp_path / "a.mp4", 2.0), gray_clip(tmp_path / "b.mp4", 2.0)]
+    src = [gray_clip(tmp_path / "a.mp4", 2.0), gray_clip(tmp_path / "b.mp4", 2.0, voiced=2.0)]
     with db.session() as s:
         s.get(Project, pid).end_card = CARD
         s.add(Character(project_id=pid, name="陈师傅", voice="km-KH-PisethNeural"))
@@ -71,7 +72,7 @@ def test_export_with_subtitles_dub_and_end_card(tmp_path, db, monkeypatch):
     assert "_zhkm_dubkm_card_" in out.name
     with db.session() as s:
         st = s.get(Export, res["export_id"]).settings
-    # 第 1 镜 2.0s 裁到 1.65s（台词 1.0s 就说完）；硬切 0.05s + 一帧
+    # 第 1 镜 2.0s 裁到 1.65s（分镜台词 1.0s 结束，实测声音也 1.0s 停）；硬切 0.05s + 一帧
     assert st["trims"] == [{"code": "S01", "clip": 2.0, "used": 1.65}]
     main = st["main_seconds"]
     assert abs(main - (1.667 + 2.0 - 0.05 - 1 / 24)) < 0.06

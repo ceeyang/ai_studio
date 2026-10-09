@@ -1,7 +1,7 @@
 """后期纯函数：裁尾规则、字幕时间轴与 ASS、片尾卡滤镜、配音语速与混音。不跑 ffmpeg。"""
 import pytest
 
-from backend.engines.ffmpeg import xfade_timeline
+from backend.engines.ffmpeg import parse_sound_end, xfade_timeline
 from backend.post.dub import build_dub_mix_cmd, fit_rate, plan_dub_lines
 from backend.post.render import CardSpec, build_finish_cmd
 from backend.post.subtitles import (ass_time, build_endcard_ass, build_subtitles_ass, timeline_cues,
@@ -18,6 +18,28 @@ def test_trim_cuts_tail_when_dialogue_ends_before_cut():
 def test_trim_keeps_full_clip_when_dialogue_runs_past_cut():
     # 最后一句到 4.5s，加 0.3s 收尾就越过 4.65s：整段保留，宁可长也不切台词
     assert trim_limit(5.167, 4.5, [{"start": 0.5, "end": 4.5}]) is None
+
+
+def test_trim_respects_measured_speech_end():
+    # 分镜说台词 3.2s 结束，但 H3 实际说到 4.8s（实测 S01）：不能裁
+    assert trim_limit(5.167, 4.5, [{"start": 0.5, "end": 3.2}], audio_end=4.8) is None
+    # 实测声音 4.2s 就停了：照常裁
+    assert trim_limit(5.167, 4.5, [{"start": 0.5, "end": 3.2}], audio_end=4.2) == pytest.approx(4.65)
+
+
+def test_parse_sound_end():
+    tail = ("[silencedetect @ 0x1] silence_start: 0.2\n"
+            "[silencedetect @ 0x1] silence_end: 0.9 | silence_duration: 0.7\n"
+            "[silencedetect @ 0x1] silence_start: 4.31\n")
+    assert parse_sound_end(tail, 5.0) == pytest.approx(4.31)
+    closed = ("[silencedetect @ 0x1] silence_start: 1.0\n"
+              "[silencedetect @ 0x1] silence_end: 2.0 | silence_duration: 1\n")
+    assert parse_sound_end(closed, 5.0) == 5.0           # 一直响到结尾
+    assert parse_sound_end("", 5.0) == 5.0
+    flushed = closed + ("[silencedetect @ 0x1] silence_start: 3.2\n"
+                        "[silencedetect @ 0x1] silence_end: 5.01 | x\n")
+    assert parse_sound_end(flushed, 5.0) == pytest.approx(3.2)   # ffmpeg 8 在结尾补 silence_end
+    assert parse_sound_end("[silencedetect @ 0x1] silence_start: 0\n", 5.0) == 0.0   # 全程静音
 
 
 def test_trim_noop_when_clip_not_longer_than_cut():

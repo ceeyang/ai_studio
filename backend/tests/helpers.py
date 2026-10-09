@@ -113,6 +113,9 @@ class FakeFFmpeg:
     def has_audio(self, path) -> bool:
         return True
 
+    def sound_end(self, path) -> float | None:
+        return 0.0
+
     def assemble(self, clips, out, *, width, height, fps, transitions, work_dir, max_seconds=None):
         self.calls.append({"clips": list(clips), "out": Path(out), "width": width,
                            "height": height, "fps": fps, "transitions": list(transitions),
