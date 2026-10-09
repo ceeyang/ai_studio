@@ -155,6 +155,7 @@ SQLite（`projects/studio.db`），通过 SQLAlchemy 2 + Alembic 迁移。媒体
    - 每个槽位可出 N 张候选（默认 1，可设 2–4），人工挑选。
 5. **视频**：逐镜调用视频引擎。H3 带原生音频（对白 + 环境声），Wan2.2 无声。
 6. **后期**：SeedVR2 超分到目标分辨率；RIFE 补帧到 24/30fps；TTS 配音（外挂，H3 原声压低当底）；字幕（libass，按 dialogue 时间轴）；片尾卡；AI 生成标识（角标 + 片头/片尾文字，参数可配）。
+   - 高棉语配音版的口型：可选阶段 `fit_khmer`（任务 `dialogue.fit_khmer`，不在 all 里）先量每句高棉语 TTS 时长，让 LLM 把中文改写成普通话 TTS 念起来一样长（±10%，最多 3 轮，原句存 `zh_original`），按高棉语时长重排台词窗口、必要时加长镜头，再重出视频；导出选项 `bed: false` 把 H3 原音轨整条静音，`align: detected` 把每句配音放到 H3 音轨里实际开口的位置，配音版字幕跟着配音播放的位置走。
 7. **合成导出**：ffmpeg 按 transition_out 做 xfade 拼接；输出 9:16 主版本，可选 16:9；另可导出素材包（选定的关键帧 + 视频 + 字幕 srt + 分镜表 csv）。
 
 ## 7. 引擎层
