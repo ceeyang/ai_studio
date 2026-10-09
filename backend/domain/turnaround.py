@@ -5,6 +5,8 @@ LLM 先给每格写视角描述（存在 Character.turnaround_plan），用户�
 """
 from __future__ import annotations
 
+import re
+
 from sqlalchemy.orm import Session
 
 from backend.domain.characters import portrait_of
@@ -28,21 +30,30 @@ VIEW_LABELS: dict[str, str] = dict(VIEWS)
 
 # 每格固定的取景要求（英文，写进出图提示词）；LLM 写的描述补充这一格能看到的服装细节和姿态
 VIEW_FRAMES: dict[str, str] = {
-    "front_full": "Full-body front view, the whole figure visible from head to shoes, standing upright "
-                  "and facing the camera, arms relaxed at the sides, eye-level camera.",
+    # H3 很容易照着定妆照的半身正面构图出图：全身、侧面、仰视要把机位和取景写得很具体
+    "front_full": "Wide full-length shot with the camera pulled far back: the entire body from the top of "
+                  "the head down to both shoes is in frame, both feet standing on the floor, empty space "
+                  "above the head and below the feet; standing upright facing the camera, arms relaxed "
+                  "at the sides, eye-level camera.",
     "front_half": "Front-facing half-body shot from the waist up, facing the camera, eye-level camera.",
-    "face_closeup": "Tight close-up of the face and neck, head and shoulders filling the frame, "
-                    "facing the camera, eye-level camera.",
-    "left_profile": "Full-body left side profile view: the camera sees the person's left side, "
-                    "the person faces toward the left edge of the frame, standing upright.",
-    "right_profile": "Full-body right side profile view: the camera sees the person's right side, "
-                     "the person faces toward the right edge of the frame, standing upright.",
+    "face_closeup": "Tight close-up portrait framed from the top of the head down to the collarbones only, "
+                    "the face filling most of the frame, the chest and pockets out of frame; facing the "
+                    "camera, eye-level camera.",
+    "left_profile": "Strict side view at 90 degrees, full body from head to shoes: the whole body and the "
+                    "head are turned sideways toward the left edge of the frame, shoulders perpendicular "
+                    "to the camera; only the left side of the face is visible (one eye, the side of the "
+                    "nose, the left ear), looking straight ahead to the left, not at the camera.",
+    "right_profile": "Strict side view at 90 degrees, full body from head to shoes: the whole body and the "
+                     "head are turned sideways toward the right edge of the frame, shoulders perpendicular "
+                     "to the camera; only the right side of the face is visible (one eye, the side of the "
+                     "nose, the right ear), looking straight ahead to the right, not at the camera.",
     "three_quarter": "Three-quarter view of the upper body, the body turned about 45 degrees away from "
                      "the camera, face still clearly visible, eye-level camera.",
     "back": "Full-body back view from behind: the person stands facing away from the camera, the back "
             "of the head and the back of the clothes visible, the face not visible.",
-    "low_angle": "Low-angle shot: the camera is below waist height looking up at the person, "
-                 "who stands upright, full body visible against the backdrop.",
+    "low_angle": "Low-angle shot: the camera is at waist height tilted upward at the person, the "
+                 "underside of the chin visible, mild upward perspective; the whole head and face stay "
+                 "fully inside the frame with empty space above the head, body visible down to the knees.",
     "high_angle": "High-angle shot: the camera is above head height looking down at the person, "
                   "who stands and looks up toward the camera, full body visible.",
 }
@@ -66,7 +77,7 @@ FALLBACKS: dict[str, tuple[str, ...]] = {
 
 # 镜头文字里的机位关键词，优先于景别（按顺序匹配）
 _ANGLE_WORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("back", ("背影", "背对", "背面", "from behind", "back view", "rear view")),
+    ("back", ("背影", "背对", "背面", "back view", "rear view")),
     ("low_angle", ("仰拍", "仰视", "低机位", "low angle", "low-angle", "worm's-eye", "worm's eye")),
     ("high_angle", ("俯拍", "俯视", "高机位", "high angle", "high-angle", "bird's-eye", "bird's eye",
                     "overhead shot")),
@@ -86,10 +97,17 @@ def slot_kind(view: str) -> str:
     return f"turnaround_{view}"
 
 
+# 英文 "from behind" 只在说拍的是人的背后时才算（"sun from behind the camera" 不算）
+_FROM_BEHIND = re.compile(r"\b(?:shot|seen|viewed|filmed|photographed|framed|him|her|them)\s+from\s+behind\b"
+                          r"|\bfrom\s+behind\s+(?:him|her|them)\b|^from\s+behind\b|[.,;]\s*from\s+behind\b")
+
+
 def view_for_shot(shot) -> str:
     """镜头最匹配的三视图格：先看镜头文字里的机位词（背影 / 仰拍 / 俯拍 / 侧面），再看景别。"""
     text = " ".join([shot.shot_size or "", shot.camera_move or "", shot.action or "",
                      shot.image_prompt or ""]).lower()
+    if _FROM_BEHIND.search(text):
+        return "back"
     for view, keys in _ANGLE_WORDS:
         if any(k in text for k in keys):
             return view
