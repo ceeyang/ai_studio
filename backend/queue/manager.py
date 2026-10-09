@@ -47,13 +47,18 @@ def job_to_dict(j: Job) -> dict:
 
 class JobManager:
     def __init__(self, db: Database, registry: HandlerRegistry, bus: Any = None, *,
-                 cpu_workers: int = 2, poll: float = 0.5):
+                 cpu_workers: int = 2, poll: float = 0.5, idle_free_seconds: float = 0.0):
         self.db = db
         self.registry = registry
         self.bus = bus or EventBus()
         self.services: Any = None
         self.on_family_switch: Callable[[str | None, str], None] | None = None
         self.on_gpu_handover: Callable[[], None] | None = None
+        # 空闲释放：GPU worker 持续没有任务超过 idle_free_seconds 秒后调用一次；0 关闭。
+        self.on_gpu_idle: Callable[[], None] | None = None
+        self.idle_free_seconds = idle_free_seconds
+        self._last_gpu_finish: float | None = None
+        self._gpu_idle_fired = False
         self.cpu_workers = cpu_workers
         self.poll = poll
         self.current_family: str | None = None
@@ -241,6 +246,7 @@ class JobManager:
         while not self._stop.is_set():
             try:
                 if self._paused.is_set() or self._llm_waiting:
+                    self._check_idle_free()
                     self._sleep()
                     continue
                 ran = False
@@ -250,11 +256,43 @@ class JobManager:
                         self._execute(jid)
                         ran = True
                 if not ran:
+                    self._check_idle_free()
                     self._sleep()
             except Exception:
                 # 任何一轮出错都不能让 worker 线程退出，否则队列会整体卡死。
                 log.exception("GPU worker 本轮出错")
                 self._sleep()
+
+    def gpu_running(self) -> bool:
+        """有没有 GPU 任务正在跑（用于手动释放显存前的互斥检查）。"""
+        with self.db.session() as s:
+            return s.scalar(select(Job.id).where(
+                Job.status == "running", Job.gpu.is_(True)).limit(1)) is not None
+
+    def _check_idle_free(self) -> None:
+        """自上一个 GPU 任务结束后，一直没有新任务排队/运行超过 idle_free_seconds 秒，
+        就调用一次 on_gpu_idle（释放 ComfyUI 显存）。用非阻塞方式抢 _gpu_lock：
+        抢不到说明这一刻正有任务在跑或 LLM 在用显卡（gpu_exclusive），下一轮再看，不会误释放。"""
+        secs = self.idle_free_seconds
+        if not secs or secs <= 0 or self._gpu_idle_fired or self._last_gpu_finish is None:
+            return
+        if time.monotonic() - self._last_gpu_finish < secs:
+            return
+        if not self._gpu_lock.acquire(blocking=False):
+            return
+        try:
+            if (self._gpu_idle_fired or self._last_gpu_finish is None
+                    or time.monotonic() - self._last_gpu_finish < secs):
+                return
+            self._gpu_idle_fired = True
+            self.current_family = None
+            if self.on_gpu_idle:
+                try:
+                    self.on_gpu_idle()
+                except Exception as e:
+                    log.warning("空闲释放显存失败：%s", e)
+        finally:
+            self._gpu_lock.release()
 
     def _cpu_loop(self) -> None:
         while not self._stop.is_set():
@@ -359,6 +397,10 @@ class JobManager:
                 j.result = None
                 j.finished_at = utcnow()
                 d = job_to_dict(j)
+        if is_gpu and status != "waiting_input":
+            # 重新起一轮空闲计时：成功/失败/取消都算「刚用过显卡」；等人工输入还没算完，不计时。
+            self._last_gpu_finish = time.monotonic()
+            self._gpu_idle_fired = False
         self._publish(d)
         self._notify()
 

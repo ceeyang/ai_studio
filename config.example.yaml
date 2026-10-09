@@ -10,6 +10,9 @@ comfyui:
   models_dir: C:\Users\cee\AppData\Local\Comfy-Desktop\ComfyUI-Shared\models
   timeout: 30
   max_retries: 6
+  # 队列空闲超过这么多秒（自上一个 GPU 任务结束算起）就自动调一次 ComfyUI 的 /free，
+  # 把显存和内存还回去；设成 0 关闭自动释放。
+  idle_free_seconds: 120
 
 llm:
   default: claude

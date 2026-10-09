@@ -364,3 +364,70 @@ def test_provide_input_serializes_with_claim(db, managers):
 
     assert result["d"]["status"] == "queued"
     assert result["d"]["payload"]["manual"]["k"] == "答案"
+
+
+def test_gpu_idle_hook_fires_once_after_timeout(db, managers):
+    reg = HandlerRegistry()
+    reg.register("g", gpu=True)(lambda ctx, p: None)
+    m = make(db, reg, managers, start=False)
+    m.idle_free_seconds = 0.1
+    idle_calls = []
+    m.on_gpu_idle = lambda: idle_calls.append(1)
+    m.start()
+    jid = m.submit("g")
+    wait_status(m, jid, "done")
+    time.sleep(0.05)
+    assert idle_calls == []  # 还没到超时
+    wait_for(lambda: len(idle_calls) == 1)
+    assert m.current_family is None
+    time.sleep(0.3)
+    assert idle_calls == [1]  # 之后不会再触发
+
+
+def test_gpu_idle_hook_not_fired_while_jobs_queued(db, managers):
+    reg = HandlerRegistry()
+
+    @reg.register("g", gpu=True)
+    def g(ctx, payload):
+        time.sleep(0.05)
+
+    m = make(db, reg, managers, start=False)
+    m.idle_free_seconds = 0.2
+    idle_calls = []
+    m.on_gpu_idle = lambda: idle_calls.append(1)
+    m.start()
+    ids = [m.submit("g") for _ in range(3)]
+    for jid in ids:
+        wait_status(m, jid, "done")
+    assert idle_calls == []  # 任务一个接一个在跑，一直没真正空闲过
+    wait_for(lambda: len(idle_calls) == 1)
+
+
+def test_gpu_idle_hook_fires_again_after_new_job(db, managers):
+    reg = HandlerRegistry()
+    reg.register("g", gpu=True)(lambda ctx, p: None)
+    m = make(db, reg, managers, start=False)
+    m.idle_free_seconds = 0.1
+    idle_calls = []
+    m.on_gpu_idle = lambda: idle_calls.append(1)
+    m.start()
+    jid = m.submit("g")
+    wait_status(m, jid, "done")
+    wait_for(lambda: len(idle_calls) == 1)
+    jid2 = m.submit("g")
+    wait_status(m, jid2, "done")
+    wait_for(lambda: len(idle_calls) == 2)
+
+
+def test_gpu_idle_zero_disables_hook(db, managers):
+    reg = HandlerRegistry()
+    reg.register("g", gpu=True)(lambda ctx, p: None)
+    m = make(db, reg, managers, start=False)
+    m.idle_free_seconds = 0
+    idle_calls = []
+    m.on_gpu_idle = lambda: idle_calls.append(1)
+    m.start()
+    jid = m.submit("g")
+    wait_status(m, jid, "done")
+    time.sleep(0.3)
+    assert idle_calls == []

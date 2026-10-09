@@ -26,6 +26,8 @@ class ComfyCfg(BaseModel):
     models_dir: Path | None = None  # 只给 doctor 检查模型文件用
     timeout: float = 30.0
     max_retries: int = 6
+    # 队列空闲超过这么多秒（自上一个 GPU 任务结束算起）就自动释放 ComfyUI 的显存/内存；0 关闭。
+    idle_free_seconds: float = 120.0
 
 
 class ProviderCfg(BaseModel):
