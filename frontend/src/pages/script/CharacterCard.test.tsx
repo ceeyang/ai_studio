@@ -127,6 +127,13 @@ describe('角色卡', () => {
     });
   });
 
+  it('角色卡里有三视图', async () => {
+    setup(CHEN);
+    const card = await screen.findByTestId('character-6');
+    expect(within(card).getByRole('region', { name: '陈师傅 的三视图' })).toBeTruthy();
+    expect(within(card).getByRole('button', { name: '生成视角描述' })).toBeTruthy();
+  });
+
   it('右栏分页：场景和风格在各自的页里', async () => {
     const { user } = setup(CHEN);
     expect(await screen.findByTestId('character-6')).toBeTruthy();

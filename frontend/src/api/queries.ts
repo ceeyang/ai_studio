@@ -31,6 +31,7 @@ import type {
   ShotPatch,
   Style,
   TranslateIn,
+  TurnaroundView,
 } from './types';
 
 export const keys = {
@@ -271,6 +272,44 @@ export function useSuggestDesigns(slug: string) {
     mutationFn: ({ id, count = 3, episode_id }: { id: number; count?: number; episode_id?: number }) =>
       api.post<RunOut>(`/api/characters/${id}/suggest`, episode_id ? { count, episode_id } : { count }),
     onSuccess: () => invalidate(qc, keys.characters(slug), ['jobs'], keys.queue),
+  });
+}
+
+/** 三视图第一步：LLM 写 9 格视角描述。 */
+export function usePlanTurnaround(slug: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => api.post<RunOut>(`/api/characters/${id}/turnaround/plan`, {}),
+    onSuccess: () => invalidate(qc, keys.characters(slug), ['jobs'], keys.queue),
+  });
+}
+
+/** 改某几格的视角描述。 */
+export function usePatchTurnaroundPlan(slug: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, views }: { id: number; views: Partial<Record<TurnaroundView, string>> }) =>
+      api.patch<Character>(`/api/characters/${id}/turnaround/plan`, { views }),
+    onSuccess: () => invalidate(qc, keys.characters(slug)),
+  });
+}
+
+/** 逐格出三视图：不给 views 就 9 格全出，每格一个 GPU 任务。 */
+export function useGenerateTurnaround(slug: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, views }: { id: number; views?: TurnaroundView[] }) =>
+      api.post<RunOut>(`/api/characters/${id}/turnaround/generate`, views ? { views } : {}),
+    onSuccess: () => invalidate(qc, keys.characters(slug), ['jobs'], keys.queue),
+  });
+}
+
+/** 三视图某一格换选定的候选。首帧 / 视频用到这一格的镜头会变过期。 */
+export function useSelectTurnaround(slug: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (candidateId: number) => api.post<Candidate>(`/api/candidates/${candidateId}/select`),
+    onSuccess: () => invalidate(qc, keys.characters(slug), ['episode']),
   });
 }
 

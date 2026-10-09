@@ -245,8 +245,33 @@ export interface Character {
   portraits?: Candidate[];
   /** AI 推荐造型 */
   design_options?: DesignOption[];
-  /** 进行中的抽卡（image.portrait）/ 推荐造型（character.suggest）任务 */
+  /** 进行中的抽卡（image.portrait）/ 推荐造型（character.suggest）/ 三视图任务 */
   active_jobs?: JobBrief[];
+  /** 三视图 9 格，固定顺序（见 TURNAROUND_VIEWS） */
+  turnaround?: TurnaroundCell[];
+}
+
+export type TurnaroundView =
+  | 'front_full'
+  | 'front_half'
+  | 'face_closeup'
+  | 'left_profile'
+  | 'right_profile'
+  | 'three_quarter'
+  | 'back'
+  | 'low_angle'
+  | 'high_angle';
+
+export interface TurnaroundCell {
+  view: TurnaroundView;
+  label: string;
+  /** 视角描述（英文），空表示还没写 */
+  description: string;
+  selected_candidate_id: number | null;
+  url: string | null;
+  /** 选定的这张是按旧定妆照 / 旧描述出的 */
+  stale: boolean;
+  candidates: Candidate[];
 }
 
 export interface DesignOption {
@@ -259,6 +284,8 @@ export interface JobBrief {
   id: number;
   type: string;
   status: JobStatus;
+  /** image.turnaround 任务出的是哪一格 */
+  view?: TurnaroundView | null;
 }
 
 export interface CharacterIn {

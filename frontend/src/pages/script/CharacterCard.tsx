@@ -1,4 +1,4 @@
-// 角色卡：定妆照候选（上传的 + 本地 AI 抽的），点一张切换角色造型；抽卡；AI 推荐造型；角色资料。
+// 角色卡：定妆照候选（上传的 + 本地 AI 抽的），点一张切换角色造型；抽卡；AI 推荐造型；三视图；角色资料。
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { errorText } from '../../api/client';
@@ -13,6 +13,7 @@ import {
 import type { Candidate, Character, CharacterPatch, DesignOption } from '../../api/types';
 import { EditableFields, type FieldSpec, type FieldValues } from '../../components/EditableFields';
 import { useEvents } from '../../ws/EventsContext';
+import { TurnaroundPanel } from './TurnaroundPanel';
 
 const CHARACTER_FIELDS: FieldSpec[] = [
   { name: 'name', label: '名字' },
@@ -231,6 +232,7 @@ export function CharacterCard({ c, slug, episodeId }: { c: Character; slug: stri
           />
         </div>
       </div>
+      <TurnaroundPanel c={c} slug={slug} />
       {options.length > 0 && (
         <div className="options" aria-label={`${c.name} 的 AI 推荐造型`}>
           {options.map((o, i) => (
