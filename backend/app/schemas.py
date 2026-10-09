@@ -6,7 +6,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from backend.llm.schemas import Transition, TurnaroundView
+from backend.llm.schemas import Transition
 from backend.post.options import ExportOptions
 
 Aspect = Literal["9:16", "16:9"]
@@ -72,32 +72,59 @@ class CharacterOut(ORM):
     portraits: list[CandidateOut] = Field(default_factory=list)   # 全部定妆照候选（上传的 + AI 抽的）
     design_options: list[dict] = Field(default_factory=list)      # AI 推荐造型
     active_jobs: list[JobBrief] = Field(default_factory=list)     # 进行中的抽卡 / 推荐造型 / 三视图任务
-    turnaround: list[TurnaroundCellOut] = Field(default_factory=list)  # 三视图 9 格，固定顺序
+    turnaround: TurnaroundOut | None = None                       # 三视图设定图和切出来的格子
 
 
 class JobBrief(BaseModel):
     id: int
     type: str
     status: str
-    view: str | None = None              # image.turnaround 任务出的是哪一格
+    sheet: str | None = None             # image.turnaround 任务出的是哪种设定图
+
+
+class TurnaroundSheetOut(BaseModel):
+    sheet: str                           # body：全身 4 视角 / face：头像 3 视角
+    label: str
+    views: list[str]                     # 从左到右切出来的视角
+    selected_candidate_id: int | None
+    url: str | None
+    stale: bool                          # 选定的这张是按旧定妆照 / 旧全身描述出的
+    crop_method: str | None              # segment 按人物切 / equal 等宽切 / None 还没切
+    candidates: list[CandidateOut]
 
 
 class TurnaroundCellOut(BaseModel):
     view: str
     label: str
-    description: str                     # 视角描述（英文），空表示还没写
+    sheet: str
     selected_candidate_id: int | None
     url: str | None
-    stale: bool                          # 选定的这张是按旧定妆照 / 旧描述出的
-    candidates: list[CandidateOut]
+    stale: bool                          # 切自的设定图过期了
 
 
-class TurnaroundPlanPatch(BaseModel):
-    views: dict[TurnaroundView, str]
+class TurnaroundOut(BaseModel):
+    look: str                            # 全身描述（英文），空表示用外貌提示词
+    default_engine: str
+    sheets: list[TurnaroundSheetOut]
+    cells: list[TurnaroundCellOut]
+
+
+class TurnaroundLookPatch(BaseModel):
+    look: str
 
 
 class TurnaroundGenerateIn(BaseModel):
-    views: list[TurnaroundView] | None = None   # 不给就 9 格全出
+    sheets: list[Literal["body", "face"]] | None = None   # 不给就全身 + 头像各一张
+    count: int = Field(1, ge=1, le=4)                     # 每种出几张候选
+    engine: str | None = None                             # 不给用默认（H3 + 定妆照锁脸）
+
+
+class TurnaroundSelectIn(BaseModel):
+    candidate_id: int
+
+
+class TurnaroundCropIn(BaseModel):
+    method: Literal["auto", "equal"] = "auto"
 
 
 class PortraitDrawIn(BaseModel):
@@ -351,5 +378,6 @@ class InputIn(BaseModel):
     text: str = Field(min_length=1)
 
 
-TurnaroundCellOut.model_rebuild()
+TurnaroundSheetOut.model_rebuild()
+TurnaroundOut.model_rebuild()
 CharacterOut.model_rebuild()  # portraits / turnaround 引用了后面定义的 CandidateOut

@@ -6,10 +6,13 @@ from fastapi import APIRouter, Request
 from backend.app.deps import get_or_404, manager, services
 from backend.app.routes.projects import character_out
 from backend.app.schemas import (CharacterOut, PortraitDrawIn, RecommendIn, RunOut, SuggestIn,
-                                 TurnaroundGenerateIn, TurnaroundPlanPatch)
+                                 TurnaroundCropIn, TurnaroundGenerateIn, TurnaroundLookPatch,
+                                 TurnaroundSelectIn)
 from backend.domain.characters import portrait_of, use_portrait
-from backend.domain.turnaround import VIEW_KEYS, VIEW_LABELS
-from backend.domain.models import Character, Episode
+from backend.domain.turnaround import (SHEETS, crop_cells, look_of, select_sheet,
+                                       sheet_slot_kind)
+from backend.domain.models import Candidate, Character, Episode, Slot
+from backend.pipeline.characters import sheet_engine_name
 from backend.queue.errors import JobError
 
 router = APIRouter(prefix="/api", tags=["characters"])
@@ -76,51 +79,82 @@ def recommend(episode_id: int, body: RecommendIn, request: Request):
     return RunOut(job_ids=[jid])
 
 
-@router.post("/characters/{char_id}/turnaround/plan", response_model=RunOut)
-def turnaround_plan(char_id: int, request: Request):
-    """三视图第一步：LLM 按外貌提示词写 9 格视角描述，写好后用户可以改，再逐格出图。"""
+@router.post("/characters/{char_id}/turnaround/look", response_model=RunOut)
+def turnaround_look(char_id: int, request: Request):
+    """三视图可选的第一步：LLM 把外貌提示词整理成从头到脚的全身描述（补上下装和鞋），用户可改。"""
     sv = services(request)
     with sv.db.session() as s:
         c = get_or_404(s, Character, char_id, "角色")
         if not c.visual_prompt.strip():
             raise JobError(f"角色 {c.name} 还没有外貌提示词，先写一个或用 AI 推荐造型")
         project_id = c.project_id
-    jid = manager(request).submit("character.turnaround_plan", {"character_id": char_id},
+    jid = manager(request).submit("character.turnaround_look", {"character_id": char_id},
                                   project_id=project_id, owner_type="character", owner_id=char_id)
     return RunOut(job_ids=[jid])
 
 
-@router.patch("/characters/{char_id}/turnaround/plan", response_model=CharacterOut)
-def patch_turnaround_plan(char_id: int, body: TurnaroundPlanPatch, request: Request):
-    """改某几格的视角描述（只改给出的格）。改了的格已出的图按哈希规则变过期。"""
+@router.patch("/characters/{char_id}/turnaround/look", response_model=CharacterOut)
+def patch_turnaround_look(char_id: int, body: TurnaroundLookPatch, request: Request):
+    """改全身描述。已出的设定图和切出来的格子按哈希规则变过期。"""
     with services(request).db.session() as s:
         c = get_or_404(s, Character, char_id, "角色")
-        c.turnaround_plan = {**(c.turnaround_plan or {}),
-                             **{k: v.strip() for k, v in body.views.items()}}
+        c.turnaround_look = body.look.strip()
         s.flush()
         return character_out(s, c)
 
 
 @router.post("/characters/{char_id}/turnaround/generate", response_model=RunOut)
 def turnaround_generate(char_id: int, body: TurnaroundGenerateIn, request: Request):
-    """逐格出三视图：每格一个 GPU 任务，不给 views 就 9 格全出。"""
+    """出三视图设定图：每种（全身 / 头像）出 count 张候选，每张一个 GPU 任务。"""
     sv = services(request)
-    views = list(dict.fromkeys(body.views)) if body.views else list(VIEW_KEYS)
+    sheets = list(dict.fromkeys(body.sheets)) if body.sheets else list(SHEETS)
     with sv.db.session() as s:
         c = get_or_404(s, Character, char_id, "角色")
-        plan = c.turnaround_plan or {}
-        missing = [VIEW_LABELS[v] for v in views if not (plan.get(v) or "").strip()]
-        if missing:
-            raise JobError(f"角色 {c.name} 的三视图还缺视角描述：{'、'.join(missing)}，先生成视角描述")
-        if portrait_of(s, char_id) is None:
-            raise JobError(f"角色 {c.name} 还没有选定定妆照，三视图要用它锁脸")
-        project_id, engine_name = c.project_id, c.project.image_engine
-    try:
-        family = sv.engines.image(engine_name).family
-    except KeyError:
-        family = None
+        engine_name = body.engine or sheet_engine_name(sv, c.project)
+        try:
+            engine = sv.engines.image(engine_name)
+        except KeyError as e:
+            raise JobError(str(e)) from None
+        if not look_of(c):
+            raise JobError(f"角色 {c.name} 还没有外貌提示词，先写一个或用 AI 推荐造型")
+        if engine.caps.max_refs > 0 and portrait_of(s, char_id) is None:
+            raise JobError(f"角色 {c.name} 还没有选定定妆照，{engine_name} 出三视图要用它锁脸")
+        project_id = c.project_id
     m = manager(request)
-    return RunOut(job_ids=[m.submit("image.turnaround", {"character_id": char_id, "view": v},
+    return RunOut(job_ids=[m.submit("image.turnaround",
+                                    {"character_id": char_id, "sheet": sh, "engine": engine_name},
                                     project_id=project_id, owner_type="character",
-                                    owner_id=char_id, model_family=family)
-                           for v in views])
+                                    owner_id=char_id, model_family=engine.family)
+                           for sh in sheets for _ in range(body.count)])
+
+
+def _sheet_or_404(sheet: str) -> str:
+    if sheet not in SHEETS:
+        raise LookupError(f"没有这种三视图设定图：{sheet}")
+    return sheet
+
+
+@router.post("/characters/{char_id}/turnaround/sheets/{sheet}/select", response_model=CharacterOut)
+def select_turnaround_sheet(char_id: int, sheet: str, body: TurnaroundSelectIn, request: Request):
+    """换选定的设定图并立即重新切图。用到这些格子的镜头按哈希规则变过期。"""
+    sv = services(request)
+    _sheet_or_404(sheet)
+    with sv.db.session() as s:
+        c = get_or_404(s, Character, char_id, "角色")
+        cand = s.get(Candidate, body.candidate_id)
+        slot = s.get(Slot, cand.slot_id) if cand else None
+        if slot is None or slot.kind != sheet_slot_kind(sheet):
+            raise LookupError(f"候选 {body.candidate_id} 不是{SHEETS[sheet].label}设定图")
+        select_sheet(s, sv.media, c, body.candidate_id)
+        return character_out(s, c)
+
+
+@router.post("/characters/{char_id}/turnaround/sheets/{sheet}/crop", response_model=CharacterOut)
+def crop_turnaround_sheet(char_id: int, sheet: str, body: TurnaroundCropIn, request: Request):
+    """重新切图：auto 按人物切（找不准时自动退回等宽），equal 直接等宽切。"""
+    sv = services(request)
+    _sheet_or_404(sheet)
+    with sv.db.session() as s:
+        c = get_or_404(s, Character, char_id, "角色")
+        crop_cells(s, sv.media, c, sheet, body.method)
+        return character_out(s, c)

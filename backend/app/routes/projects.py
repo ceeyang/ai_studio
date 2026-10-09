@@ -11,9 +11,12 @@ from sqlalchemy import func, select
 from backend.app.deps import check_engines, get_or_404, project_by_slug, services
 from backend.app.schemas import (CharacterIn, CharacterOut, CharacterPatch, EndCardIO,
                                  EpisodeStats, JobBrief, LocationOut, LocationPatch, PortraitPathIn, ProjectIn, ProjectOut,
-                                 ProjectOverview, ProjectPatch, StyleIO, TurnaroundCellOut)
+                                 ProjectOverview, ProjectPatch, StyleIO, TurnaroundCellOut,
+                                 TurnaroundOut, TurnaroundSheetOut)
 from backend.domain.characters import portrait_ext, portrait_of, set_portrait
-from backend.domain.turnaround import VIEW_KEYS, VIEW_LABELS, cell_state, slot_kind
+from backend.domain.turnaround import (DEFAULT_SHEET_ENGINE, SHEETS, VIEW_KEYS, VIEW_LABELS,
+                                       VIEW_SHEET, cell_state, crop_method, sheet_slot_kind,
+                                       sheet_state)
 from backend.domain.models import (Candidate, Character, Episode, Export, Job, Location, Project,
                                    Shot, Slot, StyleBible)
 from backend.app.views import candidate_out
@@ -115,22 +118,32 @@ def delete_project(slug: str, request: Request):
     return Response(status_code=204)
 
 
-CHARACTER_JOB_TYPES = ("image.portrait", "character.suggest", "character.turnaround_plan",
+CHARACTER_JOB_TYPES = ("image.portrait", "character.suggest", "character.turnaround_look",
                        "image.turnaround")
 
 
-def turnaround_out(s, c: Character, slots: dict) -> list[TurnaroundCellOut]:
-    plan = c.turnaround_plan or {}
-    out = []
-    for view in VIEW_KEYS:
-        slot = slots.get(slot_kind(view))
-        sel, is_stale = cell_state(s, c, view)
-        out.append(TurnaroundCellOut(
-            view=view, label=VIEW_LABELS[view], description=plan.get(view) or "",
-            selected_candidate_id=sel.id if sel else None,
-            url="/media/" + quote(sel.file_path) if sel else None, stale=is_stale,
+def _url(c) -> str | None:
+    return "/media/" + quote(c.file_path) if c else None
+
+
+def turnaround_out(s, c: Character, slots: dict) -> TurnaroundOut:
+    sheets = []
+    for key, spec in SHEETS.items():
+        slot = slots.get(sheet_slot_kind(key))
+        sel, is_stale = sheet_state(s, c, key)
+        sheets.append(TurnaroundSheetOut(
+            sheet=key, label=spec.label, views=list(spec.views),
+            selected_candidate_id=sel.id if sel else None, url=_url(sel), stale=is_stale,
+            crop_method=crop_method(s, c, key),
             candidates=[candidate_out(x) for x in slot.candidates] if slot else []))
-    return out
+    cells = []
+    for view in VIEW_KEYS:
+        sel, is_stale = cell_state(s, c, view)
+        cells.append(TurnaroundCellOut(view=view, label=VIEW_LABELS[view], sheet=VIEW_SHEET[view],
+                                       selected_candidate_id=sel.id if sel else None,
+                                       url=_url(sel), stale=is_stale))
+    return TurnaroundOut(look=c.turnaround_look or "", default_engine=DEFAULT_SHEET_ENGINE,
+                         sheets=sheets, cells=cells)
 
 
 def character_out(s, c: Character) -> CharacterOut:
@@ -146,7 +159,7 @@ def character_out(s, c: Character) -> CharacterOut:
         "portraits": [candidate_out(x) for x in slot.candidates] if slot else [],
         "design_options": list(c.design_options or []),
         "active_jobs": [JobBrief(id=j.id, type=j.type, status=j.status,
-                                 view=(j.payload or {}).get("view")) for j in jobs],
+                                 sheet=(j.payload or {}).get("sheet")) for j in jobs],
         "turnaround": turnaround_out(s, c, slots)})
 
 

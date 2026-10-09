@@ -167,35 +167,14 @@ class CharacterRecommendations(BaseModel):
 
 
 # ---------------------------------------------------------------- 三视图
-TURNAROUND_VIEWS = ("front_full", "front_half", "face_closeup", "left_profile", "right_profile",
-                    "three_quarter", "back", "low_angle", "high_angle")
-TurnaroundView = Literal["front_full", "front_half", "face_closeup", "left_profile", "right_profile",
-                         "three_quarter", "back", "low_angle", "high_angle"]
-
-
-class TurnaroundCell(BaseModel):
-    view: TurnaroundView
+class TurnaroundLook(BaseModel):
+    """出三视图设定图用的全身描述：一段英文，从头到脚。"""
     description: str
 
     @field_validator("description")
     @classmethod
     def _words(cls, v: str) -> str:
         n = len(v.split())
-        if n < 12 or n > 110:
-            raise ValueError(f"description 要写 20–80 个英文单词，现在是 {n} 个")
-        return v.strip()
-
-
-class TurnaroundPlan(BaseModel):
-    views: list[TurnaroundCell]
-
-    @model_validator(mode="after")
-    def _all_nine(self):
-        seen = [c.view for c in self.views]
-        dup = sorted({v for v in seen if seen.count(v) > 1})
-        if dup:
-            raise ValueError(f"视角重复：{dup}，每个视角只写一次")
-        missing = [v for v in TURNAROUND_VIEWS if v not in seen]
-        if missing:
-            raise ValueError(f"缺少视角：{missing}，9 个视角都要写")
-        return self
+        if n < 30 or n > 160:
+            raise ValueError(f"description 要写 50–130 个英文单词，现在是 {n} 个")
+        return " ".join(v.split())

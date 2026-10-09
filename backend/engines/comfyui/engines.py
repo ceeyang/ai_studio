@@ -45,7 +45,8 @@ class ZImageEngine(_ComfyEngine):
     family = "zimage"
     template_name = "zimage"
     caps = ImageCaps(max_refs=0, supports_negative=True,
-                     sizes={"9:16": (768, 1344), "16:9": (1344, 768), "1:1": (1024, 1024)})
+                     sizes={"9:16": (768, 1344), "16:9": (1344, 768), "1:1": (1024, 1024),
+                            "21:9": (1792, 768)})
 
     def build(self, req: ImageRequest) -> EngineCall:
         w, h = size_for(self.caps.sizes, req.aspect)
@@ -63,7 +64,8 @@ class H3ImageEngine(_ComfyEngine):
     family = "h3"
     template_name = "h3_image"
     caps = ImageCaps(max_refs=9, supports_negative=False,
-                     sizes={"9:16": (768, 1344), "16:9": (1344, 768), "1:1": (960, 960)})
+                     sizes={"9:16": (768, 1344), "16:9": (1344, 768), "1:1": (960, 960),
+                            "21:9": (1792, 768)})
 
     def build(self, req: ImageRequest) -> EngineCall:
         w, h = size_for(self.caps.sizes, req.aspect)
