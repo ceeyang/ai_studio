@@ -69,6 +69,29 @@ class CharacterOut(ORM):
     voice: str | None
     portrait_candidate_id: int | None = None
     portrait_url: str | None = None
+    portraits: list[CandidateOut] = Field(default_factory=list)   # 全部定妆照候选（上传的 + AI 抽的）
+    design_options: list[dict] = Field(default_factory=list)      # AI 推荐造型
+    active_jobs: list[JobBrief] = Field(default_factory=list)     # 进行中的抽卡 / 推荐造型任务
+
+
+class JobBrief(BaseModel):
+    id: int
+    type: str
+    status: str
+
+
+class PortraitDrawIn(BaseModel):
+    count: int = Field(1, ge=1, le=4)
+    visual_prompt: str | None = None     # 不给就用角色当前的外貌提示词
+
+
+class SuggestIn(BaseModel):
+    count: int = Field(3, ge=1, le=6)
+    episode_id: int | None = None        # 读哪一集的剧本；不给读全部剧集
+
+
+class RecommendIn(BaseModel):
+    count: int = Field(3, ge=1, le=6)
 
 
 class CharacterIn(BaseModel):
@@ -306,3 +329,6 @@ class RetryIn(BaseModel):
 
 class InputIn(BaseModel):
     text: str = Field(min_length=1)
+
+
+CharacterOut.model_rebuild()  # portraits 引用了后面定义的 CandidateOut

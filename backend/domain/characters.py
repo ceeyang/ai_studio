@@ -54,3 +54,34 @@ def cast_portraits(s: Session, shot) -> list[Candidate]:
         if c is not None:
             out.append(c)
     return out
+
+
+def add_portrait(s: Session, char_id: int, *, file_path: str, engine: str, params: dict,
+                 input_hash: str, job_id: int | None) -> Candidate:
+    """AI 抽出来的定妆照：加成候选。已经选定了定妆照就不动（换脸会让出场镜头过期），没有才自动选定。"""
+    slot = get_or_create_slot(s, "character", char_id, "portrait")
+    c = add_candidate(s, slot, file_path=file_path, engine=engine, params=params,
+                      input_hash=input_hash, job_id=job_id, auto_select=False)
+    if slot.selected_candidate_id is None:
+        select_candidate(s, c.id)
+    return c
+
+
+def use_portrait(s: Session, char: Character, candidate_id: int) -> Candidate:
+    """切换角色造型：选定这张定妆照；它记着当时的外貌提示词时，角色提示词一起换过去。
+
+    切走的那张如果没记提示词（比如上传的），先把当前提示词记到它身上，切回来时能恢复。"""
+    slot = get_or_create_slot(s, "character", char.id, "portrait")
+    c = s.get(Candidate, candidate_id)
+    if c is None or c.slot_id != slot.id:
+        raise LookupError(f"角色 {char.name} 没有定妆照候选 {candidate_id}")
+    cur = s.get(Candidate, slot.selected_candidate_id) if slot.selected_candidate_id else None
+    if cur is not None and cur.id != c.id and not (cur.params or {}).get("visual_prompt") \
+            and char.visual_prompt:
+        cur.params = {**(cur.params or {}), "visual_prompt": char.visual_prompt}
+    select_candidate(s, c.id)
+    vp = (c.params or {}).get("visual_prompt")
+    if isinstance(vp, str) and vp.strip():
+        char.visual_prompt = vp
+    s.flush()
+    return c

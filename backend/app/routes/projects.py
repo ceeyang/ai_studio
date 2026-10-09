@@ -10,12 +10,14 @@ from sqlalchemy import func, select
 
 from backend.app.deps import check_engines, get_or_404, project_by_slug, services
 from backend.app.schemas import (CharacterIn, CharacterOut, CharacterPatch, EndCardIO,
-                                 EpisodeStats, LocationOut, LocationPatch, PortraitPathIn, ProjectIn, ProjectOut,
+                                 EpisodeStats, JobBrief, LocationOut, LocationPatch, PortraitPathIn, ProjectIn, ProjectOut,
                                  ProjectOverview, ProjectPatch, StyleIO)
 from backend.domain.characters import portrait_ext, portrait_of, set_portrait
-from backend.domain.models import (Candidate, Character, Episode, Export, Location, Project, Shot,
-                                   Slot, StyleBible)
-from backend.domain.slots import delete_slots
+from backend.domain.models import (Candidate, Character, Episode, Export, Job, Location, Project,
+                                   Shot, Slot, StyleBible)
+from backend.app.views import candidate_out
+from backend.domain.slots import delete_slots, slots_for
+from backend.queue.manager import ACTIVE
 from backend.queue.errors import JobError
 
 router = APIRouter(prefix="/api", tags=["projects"])
@@ -112,11 +114,21 @@ def delete_project(slug: str, request: Request):
     return Response(status_code=204)
 
 
+CHARACTER_JOB_TYPES = ("image.portrait", "character.suggest")
+
+
 def character_out(s, c: Character) -> CharacterOut:
     pc = portrait_of(s, c.id)
+    slot = next((x for x in slots_for(s, "character", c.id) if x.kind == "portrait"), None)
+    jobs = s.scalars(select(Job).where(Job.owner_type == "character", Job.owner_id == c.id,
+                                       Job.type.in_(CHARACTER_JOB_TYPES),
+                                       Job.status.in_(ACTIVE)).order_by(Job.id))
     return CharacterOut.model_validate(c).model_copy(update={
         "portrait_candidate_id": pc.id if pc else None,
-        "portrait_url": "/media/" + quote(pc.file_path) if pc else None})
+        "portrait_url": "/media/" + quote(pc.file_path) if pc else None,
+        "portraits": [candidate_out(x) for x in slot.candidates] if slot else [],
+        "design_options": list(c.design_options or []),
+        "active_jobs": [JobBrief(id=j.id, type=j.type, status=j.status) for j in jobs]})
 
 
 @router.get("/projects/{slug}/characters", response_model=list[CharacterOut])

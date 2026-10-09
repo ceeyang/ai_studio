@@ -125,3 +125,42 @@ class TranslatedLine(BaseModel):
 
 class TranslationOut(BaseModel):
     lines: list[TranslatedLine] = Field(min_length=1)
+
+
+# ---------------------------------------------------------------- 角色造型
+def _look_words(v: str) -> str:
+    n = len(v.split())
+    if n < 50 or n > 140:
+        raise ValueError(f"visual_prompt 要写 60–120 个英文单词，现在是 {n} 个")
+    return v
+
+
+class DesignOption(BaseModel):
+    label: str = Field(min_length=1, max_length=40)
+    visual_prompt: str
+    core_features: str = ""
+
+    @field_validator("visual_prompt")
+    @classmethod
+    def _words(cls, v: str) -> str:
+        return _look_words(v)
+
+
+class DesignOptions(BaseModel):
+    options: list[DesignOption] = Field(min_length=1)
+
+
+class RecommendedCharacter(BaseModel):
+    name: str = Field(min_length=1, max_length=100)
+    description: str = ""
+    visual_prompt: str
+    core_features: str = ""
+
+    @field_validator("visual_prompt")
+    @classmethod
+    def _words(cls, v: str) -> str:
+        return _look_words(v)
+
+
+class CharacterRecommendations(BaseModel):
+    characters: list[RecommendedCharacter] = Field(default_factory=list)
