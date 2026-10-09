@@ -34,7 +34,8 @@ class SheetSpec:
 
 SHEETS: dict[str, SheetSpec] = {
     "body": SheetSpec("全身三视图", "21:9", ("front_full", "three_quarter", "profile", "back")),
-    "face": SheetSpec("头像", "16:9", ("face_front", "face_three_quarter", "face_profile")),
+    # 头像也用 21:9：16:9 时 H3 会照着定妆照的中景构图出，3/4 转不过去；宽画幅三个头之间留得开
+    "face": SheetSpec("头像", "21:9", ("face_front", "face_three_quarter", "face_profile")),
 }
 SHEET_KEYS: tuple[str, ...] = tuple(SHEETS)
 

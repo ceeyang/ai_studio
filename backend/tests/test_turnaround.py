@@ -63,7 +63,7 @@ class SheetRunner(FakeRunner):
 
     def run(self, call, *, run_dir, cancel, on_progress=None, timeout=3600.0):
         files = super().run(call, run_dir=run_dir, cancel=cancel, on_progress=on_progress)
-        n = self.counts.pop(0) if self.counts else (3 if call.meta["size"][0] == 1344 else 4)
+        n = self.counts.pop(0) if self.counts else (3 if "_face" in str(call.workflow) else 4)
         files[0].write_bytes(png(n))
         return files
 
@@ -127,7 +127,7 @@ def test_views_and_sheets():
         "正面全身", "3/4 侧", "侧面", "背面", "正脸", "3/4 脸", "侧脸"]
     assert SHEETS["body"].views == ("front_full", "three_quarter", "profile", "back")
     assert SHEETS["face"].views == ("face_front", "face_three_quarter", "face_profile")
-    assert SHEETS["body"].aspect == "21:9" and SHEETS["face"].aspect == "16:9"
+    assert SHEETS["body"].aspect == "21:9" and SHEETS["face"].aspect == "21:9"
     assert sheet_slot_kind("body") == "turnaround_sheet_body"
     assert view_slot_kind("back") == "turnaround_view_back"
 
@@ -278,7 +278,7 @@ def test_face_sheet(tmp_path, db):
     put_portrait(ctx.services, ids["chen"])
     gen_sheet(ctx, ids["chen"], "face")
     call = runner.calls[-1]
-    assert call.meta["size"] == [1344, 768]
+    assert call.meta["size"] == [1792, 768]
     with db.session() as s:
         ch = s.get(Character, ids["chen"])
         assert all(cell_state(s, ch, v)[0] is not None for v in SHEETS["face"].views)
