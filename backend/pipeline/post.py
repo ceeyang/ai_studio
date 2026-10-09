@@ -189,15 +189,17 @@ def run_translate(ctx, payload: dict) -> dict:
 
 # ---------------------------------------------------------------- 配音
 def _tts(sv, cache: Path, text: str, voice: str, rate: int) -> tuple[Path, float]:
-    mp3 = cache / f"{input_hash('tts', text, voice, rate)}.mp3"
-    if not mp3.exists() or mp3.stat().st_size == 0:
-        tmp = mp3.with_suffix(".part.mp3")
+    """念一句并剪掉首尾静音（Edge TTS 句尾常带一秒多空白，不剪的话语速永远算不对）。按文本+音色+语速缓存。"""
+    wav = cache / f"{input_hash('tts', text, voice, rate)}.wav"
+    if not wav.exists() or wav.stat().st_size == 0:
+        raw = wav.with_suffix(".raw.mp3")
         try:
-            edge_tts_save(text, voice, rate, tmp)
+            edge_tts_save(text, voice, rate, raw)
         except Exception as e:
             raise JobError(f"Edge TTS 失败（{voice}，{rate:+d}%）：{e}") from e
-        tmp.replace(mp3)
-    return mp3, sv.ffmpeg.duration(mp3)
+        sv.ffmpeg.trim_silence(raw, wav)
+        raw.unlink(missing_ok=True)
+    return wav, sv.ffmpeg.duration(wav)
 
 
 @HANDLERS.register("post.dub")

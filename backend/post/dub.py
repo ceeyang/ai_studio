@@ -71,6 +71,13 @@ def build_dub_mix_cmd(ffmpeg: str, src, lines: list[tuple], out, *, bed_db: floa
                   "-movflags", "+faststart", str(out)]
 
 
+def build_trim_silence_cmd(ffmpeg: str, src, dst, *, threshold_db: float = -45.0) -> list[str]:
+    """剪掉一句 TTS 首尾的静音（Edge TTS 句尾常带一秒多空白），输出 48k 立体声 wav，时长就是真正说话的长度。"""
+    one = f"silenceremove=start_periods=1:start_threshold={threshold_db:g}dB:start_silence=0.03"
+    return [ffmpeg, "-y", "-i", str(src), "-af", f"{one},areverse,{one},areverse",
+            "-ar", str(SAMPLE_RATE), "-ac", "2", str(dst)]
+
+
 def edge_tts_save(text: str, voice: str, rate_pct: int, out: Path) -> None:
     """Edge TTS 念一句存成 mp3。rate_pct 是整数百分比，0 = 原速。需要联网，不要 key。"""
     from edge_tts import Communicate

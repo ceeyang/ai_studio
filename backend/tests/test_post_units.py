@@ -2,7 +2,7 @@
 import pytest
 
 from backend.engines.ffmpeg import parse_sound_end, xfade_timeline
-from backend.post.dub import build_dub_mix_cmd, fit_rate, plan_dub_lines
+from backend.post.dub import build_dub_mix_cmd, build_trim_silence_cmd, fit_rate, plan_dub_lines
 from backend.post.render import CardSpec, build_finish_cmd
 from backend.post.subtitles import (ass_time, build_endcard_ass, build_subtitles_ass, timeline_cues,
                                     wrap_zh)
@@ -189,3 +189,11 @@ def test_dub_mix_cmd_ducks_bed_and_delays_lines():
     assert "adelay=4000:all=1[v2]" in graph
     assert "[bed][v1][v2]amix=inputs=3:normalize=0:dropout_transition=0:duration=first[a]" in graph
     assert cmd[cmd.index("-c:v") + 1] == "copy"
+
+
+def test_trim_silence_cmd_strips_both_ends():
+    cmd = build_trim_silence_cmd("ffmpeg", "raw.mp3", "line.wav")
+    af = cmd[cmd.index("-af") + 1]
+    one = "silenceremove=start_periods=1:start_threshold=-45dB:start_silence=0.03"
+    assert af == f"{one},areverse,{one},areverse"   # 先剪开头，倒过来再剪一次就是结尾
+    assert cmd[-1] == "line.wav" and "48000" in cmd

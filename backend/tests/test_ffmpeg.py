@@ -124,3 +124,17 @@ def test_sound_end_finds_trailing_silence(tmp_path):
     assert abs(ff.sound_end(clip) - 1.2) < 0.1
     silent = make_clip(tmp_path / "b.mp4", 1.0, False)
     assert ff.sound_end(silent) is None
+
+
+@needs_ffmpeg
+def test_trim_silence_removes_tts_padding(tmp_path):
+    ff = FFmpeg()
+    raw = tmp_path / "raw.mp3"
+    subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=24000:cl=mono:d=0.2",
+                    "-f", "lavfi", "-i", "sine=frequency=300:duration=0.4",
+                    "-f", "lavfi", "-i", "anullsrc=r=24000:cl=mono:d=1.4",
+                    "-filter_complex", "[0][1][2]concat=n=3:v=0:a=1", str(raw)],
+                   check=True, capture_output=True)
+    assert ff.duration(raw) > 1.9
+    out = ff.trim_silence(raw, tmp_path / "line.wav")
+    assert abs(ff.duration(out) - 0.4) < 0.08

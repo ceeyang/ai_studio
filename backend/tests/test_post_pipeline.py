@@ -102,6 +102,10 @@ class TimedFFmpeg(FakeFFmpeg):
     def duration(self, path):
         return float(Path(path).read_text())
 
+    def trim_silence(self, src, dst):
+        Path(dst).write_text(Path(src).read_text())
+        return Path(dst)
+
 
 def fake_tts(lengths):
     calls = []

@@ -181,6 +181,12 @@ class FFmpeg:
             raise FFmpegError(f"silencedetect 失败：\n{p.stderr[-1500:]}")
         return parse_sound_end(p.stderr, self.duration(path))
 
+    def trim_silence(self, src: Path, dst: Path) -> Path:
+        """剪掉音频首尾静音（配音用）。"""
+        from backend.post.dub import build_trim_silence_cmd
+        self.run(build_trim_silence_cmd(self.ffmpeg, src, dst))
+        return Path(dst)
+
     def last_frame(self, video: Path, out_png: Path) -> Path:
         out_png = Path(out_png)
         out_png.parent.mkdir(parents=True, exist_ok=True)
