@@ -101,3 +101,26 @@ class ComfyClient:
             return self.system_stats(tries=2)["devices"][0]["vram_free"] / 2**30
         except (ComfyError, KeyError, IndexError):
             return None
+
+    def ram_free_gb(self) -> float | None:
+        try:
+            return self.system_stats(tries=2)["system"]["ram_free"] / 2**30
+        except (ComfyError, KeyError, TypeError):
+            return None
+
+    def process_rss_gb(self) -> float | None:
+        """ComfyUI 所在进程占用的内存（RSS）。按监听端口在本机进程里找：找不到、
+        没权限，或者 ComfyUI 跑在别的机器上，就返回 None（不是必须有的信息）。"""
+        try:
+            import psutil
+
+            port = httpx.URL(self.base_url).port
+            if port is None:
+                return None
+            for c in psutil.net_connections(kind="inet"):
+                if (c.status == psutil.CONN_LISTEN and c.laddr and c.laddr.port == port
+                        and c.pid):
+                    return psutil.Process(c.pid).memory_info().rss / 2**30
+        except Exception:
+            return None
+        return None

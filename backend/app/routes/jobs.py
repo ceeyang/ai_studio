@@ -1,12 +1,17 @@
 """任务与队列。"""
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request
 
 from backend.app.deps import manager, project_by_slug, services
 from backend.app.schemas import InputIn, RetryIn
 
 router = APIRouter(prefix="/api", tags=["jobs"])
+
+
+def _mem_snapshot(client) -> dict:
+    return {"vram_free_gb": client.vram_free_gb(), "ram_free_gb": client.ram_free_gb(),
+            "process_rss_gb": client.process_rss_gb()}
 
 
 @router.get("/jobs")
@@ -55,3 +60,17 @@ def pause(request: Request):
 def resume(request: Request):
     manager(request).resume()
     return manager(request).queue_state()
+
+
+@router.post("/queue/free-gpu")
+def free_gpu(request: Request):
+    """手动释放 ComfyUI 的显存/内存（自动释放之外，想立刻腾出来就点这个）。"""
+    m = manager(request)
+    if m.gpu_running():
+        raise HTTPException(409, "有任务正在用显卡，等它结束再释放")
+    sv = services(request)
+    before = _mem_snapshot(sv.comfy_client)
+    sv.comfy.free()
+    m.current_family = None
+    after = _mem_snapshot(sv.comfy_client)
+    return {"before": before, "after": after}

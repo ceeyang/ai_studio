@@ -3,7 +3,8 @@ import type { QueryKey } from '@tanstack/react-query';
 import type { Job, JobStatus, QueueState } from '../api/types';
 
 export type WsEvent =
-  | ({ type: 'queue' } & QueueState)
+  // event 只在队列状态变化带了具体原因时才有，目前只用在空闲自动释放显存上
+  | ({ type: 'queue'; event?: string } & QueueState)
   | { type: 'job'; job: Job }
   | { type: 'log'; job_id: number; line: string }
   | { type: 'progress'; job_id: number; value: number; max: number };
@@ -26,6 +27,9 @@ export interface EventsState {
   /** 连上过至少一次就一直是 true（哪怕后来断开）：区分"还没连上过"和"断线了"。 */
   everConnected: boolean;
   progress: Record<number, Progress>;
+  /** 队列空闲自动释放显存那次事件的时间戳（Date.now()），没发生过是 undefined。
+   * 只用来触发"已自动释放显存"提示：每次变化都当作一次新通知，值本身不重要。 */
+  gpuFreedAt?: number;
 }
 
 export type EventsAction = WsEvent | { type: 'connected' } | { type: 'disconnected' };
@@ -47,6 +51,8 @@ export function eventsReducer(state: EventsState, action: EventsAction): EventsS
       delete progress[id];
       return { ...state, progress };
     }
+    case 'queue':
+      return action.event === 'gpu_idle_freed' ? { ...state, gpuFreedAt: Date.now() } : state;
     default:
       return state;
   }

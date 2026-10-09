@@ -1,20 +1,50 @@
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useCancelJob, useJobs, usePauseQueue, useQueue, useResumeQueue } from '../api/queries';
+import { errorText } from '../api/client';
+import { useCancelJob, useFreeGpu, useJobs, usePauseQueue, useQueue, useResumeQueue } from '../api/queries';
 import { jobTypeLabel } from '../format';
 import { useEvents } from '../ws/EventsContext';
 import { isDecoding } from '../ws/events';
 
+function freeGpuNoticeText(before: number | null, after: number | null): string {
+  return before !== null && after !== null
+    ? `已释放：显存空闲 ${before.toFixed(1)} → ${after.toFixed(1)} GB`
+    : '已释放显存';
+}
+
 export function TaskBar() {
-  const { connected, everConnected, progress } = useEvents();
+  const { connected, everConnected, progress, gpuFreedAt } = useEvents();
   const queue = useQueue();
   const running = useJobs('running', 5);
   const pause = usePauseQueue();
   const resume = useResumeQueue();
   const cancel = useCancelJob();
+  const freeGpu = useFreeGpu();
+  const [gpuNotice, setGpuNotice] = useState<string | null>(null);
   const q = queue.data;
   const jobs = running.data ?? [];
   const current = jobs[0];
   const p = current ? progress[current.id] : undefined;
+  const gpuBusy = jobs.some((j) => j.gpu);
+
+  // 队列空闲时后端会自动释放一次显存，并推一条带 gpu_idle_freed 标记的队列事件；
+  // 这里只用它的时间戳触发提示，具体数值用户看不到也没关系。
+  useEffect(() => {
+    if (gpuFreedAt !== undefined) setGpuNotice('已自动释放显存');
+  }, [gpuFreedAt]);
+
+  useEffect(() => {
+    if (!gpuNotice) return;
+    const t = setTimeout(() => setGpuNotice(null), 6000);
+    return () => clearTimeout(t);
+  }, [gpuNotice]);
+
+  const handleFreeGpu = () => {
+    freeGpu.mutate(undefined, {
+      onSuccess: (r) => setGpuNotice(freeGpuNoticeText(r.before.vram_free_gb, r.after.vram_free_gb)),
+      onError: (err) => setGpuNotice(errorText(err)),
+    });
+  };
 
   return (
     <header className="taskbar" aria-label="任务条">
@@ -59,6 +89,20 @@ export function TaskBar() {
             暂停队列
           </button>
         ))}
+      <button
+        type="button"
+        className="ghost"
+        disabled={gpuBusy || freeGpu.isPending}
+        title={gpuBusy ? '有任务正在用显卡，等它结束再释放' : undefined}
+        onClick={handleFreeGpu}
+      >
+        释放显存
+      </button>
+      {gpuNotice && (
+        <span className="pill" role="status">
+          {gpuNotice}
+        </span>
+      )}
       <Link to="/jobs" className="taskbar-all">
         全部任务
       </Link>

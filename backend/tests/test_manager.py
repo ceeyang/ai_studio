@@ -431,3 +431,23 @@ def test_gpu_idle_zero_disables_hook(db, managers):
     wait_status(m, jid, "done")
     time.sleep(0.3)
     assert idle_calls == []
+
+
+def test_gpu_running_reflects_running_gpu_jobs(db, managers):
+    reg = HandlerRegistry()
+    started = threading.Event()
+    release = threading.Event()
+
+    @reg.register("g", gpu=True)
+    def g(ctx, payload):
+        started.set()
+        release.wait(5)
+
+    m = make(db, reg, managers)
+    assert m.gpu_running() is False
+    jid = m.submit("g")
+    assert started.wait(3)
+    assert m.gpu_running() is True
+    release.set()
+    wait_status(m, jid, "done")
+    assert m.gpu_running() is False

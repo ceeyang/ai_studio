@@ -26,6 +26,25 @@ describe('eventsReducer', () => {
   it('日志和队列事件不改 reducer 状态', () => {
     const s = eventsReducer(initialEvents, { type: 'log', job_id: 1, line: 'x' });
     expect(s).toBe(initialEvents);
+    const q = eventsReducer(initialEvents, {
+      type: 'queue',
+      paused: false,
+      counts: { queued: 0, running: 0, waiting_input: 0 },
+      current_family: null,
+    });
+    expect(q).toBe(initialEvents);
+  });
+
+  it('队列事件带 event: gpu_idle_freed 时记一个时间戳，供 UI 弹"已自动释放显存"提示', () => {
+    expect(initialEvents.gpuFreedAt).toBeUndefined();
+    const s = eventsReducer(initialEvents, {
+      type: 'queue',
+      event: 'gpu_idle_freed',
+      paused: false,
+      counts: { queued: 0, running: 0, waiting_input: 0 },
+      current_family: null,
+    });
+    expect(typeof s.gpuFreedAt).toBe('number');
   });
 });
 

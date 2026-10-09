@@ -397,6 +397,17 @@ export interface QueueState {
   current_family: string | null;
 }
 
+export interface GpuMemSnapshot {
+  vram_free_gb: number | null;
+  ram_free_gb: number | null;
+  process_rss_gb: number | null;
+}
+
+export interface FreeGpuResult {
+  before: GpuMemSnapshot;
+  after: GpuMemSnapshot;
+}
+
 export interface DoctorCheck {
   group: string;
   name: string;

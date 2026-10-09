@@ -1,7 +1,7 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
-import { installFetch } from '../test/fetch';
+import { installFetch, json } from '../test/fetch';
 import { makeJob } from '../test/factories';
 import { renderAt } from '../test/render';
 import type { EventsState } from '../ws/events';
@@ -71,5 +71,58 @@ describe('TaskBar', () => {
     renderBar({ connected: false, everConnected: false, progress: {} });
     expect(await screen.findByText('没有运行中的任务')).toBeTruthy();
     expect(screen.queryByText(/实时连接已断开/)).toBeNull();
+  });
+
+  it('点"释放显存"：调后端接口，用返回的前后显存数字弹提示', async () => {
+    const calls = installFetch({
+      'GET /api/queue': { ...QUEUE, counts: { queued: 0, running: 0, waiting_input: 0 } },
+      'GET /api/jobs': [],
+      'POST /api/queue/free-gpu': {
+        before: { vram_free_gb: 1.3, ram_free_gb: 10, process_rss_gb: null },
+        after: { vram_free_gb: 14.5, ram_free_gb: 40, process_rss_gb: null },
+      },
+    });
+    renderBar({ connected: true, everConnected: true, progress: {} });
+    const user = userEvent.setup();
+    const btn = (await screen.findByRole('button', { name: '释放显存' })) as HTMLButtonElement;
+    expect(btn.disabled).toBe(false);
+    await user.click(btn);
+    const status = await screen.findByRole('status');
+    expect(status.textContent).toContain('已释放：显存空闲 1.3 → 14.5 GB');
+    expect(calls.some((c) => c.method === 'POST' && c.url === '/api/queue/free-gpu')).toBe(true);
+  });
+
+  it('有 GPU 任务在跑时，"释放显存"按钮是禁用的', async () => {
+    installFetch({
+      'GET /api/queue': QUEUE,
+      'GET /api/jobs': [makeJob({ id: 9, type: 'video.shot', status: 'running', gpu: true })],
+    });
+    renderBar({ connected: true, everConnected: true, progress: {} });
+    await screen.findByTestId('taskbar-current'); // 等任务数据到位，gpuBusy 才会算出来
+    const btn = screen.getByRole('button', { name: '释放显存' }) as HTMLButtonElement;
+    expect(btn.disabled).toBe(true);
+  });
+
+  it('释放失败时弹出错误信息', async () => {
+    installFetch({
+      'GET /api/queue': { ...QUEUE, counts: { queued: 0, running: 0, waiting_input: 0 } },
+      'GET /api/jobs': [],
+      'POST /api/queue/free-gpu': () => json({ detail: '有任务正在用显卡，等它结束再释放' }, 409),
+    });
+    renderBar({ connected: true, everConnected: true, progress: {} });
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: '释放显存' }));
+    const status = await screen.findByRole('status');
+    expect(status.textContent).toContain('有任务正在用显卡，等它结束再释放');
+  });
+
+  it('后端自动释放显存后推来的队列事件：弹"已自动释放显存"提示', async () => {
+    installFetch({
+      'GET /api/queue': { ...QUEUE, counts: { queued: 0, running: 0, waiting_input: 0 } },
+      'GET /api/jobs': [],
+    });
+    renderBar({ connected: true, everConnected: true, progress: {}, gpuFreedAt: Date.now() });
+    const status = await screen.findByRole('status');
+    expect(status.textContent).toContain('已自动释放显存');
   });
 });

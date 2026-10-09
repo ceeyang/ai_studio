@@ -14,6 +14,7 @@ import type {
   EpisodeIn,
   EpisodePatch,
   ExportRow,
+  FreeGpuResult,
   Job,
   Location,
   LocationPatch,
@@ -463,5 +464,14 @@ export function useResumeQueue() {
   return useMutation({
     mutationFn: () => api.post<QueueState>('/api/queue/resume'),
     onSuccess: (q) => qc.setQueryData(keys.queue, q),
+  });
+}
+
+/** 手动释放 ComfyUI 显存；有 GPU 任务在跑时后端会拒绝（409）。 */
+export function useFreeGpu() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post<FreeGpuResult>('/api/queue/free-gpu'),
+    onSuccess: () => invalidate(qc, keys.queue),
   });
 }
