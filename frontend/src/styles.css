@@ -1177,7 +1177,7 @@ div.error.banner.job-notice a { color: #ffd0d1; text-decoration: underline; }
   color: #f6dc9c; font-size: 13px;
   animation: enter 220ms var(--ease);
 }
-.health-banner .health-msgs { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; text-wrap: pretty; }
+.health-banner .health-msgs { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; cursor: help; }
 .health-banner a { color: var(--warn); font-weight: 500; white-space: nowrap; }
 .health-banner .icon-btn { width: 28px; height: 28px; color: inherit; }
 

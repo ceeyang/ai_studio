@@ -557,7 +557,10 @@ export interface ExportRow {
 
 export interface HealthItem {
   ok: boolean;
+  /** 一句短中文，如「连不上 127.0.0.1:8188（超时）」 */
   message: string;
+  /** 原始错误文本（英文异常等），只放在悬停提示里 */
+  detail?: string;
 }
 
 /** GET /api/system/health：任务条下面的横幅用，很便宜，30 秒轮询一次 */

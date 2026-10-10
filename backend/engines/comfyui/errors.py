@@ -6,11 +6,13 @@ import httpx
 
 class ComfyError(RuntimeError):
     def __init__(self, message: str, *, retryable: bool = False,
-                 node_id: str | None = None, node_type: str | None = None):
+                 node_id: str | None = None, node_type: str | None = None,
+                 status: int | None = None):
         super().__init__(message)
         self.retryable = retryable
         self.node_id = node_id
         self.node_type = node_type
+        self.status = status   # 最后一次是 HTTP 错误时的状态码（连接类错误时为 None，原始异常在 __cause__）
 
 
 def error_from_response(path: str, r: httpx.Response) -> ComfyError:

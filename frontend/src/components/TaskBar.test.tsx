@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from '@testing-library/react';
+import { cleanup, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { installFetch, json } from '../test/fetch';
@@ -150,23 +150,55 @@ describe('TaskBar', () => {
     expect(screen.queryByText(/排队/)).toBeNull();
   });
 
-  it('ComfyUI 或浏览器扩展不可用：任务条下面出黄色横幅，可去设置、可关掉', async () => {
+  it('ComfyUI 或浏览器扩展不可用：任务条下面一行黄色横幅，原因放悬停提示，可去设置、可关掉', async () => {
+    sessionStorage.clear();
     installFetch({
       'GET /api/queue': { ...QUEUE, counts: { queued: 0, running: 0, waiting_input: 0 } },
       'GET /api/jobs': [],
       'GET /api/system/health': {
-        comfyui: { ok: false, message: 'ComfyUI 没启动（127.0.0.1:8188 连不上）' },
-        browser_ext: { ok: true, message: '已连接' },
+        comfyui: { ok: false, message: '连不上 127.0.0.1:8188（超时）', detail: 'ComfyError: ConnectTimeout: timed out' },
+        browser_ext: { ok: false, message: '浏览器扩展没有连上，ChatGPT / Gemini 出图会失败；到设置页看安装步骤' },
       },
     });
     renderBar({ connected: true, everConnected: true, progress: {} });
     const banner = await screen.findByTestId('health-banner');
-    expect(banner.textContent).toContain('ComfyUI 没启动');
-    expect(banner.textContent).not.toContain('已连接');
+    const line = banner.querySelector('.health-msgs')!;
+    expect(line.textContent).toBe('ComfyUI 没连上，本机出图、出视频会失败 · 浏览器扩展没连上，网页出图会失败');
+    // 英文原文不在横幅正文里，只在悬停提示里
+    expect(banner.textContent).not.toContain('timed out');
+    expect(line.getAttribute('title')).toContain('连不上 127.0.0.1:8188（超时）');
+    expect(line.getAttribute('title')).toContain('ConnectTimeout: timed out');
     expect(within(banner).getByRole('link', { name: '去设置' }).getAttribute('href')).toBe('/settings');
     const user = userEvent.setup();
     await user.click(within(banner).getByRole('button', { name: '关闭提醒' }));
     expect(screen.queryByTestId('health-banner')).toBeNull();
+  });
+
+  it('关掉横幅记在 sessionStorage：刷新（重新挂载）后同样的问题不再提示；换了问题会重新出现', async () => {
+    sessionStorage.clear();
+    const down = { ok: false, message: '连不上 127.0.0.1:8188（拒绝连接）' };
+    installFetch({
+      'GET /api/queue': { ...QUEUE, counts: { queued: 0, running: 0, waiting_input: 0 } },
+      'GET /api/jobs': [],
+      'GET /api/system/health': { comfyui: down, browser_ext: { ok: true, message: '' } },
+    });
+    const first = renderBar({ connected: true, everConnected: true, progress: {} });
+    const user = userEvent.setup();
+    await user.click(within(await screen.findByTestId('health-banner')).getByRole('button', { name: '关闭提醒' }));
+    first.unmount();
+    renderBar({ connected: true, everConnected: true, progress: {} });
+    await screen.findByText('没有运行中的任务');
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.queryByTestId('health-banner')).toBeNull();
+    cleanup();
+    installFetch({
+      'GET /api/queue': { ...QUEUE, counts: { queued: 0, running: 0, waiting_input: 0 } },
+      'GET /api/jobs': [],
+      'GET /api/system/health': { comfyui: down, browser_ext: { ok: false, message: '没连上' } },
+    });
+    renderBar({ connected: true, everConnected: true, progress: {} });
+    expect(await screen.findByTestId('health-banner')).toBeTruthy();
+    sessionStorage.clear();
   });
 
   it('都正常时不显示横幅', async () => {

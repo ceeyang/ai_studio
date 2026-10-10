@@ -39,21 +39,24 @@ class ComfyClient:
         if timeout is not None:
             kw["timeout"] = timeout
         last = ""
+        last_exc: httpx.TransportError | None = None
+        status: int | None = None
         for attempt in range(tries):
             try:
                 r = self._http.request(method, path, **kw)
             except httpx.TransportError as e:
-                last = f"{type(e).__name__}: {e}"
+                last, last_exc, status = f"{type(e).__name__}: {e}", e, None
             else:
                 if r.status_code < 400:
                     return r
                 if r.status_code < 500:
                     raise error_from_response(path, r)
-                last = f"HTTP {r.status_code}: {r.text[:300]}"
+                last, last_exc, status = f"HTTP {r.status_code}: {r.text[:300]}", None, r.status_code
             if attempt + 1 < tries:
                 time.sleep(self.backoff * min(attempt + 1, 5))
+        # 原始的连接异常挂在 __cause__ 上（健康检查按它的类型说「超时 / 拒绝连接 / 地址不对」）
         raise ComfyError(f"连不上 ComfyUI（{self.base_url}{path}），重试 {tries} 次仍失败：{last}",
-                         retryable=True)
+                         retryable=True, status=status) from last_exc
 
     def system_stats(self, *, tries: int | None = None, timeout: float | None = None) -> dict:
         return self._request("GET", "/system_stats", tries=tries, timeout=timeout).json()

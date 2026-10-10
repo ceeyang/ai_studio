@@ -118,7 +118,7 @@ test('ComfyUI 不通时点生成首帧：提交被拒，页面说明原因并给
 
   // 健康横幅给出根因和去设置的入口
   const banner = page.getByTestId('health-banner');
-  await expect(banner).toContainText('ComfyUI 不可用');
+  await expect(banner).toContainText('ComfyUI 没连上，本机出图、出视频会失败');
   await banner.getByRole('link', { name: '去设置' }).click();
   await expect(page).toHaveURL(/\/settings$/);
   await expect(page.getByRole('heading', { name: '引擎' })).toBeVisible();

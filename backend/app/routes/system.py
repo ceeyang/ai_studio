@@ -38,7 +38,10 @@ def system_health(request: Request):
     """顶栏状态灯用：ComfyUI 连没连上（1 秒超时、缓存 15 秒）、浏览器扩展连没连上。"""
     sv = services(request)
     h = comfy_health.check_comfy(sv.comfy_client)
-    return {"comfyui": {"ok": h.ok, "message": h.message}, "browser_ext": _browser_ext(sv.browser)}
+    comfy = {"ok": h.ok, "message": h.message}
+    if h.detail:
+        comfy["detail"] = h.detail
+    return {"comfyui": comfy, "browser_ext": _browser_ext(sv.browser)}
 
 
 @router.get("/engines")
