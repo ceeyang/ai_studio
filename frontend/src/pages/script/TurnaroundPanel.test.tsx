@@ -198,7 +198,7 @@ describe('三视图', () => {
       'POST /api/characters/6/turnaround/generate': { job_ids: [70, 71] },
     });
     const pick = screen.getByLabelText('三视图引擎');
-    expect(within(pick).getByRole('option', { name: '默认（h3_image）' })).toBeTruthy();
+    expect(within(pick).getByRole('option', { name: '默认（H3 图像）' })).toBeTruthy();
     await waitFor(() => expect(within(pick).getByRole('option', { name: 'ChatGPT 网页' })).toBeTruthy());
     await user.selectOptions(pick, 'gpt_image');
     await user.click(screen.getByRole('button', { name: '全部生成' }));

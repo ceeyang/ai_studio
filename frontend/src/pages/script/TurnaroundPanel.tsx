@@ -15,6 +15,7 @@ import {
 import type { Character, JobBrief, TurnaroundCell, TurnaroundSheet, TurnaroundSheetKey } from '../../api/types';
 import { useUnsavedGuard } from '../../components/EditableFields';
 import { ImageEngineSelect } from '../../components/ImageEngineSelect';
+import { engineLabel } from '../../format';
 import { useEvents } from '../../ws/EventsContext';
 import { isDecoding } from '../../ws/events';
 
@@ -227,7 +228,7 @@ export function TurnaroundPanel({
           出场镜头的首帧和视频按景别 / 机位带上最匹配的一格。
         </p>
         <div className="row">
-          <ImageEngineSelect value={engine} onChange={setEngine} defaultLabel={`默认（${t.default_engine}）`} ariaLabel="三视图引擎" />
+          <ImageEngineSelect value={engine} onChange={setEngine} defaultLabel={`默认（${engineLabel(t.default_engine)}）`} ariaLabel="三视图引擎" />
           <button
             type="button"
             className="soft"
