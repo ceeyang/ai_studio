@@ -126,3 +126,12 @@
   高棉语时间与 H3 说话段的重叠合计 88%；作为对照，旧片段（原中文）把高棉语放在手工对齐过的台词起点上只有 73%（S02.1 2%、S02.2 55%、S03 62%）。9/12 句结尾差在 ±0.25s 内；S03 H3 念"能修的，我们绝对不给您换"用了约 3.0s，比 TTS 的 1.95s 慢一半，高棉语提前 0.94s 说完。
 - 看帧：12 条字幕各在中点抽一帧（中文在上、高棉文在下，长句自动折行，字形正常），说话人和画面对得上（S01 小雨开口；S06.1 小雨背对镜头）；片尾卡 35.5s 一帧正常。
 - 待人工：试听（只能靠能量和频谱判断，没人耳确认嘴型）；高棉语仍是 AI 译稿，要母语校对；成片 37.2s，比 30s 目标更长。
+
+## 网页图像引擎 gpt_image / gemini_image：浏览器和登录检查（2026-10-10）
+
+- 浏览器：自动找到 `C:\Program Files\Google\Chrome\Application\chrome.exe`（Chrome/154.0.8037.99），用新配置目录 `D:\works\ai_studio\browser-profile` 带 `--remote-debugging-port=9333` 启动成功，`/json/version` 正常，窗口开着 https://chatgpt.com/ 和 https://gemini.google.com/app 两个标签页。
+- 登录状态（CDP `Storage.getCookies`）：`{'chatgpt': False, 'gemini': False}`——新配置目录，两个网站都还没登录，所以**没有真出图**。需要用户在这个窗口里登录一次（或在设置页点「打开浏览器登录」），之后重跑实测：陈师傅（cambodia-no1-car）9:16 半身像，带定妆照当参考图，两个网站各出一张。
+- 未登录页只读探测（CDP `Runtime.evaluate`，没点任何东西）：
+  - Gemini：登录墙选择器命中 1 个（`a[href*="accounts.google.com/ServiceLogin"]`，aria-label「登录」），输入框 `div.ql-editor` 命中，没有常驻的 file input（要走上传菜单 → 文件选择框）。
+  - ChatGPT：已换新界面——输入框 `textarea#mobile-composer-prompt`（占位「询问 ChatGPT」），发送按钮 aria-label「发送消息」，「添加文件等」按钮，隐藏的 `input#octane-mobile-composer-photos-input`（accept=image/*，multiple），「创建图像」按钮写着「登录后使用」；旧的 `#prompt-textarea`、`data-testid=login-button` 都没有了。已把新界面的选择器加进 `sites/chatgpt.py`（新旧并存），登录墙改用文字恰为「登录 / Log in」的按钮；登录后的回复区和生成图的结构还没实测。
+- 这次没能重启后端：运行中的 studio-server.exe 锁着 `.venv`，`uv add playwright` 装不进去；pyproject 和 uv.lock 已加上 playwright 1.63，下次用 start.ps1 启动时 `uv run` 会自动装上。测试用 `uv run --no-sync`：pytest 392 passed，vitest 119 passed，typecheck 通过，e2e 5 passed。

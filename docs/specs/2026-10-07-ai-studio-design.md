@@ -201,6 +201,19 @@ class PostEngine(Protocol):  # upscale / interpolate / tts
 
 每次调用都把最终工作流 JSON 和参数写到 `projects/<slug>/runs/<job_id>/`，方便复现，也能直接拖进 ComfyUI 手调。
 
+### 7.4 网页图像引擎（gpt_image / gemini_image，2026-10-10 增补）
+
+不用 API key，而是驱动一个**已经登录**的真实浏览器在 chatgpt.com / gemini.google.com 上出图（代码在 `backend/engines/browser/`）。
+
+- **浏览器**：studio 自己管一个 Chrome（找不到用 Edge），用独立配置目录 `browser.user_data_dir`（默认 `browser-profile/`，不进 git）带 `--remote-debugging-port=browser.cdp_port`（默认 9333）按普通方式启动、脱离后端进程组；端口已在听就复用。Chrome 136 起默认配置目录不许远程调试，所以不能复用平时的浏览器配置；也不用 Playwright 的 launch（带 `--enable-automation`，Google 登录会拦）。Playwright 只用 `connect_over_cdp` 连上去，每次出图在任务线程里现连现断。
+- **登录**：设置页「打开浏览器登录」（`POST /api/browser/login`）在两个网站首页各开一个标签页，用户手动登录一次，登录态留在配置目录里。studio 从不输入账号密码、不碰验证码。登录状态按 cookie 判断（ChatGPT `__Secure-next-auth.session-token`，Gemini `__Secure-1PSID`），doctor 走 CDP `Storage.getCookies`，不开页面、不出图。
+- **流程**（`flow.py`，只经 `PageDriver` 操作页面）：新对话 → 上传参考图（file input → 文件选择框 → 粘贴，依次兜底）→ 输入一行提示词（开头写明直接出一张图、画幅和大致尺寸，网页没有尺寸/种子/负面提示词参数）→ 发送 → 轮询：停止按钮消失且结果图地址稳定几秒才算出完 → 取原图（ChatGPT 在页面里带 cookie fetch 图片地址；Gemini 先点「下载原尺寸图片」）→ 宽高比不对就居中裁成要求的画幅（原图留在任务目录）。
+- **出错**：没登录（登录墙或缺 cookie）、限额/限流、内容被拒、超时、页面元素找不到（指明要改哪个选择器）都抛 `BrowserError`（JobError），中文原因显示在任务上，不静默失败。
+- **选择器**：每个网站一个文件（`sites/chatgpt.py`、`sites/gemini.py`），所有选择器和文案正则集中在 `SiteSpec` 里，附改版排查顺序。
+- **能力**：gpt_image 参考图上限 4、gemini_image 上限 3；不支持负面提示词；画幅 9:16 / 16:9 / 1:1 / 21:9（写进提示词）；没有种子，结果每次不同——首帧哈希本来就不含种子，过期判断不受影响。
+- **调度**：这两个引擎的 `model_family`（`chatgpt_web` / `gemini_web`）在队列里各有一条串行通道（lane 线程），任务一律 `gpu=False`，不占 GPU worker、不触发换族 `/free`、不参与空闲释放显存；runner 里每个网站再加一把锁，一个网站一个标签页、同时只出一张。
+- **界面**：引擎表和各处引擎下拉标「浏览器」；角色抽卡、三视图可以选引擎。
+
 ## 8. 任务队列与显存调度
 
 - 两个 worker：**GPU worker**（串行，执行 ComfyUI 任务）和 **CPU worker**（ffmpeg、TTS、云端轮询，可并发 2）。
