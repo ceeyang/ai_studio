@@ -84,7 +84,7 @@ def test_crop_to_aspect():
 
 
 def runner_with(page, tmp_path):
-    return BrowserRunner(BrowserSession(BrowserCfg(user_data_dir=tmp_path / "profile")),
+    return BrowserRunner(BrowserSession(BrowserCfg(transport="cdp", user_data_dir=tmp_path / "profile")),
                          page_factory=page.factory, poll=1.0)   # 假页面的 sleep 只推进假时钟
 
 
@@ -161,7 +161,7 @@ def test_runner_one_generation_per_site(tmp_path, reg):
 
 
 def test_login_status_from_cookies(tmp_path, monkeypatch):
-    runner = BrowserRunner(BrowserSession(BrowserCfg()))
+    runner = BrowserRunner(BrowserSession(BrowserCfg(transport="cdp")))
     monkeypatch.setattr(runner.session, "cookies", lambda: [
         {"name": "__Secure-1PSID", "domain": ".google.com"},
         {"name": "other", "domain": "chatgpt.com"}])
@@ -334,6 +334,7 @@ def test_api_engines_and_browser_routes(api, monkeypatch):
     assert rows["gpt_image"]["runtime"] == "browser" and rows["gpt_image"]["family"] == "chatgpt_web"
     assert rows["zimage"]["runtime"] == "comfyui"
     runner = api.app.state.services.browser
+    monkeypatch.setattr(runner.session.cfg, "transport", "cdp")   # 备用的 cdp 方式（默认是扩展）
     opened = []
     monkeypatch.setattr(runner.session, "open_login", lambda urls: opened.append(urls) or True)
     r = api.post("/api/browser/login")

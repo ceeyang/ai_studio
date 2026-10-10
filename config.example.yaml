@@ -38,17 +38,28 @@ engines:
   h3_image: {enabled: true, params: {turbo: false}}
   h3_video: {enabled: true, params: {turbo: true}}
   wan22_i2v: {enabled: true, params: {}}
-  # 网页出图：驱动下面 browser 里那个已经登录的浏览器，在 chatgpt.com / gemini.google.com 上出图，
+  # 网页出图：在已经登录的浏览器里（默认是装了 browser-extension 的你平时用的浏览器，见下面 browser），
+  # 在 chatgpt.com / gemini.google.com 上出图，
   # 不用 API key、不占显卡。timeout 是等出图的最长秒数；fit_aspect 把出来的图居中裁成要求的画幅。
   gpt_image: {enabled: true, params: {timeout: 420, fit_aspect: true}}
   gemini_image: {enabled: true, params: {timeout: 300, fit_aspect: true}}
 
-# 网页出图用的浏览器。studio 用单独的配置目录带调试端口启动 Chrome（找不到就用 Edge），
-# 第一次在设置页点「打开浏览器登录」，在弹出的窗口里登录 ChatGPT 和 Gemini，之后登录态一直留着。
-# Chrome 136 起默认配置目录不许开远程调试，所以不能用你平时的浏览器配置。
+# 网页出图用的浏览器。
+# transport: extension（默认）——出图在你平时用的 Chrome/Edge 里进行：在那个浏览器里加载仓库下的
+#   browser-extension（chrome://extensions → 开发者模式 → 加载已解压的扩展程序），并登录 ChatGPT 和 Gemini。
+#   扩展用 WebSocket 连 studio（ws://127.0.0.1:8700/api/browser/ext），在已登录的标签页里开新对话出图，
+#   把原图传回来。studio 不启动浏览器、不读也不拷 cookie。设置页能看到扩展连没连上、各网站登没登录。
+# transport: cdp（备用）——studio 用单独的配置目录带调试端口启动 Chrome（找不到就用 Edge），在设置页点
+#   「打开浏览器登录」，在弹出的窗口里登录一次。Chrome 136 起默认配置目录不许开远程调试，所以这种方式
+#   不能用你平时的浏览器配置。下面 executable 到 headless 只给 cdp 用。
 browser:
-  executable: null            # 不写就自动找 Chrome，再找 Edge
-  user_data_dir: browser-profile   # 相对本文件；里面有登录 cookie，不进 git
+  transport: extension
+  extension_id: null          # 只接受这个 id 的扩展连接（chrome://extensions 里看）；null 不限制
+  reuse_conversation: false   # true：在标签页当前的对话里接着发（默认每次开新对话，不混进你的对话）
+  reuse_user_tabs: true       # 可以借用你开着、没在看、没在生成的 ChatGPT / Gemini 标签页（会切到新对话）
+  activate_tab: false         # 出图时把标签页切到前台（后台标签页被浏览器冻结、图出不来时打开）
+  executable: null            # cdp：不写就自动找 Chrome，再找 Edge
+  user_data_dir: browser-profile   # cdp：相对本文件；里面有登录 cookie，不进 git
   cdp_port: 9333
   headless: false
 

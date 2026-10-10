@@ -111,9 +111,22 @@ class DubCfg(BaseModel):
 
 
 class BrowserCfg(BaseModel):
-    """网页图像引擎（gpt_image / gemini_image）用的浏览器：studio 自己管一个独立的 Chrome/Edge 配置目录，
-    带远程调试端口启动，Playwright 走 CDP 连上去。Chrome 136 起默认配置目录不许开远程调试，
-    所以必须用单独的 user_data_dir；在那个窗口里登录一次 ChatGPT / Gemini，登录态就留在这个目录里。"""
+    """网页图像引擎（gpt_image / gemini_image）用哪个浏览器出图。
+
+    transport=extension（默认）：在你平时用的 Chrome/Edge 里装 browser-extension（开发者模式加载已解压的
+    扩展程序），扩展用 WebSocket 连 /api/browser/ext，出图任务在那个浏览器里已登录的 ChatGPT / Gemini
+    标签页里跑。studio 不启动浏览器、不读也不拷 cookie。
+
+    transport=cdp（备用）：studio 自己管一个独立的 Chrome/Edge 配置目录，带远程调试端口启动，Playwright
+    走 CDP 连上去。Chrome 136 起默认配置目录不许开远程调试，所以必须用单独的 user_data_dir；在那个窗口里
+    登录一次 ChatGPT / Gemini，登录态就留在这个目录里。下面 executable 到 launch_timeout 只给 cdp 用。"""
+    transport: Literal["extension", "cdp"] = "extension"
+    # extension：只接受这个 id 的扩展连接（chrome://extensions 里看）；不写就接受任何 chrome-extension:// 来源
+    extension_id: str | None = None
+    reuse_conversation: bool = False   # true：在标签页当前的对话里接着发，不开新对话（会混进你的对话）
+    reuse_user_tabs: bool = True       # 可以借用你已经开着、没在用的 ChatGPT / Gemini 标签页（会切到新对话）
+    activate_tab: bool = False         # 出图时把标签页切到前台（后台标签页被浏览器冻结时打开）
+
     executable: Path | None = None     # 不写就先找 Chrome，再找 Edge
     user_data_dir: Path = ROOT / "browser-profile"   # 不进 git
     cdp_port: int = 9333

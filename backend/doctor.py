@@ -12,7 +12,7 @@ import httpx
 import psutil
 
 from backend.config import Config
-from backend.engines.browser.errors import LOGIN_HINT
+from backend.engines.browser.errors import EXT_INSTALL_HINT, EXT_LOGIN_HINT, LOGIN_HINT
 from backend.engines.comfyui.errors import ComfyError
 from backend.engines.registry import runtime_of
 
@@ -46,6 +46,8 @@ def check_browser(engines, browser) -> list[Check]:
     used = {e.site: e for e in engines.all().values() if runtime_of(e) == "browser"}
     if not used or browser is None:
         return []
+    if getattr(browser, "transport", "cdp") == "extension":
+        return _check_extension(used, browser)
     out: list[Check] = []
     sess = browser.session
     exe = sess.executable()
@@ -82,6 +84,39 @@ def check_browser(engines, browser) -> list[Check]:
         else:
             out.append(Check("浏览器", name, "warn",
                              f"没登录 {site.host if site else key}，{eng.name} 出图会失败。{LOGIN_HINT}"))
+    return out
+
+
+def _check_extension(used: dict, browser) -> list[Check]:
+    """transport=extension：扩展连没连上、各网站在那个浏览器里有没有登录（扩展报的，不开页面、不出图）。"""
+    info = browser.hub.info()
+    out: list[Check] = []
+    if not info.get("connected"):
+        out.append(Check("浏览器", "扩展连接", "warn",
+                         f"浏览器扩展没有连上，gpt_image / gemini_image 出图会失败。{EXT_INSTALL_HINT}"))
+    else:
+        out.append(Check("浏览器", "扩展连接", "ok",
+                         f"已连上 · 扩展 v{info.get('version') or '?'} · {info.get('browser') or '浏览器'}"
+                         f" · id {info.get('ext_id') or '?'}"))
+    st = browser.hub.site_status()
+    for key, eng in sorted(used.items()):
+        site = browser.sites.get(key)
+        label = site.label if site else key
+        host = site.host if site else key
+        name = f"{label} 登录（{eng.name}）"
+        s = st.get(key)
+        if not info.get("connected"):
+            out.append(Check("浏览器", name, "warn", f"扩展没连上，查不了登录状态。{EXT_LOGIN_HINT}"))
+        elif s is None:
+            out.append(Check("浏览器", name, "warn", f"扩展还没报 {host} 的状态，稍后重新检查"))
+        else:
+            tabs = s.get("tabs")
+            tab_text = f"开着 {tabs} 个标签页" if tabs else "没有开着的标签页（出图时扩展会在后台新开一个）"
+            if s.get("logged_in"):
+                out.append(Check("浏览器", name, "ok", f"已登录 {host} · {tab_text}"))
+            else:
+                out.append(Check("浏览器", name, "warn",
+                                 f"没登录 {host}，{eng.name} 出图会失败。{EXT_LOGIN_HINT} · {tab_text}"))
     return out
 
 

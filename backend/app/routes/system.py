@@ -46,8 +46,8 @@ def doctor(request: Request):
 
 @router.post("/browser/login")
 def browser_login(request: Request):
-    """打开 studio 管的浏览器（独立配置目录、带调试端口），在 ChatGPT 和 Gemini 的首页各开一个标签页，
-    让用户手动登录一次。没在运行就启动，在运行就新开标签页。"""
+    """让用户登录 ChatGPT 和 Gemini。transport=extension：让扩展在用户自己的浏览器里打开两个网站
+    （扩展没连上时报错并给安装步骤）；cdp：打开 studio 管的浏览器（没在运行就启动，在运行就新开标签页）。"""
     sv = services(request)
     if sv.browser is None:
         raise JobError("网页出图的浏览器没有配置")
@@ -56,19 +56,11 @@ def browser_login(request: Request):
 
 @router.get("/browser/status")
 def browser_status(request: Request):
-    """浏览器是否在运行、各网站是否登录（按 cookie）。不会启动浏览器。"""
+    """extension：扩展是否连上、各网站开着几个标签页、是否登录；cdp：浏览器是否在运行、各网站是否登录
+    （按 cookie）。都不会启动浏览器。"""
     sv = services(request)
     if sv.browser is None:
-        return {"running": False, "executable": None, "logged_in": {}}
-    sess = sv.browser.session
-    exe = sess.executable()
-    running = sess.version() is not None
-    logged: dict[str, bool | None] = {k: None for k in sv.browser.sites}
-    if running:
-        try:
-            logged.update(sv.browser.login_status())
-        except Exception:
-            pass
-    return {"running": running, "executable": str(exe) if exe else None,
-            "endpoint": sess.endpoint, "user_data_dir": str(sess.cfg.user_data_dir),
-            "logged_in": logged}
+        return {"transport": None, "running": False, "connected": False, "logged_in": {}}
+    if sv.browser.transport == "extension":
+        sv.browser.hub.request_status()   # 让扩展马上再报一次（下一次刷新就是新的）
+    return sv.browser.status()
