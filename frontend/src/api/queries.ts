@@ -3,6 +3,7 @@ import { type QueryClient, type QueryKey, useMutation, useQuery, useQueryClient 
 import { api, enc } from './client';
 import type {
   BrowserLoginOut,
+  BrowserStatus,
   Candidate,
   Character,
   CharacterIn,
@@ -54,6 +55,7 @@ export const keys = {
   job: (id: number) => ['job', id] as const,
   queue: ['queue'] as const,
   doctor: ['doctor'] as const,
+  browserStatus: ['browserStatus'] as const,
   config: ['config'] as const,
 };
 
@@ -165,6 +167,17 @@ export function useJob(id: number | null) {
 
 export function useQueue() {
   return useQuery({ queryKey: keys.queue, queryFn: () => api.get<QueueState>('/api/queue'), refetchInterval: 10000 });
+}
+
+/** 网页出图的浏览器：扩展连没连上、各网站是否登录。很便宜（不开页面），设置页上每 5 秒刷新。 */
+export function useBrowserStatus(enabled = true) {
+  return useQuery({
+    queryKey: keys.browserStatus,
+    queryFn: () => api.get<BrowserStatus>('/api/browser/status'),
+    refetchInterval: 5000,
+    retry: false,
+    enabled,
+  });
 }
 
 /** doctor 会连 ComfyUI、读 object_info，最长十几秒：只在打开设置页和点"重新检查"时跑。 */
@@ -484,13 +497,16 @@ export function useResumeQueue() {
   });
 }
 
-/** 手动释放 ComfyUI 显存；有 GPU 任务在跑时后端会拒绝（409）。 */
-/** 打开 studio 管的浏览器（ChatGPT / Gemini 登录页），用户在里面手动登录一次。 */
+/** 登录 ChatGPT / Gemini：扩展方式在用户自己的浏览器里打开两个网站；cdp 方式打开 studio 管的浏览器。 */
 export function useOpenBrowserLogin() {
+  const qc = useQueryClient();
   return useMutation({
     mutationFn: () => api.post<BrowserLoginOut>('/api/browser/login'),
+    onSuccess: () => invalidate(qc, keys.browserStatus),
   });
 }
+
+/** 手动释放 ComfyUI 显存；有 GPU 任务在跑时后端会拒绝（409）。 */
 
 export function useFreeGpu() {
   const qc = useQueryClient();

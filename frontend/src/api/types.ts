@@ -32,12 +32,50 @@ export interface EngineRow {
   caps: Record<string, unknown>;
 }
 
-/** POST /api/browser/login：打开 studio 管的浏览器，在两个网站的首页各开一个标签页 */
+/** POST /api/browser/login。extension：让扩展在用户自己的浏览器里打开两个网站；
+ *  cdp：打开 studio 管的浏览器（launched 表示是否新启动），在两个网站的首页各开一个标签页 */
 export interface BrowserLoginOut {
+  transport?: 'extension' | 'cdp';
   launched: boolean;
   urls: string[];
-  endpoint: string;
-  user_data_dir: string;
+  endpoint?: string;
+  user_data_dir?: string;
+}
+
+/** 扩展报的一个网站的状态：开着几个标签页、是否登录（cookie 在不在 + 页面上有没有登录按钮） */
+export interface BrowserSiteStatus {
+  label: string;
+  host: string;
+  tabs: number | null;
+  logged_in: boolean | null;
+  cookie: boolean | null;
+  page: 'login_wall' | 'logged_in' | 'unknown' | null;
+}
+
+export interface BrowserExtensionInfo {
+  connected: boolean;
+  version?: string | null;
+  browser?: string | null;
+  ext_id?: string;
+  connected_at?: number;
+  last_seen?: number;
+  last_disconnect?: number | null;
+}
+
+/** GET /api/browser/status（backend/engines/browser/runner.py BrowserRunner.status） */
+export interface BrowserStatus {
+  transport: 'extension' | 'cdp' | null;
+  running: boolean;
+  logged_in: Record<string, boolean | null>;
+  // extension
+  connected?: boolean;
+  extension?: BrowserExtensionInfo;
+  extension_dir?: string;
+  sites?: Record<string, BrowserSiteStatus>;
+  // cdp
+  executable?: string | null;
+  endpoint?: string;
+  user_data_dir?: string;
 }
 
 export interface Engines {

@@ -1,6 +1,7 @@
 import { errorText } from '../api/client';
-import { useConfig, useDoctor, useEngines, useOpenBrowserLogin } from '../api/queries';
+import { useConfig, useDoctor, useEngines } from '../api/queries';
 import type { DoctorCheck, EngineRow } from '../api/types';
+import { BrowserPanel } from './settings/BrowserPanel';
 
 const ICON: Record<DoctorCheck['status'], string> = { ok: '√', warn: '!', fail: '×' };
 
@@ -25,7 +26,6 @@ export function SettingsPage() {
   const doctor = useDoctor();
   const engines = useEngines();
   const config = useConfig();
-  const login = useOpenBrowserLogin();
   const rows = doctor.data ?? [];
   const hasBrowserEngine = (engines.data?.image ?? []).some((e) => e.runtime === 'browser');
   const engineRows: [string, 'image' | 'video', EngineRow][] = [
@@ -39,28 +39,11 @@ export function SettingsPage() {
         <div className="page-head">
           <h2>环境检查（doctor）</h2>
           <div className="row">
-            {hasBrowserEngine && (
-              <button
-                type="button"
-                disabled={login.isPending}
-                title="打开 studio 专用的浏览器窗口（独立配置目录），在里面登录 ChatGPT 和 Gemini，只需一次"
-                onClick={() => login.mutate()}
-              >
-                {login.isPending ? '正在打开浏览器…' : '打开浏览器登录'}
-              </button>
-            )}
             <button type="button" disabled={doctor.isFetching} onClick={() => void doctor.refetch()}>
               {doctor.isFetching ? '检查中…（最长十几秒）' : '重新检查'}
             </button>
           </div>
         </div>
-        {login.data && (
-          <p className="notice" data-testid="browser-login-notice">
-            {login.data.launched ? '已启动浏览器' : '浏览器已在运行，已新开标签页'}：请在弹出的窗口里登录 ChatGPT 和 Gemini（只需一次，登录态保存在{' '}
-            {login.data.user_data_dir}），登录后点「重新检查」。
-          </p>
-        )}
-        {login.error && <p className="error">打开浏览器失败：{errorText(login.error)}</p>}
         {doctor.error && <p className="error">{errorText(doctor.error)}</p>}
         {doctor.data && (
           <p>
@@ -92,6 +75,8 @@ export function SettingsPage() {
           </tbody>
         </table>
       </section>
+
+      {hasBrowserEngine && <BrowserPanel />}
 
       <section className="panel area-engines">
         <h2>引擎</h2>

@@ -1067,6 +1067,10 @@ pre.error { background: rgba(255, 90, 95, 0.06); border-color: rgba(255, 90, 95,
 
 /* 设置页 */
 .settings-layout > .panel { margin: 0; }
+.browser-conn { display: flex; align-items: center; gap: var(--s-2); margin: 0 0 var(--s-2); }
+.browser-sites { margin: var(--s-2) 0; }
+.install-steps { margin: var(--s-2) 0 0; padding-left: 1.4em; line-height: 1.8; }
+.install-steps code { word-break: break-all; }
 
 @media (min-width: 2100px) {
   .script-workspace { grid-template-columns: minmax(0, 0.75fr) minmax(0, 1.25fr); }
@@ -1081,9 +1085,10 @@ pre.error { background: rgba(255, 90, 95, 0.06); border-color: rgba(255, 90, 95,
   .settings-layout {
     display: grid; gap: var(--s-4); align-items: start;
     grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
-    grid-template-areas: 'doctor engines' 'doctor config';
+    grid-template-areas: 'doctor browser' 'doctor engines' 'doctor config';
   }
   .area-doctor { grid-area: doctor; }
+  .area-browser { grid-area: browser; }
   .area-engines { grid-area: engines; }
   .area-config { grid-area: config; }
   .split.jobs { grid-template-columns: minmax(0, 0.7fr) minmax(0, 1.3fr); }
