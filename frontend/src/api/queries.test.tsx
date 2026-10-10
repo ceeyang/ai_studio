@@ -62,4 +62,14 @@ describe('queries', () => {
     expect(calls[0].body).toEqual({ text: '{"a":1}' });
     expect(qc.getQueryData(keys.job(9))).toMatchObject({ id: 9, status: 'queued' });
   });
+
+  it('提交人工输入后还要重拉任务详情：任务可能在响应回来前就跑完了，推送早于响应到达', async () => {
+    // 先到的推送已经把详情刷成「完成」，晚到的提交响应还是「排队中」；只用响应覆盖缓存会永远停在排队中
+    installFetch({ 'POST /api/jobs/9/input': makeJob({ id: 9, status: 'queued' }) });
+    const qc = newQueryClient();
+    qc.setQueryData(keys.job(9), makeJob({ id: 9, status: 'done' }));
+    const { result } = renderHook(() => useProvideInput(), { wrapper: wrapper(qc) });
+    await result.current.mutateAsync({ id: 9, text: '{"a":1}' });
+    expect(qc.getQueryState(keys.job(9))?.isInvalidated).toBe(true);
+  });
 });

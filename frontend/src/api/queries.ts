@@ -572,8 +572,9 @@ export function useProvideInput() {
   return useMutation({
     mutationFn: ({ id, text }: { id: number; text: string }) => api.post<Job>(`/api/jobs/${id}/input`, { text }),
     onSuccess: (job) => {
+      // 先用响应立刻更新，再重拉一次：任务可能在响应回来之前就跑完了，那条推送触发的刷新会被这份旧响应盖掉
       qc.setQueryData(keys.job(job.id), job);
-      return invalidate(qc, ['jobs'], keys.queue);
+      return invalidate(qc, keys.job(job.id), ['jobs'], keys.queue);
     },
   });
 }
