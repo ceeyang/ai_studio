@@ -7,6 +7,13 @@ import type { CardAction, GenStage } from '../director/shotStatus';
 import { isOrphanShot } from '../stages';
 import { ShotCard } from './ShotCard';
 
+/** 剧本阶段登记的段落编辑：哪段改了没保存、怎么先把它保存（剧本阶段没打开过时没有） */
+export interface ScriptBlockEdits {
+  isDirty(blockId: number): boolean;
+  /** 保存这一段；失败返回 false */
+  save(blockId: number): Promise<boolean>;
+}
+
 export interface ShotGridProps {
   episodeId: number;
   shots: ShotDetail[];
@@ -28,6 +35,8 @@ export interface ShotGridProps {
   onDelete(id: number): void;
   /** 「重写本段分镜…」提交了：任务 id 和提示条里的说法 */
   onRegenerated(jobIds: number[], text: string): void;
+  /** 剧本阶段里没保存的段落：重写那一段前先保存它 */
+  blockEdits?: () => ScriptBlockEdits | null;
 }
 
 const ORPHAN_SCOPE = '上一版剧本留下的镜头';
@@ -80,6 +89,9 @@ export function ShotGrid(props: ShotGridProps) {
   const charOf = new Map(props.characters.map((c) => [c.id, c]));
   const groups = groupShots(shots, props.blocks, props.locations);
   const lastId = shots[shots.length - 1]?.id;
+  // 剧本阶段（藏着、保持挂载）里这一段改了没保存：对话框里说一声，确认时先保存，保存失败就不重写
+  const edits = props.blockEdits?.() ?? null;
+  const regenDirty = !!regen && !!edits?.isDirty(regen.id);
 
   return (
     <div className="shot-grid-wrap">
@@ -139,6 +151,11 @@ export function ShotGrid(props: ShotGridProps) {
         episodeId={props.episodeId}
         blockIds={regen ? [regen.id] : undefined}
         scopeLabel={regen ? `第 ${regen.order + 1} 段` : ''}
+        unsavedNote={regenDirty ? '这一段在剧本阶段改了还没保存，重写前会先保存' : undefined}
+        beforeRun={async () => {
+          const e = props.blockEdits?.();
+          return regen && e?.isDirty(regen.id) ? e.save(regen.id) : true;
+        }}
         onSubmitted={(ids) => {
           if (regen) props.onRegenerated(ids, `重写第 ${regen.order + 1} 段分镜`);
         }}

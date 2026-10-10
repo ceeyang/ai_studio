@@ -27,7 +27,7 @@ import { type CardAction, type GenStage, cellOf, hasSelected } from '../director
 import { moveId } from '../director/slots';
 import type { StageKey } from '../stages';
 import { CONFIRM_OVER, type GateBatch, type ShotGate } from './shotGate';
-import { ShotGrid } from './ShotGrid';
+import { type ScriptBlockEdits, ShotGrid } from './ShotGrid';
 import { workspacePath } from './urls';
 
 /** 工作台里这块内容的名字（阶段条的下一步事件按它发） */
@@ -53,6 +53,8 @@ export interface ShotWork {
   setSubmitting(b: boolean): void;
   /** 切阶段，可以顺带设 ?shot= */
   goStage(stage: StageKey, extra?: Record<string, string>): void;
+  /** 剧本阶段登记的段落编辑（「重写本段分镜…」先保存那一段）；剧本阶段没挂载时为 null */
+  scriptEdits?: () => ScriptBlockEdits | null;
 }
 
 export function ShotStage({
@@ -305,6 +307,7 @@ export function ShotStage({
           onInsertAfter={(shotId) => report(create.mutateAsync({ after_shot_id: shotId }), '已插入新镜头')}
           onDelete={(shotId) => void remove(shotId)}
           onRegenerated={(ids, text) => notice.track(ids, text)}
+          blockEdits={work.scriptEdits}
         />
       )}
 

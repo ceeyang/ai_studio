@@ -17,6 +17,7 @@ import {
   useStyle,
 } from '../../api/queries';
 import type { EpisodePatch, Job, RerunImpact, SceneBlock } from '../../api/types';
+import type { ScriptBlockEdits } from './ShotGrid';
 import { useConfirm } from '../../components/ConfirmDialog';
 import { RegenerateDialog, impactText } from '../../components/RegenerateDialog';
 import { EpisodeLoadError, nextActionProps, useNextAction } from '../../components/EpisodeHeader';
@@ -94,7 +95,7 @@ function BlockRow({
   onSave: (v: FieldValues) => void;
   onDirtyChange: (dirty: boolean) => void;
   onValuesChange: (state: FieldsState) => void;
-  /** 这一段有镜头时：「重写本段分镜…」 */
+  /** 「重写本段分镜…」（这一段还没镜头时就是生成这一段） */
   onRegen?: () => void;
 }) {
   return (
@@ -130,7 +131,12 @@ function BlockRow({
   );
 }
 
-export function ScriptStage() {
+export function ScriptStage({
+  setScriptEdits,
+}: {
+  /** 登记段落编辑给工作台：镜头网格的「重写本段分镜…」先保存那一段 */
+  setScriptEdits?: (edits: ScriptBlockEdits | null) => void;
+} = {}) {
   const { slug = '', episodeId = '' } = useParams();
   const id = Number(episodeId);
   const ep = useEpisode(id);
@@ -154,6 +160,15 @@ export function ScriptStage() {
   // 每个段落编辑框的当前内容：「保存并生成分镜」「重新生成分镜…」要先把没保存的改动存上
   const blockStates = useRef(new Map<number, FieldsState>());
   useUnsavedGuard(!!src?.dirty || dirtyBlocks.size > 0);
+  // 登记给工作台的段落编辑：读最新的脏标记、调最新的保存函数
+  const dirtyRef = useRef(dirtyBlocks);
+  dirtyRef.current = dirtyBlocks;
+  const saveRef = useRef<(ids: number[]) => Promise<boolean>>(async () => true);
+  useEffect(() => {
+    if (!setScriptEdits) return;
+    setScriptEdits({ isDirty: (bid) => dirtyRef.current.has(bid), save: (bid) => saveRef.current([bid]) });
+    return () => setScriptEdits(null);
+  }, [setScriptEdits]);
   // 下一步是生成剧本 / 生成分镜时，对应按钮打上 data-next-action，阶段条的「下一步」触发它
   const nextAct = useNextAction(slug, ep.data, ['script']);
   const base = workspacePath(slug, id);
@@ -208,10 +223,10 @@ export function ScriptStage() {
     }
   };
 
-  /** 段落有没保存的修改：分镜先保存再按新段落跑。保存失败返回 false（错误也显示在那一段里）。 */
-  const saveBlocks = async (): Promise<boolean> => {
+  /** 段落有没保存的修改：分镜先保存再按新段落跑（ids 不给 = 所有改过的段落）。保存失败返回 false（错误也显示在那一段里）。 */
+  const saveBlocks = async (ids: number[] = dirtyBlockIds): Promise<boolean> => {
     try {
-      for (const bid of dirtyBlockIds) {
+      for (const bid of ids.filter((x) => dirtyBlocks.has(x))) {
         const v = blockStates.current.get(bid)?.values;
         if (!v) continue;
         await patchBlock.mutateAsync({
@@ -226,6 +241,8 @@ export function ScriptStage() {
       return false;
     }
   };
+
+  saveRef.current = saveBlocks;
 
   const track = (stage: Stage, ids: number[], label: string) => {
     notice.track(ids, label);
@@ -296,7 +313,6 @@ export function ScriptStage() {
     if (dirtyBlockIds.length > 0) parts.push(`有 ${dirtyBlockIds.length} 个段落改了还没保存，重新拆段落时这些修改会丢掉`);
     return parts.length > 0 ? parts.join('；') : undefined;
   };
-  const shotBlocks = new Set(e.shots.map((sh) => sh.scene_block_id).filter((x): x is number => x != null));
   const hasBlocks = e.scene_blocks.length > 0;
   const hasShots = e.shots.length > 0;
 
@@ -416,7 +432,7 @@ export function ScriptStage() {
                   })
                 }
                 onValuesChange={(st) => blockStates.current.set(b.id, st)}
-                onRegen={shotBlocks.has(b.id) ? () => openRegen('storyboard', [b.id], `第 ${b.order + 1} 段`) : undefined}
+                onRegen={() => openRegen('storyboard', [b.id], `第 ${b.order + 1} 段`)}
                 onSave={(v) =>
                   patchBlock.mutate({
                     id: b.id,

@@ -73,6 +73,47 @@ describe('ShotGrid', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
+  it('剧本阶段里这一段改了没保存：对话框说明会先保存，确认时先保存这一段再提交', async () => {
+    const calls = installFetch({
+      'GET /api/episodes/4/rerun-impact': { blocks: [2], shots_deleted: 1, selected_first_frames: 0, selected_videos: 0, manual_kept: 0, overwrites: [] },
+      'POST /api/episodes/4/run': { job_ids: [77] },
+    });
+    const order: string[] = [];
+    const save = vi.fn(async (bid: number) => {
+      order.push(`save ${bid}`);
+      return true;
+    });
+    const h = setup({ blockEdits: () => ({ isDirty: (bid) => bid === 22, save }) });
+    const user = userEvent.setup();
+    // 第 1 段没改：没有提示
+    await user.click(within(screen.getByRole('region', { name: '第 1 段 · 直播间 · 2 镜' })).getByRole('button', { name: '重写本段分镜…' }));
+    let dlg = await screen.findByRole('dialog', { name: '重新生成分镜' });
+    expect(within(dlg).queryByText(/还没保存/)).toBeNull();
+    await user.click(within(dlg).getByRole('button', { name: '取消' }));
+    await user.click(within(screen.getByRole('region', { name: '第 2 段 · 未指定场景 · 1 镜' })).getByRole('button', { name: '重写本段分镜…' }));
+    dlg = await screen.findByRole('dialog', { name: '重新生成分镜' });
+    expect(within(dlg).getByText('这一段在剧本阶段改了还没保存，重写前会先保存')).toBeTruthy();
+    await user.click(within(dlg).getByRole('button', { name: '重新生成' }));
+    await waitFor(() => expect(h.onRegenerated).toHaveBeenCalledWith([77], '重写第 2 段分镜'));
+    expect(save).toHaveBeenCalledWith(22);
+    expect(calls.filter((c) => c.method === 'POST')).toHaveLength(1);
+  });
+
+  it('剧本阶段里这一段保存失败：不重写，对话框里说没成功', async () => {
+    const calls = installFetch({
+      'GET /api/episodes/4/rerun-impact': { blocks: [2], shots_deleted: 1, selected_first_frames: 0, selected_videos: 0, manual_kept: 0, overwrites: [] },
+      'POST /api/episodes/4/run': { job_ids: [77] },
+    });
+    const h = setup({ blockEdits: () => ({ isDirty: () => true, save: async () => false }) });
+    const user = userEvent.setup();
+    await user.click(within(screen.getByRole('region', { name: '第 2 段 · 未指定场景 · 1 镜' })).getByRole('button', { name: '重写本段分镜…' }));
+    const dlg = await screen.findByRole('dialog', { name: '重新生成分镜' });
+    await user.click(within(dlg).getByRole('button', { name: '重新生成' }));
+    expect(await within(dlg).findByText('保存没成功，没有重新生成')).toBeTruthy();
+    expect(calls.filter((c) => c.method === 'POST')).toHaveLength(0);
+    expect(h.onRegenerated).not.toHaveBeenCalled();
+  });
+
   it('多选：卡片勾选回调镜头 id；组头勾选整段（全选 / 全不选）', async () => {
     installFetch({});
     const h = setup({ selected: new Set([11]) });

@@ -100,7 +100,7 @@ describe('ScriptStage', () => {
     expect(writes(calls)).toHaveLength(0);
   });
 
-  it('有镜头的段落有「重写本段分镜…」：只重写这一段（scene_block_ids）', async () => {
+  it('每一段都有「重写本段分镜…」（没镜头的段落就是生成这一段）：只重写这一段（scene_block_ids）', async () => {
     const ep = {
       ...EP,
       scene_blocks: [...EP.scene_blocks, { id: 22, order: 1, location_id: null, text: '第二段' }],
@@ -116,7 +116,7 @@ describe('ScriptStage', () => {
     renderAt(<ScriptStage />, AT);
     const user = userEvent.setup();
     const b1 = await screen.findByTestId('block-21');
-    expect(within(screen.getByTestId('block-22')).queryByRole('button', { name: '重写本段分镜…' })).toBeNull();
+    expect(within(screen.getByTestId('block-22')).getByRole('button', { name: '重写本段分镜…' })).toBeTruthy();
     await user.click(within(b1).getByRole('button', { name: '重写本段分镜…' }));
     const dlg = await screen.findByRole('dialog', { name: '重新生成分镜' });
     expect(dlg.textContent).toContain('范围：第 1 段');

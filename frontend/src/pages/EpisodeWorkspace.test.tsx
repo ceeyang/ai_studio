@@ -350,6 +350,33 @@ describe('EpisodeWorkspace', () => {
     expect(screen.queryByRole('dialog', { name: '放弃没保存的修改？' })).toBeNull();
   });
 
+  it('剧本阶段改了某段没保存、切到首帧阶段点那一段的「重写本段分镜…」：先保存那一段再重写', async () => {
+    const calls = installFetch(
+      routes({
+        'PATCH /api/scene-blocks/22': { ...BLOCKS[1], text: '老周推门进来。（改）' },
+        'GET /api/episodes/4/rerun-impact': { stage: 'storyboard', will_run: true, blocks: [2], shots_deleted: 1, selected_first_frames: 0, selected_videos: 0, manual_kept: 0, overwrites: [] },
+        'POST /api/episodes/4/run': { job_ids: [77] },
+        'GET /api/jobs/77': { id: 77, type: 'storyboard', status: 'running', project_id: 1, owner_type: 'episode', owner_id: 4, payload: {}, gpu: false, model_family: null, priority: 0, depends_on: [], log: '', error: null, result: null, created_at: '2026-10-08T10:00:00Z', started_at: null, finished_at: null },
+      }),
+    );
+    renderRoute('/projects/demo/episodes/4?stage=script');
+    const user = userEvent.setup();
+    const block = await screen.findByTestId('block-22');
+    await user.click(within(block).getByRole('button', { name: /段落 2/ }));
+    await user.type(within(block).getByLabelText('段落内容'), '（改）');
+    await user.click(within(stageBar()).getByRole('button', { name: /首帧/ }));
+    const g2 = await screen.findByRole('region', { name: /^第 2 段/ });
+    await user.click(within(g2).getByRole('button', { name: '重写本段分镜…' }));
+    const dlg = await screen.findByRole('dialog', { name: '重新生成分镜' });
+    expect(within(dlg).getByText('这一段在剧本阶段改了还没保存，重写前会先保存')).toBeTruthy();
+    await user.click(within(dlg).getByRole('button', { name: '重新生成' }));
+    await waitFor(() => expect(calls.filter((c) => c.method === 'POST')).toHaveLength(1));
+    const w = calls.filter((c) => c.method !== 'GET');
+    expect(w.map((c) => `${c.method} ${c.url}`)).toEqual(['PATCH /api/scene-blocks/22', 'POST /api/episodes/4/run']);
+    expect(w[0].body).toEqual({ text: '老周推门进来。（改）', location_id: null });
+    expect(w[1].body).toEqual({ stage: 'storyboard', force: true, scene_block_ids: [22] });
+  });
+
   it('只有 ?shot= 没有 stage：停在首帧阶段', async () => {
     installFetch(routes());
     renderRoute('/projects/demo/episodes/4?shot=11');

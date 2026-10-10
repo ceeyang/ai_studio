@@ -11,6 +11,7 @@ import { CastStage } from './workspace/CastStage';
 import { ExportStage } from './workspace/ExportStage';
 import { ScriptStage } from './workspace/ScriptStage';
 import { type ShotGate, shotGate } from './workspace/shotGate';
+import type { ScriptBlockEdits } from './workspace/ShotGrid';
 import { SHOTS_PANEL, type ShotWork, ShotStage } from './workspace/ShotStage';
 import { StageBar, triggerNextAction } from './workspace/StageBar';
 import { LEGACY_STAGE, stageSearch, workspacePath } from './workspace/urls';
@@ -36,6 +37,8 @@ export interface StagePanelProps {
   work: ShotWork;
   /** 登记「切走本阶段前」的检查（抽屉有没保存的修改时问一句）；卸载时登记 null */
   setLeaveCheck: (check: LeaveCheck | null) => void;
+  /** 剧本阶段登记段落编辑（哪段没保存、怎么保存），镜头网格的「重写本段分镜…」先保存那一段；卸载时登记 null */
+  setScriptEdits: (edits: ScriptBlockEdits | null) => void;
 }
 
 const PANELS: { key: PanelKey; label: string; Component: ComponentType<StagePanelProps> }[] = [
@@ -77,6 +80,13 @@ function Workspace({ slug, id }: { slug: string; id: number }) {
     }
     return f;
   };
+
+  // 剧本阶段的段落编辑（剧本阶段挂载时登记）
+  const scriptEdits = useRef<ScriptBlockEdits | null>(null);
+  const [setScriptEdits] = useState(() => (edits: ScriptBlockEdits | null) => {
+    scriptEdits.current = edits;
+  });
+  const [getScriptEdits] = useState(() => () => scriptEdits.current);
 
   const progress = ep.data ? episodeStages(ep.data, characters.data ?? [], exports.data ?? []) : null;
   // 角色和成片也读到了（或读失败了）才算得准默认阶段
@@ -153,6 +163,7 @@ function Workspace({ slug, id }: { slug: string; id: number }) {
     submitting,
     setSubmitting,
     goStage: select,
+    scriptEdits: getScriptEdits,
   };
 
   return (
@@ -184,7 +195,7 @@ function Workspace({ slug, id }: { slug: string; id: number }) {
         <div className="ws-main">
           {PANELS.filter((p) => mounted.has(p.key)).map(({ key, label, Component }) => (
             <section key={key} className="ws-panel" data-stage-panel={key} aria-label={label} hidden={key !== panel}>
-              <Component active={key === panel} work={work} setLeaveCheck={leaveSetter(key)} />
+              <Component active={key === panel} work={work} setLeaveCheck={leaveSetter(key)} setScriptEdits={setScriptEdits} />
             </section>
           ))}
         </div>
