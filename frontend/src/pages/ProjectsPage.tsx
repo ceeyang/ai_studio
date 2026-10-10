@@ -316,13 +316,18 @@ function ProjectsOverview() {
 
 // ------------------------------------------------------------ 项目详情
 
+/** 目标时长范围：和剧本页的目标时长字段（EPISODE_FIELDS）一致 */
+const MIN_SECONDS = 5;
+const MAX_SECONDS = 3600;
+
 function NewEpisodeDialog({ slug, nextNumber, onClose }: { slug: string; nextNumber: number; onClose: () => void }) {
   const create = useCreateEpisode(slug);
   const navigate = useNavigate();
   const [title, setTitle] = useState('');
   const [text, setText] = useState('');
   const [seconds, setSeconds] = useState('30');
-  const secondsOk = Number(seconds) > 0 && Number(seconds) <= 3600;
+  // 和剧本页的目标时长字段同一范围：太短的集剧本页一个字都存不了
+  const secondsOk = seconds.trim() !== '' && Number(seconds) >= MIN_SECONDS && Number(seconds) <= MAX_SECONDS;
   const submit = (e: FormEvent) => {
     e.preventDefault();
     create.mutate(
@@ -347,9 +352,10 @@ function NewEpisodeDialog({ slug, nextNumber, onClose }: { slug: string; nextNum
           </label>
           <label className="field">
             <span>目标时长（秒）</span>
-            <input type="number" min={1} max={3600} value={seconds} onChange={(e) => setSeconds(e.target.value)} />
+            <input type="number" min={MIN_SECONDS} max={MAX_SECONDS} value={seconds} onChange={(e) => setSeconds(e.target.value)} />
           </label>
         </div>
+        {!secondsOk && <p className="error">目标时长要在 {MIN_SECONDS}–{MAX_SECONDS} 秒之间</p>}
         <label className="field">
           <span>原文或梗概</span>
           <textarea rows={14} value={text} onChange={(e) => setText(e.target.value)} />

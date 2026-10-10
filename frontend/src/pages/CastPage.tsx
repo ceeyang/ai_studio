@@ -4,7 +4,7 @@ import { Link, useParams } from 'react-router-dom';
 import { enc, errorText } from '../api/client';
 import { useCharacters, useEpisode, useLocations, usePatchLocation, usePutStyle, useStyle } from '../api/queries';
 import type { LocationPatch, Style } from '../api/types';
-import { EditableFields, type FieldSpec, type FieldValues } from '../components/EditableFields';
+import { EditableFields, type FieldSpec, type FieldValues, useUnsavedGuard } from '../components/EditableFields';
 import { CharacterCard } from './script/CharacterCard';
 import { RecommendPanel } from './script/RecommendPanel';
 
@@ -56,6 +56,18 @@ export function CastPage() {
   const patchLoc = usePatchLocation(slug);
   const putStyle = usePutStyle(slug);
   const [tab, setTab] = useState<Tab>('chars');
+  // 改过没保存的场景（按 id）和风格：换页面前问一句（角色卡自己挂了）
+  const [dirtyLocs, setDirtyLocs] = useState<Set<number>>(() => new Set());
+  const [styleDirty, setStyleDirty] = useState(false);
+  useUnsavedGuard(styleDirty || dirtyLocs.size > 0);
+  const setLocDirty = (locId: number, d: boolean) =>
+    setDirtyLocs((prev) => {
+      if (d === prev.has(locId)) return prev;
+      const next = new Set(prev);
+      if (d) next.add(locId);
+      else next.delete(locId);
+      return next;
+    });
 
   if (ep.isLoading) return <p className="loading">加载中…</p>;
   if (ep.error || !ep.data) return <p className="error">{ep.error ? errorText(ep.error) : '找不到这一集'}</p>;
@@ -131,6 +143,7 @@ export function CastPage() {
                   saving={patchLoc.isPending && patchLoc.variables?.id === l.id}
                   error={patchLoc.error && patchLoc.variables?.id === l.id ? errorText(patchLoc.error) : null}
                   onSave={(_v, ch) => patchLoc.mutate({ id: l.id, ...(ch as LocationPatch) })}
+                  onDirtyChange={(d) => setLocDirty(l.id, d)}
                 />
               </div>
             ))}
@@ -159,6 +172,7 @@ export function CastPage() {
             saving={putStyle.isPending}
             error={putStyle.error ? errorText(putStyle.error) : null}
             onSave={(v) => putStyle.mutate(toStyle(v))}
+            onDirtyChange={setStyleDirty}
           />
         </div>
       </section>

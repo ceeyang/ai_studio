@@ -110,8 +110,16 @@ describe('ProjectsPage', () => {
     expect(screen.getByText('放弃修改？')).toBeTruthy();
     await user.click(screen.getByRole('button', { name: '继续编辑' }));
     const secs = screen.getByLabelText('目标时长（秒）');
+    expect(secs.getAttribute('min')).toBe('5');
+    expect(secs.getAttribute('max')).toBe('3600');
+    // 和剧本页一样 5–3600 秒：太短的不让建（不然剧本页什么都存不了）
+    await user.clear(secs);
+    await user.type(secs, '4');
+    expect(btn.disabled).toBe(true);
+    expect(screen.getByText('目标时长要在 5–3600 秒之间')).toBeTruthy();
     await user.clear(secs);
     await user.type(secs, '10');
+    expect(screen.queryByText('目标时长要在 5–3600 秒之间')).toBeNull();
     await user.click(btn);
     await waitFor(() => expect(where()).toBe('/projects/demo/episodes/5/script'));
     expect(calls.find((c) => c.method === 'POST')?.body).toEqual({

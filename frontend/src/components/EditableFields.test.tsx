@@ -2,7 +2,7 @@ import { render, renderHook, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Link, RouterProvider, createMemoryRouter } from 'react-router-dom';
 import { describe, expect, it, vi } from 'vitest';
-import { EditableFields, type FieldSpec, useUnsavedGuard } from './EditableFields';
+import { EditableFields, type FieldSpec, LeaveGuard, useUnsavedGuard } from './EditableFields';
 
 const FIELDS: FieldSpec[] = [
   { name: 'name', label: '名字' },
@@ -102,7 +102,12 @@ describe('useUnsavedGuard', () => {
     vi.stubGlobal('confirm', ask);
     function Page() {
       useUnsavedGuard(true);
-      return <Link to="/other">走</Link>;
+      return (
+        <>
+          <Link to="/other">走</Link>
+          <LeaveGuard />
+        </>
+      );
     }
     const router = createMemoryRouter(
       [
@@ -118,5 +123,56 @@ describe('useUnsavedGuard', () => {
     ask.mockReturnValue(true);
     await user.click(screen.getByRole('link', { name: '走' }));
     expect(await screen.findByText('别处')).toBeTruthy();
+  });
+
+  it('一页里有好几处在编辑：只要有一处没保存就拦（全站只有一个拦截器，不会互相覆盖）', async () => {
+    const user = userEvent.setup();
+    const ask = vi.fn(() => false);
+    vi.stubGlobal('confirm', ask);
+    function Editor({ dirty }: { dirty: boolean }) {
+      useUnsavedGuard(dirty);
+      return null;
+    }
+    const router = createMemoryRouter(
+      [
+        {
+          path: '/',
+          element: (
+            <>
+              <Editor dirty />
+              <Editor dirty={false} />
+              <Link to="/other">走</Link>
+              <LeaveGuard />
+            </>
+          ),
+        },
+        { path: '/other', element: <p>别处</p> },
+      ],
+      { initialEntries: ['/'] },
+    );
+    render(<RouterProvider router={router} />);
+    await user.click(screen.getByRole('link', { name: '走' }));
+    expect(ask).toHaveBeenCalledTimes(1);
+    expect(router.state.location.pathname).toBe('/');
+  });
+
+  it('只改地址栏查询串（如开关镜头抽屉）不拦', async () => {
+    const user = userEvent.setup();
+    const ask = vi.fn(() => false);
+    vi.stubGlobal('confirm', ask);
+    function Page() {
+      useUnsavedGuard(true);
+      return (
+        <>
+          <Link to="/?shot=3">开抽屉</Link>
+          <LeaveGuard />
+        </>
+      );
+    }
+    const router = createMemoryRouter([{ path: '/', element: <Page /> }], { initialEntries: ['/'] });
+    render(<RouterProvider router={router} />);
+    await user.click(screen.getByRole('link', { name: '开抽屉' }));
+    expect(ask).not.toHaveBeenCalled();
+    expect(router.state.location.search).toBe('?shot=3');
   });
 });

@@ -1,5 +1,6 @@
 import { type FormEvent, useContext, useEffect, useRef, useState } from 'react';
 import { UNSAFE_DataRouterContext, useBlocker } from 'react-router-dom';
+import { useConfirm } from './ConfirmDialog';
 
 export interface FieldOption {
   value: string;
@@ -216,6 +217,10 @@ export function EditableFields({
 
 const LEAVE_PROMPT = '有未保存的修改，确定离开？';
 
+// 正在编辑、还没保存的地方（每个 useUnsavedGuard(true) 一份）。react-router 一个路由只认最后注册的那个
+// useBlocker，所以不能每个编辑框各挂一个拦截器：编辑框只往这里登记，全站由一个 LeaveGuard 统一拦。
+const dirtySources = new Set<symbol>();
+
 function useBeforeUnloadGuard(dirty: boolean) {
   useEffect(() => {
     if (!dirty) return;
@@ -228,23 +233,52 @@ function useBeforeUnloadGuard(dirty: boolean) {
   }, [dirty]);
 }
 
-function useRouteLeaveGuard(dirty: boolean) {
-  const blocker = useBlocker(({ currentLocation, nextLocation }) => dirty && currentLocation.pathname !== nextLocation.pathname);
+/**
+ * 有未保存的修改时拦住离开：关页面/刷新走浏览器的 beforeunload；站内换页面（路径变了）由 LeaveGuard 问一句。
+ * 只改查询串（开关镜头抽屉、换任务筛选）不算离开。
+ */
+export function useUnsavedGuard(dirty: boolean): void {
+  useBeforeUnloadGuard(dirty);
+  const [me] = useState(() => Symbol('unsaved'));
   useEffect(() => {
-    if (blocker.state !== 'blocked') return;
-    if (window.confirm(LEAVE_PROMPT)) blocker.proceed();
-    else blocker.reset();
-  }, [blocker]);
+    if (!dirty) return;
+    dirtySources.add(me);
+    return () => {
+      dirtySources.delete(me);
+    };
+  }, [dirty, me]);
+}
+
+function RouteLeaveGuard() {
+  const confirm = useConfirm();
+  const blocker = useBlocker(
+    ({ currentLocation, nextLocation }) => dirtySources.size > 0 && currentLocation.pathname !== nextLocation.pathname,
+  );
+  const asking = useRef(false);
+  useEffect(() => {
+    if (blocker.state !== 'blocked' || asking.current) return;
+    asking.current = true;
+    void confirm({
+      title: LEAVE_PROMPT,
+      body: '离开后，这一页上改过但没保存的内容会丢掉。',
+      confirmText: '离开',
+      cancelText: '留下',
+      danger: true,
+    }).then((ok) => {
+      asking.current = false;
+      if (ok) blocker.proceed();
+      else blocker.reset();
+    });
+  }, [blocker, confirm]);
+  return null;
 }
 
 /**
- * 有未保存的修改时拦住离开：关页面/刷新走浏览器的 beforeunload；站内跳转走 react-router 的 useBlocker 并问一句。
- * useBlocker 只在数据路由（createBrowserRouter + RouterProvider）下可用，BrowserRouter 下调用会抛错，
- * 所以先看有没有数据路由上下文——一个组件一生里这件事不会变，条件调用不会打乱 hooks 顺序。
+ * 全站唯一的站内跳转拦截器，挂在根路由里（ConfirmProvider 里面）。
+ * useBlocker 只在数据路由（createBrowserRouter / createMemoryRouter + RouterProvider）下可用，
+ * 普通 <MemoryRouter> 下什么也不做——一个组件一生里这件事不会变，条件渲染不会打乱 hooks 顺序。
  */
-export function useUnsavedGuard(dirty: boolean): void {
+export function LeaveGuard() {
   const dataRouter = useContext(UNSAFE_DataRouterContext);
-  useBeforeUnloadGuard(dirty);
-  // eslint-disable-next-line react-hooks/rules-of-hooks
-  if (dataRouter) useRouteLeaveGuard(dirty);
+  return dataRouter ? <RouteLeaveGuard /> : null;
 }

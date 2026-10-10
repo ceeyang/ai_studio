@@ -1,8 +1,9 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render } from '@testing-library/react';
 import type { ReactElement } from 'react';
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
+import { Outlet, RouterProvider, createMemoryRouter, useLocation } from 'react-router-dom';
 import { ConfirmProvider } from '../components/ConfirmDialog';
+import { LeaveGuard } from '../components/EditableFields';
 
 export function newQueryClient(): QueryClient {
   return new QueryClient({
@@ -22,22 +23,29 @@ interface RenderOptions {
 }
 
 /**
- * 在 MemoryRouter + QueryClientProvider + ConfirmProvider 里渲染（和 App 一样：确认框在路由里面，正文可以放链接）；
- * ui 挂在 path 上，当前地址显示在 data-testid="location"。
+ * 和 App 一样用数据路由（createMemoryRouter + RouterProvider）渲染：根路由里有 ConfirmProvider（正文可以放链接）
+ * 和未保存修改的离开拦截；ui 挂在 path 上，当前地址显示在 data-testid="location"。
  */
 export function renderAt(ui: ReactElement, { route = '/', path = '*', qc = newQueryClient() }: RenderOptions = {}) {
+  const router = createMemoryRouter(
+    [
+      {
+        element: (
+          <ConfirmProvider>
+            <Outlet />
+            <LocationProbe />
+            <LeaveGuard />
+          </ConfirmProvider>
+        ),
+        children: [{ path, element: ui }, ...(path !== '*' ? [{ path: '*', element: null }] : [])],
+      },
+    ],
+    { initialEntries: [route] },
+  );
   const result = render(
     <QueryClientProvider client={qc}>
-      <MemoryRouter initialEntries={[route]}>
-        <ConfirmProvider>
-          <Routes>
-            <Route path={path} element={ui} />
-            {path !== '*' && <Route path="*" element={null} />}
-          </Routes>
-          <LocationProbe />
-        </ConfirmProvider>
-      </MemoryRouter>
+      <RouterProvider router={router} />
     </QueryClientProvider>,
   );
-  return { qc, ...result };
+  return { qc, router, ...result };
 }

@@ -215,4 +215,27 @@ describe('ScriptPage', () => {
   it('toCharacterPatch：清空音色提交 null', () => {
     expect(toCharacterPatch({ voice: '', name: '林夏' })).toEqual({ voice: null, name: '林夏' });
   });
+
+  it('原文或段落改了没保存时换页面先问；留下就不走', async () => {
+    installFetch(ROUTES);
+    renderAt(<ScriptPage />, AT);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: /原文 \/ 梗概/ }));
+    const src = screen.getByLabelText('原文 / 梗概');
+    await user.type(src, '加一句');
+    expect(screen.getAllByText(/有未保存的修改/).length).toBeGreaterThan(0);
+    await user.click(screen.getByRole('link', { name: /本集角色/ }));
+    const dlg = await screen.findByRole('dialog', { name: '有未保存的修改，确定离开？' });
+    await user.click(within(dlg).getByRole('button', { name: '留下' }));
+    expect(screen.getByTestId('location').textContent).toBe('/projects/demo/episodes/4/script');
+    // 段落里的修改也算
+    await user.clear(src);
+    await user.type(src, '梗概');
+    await user.click(screen.getByRole('button', { name: /段落 1/ }));
+    await user.type(screen.getByLabelText('段落内容'), '！');
+    await user.click(screen.getByRole('link', { name: /本集角色/ }));
+    const dlg2 = await screen.findByRole('dialog', { name: '有未保存的修改，确定离开？' });
+    await user.click(within(dlg2).getByRole('button', { name: '离开' }));
+    await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/projects/demo/episodes/4/cast'));
+  });
 });

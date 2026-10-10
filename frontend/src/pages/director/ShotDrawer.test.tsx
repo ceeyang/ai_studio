@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { installFetch } from '../../test/fetch';
 import { makeCandidate, makeShot, makeSlot } from '../../test/factories';
+import { Link } from 'react-router-dom';
 import { renderAt } from '../../test/render';
 import { ShotDrawer, toShotPatch } from './ShotDrawer';
 
@@ -221,5 +222,23 @@ describe('ShotDrawer', () => {
     await user.click(screen.getByRole('button', { name: '保存并生成视频' }));
     expect(await screen.findByText(/时长不对/)).toBeTruthy();
     expect(onGenerate).not.toHaveBeenCalled();
+  });
+
+  it('提示词或对白改了没保存时换页面先问', async () => {
+    const shot = makeShot({ id: 6, code: 'S02', dialogue: [{ speaker: '陈师傅', zh: '换？', start: 2, end: 2.6 }] });
+    installFetch({ 'GET /api/engines': ENGINES });
+    renderAt(
+      <>
+        <ShotDrawer shot={shot} episodeId={1} onClose={() => {}} onGenerate={() => {}} />
+        <Link to="/jobs">去任务页</Link>
+      </>,
+      { route: '/d', path: '/d' },
+    );
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText('动作'), '！');
+    await user.click(screen.getByRole('link', { name: '去任务页' }));
+    const dlg = await screen.findByRole('dialog', { name: '有未保存的修改，确定离开？' });
+    await user.click(within(dlg).getByRole('button', { name: '留下' }));
+    expect(screen.getByTestId('location').textContent).toBe('/d');
   });
 });

@@ -113,4 +113,21 @@ describe('CastPage', () => {
     await waitFor(() => expect(writes(calls)).toHaveLength(1));
     expect(writes(calls)[0]).toMatchObject({ url: '/api/locations/3', body: { atmosphere: '压抑，安静' } });
   });
+
+  it('场景或风格改了没保存时换页面先问', async () => {
+    installFetch(ROUTES);
+    renderAt(<CastPage />, AT);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('tab', { name: '风格' }));
+    await user.type(screen.getByLabelText('色板'), '冷色');
+    await user.click(screen.getAllByRole('link', { name: /剧本/ })[0]);
+    const dlg = await screen.findByRole('dialog', { name: '有未保存的修改，确定离开？' });
+    await user.click(within(dlg).getByRole('button', { name: '留下' }));
+    expect(screen.getByTestId('location').textContent).toBe('/projects/demo/episodes/4/cast');
+    await user.clear(screen.getByLabelText('色板'));
+    await user.click(screen.getByRole('tab', { name: '场景（1）' }));
+    await user.type(within(screen.getByTestId('location-3')).getByLabelText('时间'), '晚');
+    await user.click(screen.getAllByRole('link', { name: /剧本/ })[0]);
+    expect(await screen.findByRole('dialog', { name: '有未保存的修改，确定离开？' })).toBeTruthy();
+  });
 });

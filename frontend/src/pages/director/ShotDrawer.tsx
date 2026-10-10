@@ -3,7 +3,7 @@ import { errorText } from '../../api/client';
 import { useEngines, usePatchShot, useSelectCandidate } from '../../api/queries';
 import { type DialogueLine, type EngineRow, type ShotDetail, type ShotPatch, TRANSITIONS, type Transition } from '../../api/types';
 import { useConfirm } from '../../components/ConfirmDialog';
-import { EditableFields, type FieldSpec, type FieldValues, type FieldsState } from '../../components/EditableFields';
+import { EditableFields, type FieldSpec, type FieldValues, type FieldsState, useUnsavedGuard } from '../../components/EditableFields';
 import { engineLabel } from '../../format';
 import { CandidateGrid } from './CandidateGrid';
 import { DialogueEditor } from './DialogueEditor';
@@ -101,6 +101,8 @@ export function ShotDrawer({
   const fieldsDirty = !!fields?.dirty;
   // 提示词或对白有没保存的修改：生成按钮先保存（生成按旧内容跑就白跑了）
   const unsaved = fieldsDirty || dialogueDirty;
+  // 关抽屉另有确认；换到别的页面由全站的离开拦截问
+  useUnsavedGuard(unsaved);
   const latest = useRef({ dirty: false, onClose });
   latest.current = { dirty: fieldsDirty || dialogueDirty, onClose };
 

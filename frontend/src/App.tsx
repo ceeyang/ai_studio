@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { BrowserRouter, Route, Routes } from 'react-router-dom';
+import { RouterProvider, createBrowserRouter } from 'react-router-dom';
 import { ConfirmProvider } from './components/ConfirmDialog';
+import { LeaveGuard } from './components/EditableFields';
 import { Layout } from './components/Layout';
 import { NotFound } from './components/NotFound';
 import { EventsProvider } from './ws/EventsContext';
@@ -16,29 +17,39 @@ const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 2000, retry: 1, refetchOnWindowFocus: false } },
 });
 
+/** 根路由：确认框放在路由里面（正文里可以放站内链接），未保存修改的离开拦截全站只挂这一个。 */
+function Root() {
+  return (
+    <ConfirmProvider>
+      <Layout />
+      <LeaveGuard />
+    </ConfirmProvider>
+  );
+}
+
+// 数据路由（createBrowserRouter）：useBlocker 只在它下面可用，站内跳转才拦得住未保存的修改
+const router = createBrowserRouter([
+  {
+    element: <Root />,
+    children: [
+      { path: '/settings', element: <SettingsPage /> },
+      { path: '/jobs', element: <JobsPage /> },
+      { path: '/projects/:slug/episodes/:episodeId/director', element: <DirectorPage /> },
+      { path: '/projects/:slug/episodes/:episodeId/script', element: <ScriptPage /> },
+      { path: '/projects/:slug/episodes/:episodeId/cast', element: <CastPage /> },
+      { path: '/projects/:slug/episodes/:episodeId/export', element: <ExportPage /> },
+      { path: '/', element: <ProjectsPage /> },
+      { path: '/projects/:slug', element: <ProjectsPage /> },
+      { path: '*', element: <NotFound /> },
+    ],
+  },
+]);
+
 export function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <EventsProvider>
-        <BrowserRouter>
-          {/* 确认框放在路由里面：正文里可以放站内链接 */}
-          <ConfirmProvider>
-            <Routes>
-              <Route element={<Layout />}>
-                {/* 页面路由 */}
-                <Route path="/settings" element={<SettingsPage />} />
-                <Route path="/jobs" element={<JobsPage />} />
-                <Route path="/projects/:slug/episodes/:episodeId/director" element={<DirectorPage />} />
-                <Route path="/projects/:slug/episodes/:episodeId/script" element={<ScriptPage />} />
-                <Route path="/projects/:slug/episodes/:episodeId/cast" element={<CastPage />} />
-                <Route path="/projects/:slug/episodes/:episodeId/export" element={<ExportPage />} />
-                <Route path="/" element={<ProjectsPage />} />
-                <Route path="/projects/:slug" element={<ProjectsPage />} />
-                <Route path="*" element={<NotFound />} />
-              </Route>
-            </Routes>
-          </ConfirmProvider>
-        </BrowserRouter>
+        <RouterProvider router={router} />
       </EventsProvider>
     </QueryClientProvider>
   );

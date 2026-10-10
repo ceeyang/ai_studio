@@ -16,7 +16,7 @@ import {
 } from '../api/queries';
 import type { Character, EpisodePatch, Job, RerunImpact, SceneBlock } from '../api/types';
 import { useConfirm } from '../components/ConfirmDialog';
-import { EditableFields, type FieldSpec, type FieldValues, type FieldsState } from '../components/EditableFields';
+import { EditableFields, type FieldSpec, type FieldValues, type FieldsState, useUnsavedGuard } from '../components/EditableFields';
 import { useJobNotice } from '../components/JobNotice';
 import { EPISODE_STATUS_LABEL } from '../format';
 
@@ -122,6 +122,7 @@ function BlockRow({
   error,
   onToggle,
   onSave,
+  onDirtyChange,
 }: {
   b: SceneBlock;
   locationName: string;
@@ -131,6 +132,7 @@ function BlockRow({
   error: string | null;
   onToggle: () => void;
   onSave: (v: FieldValues) => void;
+  onDirtyChange: (dirty: boolean) => void;
 }) {
   return (
     <div className={`block${open ? ' is-open' : ''}`} data-testid={`block-${b.id}`}>
@@ -150,6 +152,7 @@ function BlockRow({
           saving={saving}
           error={error}
           onSave={onSave}
+          onDirtyChange={onDirtyChange}
         />
       </div>
     </div>
@@ -173,6 +176,9 @@ export function ScriptPage() {
   const [srcOpen, setSrcOpen] = useState<boolean | null>(null);
   const [src, setSrc] = useState<FieldsState | null>(null);
   const [lastRun, setLastRun] = useState<{ stage: Stage; ids: number[] } | null>(null);
+  // 改过没保存的段落：和原文一起决定换页面前要不要问一句
+  const [dirtyBlocks, setDirtyBlocks] = useState<Set<number>>(() => new Set());
+  useUnsavedGuard(!!src?.dirty || dirtyBlocks.size > 0);
   const base = `/projects/${enc(slug)}/episodes/${id}`;
 
   useOnStageDone(
@@ -352,6 +358,15 @@ export function ScriptPage() {
                 saving={patchBlock.isPending && mine}
                 error={patchBlock.error && mine ? errorText(patchBlock.error) : null}
                 onToggle={() => toggleBlock(b.id)}
+                onDirtyChange={(d) =>
+                  setDirtyBlocks((prev) => {
+                    if (d === prev.has(b.id)) return prev;
+                    const next = new Set(prev);
+                    if (d) next.add(b.id);
+                    else next.delete(b.id);
+                    return next;
+                  })
+                }
                 onSave={(v) =>
                   patchBlock.mutate({
                     id: b.id,
