@@ -222,6 +222,8 @@ export interface Shot {
   use_end_frame: boolean;
   continue_from_prev: boolean;
   transition_out: string;
+  /** llm = 分镜生成的；manual = 手工添加（含拆分出来的） */
+  origin: 'llm' | 'manual' | string;
 }
 
 export interface ShotDetail extends Shot {

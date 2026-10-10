@@ -69,6 +69,34 @@ export function castTarget(shots: ShotDetail[], chars: Character[]): CastTarget 
   return { kind: 'busy', id: null, missing: missing.length };
 }
 
+/**
+ * 上一版剧本留下的镜头：分镜生成的（origin=llm），但段落已经没了（重新生成剧本后段落换了一批，旧镜头的 scene_block_id 变成空）。
+ * 手工添加的镜头本来就没有段落，不算。
+ */
+export function isOrphanShot(shot: Pick<ShotDetail, 'origin' | 'scene_block_id'>, blockIds: ReadonlySet<number>): boolean {
+  return shot.origin === 'llm' && (shot.scene_block_id == null || !blockIds.has(shot.scene_block_id));
+}
+
+/** 剧本这一格：分镜跟得上剧本没有（每段都有镜头、没有上一版剧本留下的镜头） */
+function scriptStage(ep: EpisodeDetail): Draft {
+  const blocks = ep.scene_blocks;
+  const shots = ep.shots;
+  const blockIds = new Set(blocks.map((b) => b.id));
+  const covered = new Set(shots.map((s) => s.scene_block_id));
+  const bare = blocks.filter((b) => !covered.has(b.id)).length;
+  const orphans = shots.filter((s) => isOrphanShot(s, blockIds)).length;
+  const base = { key: 'script' as const, label: '剧本' };
+  if (blocks.length === 0) return { ...base, state: 'todo', detail: '还没有段落', next: '生成剧本', count: 0 };
+  if (shots.length === 0) {
+    return { ...base, state: 'todo', detail: `${blocks.length} 段 · 还没有镜头`, next: '生成分镜', count: blocks.length };
+  }
+  const detail = `${blocks.length} 段 · ${shots.length} 镜`;
+  if (bare === 0 && orphans === 0) return { ...base, state: 'done', detail, next: '', count: 0 };
+  // 重新生成过剧本（或有段落还没镜头）：分镜跟不上了，去剧本阶段点「重新生成分镜…」
+  const why = orphans > 0 ? `${orphans} 镜是上一版剧本的` : `${bare} 段没有镜头`;
+  return { ...base, state: 'todo', detail: `${detail} · ${why}`, next: '重新生成分镜（剧本改过）', count: bare };
+}
+
 /** 首帧 / 视频这一格：几镜有选定的、几镜过期、几镜缺 */
 function slotStats(shots: ShotDetail[], kind: string) {
   const marks = shots.map((s) => slotMark(slotOf(s, kind)));
@@ -96,7 +124,6 @@ export function episodeStages(
   exports: ExportRow[],
 ): { stages: Stage[]; next: NextStep | null } {
   const shots = ep.shots;
-  const blocks = ep.scene_blocks.length;
   const cast = castOf(shots, chars);
   const withPortrait = cast.filter(hasPortrait).length;
   const finalCut = exports.some((x) => x.is_final);
@@ -111,15 +138,8 @@ export function episodeStages(
           : `抽定妆照（${cast.length - withPortrait} 个角色缺）`;
 
   const drafts: Draft[] = [
-    {
-      key: 'script',
-      label: '剧本',
-      // 剧本 = 有段落且有镜头（分镜也在剧本阶段做）
-      state: blocks > 0 && shots.length > 0 ? 'done' : 'todo',
-      detail: blocks === 0 ? '还没有段落' : `${blocks} 段 · ${shots.length > 0 ? `${shots.length} 镜` : '还没有镜头'}`,
-      next: blocks === 0 ? '生成剧本' : '生成分镜',
-      count: blocks === 0 ? 0 : blocks,
-    },
+    // 剧本 = 有段落、每段都有镜头、没有上一版剧本留下的镜头（分镜也在剧本阶段做）
+    scriptStage(ep),
     {
       key: 'cast',
       label: '角色',

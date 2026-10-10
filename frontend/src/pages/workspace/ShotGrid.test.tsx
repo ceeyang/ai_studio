@@ -105,6 +105,27 @@ describe('ShotGrid', () => {
     expect(h.onOpen).toHaveBeenCalledWith(13);
   });
 
+  it('重新生成剧本后旧段落没了的分镜镜头（origin=llm、没有段落）：单独一组「上一版剧本留下的镜头」，手工镜头还是「手工添加」', () => {
+    installFetch({});
+    setup({
+      shots: [
+        ...SHOTS,
+        makeShot({ id: 15, code: 'S05', order: 4, scene_block_id: null, origin: 'llm' }),
+        makeShot({ id: 16, code: 'S06', order: 5, scene_block_id: 99, origin: 'llm' }),
+      ],
+    });
+    expect(groups()).toEqual([
+      '第 1 段 · 直播间 · 2 镜',
+      '第 2 段 · 未指定场景 · 1 镜',
+      '上一版剧本留下的镜头 · 2 镜',
+      '手工添加 · 1 镜',
+    ]);
+    const old = screen.getByRole('region', { name: '上一版剧本留下的镜头 · 2 镜' });
+    expect(within(old).getAllByTestId(/^shot-/).map((el) => el.dataset.testid)).toEqual(['shot-S05', 'shot-S06']);
+    expect(within(old).getByRole('checkbox', { name: '选择上一版剧本留下的全部镜头' })).toBeTruthy();
+    expect(within(old).queryByRole('button', { name: /重写本段分镜/ })).toBeNull();
+  });
+
   it('段落还没有镜头：组头照样有「重写本段分镜…」，写明这一段还没有镜头', () => {
     installFetch({});
     setup({ shots: SHOTS.filter((s) => s.scene_block_id !== 22) });

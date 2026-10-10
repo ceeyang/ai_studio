@@ -183,3 +183,11 @@ def test_stale_reason_prompt_then_engine(api):
     assert api.get(f"/api/shots/{ids[0]}").json()["slots"][0]["stale_reason"] == "引擎换了"
     api.patch(f"/api/shots/{ids[0]}", json={"image_prompt": "改了"})
     assert api.get(f"/api/shots/{ids[0]}").json()["slots"][0]["stale_reason"] == "提示词改了"
+
+
+def test_shot_out_includes_origin(api):
+    ep_id, ids = seed(api, n=1)
+    manual = api.post(f"/api/episodes/{ep_id}/shots", json={"action": "手工加的"}).json()
+    assert manual["origin"] == "manual"
+    shots = api.get(f"/api/episodes/{ep_id}").json()["shots"]
+    assert [x["origin"] for x in shots] == ["llm", "manual"]

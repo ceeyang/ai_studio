@@ -27,7 +27,7 @@ export function makeShot(p: Partial<ShotDetail> = {}): ShotDetail {
     camera_move: 'static', action: '林夏念稿', dialogue: [], cast: [], props: [],
     image_prompt: 'prompt', motion_prompt: 'motion', audio_prompt: 'audio', image_engine: null,
     video_engine: null, duration: 5, use_end_frame: false, continue_from_prev: false,
-    transition_out: 'hard_cut', slots: [], ...p,
+    transition_out: 'hard_cut', origin: 'manual', slots: [], ...p,
   };
 }
 

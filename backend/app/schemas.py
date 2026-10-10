@@ -366,6 +366,7 @@ class ShotOut(ORM):
     use_end_frame: bool
     continue_from_prev: bool
     transition_out: str
+    origin: str = "llm"        # llm = 分镜生成的；manual = 手工添加（含拆分出来的）
 
 
 class ShotDetail(ShotOut):

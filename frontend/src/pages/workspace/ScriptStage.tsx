@@ -330,6 +330,7 @@ export function ScriptStage() {
         {hasShots ? (
           <button
             type="button"
+            {...nextActionProps(!!nextAct)}
             disabled={busy}
             title="按段落重新出整集的镜头，可以写修改意见"
             onClick={() => openRegen('storyboard')}

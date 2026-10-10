@@ -451,6 +451,15 @@ describe('ScriptStage', () => {
     expect(screen.getByRole('button', { name: '重新生成剧本…' }).hasAttribute('data-next-action')).toBe(false);
   });
 
+  it('重新生成过剧本、旧镜头没了段落：下一步「重新生成分镜（剧本改过）」落在「重新生成分镜…」上', async () => {
+    const ep = { ...EP, shots: [makeShot({ id: 1, scene_block_id: 21, origin: 'llm' }), makeShot({ id: 2, code: 'S02', scene_block_id: null, origin: 'llm' })] };
+    installFetch({ ...ROUTES, 'GET /api/episodes/4': ep, 'GET /api/episodes/4/exports': [] });
+    renderAt(<ScriptStage />, AT);
+    const btn = await screen.findByRole('button', { name: '重新生成分镜…' });
+    await waitFor(() => expect(btn.hasAttribute('data-next-action')).toBe(true));
+    expect(screen.getByRole('button', { name: '重新生成剧本…' }).hasAttribute('data-next-action')).toBe(false);
+  });
+
   it('已有段落和镜头时：工具栏没有主按钮（重新生成不是下一步）', async () => {
     installFetch({ ...ROUTES, 'GET /api/episodes/4': WITH_SHOTS });
     const { container } = renderAt(<ScriptStage />, AT);

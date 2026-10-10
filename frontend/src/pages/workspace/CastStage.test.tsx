@@ -16,7 +16,7 @@ const EP = makeEpisode({
   id: 4,
   title: '提词器',
   scene_blocks: [{ id: 1, order: 0, location_id: null, text: 'a' }],
-  shots: [makeShot({ id: 1, cast: [{ character_id: 8, variation_id: null }, { character_id: 9, variation_id: null }] })],
+  shots: [makeShot({ id: 1, scene_block_id: 1, cast: [{ character_id: 8, variation_id: null }, { character_id: 9, variation_id: null }] })],
 });
 const ROUTES = {
   'GET /api/episodes/4': EP,
@@ -116,7 +116,7 @@ describe('CastStage', () => {
       ...ROUTES,
       'GET /api/episodes/4': makeEpisode({
         ...EP,
-        shots: [makeShot({ id: 1, cast: [8, 9, 10].map((character_id) => ({ character_id, variation_id: null })) })],
+        shots: [makeShot({ id: 1, scene_block_id: 1, cast: [8, 9, 10].map((character_id) => ({ character_id, variation_id: null })) })],
       }),
       'GET /api/projects/demo/characters': [LIN, { ...LAO, active_jobs: [{ id: 5, type: 'image.portrait', status: 'running' }] }, XIAO],
     });

@@ -256,7 +256,7 @@ describe('ExportStage', () => {
   it('前面都做完、下一步是合成导出：「合成导出」打上 data-next-action（主按钮在阶段条）', async () => {
     const full = (id: number, code: string) =>
       makeShot({
-        id, code, order: id, cast: [{ character_id: 8, variation_id: null }],
+        id, code, order: id, scene_block_id: 1, cast: [{ character_id: 8, variation_id: null }],
         slots: [
           makeSlot({ id: id * 10 + 1, kind: 'first_frame', selected_candidate_id: id * 100 + 1, candidates: [makeCandidate({ id: id * 100 + 1 })] }),
           withVideo(id, code).slots[0],

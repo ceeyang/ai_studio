@@ -1,9 +1,10 @@
 // 首帧 / 视频阶段的镜头卡片网格：按剧本段落分组（组头「第 N 段 · 场景名 · M 镜」+「重写本段分镜…」），
-// 没有段落的手工镜头放最后一组「手工添加」。上移 / 下移按全集顺序。
+// 上一版剧本留下的（分镜生成、段落已经没了）一组，没有段落的手工镜头放最后一组「手工添加」。上移 / 下移按全集顺序。
 import { useEffect, useRef, useState } from 'react';
 import type { Character, Location, SceneBlock, ShotDetail } from '../../api/types';
 import { RegenerateDialog } from '../../components/RegenerateDialog';
 import type { CardAction, GenStage } from '../director/shotStatus';
+import { isOrphanShot } from '../stages';
 import { ShotCard } from './ShotCard';
 
 export interface ShotGridProps {
@@ -29,6 +30,8 @@ export interface ShotGridProps {
   onRegenerated(jobIds: number[], text: string): void;
 }
 
+const ORPHAN_SCOPE = '上一版剧本留下的镜头';
+
 interface Group {
   key: string;
   title: string;
@@ -36,7 +39,10 @@ interface Group {
   shots: ShotDetail[];
 }
 
-/** 段落按顺序各一组（没镜头的段落也列出来，好按段重写）；段落对不上的镜头算手工添加 */
+/**
+ * 段落按顺序各一组（没镜头的段落也列出来，好按段重写）；段落对不上的镜头：分镜生成的（重新生成剧本后旧段落没了）
+ * 单独一组「上一版剧本留下的镜头」，手工添加的一组「手工添加」。
+ */
 export function groupShots(shots: ShotDetail[], blocks: SceneBlock[], locations: Location[]): Group[] {
   const locName = new Map(locations.map((l) => [l.id, l.name]));
   const ordered = [...blocks].sort((a, b) => a.order - b.order);
@@ -46,7 +52,11 @@ export function groupShots(shots: ShotDetail[], blocks: SceneBlock[], locations:
     const place = (b.location_id != null && locName.get(b.location_id)) || '未指定场景';
     return { key: `b${b.id}`, title: `第 ${b.order + 1} 段 · ${place} · ${list.length} 镜`, block: b, shots: list };
   });
-  const manual = shots.filter((s) => s.scene_block_id == null || !known.has(s.scene_block_id));
+  const orphans = shots.filter((s) => isOrphanShot(s, known));
+  if (orphans.length > 0) {
+    groups.push({ key: 'orphan', title: `${ORPHAN_SCOPE} · ${orphans.length} 镜`, block: null, shots: orphans });
+  }
+  const manual = shots.filter((s) => !isOrphanShot(s, known) && (s.scene_block_id == null || !known.has(s.scene_block_id)));
   if (manual.length > 0) groups.push({ key: 'manual', title: `手工添加 · ${manual.length} 镜`, block: null, shots: manual });
   return groups;
 }
@@ -75,12 +85,12 @@ export function ShotGrid(props: ShotGridProps) {
     <div className="shot-grid-wrap">
       {groups.map((g) => {
         const ids = g.shots.map((s) => s.id);
-        const scope = g.block ? `第 ${g.block.order + 1} 段` : '手工添加';
+        const scope = g.block ? `第 ${g.block.order + 1} 段` : g.key === 'orphan' ? ORPHAN_SCOPE : '手工添加';
         return (
           <section key={g.key} className="shot-group" aria-label={g.title}>
             <header className="shot-group-head">
               <GroupCheck
-                label={g.block ? `选择${scope}的全部镜头` : '选择手工添加的全部镜头'}
+                label={g.block ? `选择${scope}的全部镜头` : g.key === 'orphan' ? '选择上一版剧本留下的全部镜头' : '选择手工添加的全部镜头'}
                 ids={ids}
                 selected={selected}
                 onChange={(checked) => props.onSelectMany(ids, checked)}
