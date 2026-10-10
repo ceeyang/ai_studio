@@ -115,6 +115,7 @@ function RegenerateDialogBody({
         <label className="field">
           <span>修改意见（可选）</span>
           <textarea
+            className="regen-note"
             rows={4}
             maxLength={NOTE_MAX}
             placeholder={NOTE_PLACEHOLDER}

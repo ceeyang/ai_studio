@@ -866,6 +866,8 @@ pre.error { background: rgba(255, 90, 95, 0.06); border-color: rgba(255, 90, 95,
 .modal-foot { display: flex; justify-content: flex-end; align-items: center; gap: var(--s-2); padding-top: var(--s-4); margin-top: var(--s-1); border-top: 1px solid var(--divider); }
 .modal-foot > .muted:first-child { margin-right: auto; font-size: 12px; }
 .modal textarea { min-height: 280px; }
+/* 修改意见最多 500 字：四行就够，别把影响预估挤到下面去 */
+.modal textarea.regen-note { min-height: 0; }
 .modal-discard { position: sticky; bottom: calc(-1 * var(--s-6)); background: var(--surface-1); padding-bottom: var(--s-1); }
 .modal-discard > span:first-child { margin-right: auto; font-size: 13px; font-weight: 500; }
 .confirm-body { color: var(--text-2); line-height: 1.6; text-wrap: pretty; margin-bottom: var(--s-2); }
