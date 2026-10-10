@@ -52,9 +52,9 @@ function promptOf(c: Candidate): string {
   return typeof vp === 'string' ? vp : '';
 }
 
-/** 换造型 / 换提示词的确认文案：没有出场镜头时不写过期那句。 */
+/** 换造型 / 换提示词的确认文案：造型是全项目共用的，只数得到本集的镜头，其他集的一并提醒；本集没有出场镜头时不写过期那句。 */
 function staleTail(shots: number): string {
-  return shots > 0 ? `，出场的 ${shots} 个镜头首帧会过期` : '';
+  return shots > 0 ? `，本集出场的 ${shots} 个镜头首帧会过期，其他集出场的镜头也会过期` : '';
 }
 
 function PortraitStrip({

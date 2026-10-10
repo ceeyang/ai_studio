@@ -69,7 +69,7 @@ describe('角色卡', () => {
     const box = await screen.findByRole('dialog', { name: /陈师傅 定妆照/ });
     await user.click(within(box).getByRole('button', { name: '设为当前造型' }));
     const ask = await screen.findByRole('dialog', { name: '设为当前造型？' });
-    expect(ask.textContent).toContain('用这张的提示词覆盖外貌描述，出场的 2 个镜头首帧会过期');
+    expect(ask.textContent).toContain('用这张的提示词覆盖外貌描述，本集出场的 2 个镜头首帧会过期，其他集出场的镜头也会过期');
     await user.click(within(ask).getByRole('button', { name: '取消' }));
     expect(posts(calls)).toHaveLength(0);
     // 卡片悬停按钮同样要确认
@@ -202,7 +202,7 @@ describe('角色卡', () => {
     });
     await user.click(within(within(card).getByTestId('option-0')).getByRole('button', { name: '设为角色提示词' }));
     const ask = await screen.findByRole('dialog', { name: '设为角色提示词？' });
-    expect(ask.textContent).toContain('用这个方案的提示词覆盖外貌描述，出场的 2 个镜头首帧会过期');
+    expect(ask.textContent).toContain('用这个方案的提示词覆盖外貌描述，本集出场的 2 个镜头首帧会过期，其他集出场的镜头也会过期');
     expect(posts(calls)).toHaveLength(2);
     await user.click(within(ask).getByRole('button', { name: '设为角色提示词' }));
     await waitFor(() => expect(posts(calls)).toHaveLength(3));

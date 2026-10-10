@@ -180,6 +180,20 @@ describe('ExportPage', () => {
     expect(links[1].hasAttribute('download')).toBe(true);
   });
 
+  it('定稿可以取消：点「取消定稿」发 PATCH is_final=false', async () => {
+    const calls = installFetch(
+      routes({
+        'GET /api/episodes/4/exports': [exportRow({ id: 3, is_final: true })],
+        'PATCH /api/exports/3': exportRow({ id: 3, is_final: false }),
+      }),
+    );
+    renderAt(<ExportPage />, AT);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: '取消定稿' }));
+    await waitFor(() => expect(calls.some((c) => c.method === 'PATCH')).toBe(true));
+    expect(calls.find((c) => c.method === 'PATCH')).toMatchObject({ url: '/api/exports/3', body: { is_final: false } });
+  });
+
   it('没有标签的旧成片按设置拼出标签', async () => {
     installFetch(
       routes({

@@ -1,4 +1,4 @@
-import { screen, waitFor } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { installFetch } from '../../test/fetch';
@@ -52,5 +52,21 @@ describe('EndCardPanel', () => {
       background: '#0b1a33',
       lines: [{ text: '柬埔寨1号铭车', font: null, size: 48, bold: false }],
     });
+  });
+
+  it('改了没保存时换页面先问', async () => {
+    installFetch({
+      'GET /api/projects/demo/end-card': CARD,
+      'PUT /api/projects/demo/end-card': (c: { body: unknown }) => c.body,
+    });
+    const { router } = renderAt(<EndCardPanel slug="demo" />, { route: '/', path: '/' });
+    const user = userEvent.setup();
+    await user.type(await screen.findByLabelText('第 1 行文字'), '！');
+    act(() => {
+      void router.navigate('/elsewhere');
+    });
+    const dlg = await screen.findByRole('dialog', { name: '有未保存的修改，确定离开？' });
+    await user.click(within(dlg).getByRole('button', { name: '离开' }));
+    await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/elsewhere'));
   });
 });

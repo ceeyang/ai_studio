@@ -2,6 +2,7 @@ import { type FormEvent, useEffect, useState } from 'react';
 import { errorText } from '../../api/client';
 import { useEndCard, usePutEndCard } from '../../api/queries';
 import type { EndCard, EndCardLine } from '../../api/types';
+import { useUnsavedGuard } from '../../components/EditableFields';
 
 const EMPTY: EndCard = { seconds: 3, background: '#0b1a33', lines: [] };
 const NEW_LINE: EndCardLine = { text: '', font: null, size: 48, bold: false };
@@ -16,8 +17,11 @@ export function EndCardPanel({ slug }: { slug: string }) {
     setCard(JSON.parse(key) as EndCard);
   }, [key]);
 
-  if (q.isLoading) return <p className="loading">加载片尾卡…</p>;
   const dirty = JSON.stringify(card) !== key;
+  // 改了没保存：换页面先问（和其他编辑框一样走全局拦截）
+  useUnsavedGuard(dirty);
+
+  if (q.isLoading) return <p className="loading">加载片尾卡…</p>;
   const setLine = (i: number, patch: Partial<EndCardLine>) =>
     setCard((c) => ({ ...c, lines: c.lines.map((l, j) => (j === i ? { ...l, ...patch } : l)) }));
   const submit = (e: FormEvent) => {

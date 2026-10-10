@@ -1,4 +1,4 @@
-import { screen, waitFor, within } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import type { Character, Turnaround, TurnaroundCell, TurnaroundSheet, TurnaroundView } from '../../api/types';
@@ -264,5 +264,23 @@ describe('三视图', () => {
     setup({ ...CHEN, visual_prompt: '' });
     expect((screen.getByRole('button', { name: '全部生成' }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByText('先写全身描述或外貌提示词')).toBeTruthy();
+  });
+
+  it('全身描述改了没保存时换页面先问', async () => {
+    installFetch({});
+    const { router } = renderAt(
+      <EventsContext.Provider value={{ ...initialEvents, progress: {} }}>
+        <TurnaroundPanel c={DONE} slug="demo" />
+      </EventsContext.Provider>,
+      { route: '/', path: '/' },
+    );
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText('全身描述'), '，戴手套');
+    act(() => {
+      void router.navigate('/elsewhere');
+    });
+    const dlg = await screen.findByRole('dialog', { name: '有未保存的修改，确定离开？' });
+    await user.click(within(dlg).getByRole('button', { name: '留下' }));
+    expect(screen.getByTestId('location').textContent).toBe('/');
   });
 });

@@ -117,7 +117,17 @@ function ExportsList({ rows, episodeId }: { rows: ExportRow[]; episodeId: number
               </button>
               <div className="export-meta">
                 {x.is_final ? (
-                  <span className="badge ok">定稿</span>
+                  <>
+                    <span className="badge ok">定稿</span>
+                    <button
+                      type="button"
+                      className="sm ghost"
+                      disabled={patch.isPending}
+                      onClick={() => patch.mutate({ id: x.id, is_final: false })}
+                    >
+                      取消定稿
+                    </button>
+                  </>
                 ) : (
                   <button
                     type="button"

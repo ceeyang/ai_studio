@@ -13,6 +13,7 @@ import {
   useTurnaroundLook,
 } from '../../api/queries';
 import type { Character, JobBrief, TurnaroundCell, TurnaroundSheet, TurnaroundSheetKey } from '../../api/types';
+import { useUnsavedGuard } from '../../components/EditableFields';
 import { ImageEngineSelect } from '../../components/ImageEngineSelect';
 import { useEvents } from '../../ws/EventsContext';
 import { isDecoding } from '../../ws/events';
@@ -161,6 +162,8 @@ export function TurnaroundPanel({ c, slug }: { c: Character; slug: string }) {
   const [lookJobId, setLookJobId] = useState<number | null>(null);
   const [engine, setEngine] = useState('');
   const job = useJob(lookJobId);
+  // 全身描述改了没保存：换页面先问（和其他编辑框一样走全局拦截）
+  useUnsavedGuard(!!t && look.trim() !== t.look.trim());
   if (!t) return null;
   const eng = engine || undefined;
 
