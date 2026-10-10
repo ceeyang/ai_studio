@@ -213,7 +213,6 @@ progress.is-decoding { animation: pulse 1.6s ease-in-out infinite; }
 .split { display: grid; grid-template-columns: minmax(300px, 360px) minmax(0, 1fr); gap: var(--s-4); align-items: start; }
 .split.jobs { grid-template-columns: minmax(380px, 0.9fr) minmax(0, 1.4fr); }
 .split.jobs > .panel:last-child { position: sticky; top: calc(var(--taskbar-h) + var(--s-4)); }
-.cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--s-4); align-items: start; }
 .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); gap: var(--s-3); }
 
 .panel {
@@ -236,9 +235,6 @@ progress.is-decoding { animation: pulse 1.6s ease-in-out infinite; }
 }
 .card:hover { border-color: var(--border-strong); }
 .portrait { display: flex; gap: var(--s-3); align-items: flex-start; margin-bottom: var(--s-3); }
-.portrait-side { display: flex; flex-direction: column; gap: var(--s-2); align-items: flex-start; font-size: 12px; }
-.portrait-side .btn { cursor: pointer; }
-.portrait-side .btn.is-disabled { opacity: 0.42; cursor: not-allowed; }
 .block { border-top: 1px solid var(--divider); padding-top: var(--s-3); margin-top: var(--s-4); }
 .block:first-of-type { border-top: 0; margin-top: 0; padding-top: 0; }
 .block h4 { margin-top: 0; }
@@ -610,8 +606,6 @@ a.pill:hover { text-decoration: none; filter: brightness(1.15); }
 .drawer > .notice, .drawer > .error { margin-top: var(--s-3); }
 .drawer .stale-reason { margin: 0 0 var(--s-3); font-size: 12.5px; color: var(--warn); }
 .drawer:focus { outline: none; }
-.drawer .dialogue-list li { border: 0; padding: 4px 0; }
-.drawer .dialogue-list .t { font-family: var(--mono); font-size: 12px; color: var(--muted); margin-right: 8px; }
 @keyframes slide-in { from { transform: translateX(40px); opacity: 0; } to { transform: none; opacity: 1; } }
 @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
 
@@ -672,7 +666,6 @@ pre.error { background: rgba(255, 90, 95, 0.06); border-color: rgba(255, 90, 95,
 .job-meta > div { background: var(--surface-0); padding: 8px 12px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .job-meta dt { font-size: 11px; color: var(--muted); }
 .job-meta dd { margin: 0; font-size: 12.5px; font-variant-numeric: tabular-nums; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.job-extra { font-size: 12px; }
 
 /* 人工输入 */
 .manual {
@@ -1139,7 +1132,6 @@ pre.error { background: rgba(255, 90, 95, 0.06); border-color: rgba(255, 90, 95,
   .taskbar { padding: var(--s-2) var(--s-4); }
   .split.jobs { grid-template-columns: minmax(340px, 0.8fr) minmax(0, 1.2fr); }
   .job-meta { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .text-cell { min-width: 220px; }
   .detail-body { grid-template-columns: minmax(0, 1fr) 300px; }
   .continue-card { gap: var(--s-4); padding: var(--s-4); }
   .continue-cover { width: 56px; }
