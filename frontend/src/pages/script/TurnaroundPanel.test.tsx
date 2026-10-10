@@ -192,6 +192,20 @@ describe('三视图', () => {
     expect(pending.querySelector('.spinner')).toBeTruthy();
   });
 
+  it('可以选别的引擎（浏览器）出设定图，请求带上 engine', async () => {
+    const { calls, user } = setup(CHEN, {
+      'GET /api/engines': { image: [{ name: 'zimage', family: 'zimage', runtime: 'comfyui', caps: { max_refs: 0 } }, { name: 'gpt_image', family: 'chatgpt_web', runtime: 'browser', caps: { max_refs: 4 } }], video: [] },
+      'POST /api/characters/6/turnaround/generate': { job_ids: [70, 71] },
+    });
+    const pick = screen.getByLabelText('三视图引擎');
+    expect(within(pick).getByRole('option', { name: '默认（h3_image）' })).toBeTruthy();
+    await waitFor(() => expect(within(pick).getByRole('option', { name: 'gpt_image（浏览器）' })).toBeTruthy());
+    await user.selectOptions(pick, 'gpt_image');
+    await user.click(screen.getByRole('button', { name: '全部生成' }));
+    await waitFor(() => expect(posts(calls)).toHaveLength(1));
+    expect(posts(calls)[0]).toMatchObject({ url: '/api/characters/6/turnaround/generate', body: { engine: 'gpt_image' } });
+  });
+
   it('默认引擎要定妆照锁脸：没有定妆照时不能出图', () => {
     setup({ ...CHEN, portrait_candidate_id: null, portrait_url: null });
     expect((screen.getByRole('button', { name: '全部生成' }) as HTMLButtonElement).disabled).toBe(true);

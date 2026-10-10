@@ -2,6 +2,7 @@
 import { type QueryClient, type QueryKey, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, enc } from './client';
 import type {
+  BrowserLoginOut,
   Candidate,
   Character,
   CharacterIn,
@@ -252,8 +253,12 @@ export function useCreateCharacter(slug: string) {
 export function useDrawPortraits(slug: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, count, visual_prompt }: { id: number; count: number; visual_prompt?: string }) =>
-      api.post<RunOut>(`/api/characters/${id}/portraits/draw`, visual_prompt ? { count, visual_prompt } : { count }),
+    mutationFn: ({ id, count, visual_prompt, engine }: { id: number; count: number; visual_prompt?: string; engine?: string }) =>
+      api.post<RunOut>(`/api/characters/${id}/portraits/draw`, {
+        count,
+        ...(visual_prompt ? { visual_prompt } : {}),
+        ...(engine ? { engine } : {}),
+      }),
     onSuccess: () => invalidate(qc, keys.characters(slug), ['jobs'], keys.queue),
   });
 }
@@ -300,8 +305,11 @@ export function usePatchTurnaroundLook(slug: string) {
 export function useGenerateTurnaround(slug: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, sheets }: { id: number; sheets?: TurnaroundSheetKey[] }) =>
-      api.post<RunOut>(`/api/characters/${id}/turnaround/generate`, sheets ? { sheets } : {}),
+    mutationFn: ({ id, sheets, engine }: { id: number; sheets?: TurnaroundSheetKey[]; engine?: string }) =>
+      api.post<RunOut>(`/api/characters/${id}/turnaround/generate`, {
+        ...(sheets ? { sheets } : {}),
+        ...(engine ? { engine } : {}),
+      }),
     onSuccess: () => invalidate(qc, keys.characters(slug), ['jobs'], keys.queue),
   });
 }
@@ -477,6 +485,13 @@ export function useResumeQueue() {
 }
 
 /** 手动释放 ComfyUI 显存；有 GPU 任务在跑时后端会拒绝（409）。 */
+/** 打开 studio 管的浏览器（ChatGPT / Gemini 登录页），用户在里面手动登录一次。 */
+export function useOpenBrowserLogin() {
+  return useMutation({
+    mutationFn: () => api.post<BrowserLoginOut>('/api/browser/login'),
+  });
+}
+
 export function useFreeGpu() {
   const qc = useQueryClient();
   return useMutation({

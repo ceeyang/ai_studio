@@ -13,6 +13,7 @@ import {
   useTurnaroundLook,
 } from '../../api/queries';
 import type { Character, JobBrief, TurnaroundCell, TurnaroundSheet } from '../../api/types';
+import { ImageEngineSelect } from '../../components/ImageEngineSelect';
 import { useEvents } from '../../ws/EventsContext';
 import { isDecoding } from '../../ws/events';
 
@@ -155,8 +156,10 @@ export function TurnaroundPanel({ c, slug }: { c: Character; slug: string }) {
   const [look, setLook] = useState(t?.look ?? '');
   useEffect(() => setLook(t?.look ?? ''), [t?.look]);
   const [lookJobId, setLookJobId] = useState<number | null>(null);
+  const [engine, setEngine] = useState('');
   const job = useJob(lookJobId);
   if (!t) return null;
+  const eng = engine || undefined;
 
   const jobs = c.active_jobs ?? [];
   const writing = jobs.some((j) => j.type === 'character.turnaround_look');
@@ -180,12 +183,13 @@ export function TurnaroundPanel({ c, slug }: { c: Character; slug: string }) {
           出场镜头的首帧和视频按景别 / 机位带上最匹配的一格。
         </p>
         <div className="row">
+          <ImageEngineSelect value={engine} onChange={setEngine} defaultLabel={`默认（${t.default_engine}）`} ariaLabel="三视图引擎" />
           <button
             type="button"
             className="primary"
             disabled={busy || !canGenerate}
             title={!hasPortrait ? '先选定定妆照' : undefined}
-            onClick={() => gen.mutate({ id: c.id })}
+            onClick={() => gen.mutate({ id: c.id, engine: eng })}
           >
             {running > 0 ? `全部生成（${running} 张进行中）` : '全部生成'}
           </button>
@@ -239,7 +243,7 @@ export function TurnaroundPanel({ c, slug }: { c: Character; slug: string }) {
           job={sheetJob(sh.sheet)}
           canGenerate={canGenerate}
           busy={busy}
-          onGenerate={() => gen.mutate({ id: c.id, sheets: [sh.sheet] })}
+          onGenerate={() => gen.mutate({ id: c.id, sheets: [sh.sheet], engine: eng })}
           onSelect={(candidateId) => select.mutate({ id: c.id, sheet: sh.sheet, candidateId })}
           onCrop={(method) => crop.mutate({ id: c.id, sheet: sh.sheet, method })}
         />

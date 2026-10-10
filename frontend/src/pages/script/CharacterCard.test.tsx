@@ -68,6 +68,20 @@ describe('角色卡', () => {
     expect(JSON.parse(init!.body as string)).toEqual({ count: 3 });
   });
 
+  it('抽卡可以换成浏览器引擎（gpt_image），请求带上 engine', async () => {
+    const { calls, user } = setup(CHEN, {
+      'GET /api/engines': { image: [{ name: 'zimage', family: 'zimage', runtime: 'comfyui', caps: { max_refs: 0 } }, { name: 'gpt_image', family: 'chatgpt_web', runtime: 'browser', caps: { max_refs: 4 } }], video: [] },
+      'POST /api/characters/6/portraits/draw': { job_ids: [83] },
+    });
+    const card = await screen.findByTestId('character-6');
+    const pick = within(card).getByLabelText('抽卡引擎');
+    await waitFor(() => expect(within(pick).getByRole('option', { name: 'gpt_image（浏览器）' })).toBeTruthy());
+    await user.selectOptions(pick, 'gpt_image');
+    await user.click(within(card).getByRole('button', { name: /^抽卡/ }));
+    await waitFor(() => expect(posts(calls)).toHaveLength(1));
+    expect(posts(calls)[0]).toMatchObject({ url: '/api/characters/6/portraits/draw', body: { count: 2, engine: 'gpt_image' } });
+  });
+
   it('抽卡采样完成（value>=max）但任务还在跑：占位显示"解码保存中"而不是卡在 100%', async () => {
     const running = { ...CHEN, active_jobs: [{ id: 80, type: 'image.portrait', status: 'running' as const }] };
     installFetch({ ...ROUTES, 'GET /api/projects/demo/characters': [running] });

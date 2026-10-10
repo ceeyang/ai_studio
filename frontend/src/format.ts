@@ -26,6 +26,11 @@ export const EPISODE_STATUS_LABEL: Record<string, string> = {
 
 export const ACTIVE_STATUSES: JobStatus[] = ['queued', 'running', 'waiting_input'];
 
+/** 引擎在下拉框里的名字：网页出图的引擎标上「浏览器」，和本机显卡上的区分开。 */
+export function engineLabel(e: { name: string; runtime?: string }): string {
+  return e.runtime === 'browser' ? `${e.name}（浏览器）` : e.name;
+}
+
 export function jobTypeLabel(t: string): string {
   return JOB_TYPE_LABEL[t] ?? t;
 }

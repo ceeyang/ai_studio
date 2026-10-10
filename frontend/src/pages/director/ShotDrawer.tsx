@@ -2,6 +2,7 @@ import { errorText } from '../../api/client';
 import { useEngines, usePatchShot, useSelectCandidate } from '../../api/queries';
 import { type EngineRow, type ShotDetail, type ShotPatch, TRANSITIONS, type Transition } from '../../api/types';
 import { EditableFields, type FieldSpec, type FieldValues } from '../../components/EditableFields';
+import { engineLabel } from '../../format';
 import { CandidateGrid } from './CandidateGrid';
 import { DialogueEditor } from './DialogueEditor';
 import type { GenStage } from './ShotTable';
@@ -19,7 +20,7 @@ const SLOT_ORDER = ['first_frame', 'end_frame', 'video'];
 const TEXT_FIELDS = ['action', 'shot_size', 'camera_move', 'image_prompt', 'motion_prompt', 'audio_prompt'] as const;
 
 function engineOptions(rows: EngineRow[] | undefined) {
-  return [{ value: '', label: '项目默认' }, ...(rows ?? []).map((r) => ({ value: r.name, label: r.name }))];
+  return [{ value: '', label: '项目默认' }, ...(rows ?? []).map((r) => ({ value: r.name, label: engineLabel(r) }))];
 }
 
 function shotFields(image: EngineRow[] | undefined, video: EngineRow[] | undefined): FieldSpec[] {

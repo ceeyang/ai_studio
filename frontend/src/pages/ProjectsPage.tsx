@@ -17,7 +17,7 @@ import {
 } from '../api/queries';
 import type { Aspect, EngineRow, EpisodeStats, Project, ProjectOverview } from '../api/types';
 import { Dialog } from '../components/Dialog';
-import { EPISODE_STATUS_LABEL } from '../format';
+import { EPISODE_STATUS_LABEL, engineLabel } from '../format';
 import { readLastEpisode } from '../lastEpisode';
 
 function pickDefault(rows: EngineRow[] | undefined, preferred: string): string {
@@ -97,7 +97,7 @@ function NewProjectDialog({ onClose }: { onClose: () => void }) {
             <select value={image} onChange={(e) => setImageEngine(e.target.value)}>
               {(engines.data?.image ?? []).map((r) => (
                 <option key={r.name} value={r.name}>
-                  {r.name}
+                  {engineLabel(r)}
                 </option>
               ))}
             </select>

@@ -27,7 +27,17 @@ export interface ProjectIn {
 export interface EngineRow {
   name: string;
   family: string;
+  /** comfyui：本机显卡；browser：驱动已登录的 ChatGPT / Gemini 网页出图（不占显卡、没有种子） */
+  runtime?: 'comfyui' | 'browser';
   caps: Record<string, unknown>;
+}
+
+/** POST /api/browser/login：打开 studio 管的浏览器，在两个网站的首页各开一个标签页 */
+export interface BrowserLoginOut {
+  launched: boolean;
+  urls: string[];
+  endpoint: string;
+  user_data_dir: string;
 }
 
 export interface Engines {

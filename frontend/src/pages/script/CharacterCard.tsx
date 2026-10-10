@@ -12,6 +12,7 @@ import {
 } from '../../api/queries';
 import type { Candidate, Character, CharacterPatch, DesignOption } from '../../api/types';
 import { EditableFields, type FieldSpec, type FieldValues } from '../../components/EditableFields';
+import { ImageEngineSelect } from '../../components/ImageEngineSelect';
 import { useEvents } from '../../ws/EventsContext';
 import { isDecoding } from '../../ws/events';
 import { TurnaroundPanel } from './TurnaroundPanel';
@@ -148,6 +149,7 @@ export function CharacterCard({ c, slug, episodeId }: { c: Character; slug: stri
   const use = useUsePortrait(slug);
   const suggest = useSuggestDesigns(slug);
   const [count, setCount] = useState(2);
+  const [engine, setEngine] = useState('');
   const [suggestJob, setSuggestJob] = useState<number | null>(null);
   const job = useJob(suggestJob);
   const suggesting = (c.active_jobs ?? []).some((j) => j.type === 'character.suggest');
@@ -179,12 +181,13 @@ export function CharacterCard({ c, slug, episodeId }: { c: Character; slug: stri
                 ))}
               </select>
             </label>
+            <ImageEngineSelect value={engine} onChange={setEngine} defaultLabel="项目图像引擎" ariaLabel="抽卡引擎" />
             <button
               type="button"
               className="primary"
               disabled={draw.isPending || !c.visual_prompt.trim()}
-              title={c.visual_prompt.trim() ? '用角色当前的外貌提示词，在本机 ComfyUI 出正面半身定妆照' : '先写外貌提示词或用 AI 推荐造型'}
-              onClick={() => draw.mutate({ id: c.id, count })}
+              title={c.visual_prompt.trim() ? '用角色当前的外貌提示词出正面半身定妆照（本机 ComfyUI，或选浏览器引擎走 ChatGPT / Gemini 网页）' : '先写外貌提示词或用 AI 推荐造型'}
+              onClick={() => draw.mutate({ id: c.id, count, engine: engine || undefined })}
             >
               {drawingCount > 0 ? `抽卡（${drawingCount} 张进行中）` : '抽卡'}
             </button>
@@ -248,7 +251,7 @@ export function CharacterCard({ c, slug, episodeId }: { c: Character; slug: stri
               opt={o}
               index={i}
               busy={draw.isPending || patch.isPending}
-              onDraw={(prompt) => draw.mutate({ id: c.id, count, visual_prompt: prompt })}
+              onDraw={(prompt) => draw.mutate({ id: c.id, count, visual_prompt: prompt, engine: engine || undefined })}
               onSetPrompt={(prompt) => patch.mutate({ id: c.id, visual_prompt: prompt })}
             />
           ))}

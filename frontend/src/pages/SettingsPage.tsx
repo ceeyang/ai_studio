@@ -1,5 +1,5 @@
 import { errorText } from '../api/client';
-import { useConfig, useDoctor, useEngines } from '../api/queries';
+import { useConfig, useDoctor, useEngines, useOpenBrowserLogin } from '../api/queries';
 import type { DoctorCheck, EngineRow } from '../api/types';
 
 const ICON: Record<DoctorCheck['status'], string> = { ok: '√', warn: '!', fail: '×' };
@@ -17,14 +17,17 @@ function capsText(kind: 'image' | 'video', e: EngineRow): string {
   if (kind === 'video') {
     return `${c.has_audio ? '有声' : '无声'} · ${c.fps} fps · 默认 ${c.default_seconds} 秒 / 最长 ${c.max_seconds} 秒 · 参考图上限 ${c.max_refs}`;
   }
-  return `参考图上限 ${c.max_refs} · ${c.supports_negative ? '支持' : '不支持'}负面提示词 · 画幅 ${sizes}`;
+  const base = `参考图上限 ${c.max_refs} · ${c.supports_negative ? '支持' : '不支持'}负面提示词 · 画幅 ${sizes}`;
+  return e.runtime === 'browser' ? `${base}（写进提示词）· 没有种子，每次结果不同 · 不占显卡` : base;
 }
 
 export function SettingsPage() {
   const doctor = useDoctor();
   const engines = useEngines();
   const config = useConfig();
+  const login = useOpenBrowserLogin();
   const rows = doctor.data ?? [];
+  const hasBrowserEngine = (engines.data?.image ?? []).some((e) => e.runtime === 'browser');
   const engineRows: [string, 'image' | 'video', EngineRow][] = [
     ...(engines.data?.image ?? []).map((e): [string, 'image', EngineRow] => ['图像', 'image', e]),
     ...(engines.data?.video ?? []).map((e): [string, 'video', EngineRow] => ['视频', 'video', e]),
@@ -35,10 +38,29 @@ export function SettingsPage() {
       <section className="panel area-doctor">
         <div className="page-head">
           <h2>环境检查（doctor）</h2>
-          <button type="button" disabled={doctor.isFetching} onClick={() => void doctor.refetch()}>
-            {doctor.isFetching ? '检查中…（最长十几秒）' : '重新检查'}
-          </button>
+          <div className="row">
+            {hasBrowserEngine && (
+              <button
+                type="button"
+                disabled={login.isPending}
+                title="打开 studio 专用的浏览器窗口（独立配置目录），在里面登录 ChatGPT 和 Gemini，只需一次"
+                onClick={() => login.mutate()}
+              >
+                {login.isPending ? '正在打开浏览器…' : '打开浏览器登录'}
+              </button>
+            )}
+            <button type="button" disabled={doctor.isFetching} onClick={() => void doctor.refetch()}>
+              {doctor.isFetching ? '检查中…（最长十几秒）' : '重新检查'}
+            </button>
+          </div>
         </div>
+        {login.data && (
+          <p className="notice" data-testid="browser-login-notice">
+            {login.data.launched ? '已启动浏览器' : '浏览器已在运行，已新开标签页'}：请在弹出的窗口里登录 ChatGPT 和 Gemini（只需一次，登录态保存在{' '}
+            {login.data.user_data_dir}），登录后点「重新检查」。
+          </p>
+        )}
+        {login.error && <p className="error">打开浏览器失败：{errorText(login.error)}</p>}
         {doctor.error && <p className="error">{errorText(doctor.error)}</p>}
         {doctor.data && (
           <p>
@@ -88,7 +110,10 @@ export function SettingsPage() {
               <tr key={e.name}>
                 <td>{e.name}</td>
                 <td>{label}</td>
-                <td>{e.family}</td>
+                <td>
+                  {e.family}
+                  {e.runtime === 'browser' && <span className="pill">浏览器</span>}
+                </td>
                 <td>{capsText(kind, e)}</td>
               </tr>
             ))}

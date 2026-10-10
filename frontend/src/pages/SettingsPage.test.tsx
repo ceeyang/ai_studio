@@ -34,6 +34,38 @@ describe('SettingsPage', () => {
     await waitFor(() => expect(calls.filter((c) => c.url === '/api/doctor')).toHaveLength(2));
   });
 
+  it('浏览器引擎标「浏览器」；点「打开浏览器登录」提示去窗口里登录', async () => {
+    const engines = {
+      image: [
+        ...ENGINES.image,
+        { name: 'gpt_image', family: 'chatgpt_web', runtime: 'browser', caps: { max_refs: 4, supports_negative: false, sizes: { '9:16': [1080, 1920] } } },
+      ],
+      video: [],
+    };
+    const calls = installFetch({
+      'GET /api/doctor': [{ group: '浏览器', name: 'ChatGPT 登录（gpt_image）', status: 'warn', detail: '没登录 chatgpt.com。在设置页点“打开浏览器登录”' }],
+      'GET /api/engines': engines,
+      'GET /api/config': {},
+      'POST /api/browser/login': { launched: true, urls: ['https://chatgpt.com/'], endpoint: 'http://127.0.0.1:9333', user_data_dir: 'D:/works/ai_studio/browser-profile' },
+    });
+    renderAt(<SettingsPage />, { route: '/settings', path: '/settings' });
+    const user = userEvent.setup();
+    expect(await screen.findByText('浏览器', { selector: '.pill' })).toBeTruthy();
+    expect(screen.getByText(/没有种子，每次结果不同/)).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: '打开浏览器登录' }));
+    const notice = await screen.findByTestId('browser-login-notice');
+    expect(notice.textContent).toContain('已启动浏览器');
+    expect(notice.textContent).toContain('browser-profile');
+    expect(calls.some((c) => c.method === 'POST' && c.url === '/api/browser/login')).toBe(true);
+  });
+
+  it('没有浏览器引擎时不显示登录按钮', async () => {
+    installFetch({ 'GET /api/doctor': [DOCTOR[0]], 'GET /api/engines': ENGINES, 'GET /api/config': {} });
+    renderAt(<SettingsPage />, { route: '/settings', path: '/settings' });
+    expect((await screen.findAllByText('zimage')).length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: '打开浏览器登录' })).toBeNull();
+  });
+
   it('全部通过时说明没有失败项', async () => {
     installFetch({ 'GET /api/doctor': [DOCTOR[0]], 'GET /api/engines': ENGINES, 'GET /api/config': {} });
     renderAt(<SettingsPage />, { route: '/settings', path: '/settings' });
