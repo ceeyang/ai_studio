@@ -5,7 +5,8 @@ import { keys } from '../../api/queries';
 import { installFetch } from '../../test/fetch';
 import { makeEpisode, makeJob, makeShot } from '../../test/factories';
 import { renderAt } from '../../test/render';
-import { ScriptStage, toCharacterPatch } from './ScriptStage';
+import { toCharacterPatch } from '../script/CharacterProfile';
+import { ScriptStage } from './ScriptStage';
 
 const EP = makeEpisode({
   id: 4,

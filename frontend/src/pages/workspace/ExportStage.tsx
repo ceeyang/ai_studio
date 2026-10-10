@@ -266,11 +266,11 @@ function ExportBody({ slug, id }: { slug: string; id: number }) {
               <input type="checkbox" aria-label="高棉语配音" checked={choice.dubKm} onChange={(ev) => set({ dubKm: ev.target.checked })} />{' '}
               高棉语配音（Edge TTS）
             </label>
-            <label title="取消后 H3 原音轨（含普通话）整条静音，成片里只有高棉语配音">
+            <label title="取消后视频原声（含普通话）整条静音，成片里只有高棉语配音">
               <input type="checkbox" aria-label="保留原声底" checked={choice.bed} onChange={(ev) => set({ bed: ev.target.checked })} />{' '}
               保留原声底（原声压低垫在下面）
             </label>
-            <label title="配音放到 H3 音轨里实际开口的位置（检测不到就用台词时间）">
+            <label title="配音放到视频原声里实际开口的位置（检测不到就用台词时间）">
               <input
                 type="checkbox"
                 aria-label="配音对齐实际说话"

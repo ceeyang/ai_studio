@@ -257,7 +257,7 @@ export function CharacterLooks({
         </p>
       )}
       <p className="muted small">
-        单击看大图；点「设为当前造型」才会换（提示词跟着换）。出场镜头的首帧和视频会带上选定的这张锁脸（H3 引擎）。
+        单击看大图；点「设为当前造型」才会换（提示词跟着换）。出场镜头的首帧和视频会用选定的这张锁脸（锁脸引擎）。
       </p>
       <div className="row draw-bar">
         <label className="inline-field">

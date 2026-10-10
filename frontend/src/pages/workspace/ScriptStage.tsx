@@ -26,9 +26,6 @@ import { useJobNotice } from '../../components/JobNotice';
 import { EPISODE_STATUS_LABEL } from '../../format';
 import { workspacePath } from './urls';
 
-export { toCharacterPatch } from '../script/CharacterProfile';
-export { impactText };
-
 const EPISODE_FIELDS: FieldSpec[] = [
   { name: 'title', label: '本集标题' },
   { name: 'target_seconds', label: '目标时长（秒）', kind: 'number', step: '1', min: 5, max: 3600 },
