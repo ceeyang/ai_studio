@@ -47,8 +47,22 @@ function toEpisodePatch(c: FieldValues): EpisodePatch {
 
 const ENDED = new Set(['done', 'failed', 'canceled', 'waiting_input']);
 
+/**
+ * 任务跑完了但其实什么都没重出：分镜 blocks_done 为 0（要重写的段落已经不在了，或输入没变全跳过），
+ * 剧本结构和视觉设定都是 skipped。
+ */
+function nothingRegenerated(stage: Stage, jobs: Job[]): boolean {
+  const r = (j: Job) => (j.result ?? {}) as Record<string, unknown>;
+  if (stage === 'storyboard') return jobs.every((j) => r(j).blocks_done === 0);
+  return jobs.every((j) => r(j).structure === 'skipped' && r(j).visual === 'skipped');
+}
+
 /** 盯住刚提交的剧本 / 分镜任务：全部真正跑完（不是跳过）时回调一次。和提示条共用 ['job', id] 缓存。 */
-function useOnStageDone(run: { stage: Stage; ids: number[] } | null, onDone: (stage: Stage) => void, onEnd: () => void) {
+function useOnStageDone(
+  run: { stage: Stage; ids: number[] } | null,
+  onDone: (stage: Stage, jobs: Job[]) => void,
+  onEnd: () => void,
+) {
   const results = useQueries({
     queries: (run?.ids ?? []).map((id) => ({
       queryKey: keys.job(id),
@@ -61,7 +75,7 @@ function useOnStageDone(run: { stage: Stage; ids: number[] } | null, onDone: (st
   useEffect(() => {
     if (!run || jobs.length === 0 || jobs.some((j) => !j || !ENDED.has(j.status))) return;
     const ok = jobs.every((j) => j!.status === 'done') && jobs.some((j) => j!.result?.skipped !== true);
-    if (ok) onDone(run.stage);
+    if (ok) onDone(run.stage, jobs as Job[]);
     else onEnd();
     // key 概括了 jobs 里会影响结果的部分
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -172,9 +186,15 @@ export function ScriptStage({
 
   useOnStageDone(
     lastRun,
-    (stage) => {
+    (stage, jobs) => {
       setLastRun(null);
-      if (stage === 'script') {
+      if (nothingRegenerated(stage, jobs)) {
+        notice.info(
+          stage === 'storyboard'
+            ? '分镜没有重新生成：要重写的段落已经不在了（剧本可能刚重新生成过），或者输入没变。'
+            : '剧本没有重新生成：输入没变。',
+        );
+      } else if (stage === 'script') {
         notice.info('剧本好了。下一步：生成分镜');
       } else {
         notice.info('分镜好了。下一步：确认角色定妆照，再生成首帧', { action: { label: '去角色', to: `${base}?stage=cast` } });

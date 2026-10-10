@@ -226,6 +226,22 @@ describe('ScriptStage', () => {
     expect(await screen.findByText('分镜好了。下一步：确认角色定妆照，再生成首帧')).toBeTruthy();
   });
 
+  it('分镜任务跑完但一段都没重出（blocks_done 为 0）：不说「分镜好了」，说明没有重新生成', async () => {
+    installFetch({
+      ...ROUTES,
+      'GET /api/episodes/4': WITH_SHOTS,
+      'GET /api/episodes/4/rerun-impact': IMPACT,
+      'POST /api/episodes/4/run': { job_ids: [9] },
+      'GET /api/jobs/9': makeJob({ id: 9, type: 'storyboard', status: 'done', result: { blocks_done: 0, blocks_skipped: 0 } }),
+    });
+    renderAt(<ScriptStage />, AT);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: '重新生成分镜…' }));
+    await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '重新生成' }));
+    expect(await screen.findByText(/分镜没有重新生成：要重写的段落已经不在了/)).toBeTruthy();
+    expect(screen.queryByText(/分镜好了/)).toBeNull();
+  });
+
   it('保存段落：提交文字和场景', async () => {
     const calls = installFetch({
       ...ROUTES,
