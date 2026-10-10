@@ -124,3 +124,40 @@ test('ComfyUI 不通时点生成首帧：提交被拒，页面说明原因并给
   await expect(page.getByRole('heading', { name: '引擎' })).toBeVisible();
   await api.dispose();
 });
+
+test('重新生成分镜（带修改意见）：等待输入的提示词里带着修改意见和上一版镜头，跑完镜头换成新的', async ({ page, playwright, baseURL }) => {
+  const api = await playwright.request.newContext({ baseURL });
+  const slug = 'regen-note';
+  expect((await api.post('/api/projects', { data: { title: '重新生成', slug } })).ok()).toBeTruthy();
+  const ep = await (await api.post(`/api/projects/${slug}/episodes`, { data: { number: 1, source_text: SYNOPSIS, target_seconds: 10 } })).json();
+  const run = async (stage: string) => (await (await api.post(`/api/episodes/${ep.id}/run`, { data: { stage } })).json()).job_ids[0];
+  expect((await answer(api, await run('script'), [STRUCTURE, VISUAL])).status).toBe('done');
+  expect((await answer(api, await run('storyboard'), [STORYBOARD])).status).toBe('done');
+
+  await page.goto(`/projects/${slug}/episodes/${ep.id}?stage=script`);
+  await page.getByRole('button', { name: '重新生成分镜…' }).click();
+  const regen = page.getByRole('dialog', { name: '重新生成分镜' });
+  await expect(regen).toContainText('删除 2 个镜头');
+  const NOTE = '第二镜改成她猛地站起来';
+  await regen.getByLabel('修改意见（可选）').fill(NOTE);
+  await regen.getByRole('button', { name: '重新生成' }).click();
+  await expect(regen).toBeHidden();
+  await expect(page.locator('.job-notice')).toContainText('分镜');
+
+  // 任务页：等待输入的那一份用户提示词里写着修改意见，并附上了上一版的镜头
+  await nav(page, '任务').click();
+  await page.getByRole('row').filter({ hasText: '等待输入' }).first().click();
+  await expect(page.getByTestId('input-key')).toHaveText(/^storyboard:\d+$/);
+  const user = page.getByLabel('用户提示词（user）');
+  await expect(user).toHaveValue(new RegExp(`修改意见：${NOTE}`));
+  await expect(user).toHaveValue(/上一版本段镜头[\s\S]*林夏照着提词器念稿/);
+
+  const changed = { shots: [STORYBOARD.shots[0], { ...STORYBOARD.shots[1], action: '林夏猛地站起来' }] };
+  await page.getByLabel('模型输出').fill(JSON.stringify(changed));
+  await page.getByRole('button', { name: '提交结果' }).click();
+  await expect(page.getByTestId('job-status')).toHaveText('完成');
+
+  await page.goto(`/projects/${slug}/episodes/${ep.id}?stage=keyframes`);
+  await expect(page.getByTestId('shot-S02')).toContainText('林夏猛地站起来');
+  await api.dispose();
+});
