@@ -116,7 +116,10 @@ def test_note_forces_rerun_and_goes_into_prompt(tmp_path, db):
         assert "修改意见：更紧凑" in user and "在满足以上全部要求的前提下按修改意见调整。" in user
     with db.session() as s:
         after = s.get(Episode, ep_id).stage_hashes
-    assert after["structure"] != before["structure"]  # 指纹里有修改意见
+    # 存的是不含修改意见的基础指纹：之后不强制、输入没变的运行会跳过，不会把按意见改好的结果再重做
+    assert after["structure"] == before["structure"] and after["visual"] == before["visual"]
+    assert run_script(ctx, {"episode_id": ep_id}) == {"structure": "skipped", "visual": "skipped"}
+    assert len(prov.calls) == 4
 
 
 def test_blank_note_is_ignored(tmp_path, db):

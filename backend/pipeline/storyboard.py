@@ -10,7 +10,8 @@ from backend.domain.models import Episode, Shot
 from backend.domain.shots import renumber_shots
 from backend.domain.slots import delete_slots
 from backend.llm.schemas import StoryboardOut
-from backend.pipeline.common import clean_note, continue_chain, load_episode, prompt_fp
+from backend.pipeline.common import (clean_note, continue_chain, load_episode, prompt_fp,
+                                     render_with_note)
 from backend.queue.errors import JobError
 from backend.queue.handlers import HANDLERS
 
@@ -106,12 +107,14 @@ def storyboard_prompt_fp(prompts, anchor, characters, location, text, count, sho
 
     分镜阶段决定跳过还是重跑、重跑影响预估决定会不会动这一段，都走这一个函数，避免两边判断走偏。
     note 是修改意见；previous_shots 是这一段上一版的镜头（只在有修改意见时提供）。
+    指纹只按不带这两样的基础提示词算（见 prompt_fp）：带意见的重出靠 force 一定会跑。
     """
-    system, user = prompts.render(
-        "storyboard", anchor=anchor, characters=characters, location=location, text=text,
+    system, user, bs, bu = render_with_note(
+        prompts, "storyboard", note, {"previous_shots": previous_shots or []},
+        anchor=anchor, characters=characters, location=location, text=text,
         count=count, shot_seconds=shot_seconds, max_seconds=max_seconds, prev_action=prev_action,
-        note=note, previous_shots=previous_shots or [])
-    return system, user, prompt_fp("storyboard", system, user, note)
+        previous_shots=[])
+    return system, user, prompt_fp("storyboard", bs, bu)
 
 
 @HANDLERS.register("storyboard")

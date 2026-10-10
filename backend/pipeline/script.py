@@ -8,27 +8,29 @@ from sqlalchemy import select
 
 from backend.domain.models import Character, Location, SceneBlock, StyleBible
 from backend.llm.schemas import ScriptStructure, ScriptVisual
-from backend.pipeline.common import clean_note, continue_chain, load_episode, prompt_fp
+from backend.pipeline.common import (clean_note, continue_chain, load_episode, prompt_fp,
+                                     render_with_note)
 from backend.queue.errors import JobError
 from backend.queue.handlers import HANDLERS
 
 
 def structure_prompt_fp(prompts, project_title: str, target_seconds: float,
                         source_text: str, note: str | None = None) -> tuple[str, str, str]:
-    """剧本结构这次要用的提示词及其输入指纹（不调用 LLM）。script 阶段和重跑影响预估共用。"""
-    system, user = prompts.render("script_structure", project_title=project_title,
-                                  target_seconds=target_seconds, source_text=source_text,
-                                  note=note)
-    return system, user, prompt_fp("structure", system, user, note)
+    """剧本结构这次要用的提示词及其输入指纹（不调用 LLM）。script 阶段和重跑影响预估共用。
+    指纹不含修改意见（见 prompt_fp）。"""
+    system, user, bs, bu = render_with_note(prompts, "script_structure", note,
+                                            project_title=project_title,
+                                            target_seconds=target_seconds, source_text=source_text)
+    return system, user, prompt_fp("structure", bs, bu)
 
 
 def visual_prompt_fp(prompts, project_title: str, characters: list[dict], locations: list[dict],
                      excerpt: str, note: str | None = None) -> tuple[str, str, str]:
     """视觉设定这次要用的提示词及其输入指纹（不调用 LLM）。script 阶段和重跑影响预估共用。"""
-    system, user = prompts.render("script_visual", project_title=project_title,
-                                  characters=characters, locations=locations, excerpt=excerpt,
-                                  note=note)
-    return system, user, prompt_fp("visual", system, user, note)
+    system, user, bs, bu = render_with_note(prompts, "script_visual", note,
+                                            project_title=project_title, characters=characters,
+                                            locations=locations, excerpt=excerpt)
+    return system, user, prompt_fp("visual", bs, bu)
 
 
 def visual_chars_and_locations(proj) -> tuple[list[dict], list[dict]]:

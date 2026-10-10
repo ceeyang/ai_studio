@@ -21,10 +21,24 @@ def clean_note(note: str | None) -> str | None:
     return (note or "").strip() or None
 
 
-def prompt_fp(kind: str, system: str, user: str, note: str | None = None) -> str:
-    """渲染后提示词的输入指纹。没有修改意见时和以前完全一样（老数据不会被当成过期）；
-    有修改意见时单独记进指纹，项目自定义模板没写 note 变量也能区分出来。"""
-    return input_hash(kind, system, user, note=note) if note else input_hash(kind, system, user)
+def prompt_fp(kind: str, system: str, user: str) -> str:
+    """渲染后提示词的输入指纹。
+
+    调用方传的是不带修改意见（和上一版镜头）渲染出来的基础提示词：带意见的重出由 force 保证一定会跑，
+    指纹只记输入本身——否则之后一次不强制的运行（整集运行、影响预估）会以为输入变了，
+    把按意见改好的结果又按原样重做一遍。"""
+    return input_hash(kind, system, user)
+
+
+def render_with_note(prompts, name: str, note: str | None, extra_note_vars: dict | None = None,
+                     **variables) -> tuple[str, str, str, str]:
+    """渲染提示词两遍：不带修改意见的基础版（算指纹用）和这次真正要发的版本（有意见时带上意见和 extra_note_vars）。
+    返回 (system, user, base_system, base_user)。"""
+    base_system, base_user = prompts.render(name, note=None, **variables)
+    if not note:
+        return base_system, base_user, base_system, base_user
+    system, user = prompts.render(name, note=note, **{**variables, **(extra_note_vars or {})})
+    return system, user, base_system, base_user
 
 
 def check_scene_blocks(s: Session, episode_id: int, stage: str, block_ids: list[int]) -> None:

@@ -221,6 +221,20 @@ def test_note_forces_every_block_and_goes_into_prompt(tmp_path, db):
         assert "动作0｜林夏：词被改了" in user and "动作1｜无台词" in user
 
 
+def test_after_note_regen_unforced_run_with_same_inputs_skips(tmp_path, db):
+    """带修改意见重出过（指纹只记不含意见的基础部分）：之后不强制、输入没变的整集运行要跳过，
+    不能因为「指纹里有意见」把按意见改好的分镜又按原样重做一遍。"""
+    ctx, ep_id, prov = setup(tmp_path, db, [shots_json(2)] * 4)
+    run_storyboard(ctx, {"episode_id": ep_id})
+    with db.session() as s:
+        before = dict(s.get(Episode, ep_id).stage_hashes)
+    run_storyboard(ctx, {"episode_id": ep_id, "note": "更紧凑"})
+    with db.session() as s:
+        assert s.get(Episode, ep_id).stage_hashes == before
+    assert run_storyboard(ctx, {"episode_id": ep_id}) == {"blocks_done": 0, "blocks_skipped": 2}
+    assert len(prov.calls) == 4
+
+
 def test_scene_block_ids_only_replaces_that_block(tmp_path, db):
     ctx, ep_id, prov = setup(tmp_path, db, [shots_json(2)] * 3)
     run_storyboard(ctx, {"episode_id": ep_id})
