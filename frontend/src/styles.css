@@ -1373,6 +1373,7 @@ img.rail-avatar { border: 0; }
 .shot-open {
   display: flex; flex-direction: column; align-items: stretch; gap: 6px; height: auto; padding: 0;
   border: 0; background: none; color: inherit; text-align: left; font-weight: 400; min-width: 0;
+  white-space: normal; /* 按钮默认不换行：动作要能折到第二行再截断，不然一行被硬切掉 */
 }
 .shot-open:hover:not(:disabled) { background: none; border: 0; }
 .shot-open:active:not(:disabled) { transform: none; }
@@ -1440,6 +1441,8 @@ img.rail-avatar { border: 0; }
   display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden;
 }
 .shot-actions { display: flex; align-items: center; gap: 4px; }
+/* 同一行的卡片高度不同（有无台词/角色、过期/失败说明）：按钮贴底对齐 */
+.shot-card > .shot-actions { margin-top: auto; }
 .shot-actions > button:first-child { flex: 1; min-width: 0; }
 
 /* =========================================================================
