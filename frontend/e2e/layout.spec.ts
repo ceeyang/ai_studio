@@ -81,6 +81,8 @@ for (const width of WIDTHS) {
 
     await page.goto(`${ep}?stage=cast`);
     await expect(page.getByTestId(`character-${charId}`)).toBeVisible();
+    // 设定默认收起：里面的表单真的看不见（不只是 hidden 属性）
+    await expect(page.getByLabel(/风格锚/)).toBeHidden();
     await page.getByRole('button', { name: /^设定/ }).click();
     await expect(page.getByLabel(/风格锚/)).toBeVisible();
     await expectNoOverflow(page, `${width} 角色`);
@@ -90,8 +92,11 @@ for (const width of WIDTHS) {
     await expect(drawer.getByTestId('option-2')).toBeVisible();
     await drawer.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
     await expectNoOverflow(page, `${width} 角色抽屉 造型`);
+    // 页签一次只显示一个：造型页签里看不到三视图，切过去后看不到定妆照条
+    await expect(drawer.getByRole('region', { name: /的三视图/ })).toBeHidden();
     await drawer.getByRole('tab', { name: '三视图' }).click();
     await expect(drawer.getByRole('region', { name: /的三视图/ })).toBeVisible();
+    await expect(drawer.getByTestId('option-2')).toBeHidden();
     await expectNoOverflow(page, `${width} 角色抽屉 三视图`);
 
     await page.goto(`${ep}?stage=keyframes`);

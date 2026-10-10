@@ -83,6 +83,8 @@
 }
 
 * { box-sizing: border-box; }
+/* hidden 属性要真的藏起来：.tab-body、.cast-settings-body 这类自带 display 的类会盖过浏览器默认的 display: none */
+[hidden] { display: none !important; }
 html { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
 body { margin: 0; background: var(--bg); min-width: 1200px; }
 h1, h2, h3, h4 { color: var(--text); font-weight: 600; letter-spacing: -0.01em; text-wrap: balance; }
