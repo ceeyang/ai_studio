@@ -14,6 +14,7 @@ import {
 } from '../../api/queries';
 import type { Candidate, Character, CharacterPatch, DesignOption } from '../../api/types';
 import { useConfirm } from '../../components/ConfirmDialog';
+import { nextActionProps } from '../../components/EpisodeHeader';
 import { EditableFields, type FieldSpec, type FieldValues, useUnsavedGuard } from '../../components/EditableFields';
 import { ImageEngineSelect } from '../../components/ImageEngineSelect';
 import { Lightbox } from '../../components/Lightbox';
@@ -189,7 +190,18 @@ function OptionCard({
   );
 }
 
-export function CharacterCard({ c, slug, episodeId }: { c: Character; slug: string; episodeId: number }) {
+export function CharacterCard({
+  c,
+  slug,
+  episodeId,
+  isNext = false,
+}: {
+  c: Character;
+  slug: string;
+  episodeId: number;
+  /** 页头的下一步是「抽定妆照」且轮到这个角色：抽卡按钮是本页唯一的主按钮 */
+  isNext?: boolean;
+}) {
   const patch = usePatchCharacter(slug);
   const upload = useUploadPortrait(slug);
   const draw = useDrawPortraits(slug);
@@ -283,7 +295,7 @@ export function CharacterCard({ c, slug, episodeId }: { c: Character; slug: stri
             <ImageEngineSelect value={engine} onChange={setEngine} defaultLabel="项目图像引擎" ariaLabel="抽卡引擎" />
             <button
               type="button"
-              className="primary"
+              {...nextActionProps(isNext)}
               disabled={draw.isPending || !c.visual_prompt.trim()}
               title={c.visual_prompt.trim() ? '用角色当前的外貌提示词出正面半身定妆照（本机 ComfyUI，或选浏览器引擎走 ChatGPT / Gemini 网页）' : '先写外貌提示词或用 AI 推荐造型'}
               onClick={drawAgain}

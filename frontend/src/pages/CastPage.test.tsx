@@ -133,4 +133,25 @@ describe('CastPage', () => {
     await user.click(screen.getAllByRole('link', { name: /剧本/ })[0]);
     expect(await screen.findByRole('dialog', { name: '有未保存的修改，确定离开？' })).toBeTruthy();
   });
+
+  it('下一步是抽定妆照：第一个缺定妆照的角色的「抽卡」是本页唯一的主按钮；点页头提示会切回角色页签并聚焦它', async () => {
+    const LAO = { ...LIN, id: 9, name: '老周', portrait_url: null };
+    installFetch({
+      ...ROUTES,
+      'GET /api/episodes/4': makeEpisode({ id: 4, title: '提词器', scene_blocks: [{ id: 1, order: 0, location_id: null, text: 'a' }] }),
+      'GET /api/projects/demo/characters': [{ ...LIN, portrait_url: '/media/p.png' }, LAO],
+    });
+    const { container } = renderAt(<CastPage />, AT);
+    const user = userEvent.setup();
+    const lao = await screen.findByTestId('character-9');
+    const draw = within(lao).getByRole('button', { name: '抽卡' });
+    await waitFor(() => expect(draw.className).toContain('primary'));
+    expect(within(screen.getByTestId('character-8')).getByRole('button', { name: '抽卡' }).className).not.toContain('primary');
+    const draws = container.querySelectorAll('.draw-bar .primary');
+    expect(draws).toHaveLength(1);
+    await user.click(screen.getByRole('tab', { name: '风格' }));
+    await user.click(screen.getByRole('button', { name: /下一步：抽定妆照/ }));
+    await waitFor(() => expect(document.activeElement).toBe(draw));
+    expect(screen.getByRole('tab', { name: /角色/ }).getAttribute('aria-selected')).toBe('true');
+  });
 });

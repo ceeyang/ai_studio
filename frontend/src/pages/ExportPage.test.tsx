@@ -238,4 +238,30 @@ describe('ExportPage', () => {
     expect(posts[1].url).toBe('/api/episodes/4/dialogue/fit-khmer');
     expect(posts[1].body).toEqual({});
   });
+
+  it('前面都做完、下一步是合成导出：「合成导出」是本页唯一的主按钮，页头是提示', async () => {
+    const full = (id: number, code: string) =>
+      makeShot({
+        id, code, order: id, cast: [{ character_id: 8, variation_id: null }],
+        slots: [
+          makeSlot({ id: id * 10 + 1, kind: 'first_frame', selected_candidate_id: id * 100 + 1, candidates: [makeCandidate({ id: id * 100 + 1 })] }),
+          withVideo(id, code).slots[0],
+        ],
+      });
+    const ep = makeEpisode({ id: 4, scene_blocks: [{ id: 1, order: 0, location_id: null, text: 'a' }], shots: [full(11, 'S01'), full(12, 'S02')] });
+    installFetch(
+      routes({
+        'GET /api/episodes/4': ep,
+        'GET /api/projects/demo/characters': [
+          { id: 8, project_id: 1, name: '林夏', description: '', visual_prompt: '', core_features: '', voice: null, portrait_url: '/media/p.png' },
+        ],
+      }),
+    );
+    const { container } = renderAt(<ExportPage />, AT);
+    const btn = await screen.findByRole('button', { name: '合成导出' });
+    await waitFor(() => expect(btn.className).toContain('primary'));
+    expect(btn.hasAttribute('data-next-action')).toBe(true);
+    expect(screen.getByRole('button', { name: /下一步：合成导出/ })).toBeTruthy();
+    expect(container.querySelectorAll('.primary')).toHaveLength(1);
+  });
 });

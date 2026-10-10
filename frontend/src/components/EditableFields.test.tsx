@@ -176,3 +176,15 @@ describe('useUnsavedGuard', () => {
     expect(router.state.location.search).toBe('?shot=3');
   });
 });
+
+describe('EditableFields 卸载', () => {
+  it('带着未保存的修改被卸载时报一次 onDirtyChange(false)，父组件不会一直以为有没保存的内容', async () => {
+    const user = userEvent.setup();
+    const onDirty = vi.fn();
+    const { unmount } = render(<EditableFields fields={FIELDS} initial={INITIAL} onSave={() => {}} onDirtyChange={onDirty} />);
+    await user.type(screen.getByLabelText('名字'), '改');
+    expect(onDirty).toHaveBeenLastCalledWith(true);
+    unmount();
+    expect(onDirty).toHaveBeenLastCalledWith(false);
+  });
+});

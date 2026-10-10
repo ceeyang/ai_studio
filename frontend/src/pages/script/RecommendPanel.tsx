@@ -4,8 +4,20 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { errorText } from '../../api/client';
 import { useCreateCharacter, useJob, useRecommendCharacters } from '../../api/queries';
 import type { Character, RecommendedCharacter } from '../../api/types';
+import { nextActionProps } from '../../components/EpisodeHeader';
 
-export function RecommendPanel({ slug, episodeId, existing }: { slug: string; episodeId: number; existing: Character[] }) {
+export function RecommendPanel({
+  slug,
+  episodeId,
+  existing,
+  isNext = false,
+}: {
+  slug: string;
+  episodeId: number;
+  existing: Character[];
+  /** 还没有角色、页头的下一步是「添加角色」：推荐按钮是本页唯一的主按钮 */
+  isNext?: boolean;
+}) {
   const recommend = useRecommendCharacters(episodeId);
   const create = useCreateCharacter(slug);
   const [params, setParams] = useSearchParams();
@@ -32,6 +44,7 @@ export function RecommendPanel({ slug, episodeId, existing }: { slug: string; ep
       <div className="row">
         <button
           type="button"
+          {...nextActionProps(isNext)}
           disabled={running}
           onClick={() => recommend.mutate(3, { onSuccess: (r) => setJobId(r.job_ids[0]) })}
         >

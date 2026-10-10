@@ -3,7 +3,7 @@ import { Link, useParams } from 'react-router-dom';
 import { enc, errorText } from '../api/client';
 import { useEpisode, useExports, useFitKhmer, usePatchExport, useRunStage, useTranslateSubtitles } from '../api/queries';
 import type { ExportOptions, ExportRow, ShotDetail } from '../api/types';
-import { EpisodeHeader, EpisodeLoadError } from '../components/EpisodeHeader';
+import { EpisodeHeader, EpisodeLoadError, nextActionProps, useNextAction } from '../components/EpisodeHeader';
 import { useJobNotice } from '../components/JobNotice';
 import { fmtTime } from '../format';
 import { EndCardPanel } from './director/EndCardPanel';
@@ -151,6 +151,7 @@ function ExportBody({ slug, id }: { slug: string; id: number }) {
   const [choice, setChoice] = useState<Choice>(() => loadChoice(id));
   useEffect(() => saveChoice(id, choice), [id, choice]);
   const set = (patch: Partial<Choice>) => setChoice((c) => ({ ...c, ...patch }));
+  const nextAct = useNextAction(slug, ep.data, 'export');
 
   if (ep.isLoading) return <p className="loading">加载中…</p>;
   if (ep.error || !ep.data) return <EpisodeLoadError slug={slug} error={ep.error} />;
@@ -201,9 +202,10 @@ function ExportBody({ slug, id }: { slug: string; id: number }) {
             {r.stale.length > 0 && ` · ${r.stale.length} 镜视频已过期（${r.stale.join('、')}）`}
           </span>
           <span className="grow" aria-hidden="true" />
-          {/* 页头的「下一步」是这一页唯一的主按钮 */}
+          {/* 下一步是合成导出时它是本页唯一的主按钮，否则页头的「下一步」才是 */}
           <button
             type="button"
+            {...nextActionProps(nextAct?.key === 'export')}
             disabled={!canExport || run.isPending}
             title={canExport ? undefined : '每个镜头都要有选定的视频才能合成'}
             onClick={doExport}

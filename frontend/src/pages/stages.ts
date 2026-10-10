@@ -13,10 +13,14 @@ export interface Stage {
   to: string;
 }
 
-/** 如 {label: '下一步：生成视频（2 镜缺视频）', to: '.../director'} */
+/** 如 {label: '下一步：生成视频（2 镜缺视频）', to: '.../director', key: 'videos', stale: false} */
 export interface NextStep {
   label: string;
   to: string;
+  /** 是哪一段：页面据此把对应的动作按钮标成主按钮 */
+  key: StageKey;
+  /** 这一段是因为有过期的结果才没完成（导演台用「只重做过期的」） */
+  stale: boolean;
 }
 
 export const STAGE_STATE_TEXT: Record<Stage['state'], string> = {
@@ -27,7 +31,7 @@ export const STAGE_STATE_TEXT: Record<Stage['state'], string> = {
 };
 
 /** 出场角色：镜头 cast 里出现过的；还没有镜头（或镜头都没标角色）时按项目全部角色算 */
-function castOf(shots: ShotDetail[], chars: Character[]): Character[] {
+export function castOf(shots: ShotDetail[], chars: Character[]): Character[] {
   const ids = new Set(shots.flatMap((s) => s.cast.map((c) => c.character_id)));
   const appearing = chars.filter((c) => ids.has(c.id));
   return appearing.length > 0 ? appearing : chars;
@@ -112,6 +116,7 @@ export function episodeStages(
     ...d,
     state: i === first && d.state === 'todo' ? 'active' : d.state,
   }));
-  const next = first >= 0 ? { label: `下一步：${drafts[first].next}`, to: drafts[first].to } : null;
+  const d = first >= 0 ? drafts[first] : null;
+  const next = d ? { label: `下一步：${d.next}`, to: d.to, key: d.key, stale: d.state === 'stale' } : null;
   return { stages, next };
 }

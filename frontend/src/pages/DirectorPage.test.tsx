@@ -236,4 +236,29 @@ describe('DirectorPage', () => {
     expect(await screen.findByText(/剧集 4 不存在/)).toBeTruthy();
     expect(screen.getByRole('link', { name: '回到项目' }).getAttribute('href')).toBe('/projects/demo');
   });
+
+  it('下一步在导演台：对应的生成按钮是本页唯一的主按钮', async () => {
+    const ep = { ...EP, scene_blocks: [{ id: 1, order: 0, location_id: null, text: 'a' }] };
+    installFetch(routes({ 'GET /api/episodes/4': ep, 'GET /api/projects/demo/characters': [{ id: 8, project_id: 1, name: '林夏', description: '', visual_prompt: '', core_features: '', voice: null, portrait_url: '/p.png' }], 'GET /api/episodes/4/exports': [] }));
+    const { container } = renderAt(<DirectorPage />, AT);
+    const kf = await screen.findByRole('button', { name: '生成首帧（全部）' });
+    await waitFor(() => expect(kf.className).toContain('primary'));
+    expect(kf.hasAttribute('data-next-action')).toBe(true);
+    expect(screen.getByRole('button', { name: '生成视频（全部）' }).className).not.toContain('primary');
+    expect(screen.getByRole('button', { name: /下一步：生成首帧/ })).toBeTruthy();
+    expect(container.querySelectorAll('.primary')).toHaveLength(1);
+  });
+
+  it('首帧有过期：「只重做过期的」是主按钮', async () => {
+    const ep = {
+      ...EP,
+      scene_blocks: [{ id: 1, order: 0, location_id: null, text: 'a' }],
+      shots: [makeShot({ id: 11, code: 'S01', slots: [chosen(1, 'first_frame', true)] })],
+    };
+    installFetch(routes({ 'GET /api/episodes/4': ep, 'GET /api/projects/demo/characters': [{ id: 8, project_id: 1, name: '林夏', description: '', visual_prompt: '', core_features: '', voice: null, portrait_url: '/p.png' }], 'GET /api/episodes/4/exports': [] }));
+    renderAt(<DirectorPage />, AT);
+    const redo = await screen.findByRole('button', { name: '只重做过期的（1）' });
+    await waitFor(() => expect(redo.className).toContain('primary'));
+    expect(screen.getByRole('button', { name: '生成首帧（全部）' }).className).not.toContain('primary');
+  });
 });

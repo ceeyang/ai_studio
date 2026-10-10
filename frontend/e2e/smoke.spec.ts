@@ -28,7 +28,7 @@ test('新建项目 → 剧本 → 分镜 → 导演台（manual LLM，不需要�
   await expect(page.getByRole('heading', { name: '剧本', exact: true, level: 2 })).toBeVisible();
   await expect(page.getByRole('navigation', { name: '面包屑' })).toContainText('冒烟');
 
-  await page.getByRole('button', { name: '运行剧本' }).click();
+  await page.getByRole('button', { name: '运行剧本', exact: true }).click();
   await expect(page.locator('.job-notice')).toContainText('运行剧本：');
 
   // 剧本任务先要结构，再要视觉设定：同一个任务连着两次等待输入
@@ -47,7 +47,7 @@ test('新建项目 → 剧本 → 分镜 → 导演台（manual LLM，不需要�
   await page.getByRole('link', { name: /本集角色/ }).click();
   await expect(page.getByRole('heading', { name: '林夏', level: 4 })).toBeVisible();
   await nav(page, '剧本').click();
-  await page.getByRole('button', { name: '运行分镜' }).click();
+  await page.getByRole('button', { name: '运行分镜', exact: true }).click();
   await expect(page.locator('.job-notice')).toContainText('运行分镜：');
 
   await answerWaitingJob(page, /^storyboard:\d+$/, JSON.stringify(STORYBOARD));

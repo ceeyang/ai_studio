@@ -1,4 +1,5 @@
 import { screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { installFetch } from '../test/fetch';
 import { makeEpisode, makeProject, makeShot } from '../test/factories';
@@ -52,13 +53,13 @@ describe('EpisodeHeader', () => {
     expect(screen.getByText(/上一集/).closest('[aria-disabled="true"]')).toBeTruthy();
   });
 
-  it('阶段进度六段，当前页对应的段标出来；右侧唯一的主按钮是下一步', async () => {
+  it('阶段进度六段，当前页对应的段标出来；下一步在别的页面时是右侧唯一的主按钮（链接）', async () => {
     installFetch(ROUTES);
-    const { container } = renderAt(<EpisodeHeader slug="demo" ep={EP} page="director" title="导演台" />);
+    const { container } = renderAt(<EpisodeHeader slug="demo" ep={EP} page="cast" title="角色" />);
     const stepper = screen.getByRole('list', { name: '制作进度' });
     const items = within(stepper).getAllByRole('listitem');
     expect(items.map((li) => li.querySelector('.step-label')?.textContent)).toEqual(['剧本', '角色', '分镜', '首帧', '视频', '导出']);
-    expect(within(stepper).getByRole('link', { name: /首帧/ }).getAttribute('aria-current')).toBe('step');
+    expect(within(stepper).getByRole('link', { name: /角色/ }).getAttribute('aria-current')).toBe('step');
     await waitFor(() => expect(within(stepper).getByRole('link', { name: /角色/ }).textContent).toContain('1/1 有定妆照'));
     expect(within(stepper).getByRole('link', { name: /剧本/ }).textContent).toContain('已完成');
     const next = screen.getByRole('link', { name: '下一步：生成首帧（2 镜缺首帧）' });
@@ -70,5 +71,25 @@ describe('EpisodeHeader', () => {
     renderAt(<EpisodeLoadError slug="demo" error={new Error('网络断了')} />);
     expect(screen.getByText(/网络断了/)).toBeTruthy();
     expect(screen.getByRole('link', { name: '回到项目' }).getAttribute('href')).toBe('/projects/demo');
+  });
+
+  it('下一步就在本页：不是链接而是提示，点了滚到并聚焦本页标了 data-next-action 的按钮', async () => {
+    installFetch(ROUTES);
+    const { container } = renderAt(
+      <>
+        <EpisodeHeader slug="demo" ep={EP} page="director" title="导演台" />
+        <button type="button" className="primary" data-next-action>
+          生成首帧（全部）
+        </button>
+      </>,
+    );
+    const user = userEvent.setup();
+    const hint = await screen.findByRole('button', { name: /下一步：生成首帧（2 镜缺首帧）/ });
+    expect(screen.queryByRole('link', { name: /下一步/ })).toBeNull();
+    expect(hint.className).not.toContain('primary');
+    // 本页只有那个动作按钮是主按钮
+    expect(container.querySelectorAll('.primary')).toHaveLength(1);
+    await user.click(hint);
+    await waitFor(() => expect(document.activeElement?.textContent).toBe('生成首帧（全部）'));
   });
 });

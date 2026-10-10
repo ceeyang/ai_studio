@@ -16,7 +16,7 @@ import {
 } from '../api/queries';
 import type { Character, EpisodePatch, Job, RerunImpact, SceneBlock } from '../api/types';
 import { useConfirm } from '../components/ConfirmDialog';
-import { EpisodeHeader, EpisodeLoadError } from '../components/EpisodeHeader';
+import { EpisodeHeader, EpisodeLoadError, nextActionProps, useNextAction } from '../components/EpisodeHeader';
 import { EditableFields, type FieldSpec, type FieldValues, type FieldsState, useUnsavedGuard } from '../components/EditableFields';
 import { useJobNotice } from '../components/JobNotice';
 import { EPISODE_STATUS_LABEL } from '../format';
@@ -180,6 +180,8 @@ export function ScriptPage() {
   // 改过没保存的段落：和原文一起决定换页面前要不要问一句
   const [dirtyBlocks, setDirtyBlocks] = useState<Set<number>>(() => new Set());
   useUnsavedGuard(!!src?.dirty || dirtyBlocks.size > 0);
+  // 下一步是运行剧本 / 运行分镜时，对应按钮是本页唯一的主按钮
+  const nextAct = useNextAction(slug, ep.data, 'script');
   const base = `/projects/${enc(slug)}/episodes/${id}`;
 
   useOnStageDone(
@@ -279,9 +281,9 @@ export function ScriptPage() {
       </EpisodeHeader>
 
       <div className="toolbar">
-        {/* 页头的「下一步」是这一页唯一的主按钮 */}
         <button
           type="button"
+          {...nextActionProps(nextAct?.key === 'script')}
           disabled={busy || (srcDirty && !srcValid)}
           title={srcDirty ? '先保存原文的修改，再按新原文运行剧本' : undefined}
           onClick={() => runStage('script')}
@@ -290,6 +292,7 @@ export function ScriptPage() {
         </button>
         <button
           type="button"
+          {...nextActionProps(nextAct?.key === 'storyboard')}
           disabled={busy || e.scene_blocks.length === 0}
           title={e.scene_blocks.length === 0 ? '先运行剧本生成段落' : undefined}
           onClick={() => runStage('storyboard')}

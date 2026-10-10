@@ -4,6 +4,7 @@ import { ConfirmProvider } from './components/ConfirmDialog';
 import { LeaveGuard } from './components/EditableFields';
 import { Layout } from './components/Layout';
 import { NotFound } from './components/NotFound';
+import { RouteError } from './components/RouteError';
 import { EventsProvider } from './ws/EventsContext';
 import { SettingsPage } from './pages/SettingsPage';
 import { JobsPage } from './pages/JobsPage';
@@ -31,6 +32,8 @@ function Root() {
 const router = createBrowserRouter([
   {
     element: <Root />,
+    // 渲染出错时显示中文出错页，而不是 react-router 自带的英文页
+    errorElement: <RouteError />,
     children: [
       { path: '/settings', element: <SettingsPage /> },
       { path: '/jobs', element: <JobsPage /> },

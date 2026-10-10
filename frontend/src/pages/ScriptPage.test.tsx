@@ -239,4 +239,29 @@ describe('ScriptPage', () => {
     await user.click(within(dlg2).getByRole('button', { name: '离开' }));
     await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/projects/demo/episodes/4/cast'));
   });
+
+  it('改过没保存的段落被重跑剧本删掉后，换页面不再误拦', async () => {
+    let ep = EP;
+    installFetch({ ...ROUTES, 'GET /api/episodes/4': () => ep });
+    const { qc } = renderAt(<ScriptPage />, AT);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: /段落 1/ }));
+    await user.type(screen.getByLabelText('段落内容'), '！');
+    ep = { ...EP, scene_blocks: [{ id: 22, order: 0, location_id: null, text: '新的段落' }] };
+    await qc.invalidateQueries({ queryKey: ['episode', 4] });
+    await screen.findByTestId('block-22');
+    await user.click(screen.getByRole('link', { name: /本集角色/ }));
+    await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/projects/demo/episodes/4/cast'));
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('下一步是运行剧本时：页头是提示，「运行剧本」是本页唯一的主按钮', async () => {
+    installFetch({ ...ROUTES, 'GET /api/episodes/4': { ...EP, scene_blocks: [] } });
+    const { container } = renderAt(<ScriptPage />, AT);
+    const run = await screen.findByRole('button', { name: '运行剧本' });
+    await waitFor(() => expect(run.className).toContain('primary'));
+    expect(run.hasAttribute('data-next-action')).toBe(true);
+    expect(screen.getByRole('button', { name: /下一步：运行剧本/ })).toBeTruthy();
+    expect(container.querySelectorAll('.primary')).toHaveLength(1);
+  });
 });

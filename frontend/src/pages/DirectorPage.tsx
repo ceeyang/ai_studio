@@ -13,7 +13,7 @@ import {
 } from '../api/queries';
 import type { Job, RunIn, ShotDetail } from '../api/types';
 import { useConfirm } from '../components/ConfirmDialog';
-import { EpisodeHeader, EpisodeLoadError } from '../components/EpisodeHeader';
+import { EpisodeHeader, EpisodeLoadError, nextActionProps, useNextAction } from '../components/EpisodeHeader';
 import { useJobNotice } from '../components/JobNotice';
 import { type EstimatePart, estimateText } from './director/estimate';
 import { ShotDrawer } from './director/ShotDrawer';
@@ -76,6 +76,8 @@ export function DirectorPage() {
   const [count, setCount] = useState(1);
   const [force, setForce] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  // 下一步在导演台时：缺首帧 / 缺视频 → 对应的生成按钮，有过期 → 只重做过期的，是本页唯一的主按钮
+  const nextAct = useNextAction(slug, ep.data, 'director');
 
   if (ep.isLoading) return <p className="loading">加载中…</p>;
   if (ep.error || !ep.data) return <EpisodeLoadError slug={slug} error={ep.error} />;
@@ -239,15 +241,25 @@ export function DirectorPage() {
           <input type="checkbox" aria-label="强制重跑" checked={force} onChange={(ev) => setForce(ev.target.checked)} /> 强制重跑
         </label>
         <span className="sep" aria-hidden="true" />
-        {/* 页头的「下一步」是这一页唯一的主按钮，这里都是次要按钮 */}
-        <button type="button" disabled={shots.length === 0 || generating} onClick={() => void generate('keyframes', selIds, `（${scope}）`)}>
+        <button
+          type="button"
+          {...nextActionProps(nextAct?.key === 'keyframes' && !nextAct.stale)}
+          disabled={shots.length === 0 || generating}
+          onClick={() => void generate('keyframes', selIds, `（${scope}）`)}
+        >
           生成首帧（{scope}）
         </button>
-        <button type="button" disabled={shots.length === 0 || generating} onClick={() => void generate('videos', selIds, `（${scope}）`)}>
+        <button
+          type="button"
+          {...nextActionProps(nextAct?.key === 'videos' && !nextAct.stale)}
+          disabled={shots.length === 0 || generating}
+          onClick={() => void generate('videos', selIds, `（${scope}）`)}
+        >
           生成视频（{scope}）
         </button>
         <button
           type="button"
+          {...nextActionProps(!!nextAct?.stale)}
           disabled={staleCount === 0 || generating}
           title={staleCount === 0 ? '没有过期的首帧或视频' : '把过期的首帧、视频按当前输入强制重出'}
           onClick={() => void redoStale()}

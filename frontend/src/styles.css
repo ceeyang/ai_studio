@@ -1405,3 +1405,14 @@ div.error.banner.job-notice a { color: #ffd0d1; text-decoration: underline; }
 .meta .advanced { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
 .meta .advanced summary { cursor: pointer; }
 .meta .advanced[open] { flex-basis: 100%; }
+/* 下一步就在本页：页头只给提示，点了跳到本页的主按钮 */
+.next-hint {
+  height: 32px; padding: 0 12px; border-radius: var(--r-pill);
+  border: 1px dashed var(--accent-line); background: var(--accent-soft); color: var(--accent);
+  font-size: 12.5px; font-weight: 600;
+}
+.next-hint:hover:not(:disabled) { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-hover); }
+/* 根路由出错页 */
+.route-error { max-width: 640px; margin: 12vh auto 0; padding: 0 var(--s-6); display: flex; flex-direction: column; gap: var(--s-3); }
+.route-error h2 { margin: 0; font-size: 22px; }
+.route-error pre { white-space: pre-wrap; overflow-wrap: anywhere; }
