@@ -102,7 +102,13 @@ describe('ProjectsPage', () => {
     expect(screen.getByRole('dialog', { name: '新建剧集 · 第 2 集' })).toBeTruthy();
     const btn = screen.getByRole('button', { name: '创建剧集' }) as HTMLButtonElement;
     expect(btn.disabled).toBe(true);
+    // 默认 30 秒
+    expect((screen.getByLabelText('目标时长（秒）') as HTMLInputElement).value).toBe('30');
     await user.type(screen.getByLabelText('原文或梗概'), '深夜的直播间');
+    // 原文非空时按 Esc 先问放弃修改，不直接关
+    await user.keyboard('{Escape}');
+    expect(screen.getByText('放弃修改？')).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: '继续编辑' }));
     const secs = screen.getByLabelText('目标时长（秒）');
     await user.clear(secs);
     await user.type(secs, '10');

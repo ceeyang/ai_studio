@@ -13,6 +13,31 @@ export interface FieldSpec {
   rows?: number;
   options?: FieldOption[];
   step?: string;
+  /** 数字字段：取值范围（同时写进 input 的 min/max），超出或留空时不能保存 */
+  min?: number;
+  max?: number;
+  /** 下拉框再加一项「其他（手填）」：选它（或当前值不在选项里）时下面出一个输入框手填 */
+  customLabel?: string;
+  placeholder?: string;
+}
+
+/** 字段值不合法时的提示；合法返回 null。目前只校验带 min/max 的数字字段。 */
+export function fieldError(f: FieldSpec, v: string): string | null {
+  if (f.kind !== 'number' || (f.min === undefined && f.max === undefined)) return null;
+  if (v.trim() === '') return `${f.label}不能为空`;
+  const n = Number(v);
+  if (Number.isNaN(n) || (f.min !== undefined && n < f.min) || (f.max !== undefined && n > f.max)) {
+    return `${f.label}要在 ${f.min ?? '-∞'}–${f.max ?? '∞'} 之间`;
+  }
+  return null;
+}
+
+/** 当前编辑状态：changed 只含改过的字段，valid 表示能不能保存 */
+export interface FieldsState {
+  values: FieldValues;
+  changed: FieldValues;
+  dirty: boolean;
+  valid: boolean;
 }
 
 export type FieldValues = Record<string, string>;
@@ -26,7 +51,11 @@ export interface EditableFieldsProps {
   saveLabel?: string;
   /** 有没有未保存的修改变化时通知父组件（用来挂 useUnsavedGuard、弹窗 guard 等） */
   onDirtyChange?: (dirty: boolean) => void;
+  /** 每次内容变化时把当前状态报给父组件（例如「保存并运行」要拿到没保存的改动） */
+  onValuesChange?: (state: FieldsState) => void;
 }
+
+const CUSTOM = '__custom__';
 
 export function changedValues(values: FieldValues, initial: FieldValues): FieldValues {
   const out: FieldValues = {};
@@ -56,6 +85,7 @@ export function EditableFields({
   error = null,
   saveLabel = '保存',
   onDirtyChange,
+  onValuesChange,
 }: EditableFieldsProps) {
   // 用内容做比较，而不是对象身份：WebSocket 触发的重新拉取若内容没变，不会冲掉正在编辑的内容
   const initialKey = JSON.stringify(initial);
@@ -71,6 +101,23 @@ export function EditableFields({
   const base = JSON.parse(initialKey) as FieldValues;
   const changed = changedValues(values, base);
   const dirty = Object.keys(changed).length > 0;
+  const errors = fields.map((f) => fieldError(f, values[f.name] ?? '')).filter((x): x is string => !!x);
+  const valid = errors.length === 0;
+  // 手动切到「其他（手填）」的下拉字段；没切过时按当前值在不在选项里决定
+  const [customMode, setCustomMode] = useState<Record<string, boolean>>({});
+  const isCustom = (f: FieldSpec) => {
+    const v = values[f.name] ?? '';
+    return customMode[f.name] ?? (v !== '' && !(f.options ?? []).some((o) => o.value === v));
+  };
+
+  const valuesCb = useRef(onValuesChange);
+  valuesCb.current = onValuesChange;
+  const stateKey = JSON.stringify([values, changed, valid]);
+  useEffect(() => {
+    valuesCb.current?.({ values, changed, dirty, valid });
+    // stateKey 概括了要报的内容
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stateKey]);
 
   const dirtyCb = useRef(onDirtyChange);
   dirtyCb.current = onDirtyChange;
@@ -91,7 +138,7 @@ export function EditableFields({
   const set = (name: string, v: string) => setValues((prev) => ({ ...prev, [name]: v }));
   const submit = (e: FormEvent) => {
     e.preventDefault();
-    if (dirty) onSave(values, changed);
+    if (dirty && valid) onSave(values, changed);
   };
 
   return (
@@ -102,28 +149,65 @@ export function EditableFields({
           {f.kind === 'textarea' ? (
             <textarea rows={f.rows ?? 4} value={values[f.name] ?? ''} onChange={(e) => set(f.name, e.target.value)} />
           ) : f.kind === 'select' ? (
-            <select value={values[f.name] ?? ''} onChange={(e) => set(f.name, e.target.value)}>
+            <select
+              value={f.customLabel && isCustom(f) ? CUSTOM : (values[f.name] ?? '')}
+              onChange={(e) => {
+                const v = e.target.value;
+                if (v === CUSTOM) {
+                  setCustomMode((m) => ({ ...m, [f.name]: true }));
+                  set(f.name, '');
+                } else {
+                  if (f.customLabel) setCustomMode((m) => ({ ...m, [f.name]: false }));
+                  set(f.name, v);
+                }
+              }}
+            >
               {(f.options ?? []).map((o) => (
                 <option key={o.value} value={o.value}>
                   {o.label}
                 </option>
               ))}
+              {f.customLabel && <option value={CUSTOM}>{f.customLabel}</option>}
             </select>
           ) : (
             <input
               type={f.kind === 'number' ? 'number' : 'text'}
               step={f.step}
+              min={f.min}
+              max={f.max}
+              placeholder={f.placeholder}
               value={values[f.name] ?? ''}
               onChange={(e) => set(f.name, e.target.value)}
             />
           )}
         </label>
-      ))}
+      )).flatMap((el, i) => {
+        const f = fields[i];
+        if (!(f.kind === 'select' && f.customLabel && isCustom(f))) return [el];
+        // 手填框放在 label 外面：不和下拉框抢同一个标签
+        return [
+          el,
+          <input
+            key={`${f.name}-custom`}
+            type="text"
+            className="field-custom"
+            aria-label={`${f.label}（手填）`}
+            placeholder={f.placeholder}
+            value={values[f.name] ?? ''}
+            onChange={(e) => set(f.name, e.target.value)}
+          />,
+        ];
+      })}
       <div className="row">
-        <button type="submit" className={dirty ? "primary" : undefined} disabled={!dirty || saving}>
+        <button type="submit" className={dirty && valid ? 'primary' : undefined} disabled={!dirty || !valid || saving}>
           {saving ? '保存中…' : saveLabel}
         </button>
         {dirty && <span className="muted">有未保存的修改</span>}
+        {errors.map((m) => (
+          <span key={m} className="error">
+            {m}
+          </span>
+        ))}
         {error && <span className="error">{error}</span>}
       </div>
     </form>

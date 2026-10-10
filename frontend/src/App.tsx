@@ -8,6 +8,7 @@ import { SettingsPage } from './pages/SettingsPage';
 import { JobsPage } from './pages/JobsPage';
 import { DirectorPage } from './pages/DirectorPage';
 import { ScriptPage } from './pages/ScriptPage';
+import { CastPage } from './pages/CastPage';
 import { ProjectsPage } from './pages/ProjectsPage';
 
 const queryClient = new QueryClient({
@@ -28,6 +29,7 @@ export function App() {
                 <Route path="/jobs" element={<JobsPage />} />
                 <Route path="/projects/:slug/episodes/:episodeId/director" element={<DirectorPage />} />
                 <Route path="/projects/:slug/episodes/:episodeId/script" element={<ScriptPage />} />
+                <Route path="/projects/:slug/episodes/:episodeId/cast" element={<CastPage />} />
                 <Route path="/" element={<ProjectsPage />} />
                 <Route path="/projects/:slug" element={<ProjectsPage />} />
                 <Route path="*" element={<NotFound />} />

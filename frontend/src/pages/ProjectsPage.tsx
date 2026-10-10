@@ -321,7 +321,7 @@ function NewEpisodeDialog({ slug, nextNumber, onClose }: { slug: string; nextNum
   const navigate = useNavigate();
   const [title, setTitle] = useState('');
   const [text, setText] = useState('');
-  const [seconds, setSeconds] = useState('60');
+  const [seconds, setSeconds] = useState('30');
   const secondsOk = Number(seconds) > 0 && Number(seconds) <= 3600;
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -331,7 +331,14 @@ function NewEpisodeDialog({ slug, nextNumber, onClose }: { slug: string; nextNum
     );
   };
   return (
-    <Dialog title={`新建剧集 · 第 ${nextNumber} 集`} subtitle="贴原文或梗概，创建后到剧本页运行剧本。" onClose={onClose} wide>
+    <Dialog
+      title={`新建剧集 · 第 ${nextNumber} 集`}
+      subtitle="贴原文或梗概，创建后到剧本页运行剧本。"
+      onClose={onClose}
+      wide
+      guard={() => text.trim() !== ''}
+      busy={create.isPending}
+    >
       <form className="fields" onSubmit={submit}>
         <div className="field-grid two">
           <label className="field">
@@ -350,11 +357,11 @@ function NewEpisodeDialog({ slug, nextNumber, onClose }: { slug: string; nextNum
         {create.error && <p className="error">{errorText(create.error)}</p>}
         <div className="modal-foot">
           <span className="muted">{text.trim() ? `${Array.from(text.trim()).length} 字` : ''}</span>
-          <button type="button" className="ghost" onClick={onClose}>
+          <button type="button" className="ghost" disabled={create.isPending} onClick={onClose}>
             取消
           </button>
           <button type="submit" className="primary" disabled={!text.trim() || !secondsOk || create.isPending}>
-            创建剧集
+            {create.isPending ? '创建中…' : '创建剧集'}
           </button>
         </div>
       </form>

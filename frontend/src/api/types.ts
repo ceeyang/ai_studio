@@ -298,6 +298,22 @@ export interface RunOut {
   job_ids: number[];
 }
 
+/** GET /api/episodes/{id}/rerun-impact：现在重跑剧本 / 分镜会删什么、覆盖什么 */
+export interface RerunImpact {
+  stage: 'script' | 'storyboard';
+  /** false = 输入没变、没勾强制，会整体跳过 */
+  will_run: boolean;
+  /** 会重跑的段落序号（从 1 开始） */
+  blocks: number[];
+  shots_deleted: number;
+  selected_first_frames: number;
+  selected_videos: number;
+  /** 手工镜头数（保留） */
+  manual_kept: number;
+  /** 会覆盖的东西，原样显示 */
+  overwrites: string[];
+}
+
 export interface Character {
   id: number;
   project_id: number;
@@ -317,6 +333,8 @@ export interface Character {
   active_jobs?: JobBrief[];
   /** 三视图设定图和切出来的格子 */
   turnaround?: Turnaround | null;
+  /** 最近一次失败的抽卡（之后没有成功的抽卡才有） */
+  last_failure?: JobBrief | null;
 }
 
 export type TurnaroundSheetKey = 'body' | 'face';
@@ -376,6 +394,11 @@ export interface JobBrief {
   status: JobStatus;
   /** image.turnaround 任务出的是哪种设定图 */
   sheet?: TurnaroundSheetKey | null;
+  /** 0-1，运行中且报过进度才有 */
+  progress?: number | null;
+  /** 失败任务才有：错误第一行 */
+  error?: string | null;
+  finished_at?: string | null;
 }
 
 export interface CharacterIn {

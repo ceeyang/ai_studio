@@ -1,9 +1,11 @@
-// 角色卡：定妆照候选（上传的 + 本地 AI 抽的），点一张切换角色造型；抽卡；AI 推荐造型；三视图；角色资料。
+// 角色卡：定妆照候选（上传的 + 本地 AI 抽的），单击看大图、「设为当前造型」确认后才切换；抽卡（失败时末尾有失败卡）；
+// AI 推荐造型；三视图；角色资料。
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { errorText } from '../../api/client';
 import {
   useDrawPortraits,
+  useEpisode,
   useJob,
   usePatchCharacter,
   useSuggestDesigns,
@@ -11,8 +13,11 @@ import {
   useUsePortrait,
 } from '../../api/queries';
 import type { Candidate, Character, CharacterPatch, DesignOption } from '../../api/types';
-import { EditableFields, type FieldSpec, type FieldValues } from '../../components/EditableFields';
+import { useConfirm } from '../../components/ConfirmDialog';
+import { EditableFields, type FieldSpec, type FieldValues, useUnsavedGuard } from '../../components/EditableFields';
 import { ImageEngineSelect } from '../../components/ImageEngineSelect';
+import { Lightbox } from '../../components/Lightbox';
+import { VOICES } from '../../format';
 import { useEvents } from '../../ws/EventsContext';
 import { isDecoding } from '../../ws/events';
 import { TurnaroundPanel } from './TurnaroundPanel';
@@ -22,8 +27,17 @@ const CHARACTER_FIELDS: FieldSpec[] = [
   { name: 'description', label: '人物描述', kind: 'textarea', rows: 2 },
   { name: 'visual_prompt', label: '外貌提示词（英文，会原样写进每个出场镜头）', kind: 'textarea', rows: 5 },
   { name: 'core_features', label: '核心特征', kind: 'textarea', rows: 2 },
-  { name: 'voice', label: '配音音色（Edge TTS，如 km-KH-PisethNeural 男 / km-KH-SreymomNeural 女）' },
+  {
+    name: 'voice',
+    label: '配音音色',
+    kind: 'select',
+    options: [{ value: '', label: '（不配音）' }, ...VOICES.map((v) => ({ value: v.id, label: v.label }))],
+    customLabel: '其他（手填）',
+    placeholder: 'Edge TTS 音色，如 km-KH-PisethNeural',
+  },
 ];
+
+const DIRTY_HINT = '先保存或放弃修改';
 
 /** 角色卡改动转 PATCH 体：音色留空表示不配音（null）。 */
 export function toCharacterPatch(changed: FieldValues): CharacterPatch {
@@ -37,27 +51,51 @@ function promptOf(c: Candidate): string {
   return typeof vp === 'string' ? vp : '';
 }
 
+/** 换造型 / 换提示词的确认文案：没有出场镜头时不写过期那句。 */
+function staleTail(shots: number): string {
+  return shots > 0 ? `，出场的 ${shots} 个镜头首帧会过期` : '';
+}
+
 function PortraitStrip({
   c,
+  onPreview,
   onUse,
+  onRetry,
   switching,
+  retrying,
 }: {
   c: Character;
-  onUse: (candidateId: number) => void;
+  onPreview: (index: number) => void;
+  onUse: (candidate: Candidate) => void;
+  onRetry: () => void;
   switching: boolean;
+  retrying: boolean;
 }) {
   const { progress } = useEvents();
   const portraits = c.portraits ?? [];
   const drawing = (c.active_jobs ?? []).filter((j) => j.type === 'image.portrait');
+  // 正在重抽时不再显示上一次的失败
+  const failed = drawing.length === 0 ? c.last_failure : null;
+  const failCard = failed ? (
+    <div role="listitem" className="pcard pcard-failed" data-testid="portrait-failed">
+      <span className="pcard-failed-text">抽卡失败：{failed.error || '没有错误信息'}</span>
+      <button type="button" className="sm" disabled={retrying || !c.visual_prompt.trim()} onClick={onRetry}>
+        重试
+      </button>
+      <Link to={`/jobs?job=${failed.id}`}>查看任务</Link>
+    </div>
+  ) : null;
+
   if (portraits.length === 0 && drawing.length === 0) {
     // 老接口没带候选列表时，至少显示选定的那张
-    return c.portrait_url ? (
+    return (
       <div className="portrait-strip">
-        <img className="pcard-img" src={c.portrait_url} alt={`${c.name} 定妆照`} />
-      </div>
-    ) : (
-      <div className="portrait-strip">
-        <div className="pcard-empty muted">还没有定妆照</div>
+        {c.portrait_url ? (
+          <img className="pcard-img" src={c.portrait_url} alt={`${c.name} 定妆照`} />
+        ) : (
+          <div className="pcard-empty muted">还没有定妆照</div>
+        )}
+        {failCard && <div role="list">{failCard}</div>}
       </div>
     );
   }
@@ -67,23 +105,31 @@ function PortraitStrip({
         const selected = p.id === c.portrait_candidate_id;
         const vp = promptOf(p);
         return (
-          <button
-            key={p.id}
-            type="button"
-            role="listitem"
-            className={`pcard${selected ? ' is-selected' : ''}`}
-            aria-pressed={selected}
-            aria-label={`定妆照 #${p.id}${selected ? '（当前）' : ''}`}
-            title={selected ? '当前造型' : vp ? `切换到这个造型：${vp}` : '切换到这张定妆照'}
-            disabled={switching}
-            onClick={() => {
-              if (!selected) onUse(p.id);
-            }}
-          >
-            <img src={p.url} alt={selected ? `${c.name} 定妆照` : `${c.name} 定妆照候选 ${i + 1}`} loading="lazy" />
+          <div key={p.id} role="listitem" className={`pcard${selected ? ' is-selected' : ''}`}>
+            <button
+              type="button"
+              className="pcard-open"
+              aria-label={`定妆照 #${p.id}${selected ? '（当前）' : ''}`}
+              title={vp ? `看大图：${vp}` : '看大图'}
+              onClick={() => onPreview(i)}
+            >
+              <img src={p.url} alt={selected ? `${c.name} 定妆照` : `${c.name} 定妆照候选 ${i + 1}`} loading="lazy" />
+            </button>
             <span className="pcard-tag">{p.engine === 'upload' ? '上传' : 'AI'}</span>
-            {selected && <span className="pcard-current">当前</span>}
-          </button>
+            {selected ? (
+              <span className="pcard-current">当前</span>
+            ) : (
+              <button
+                type="button"
+                className="sm pcard-use"
+                aria-label={`把定妆照 #${p.id} 设为当前造型`}
+                disabled={switching}
+                onClick={() => onUse(p)}
+              >
+                设为当前造型
+              </button>
+            )}
+          </div>
         );
       })}
       {drawing.map((j) => {
@@ -102,6 +148,7 @@ function PortraitStrip({
           </div>
         );
       })}
+      {failCard}
     </div>
   );
 }
@@ -148,6 +195,17 @@ export function CharacterCard({ c, slug, episodeId }: { c: Character; slug: stri
   const draw = useDrawPortraits(slug);
   const use = useUsePortrait(slug);
   const suggest = useSuggestDesigns(slug);
+  const confirm = useConfirm();
+  const episode = useEpisode(episodeId);
+  // 本集里这个角色出场的镜头数：换造型 / 换提示词后它们的首帧会过期
+  const castShots = (episode.data?.shots ?? []).filter((sh) => (sh.cast ?? []).some((x) => x.character_id === c.id)).length;
+  const [dirty, setDirty] = useState(false);
+  useUnsavedGuard(dirty);
+  const [hint, setHint] = useState<string | null>(null);
+  useEffect(() => {
+    if (!dirty) setHint(null);
+  }, [dirty]);
+  const [preview, setPreview] = useState<number | null>(null);
   const [count, setCount] = useState(2);
   const [engine, setEngine] = useState('');
   const [suggestJob, setSuggestJob] = useState<number | null>(null);
@@ -155,9 +213,40 @@ export function CharacterCard({ c, slug, episodeId }: { c: Character; slug: stri
   const suggesting = (c.active_jobs ?? []).some((j) => j.type === 'character.suggest');
   const drawingCount = (c.active_jobs ?? []).filter((j) => j.type === 'image.portrait').length;
   const options = c.design_options ?? [];
+  const portraits = c.portraits ?? [];
   const suggestFailed = job.data && (job.data.status === 'failed' || job.data.status === 'canceled');
   const waitingInput = job.data?.status === 'waiting_input';
   const error = [patch.error, upload.error, draw.error, use.error, suggest.error].find(Boolean);
+  const drawAgain = () => draw.mutate({ id: c.id, count, engine: engine || undefined });
+
+  /** 设为当前造型：资料有没保存的修改时先提示；否则确认后才切换（带提示词的会覆盖外貌描述）。 */
+  const usePortrait = async (p: Candidate) => {
+    if (dirty) {
+      setHint(DIRTY_HINT);
+      return;
+    }
+    const ok = await confirm({
+      title: '设为当前造型？',
+      body: promptOf(p)
+        ? `用这张的提示词覆盖外貌描述${staleTail(castShots)}`
+        : `换成这张定妆照（外貌描述不变）${staleTail(castShots)}`,
+      confirmText: '设为当前造型',
+    });
+    if (ok) use.mutate({ id: c.id, candidateId: p.id });
+  };
+
+  const setPrompt = async (prompt: string) => {
+    if (dirty) {
+      setHint(DIRTY_HINT);
+      return;
+    }
+    const ok = await confirm({
+      title: '设为角色提示词？',
+      body: `用这个方案的提示词覆盖外貌描述${staleTail(castShots)}`,
+      confirmText: '设为角色提示词',
+    });
+    if (ok) patch.mutate({ id: c.id, visual_prompt: prompt });
+  };
 
   return (
     <article className="char-card" data-testid={`character-${c.id}`}>
@@ -168,8 +257,18 @@ export function CharacterCard({ c, slug, episodeId }: { c: Character; slug: stri
 
       <div className="char-body">
         <div className="char-looks">
-          <PortraitStrip c={c} switching={use.isPending} onUse={(candidateId) => use.mutate({ id: c.id, candidateId })} />
-          <p className="muted small">点一张卡切换角色造型（提示词跟着换）；出场镜头的首帧和视频会带上选定的这张锁脸（H3 引擎）。</p>
+          <PortraitStrip
+            c={c}
+            switching={use.isPending}
+            retrying={draw.isPending}
+            onPreview={setPreview}
+            onUse={usePortrait}
+            onRetry={drawAgain}
+          />
+          {hint && <p className="notice small">{hint}</p>}
+          <p className="muted small">
+            单击看大图；点「设为当前造型」才会换（提示词跟着换）。出场镜头的首帧和视频会带上选定的这张锁脸（H3 引擎）。
+          </p>
           <div className="row draw-bar">
             <label className="inline-field">
               <span>张数</span>
@@ -187,7 +286,7 @@ export function CharacterCard({ c, slug, episodeId }: { c: Character; slug: stri
               className="primary"
               disabled={draw.isPending || !c.visual_prompt.trim()}
               title={c.visual_prompt.trim() ? '用角色当前的外貌提示词出正面半身定妆照（本机 ComfyUI，或选浏览器引擎走 ChatGPT / Gemini 网页）' : '先写外貌提示词或用 AI 推荐造型'}
-              onClick={() => draw.mutate({ id: c.id, count, engine: engine || undefined })}
+              onClick={drawAgain}
             >
               {drawingCount > 0 ? `抽卡（${drawingCount} 张进行中）` : '抽卡'}
             </button>
@@ -238,6 +337,8 @@ export function CharacterCard({ c, slug, episodeId }: { c: Character; slug: stri
               core_features: c.core_features,
               voice: c.voice ?? '',
             }}
+            saving={patch.isPending}
+            onDirtyChange={setDirty}
             onSave={(_v, ch) => patch.mutate({ id: c.id, ...toCharacterPatch(ch) })}
           />
         </div>
@@ -252,12 +353,38 @@ export function CharacterCard({ c, slug, episodeId }: { c: Character; slug: stri
               index={i}
               busy={draw.isPending || patch.isPending}
               onDraw={(prompt) => draw.mutate({ id: c.id, count, visual_prompt: prompt, engine: engine || undefined })}
-              onSetPrompt={(prompt) => patch.mutate({ id: c.id, visual_prompt: prompt })}
+              onSetPrompt={setPrompt}
             />
           ))}
         </div>
       )}
       {error && <p className="error">{errorText(error)}</p>}
+      {preview !== null && portraits.length > 0 && (
+        <Lightbox
+          title={`${c.name} 定妆照`}
+          items={portraits.map((p, i) => ({
+            url: p.url,
+            alt: p.id === c.portrait_candidate_id ? `${c.name} 定妆照` : `${c.name} 定妆照候选 ${i + 1}`,
+            current: p.id === c.portrait_candidate_id,
+            caption: promptOf(p) || (p.engine === 'upload' ? '上传的定妆照' : undefined),
+          }))}
+          index={preview}
+          onIndex={setPreview}
+          onClose={() => setPreview(null)}
+          actions={(i) => {
+            const p = portraits[i];
+            if (!p || p.id === c.portrait_candidate_id) return null;
+            return (
+              <div className="row">
+                <button type="button" className="primary" disabled={use.isPending} onClick={() => usePortrait(p)}>
+                  设为当前造型
+                </button>
+                {hint && <span className="notice small">{hint}</span>}
+              </div>
+            );
+          }}
+        />
+      )}
     </article>
   );
 }

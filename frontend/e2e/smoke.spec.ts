@@ -28,7 +28,7 @@ test('新建项目 → 剧本 → 分镜 → 导演台（manual LLM，不需要�
   await expect(page.getByRole('heading', { name: /剧本 · 第 1 集/ })).toBeVisible();
 
   await page.getByRole('button', { name: '运行剧本' }).click();
-  await expect(page.getByRole('status')).toContainText('已提交任务');
+  await expect(page.locator('.job-notice')).toContainText('运行剧本：');
 
   // 剧本任务先要结构，再要视觉设定：同一个任务连着两次等待输入
   await answerWaitingJob(page, /^script_structure$/, JSON.stringify(STRUCTURE));
@@ -40,8 +40,12 @@ test('新建项目 → 剧本 → 分镜 → 导演台（manual LLM，不需要�
   await nav(page, '剧本').click();
   await expect(page.getByRole('heading', { name: '剧本段落（1）' })).toBeVisible();
   await expect(page.getByRole('heading', { name: /剧本 · 第 1 集 提词器/ })).toBeVisible();
+  // 剧本跑完后角色在角色页：右上「本集角色」条进去
+  await page.getByRole('link', { name: /本集角色/ }).click();
+  await expect(page.getByRole('heading', { name: '林夏', level: 4 })).toBeVisible();
+  await page.getByRole('link', { name: '回剧本' }).click();
   await page.getByRole('button', { name: '运行分镜' }).click();
-  await expect(page.getByRole('status')).toContainText('已提交任务');
+  await expect(page.locator('.job-notice')).toContainText('运行分镜：');
 
   await answerWaitingJob(page, /^storyboard:\d+$/, JSON.stringify(STORYBOARD));
   await expect(page.getByTestId('job-status')).toHaveText('完成');

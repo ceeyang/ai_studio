@@ -92,9 +92,14 @@ for (const width of WIDTHS) {
     await expectNoOverflow(page, `${width} 项目详情`);
 
     await page.goto(`${ep}/script`);
+    await expect(page.getByRole('heading', { name: /剧本段落/ })).toBeVisible();
+    await expect(page.getByRole('link', { name: /本集角色/ })).toBeVisible();
+    await expectNoOverflow(page, `${width} 剧本`);
+
+    await page.goto(`${ep}/cast`);
     await expect(page.getByRole('region', { name: /的三视图/ })).toBeVisible();
     await expect(page.getByTestId('option-2')).toBeVisible();
-    await expectNoOverflow(page, `${width} 剧本`);
+    await expectNoOverflow(page, `${width} 角色`);
 
     await page.goto(`${ep}/director`);
     await expect(page.getByTestId('shot-S02')).toBeVisible();

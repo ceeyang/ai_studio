@@ -211,4 +211,58 @@ describe('三视图', () => {
     expect((screen.getByRole('button', { name: '全部生成' }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByText(/先选定定妆照/)).toBeTruthy();
   });
+
+  it('全身描述改了没保存：「全部生成」「生成」变「保存描述并生成」，先保存再出图', async () => {
+    const { calls, user } = setup(CHEN, {
+      'PATCH /api/characters/6/turnaround/look': CHEN,
+      'POST /api/characters/6/turnaround/generate': { job_ids: [70] },
+    });
+    await user.type(screen.getByLabelText('全身描述'), 'navy jacket, black boots');
+    expect(screen.queryByRole('button', { name: '全部生成' })).toBeNull();
+    const face = screen.getByTestId('sheet-face');
+    await user.click(within(face).getByRole('button', { name: '保存描述并生成' }));
+    await waitFor(() => expect(posts(calls)).toHaveLength(2));
+    expect(posts(calls)[0]).toMatchObject({ method: 'PATCH', url: '/api/characters/6/turnaround/look', body: { look: 'navy jacket, black boots' } });
+    expect(posts(calls)[1]).toMatchObject({ url: '/api/characters/6/turnaround/generate', body: { sheets: ['face'] } });
+  });
+
+  it('全部生成：保存描述并生成也走同一条路', async () => {
+    const { calls, user } = setup(CHEN, {
+      'PATCH /api/characters/6/turnaround/look': CHEN,
+      'POST /api/characters/6/turnaround/generate': { job_ids: [70, 71] },
+    });
+    await user.type(screen.getByLabelText('全身描述'), 'navy jacket');
+    const head = screen.getByRole('region', { name: '陈师傅 的三视图' }).querySelector('.turn-head') as HTMLElement;
+    await user.click(within(head).getByRole('button', { name: '保存描述并生成' }));
+    await waitFor(() => expect(posts(calls)).toHaveLength(2));
+    expect(posts(calls)[0].body).toEqual({ look: 'navy jacket' });
+    expect(posts(calls)[1].body).toEqual({});
+  });
+
+  it('全部生成只提交没在跑的设定图；全在跑时禁用并写明原因', async () => {
+    const one: Character = { ...CHEN, active_jobs: [{ id: 80, type: 'image.turnaround', status: 'running', sheet: 'body' }] };
+    const { calls, user } = setup(one, { 'POST /api/characters/6/turnaround/generate': { job_ids: [71] } });
+    await user.click(screen.getByRole('button', { name: /^全部生成/ }));
+    await waitFor(() => expect(posts(calls)).toHaveLength(1));
+    expect(posts(calls)[0].body).toEqual({ sheets: ['face'] });
+  });
+
+  it('两张都在跑：全部生成禁用，旁边写原因', () => {
+    const both: Character = {
+      ...CHEN,
+      active_jobs: [
+        { id: 80, type: 'image.turnaround', status: 'running', sheet: 'body' },
+        { id: 81, type: 'image.turnaround', status: 'queued', sheet: 'face' },
+      ],
+    };
+    setup(both);
+    expect((screen.getByRole('button', { name: /^全部生成/ }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText('两张设定图都在生成')).toBeTruthy();
+  });
+
+  it('能不能出图看已保存的描述：没外貌提示词也没保存的描述时禁用并写明原因', () => {
+    setup({ ...CHEN, visual_prompt: '' });
+    expect((screen.getByRole('button', { name: '全部生成' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText('先写全身描述或外貌提示词')).toBeTruthy();
+  });
 });

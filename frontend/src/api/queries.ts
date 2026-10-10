@@ -24,6 +24,7 @@ import type {
   ProjectIn,
   ProjectOverview,
   QueueState,
+  RerunImpact,
   RunIn,
   RunOut,
   SceneBlock,
@@ -456,6 +457,11 @@ export function useTranslateSubtitles(episodeId: number) {
     mutationFn: (body: TranslateIn) => api.post<RunOut>(`/api/episodes/${episodeId}/subtitles/translate`, body),
     onSuccess: () => invalidate(qc, ['jobs'], keys.queue),
   });
+}
+
+/** 跑之前问一句后端：现在重跑这个阶段会不会动、会删什么（不调用 LLM）。 */
+export function fetchRerunImpact(episodeId: number, stage: 'script' | 'storyboard', force: boolean): Promise<RerunImpact> {
+  return api.get<RerunImpact>(`/api/episodes/${episodeId}/rerun-impact?stage=${stage}&force=${force ? 1 : 0}`);
 }
 
 export function useRunStage(episodeId: number) {

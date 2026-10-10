@@ -12,7 +12,7 @@ import {
   useSelectTurnaroundSheet,
   useTurnaroundLook,
 } from '../../api/queries';
-import type { Character, JobBrief, TurnaroundCell, TurnaroundSheet } from '../../api/types';
+import type { Character, JobBrief, TurnaroundCell, TurnaroundSheet, TurnaroundSheetKey } from '../../api/types';
 import { ImageEngineSelect } from '../../components/ImageEngineSelect';
 import { useEvents } from '../../ws/EventsContext';
 import { isDecoding } from '../../ws/events';
@@ -24,6 +24,7 @@ function SheetBlock({
   job,
   canGenerate,
   busy,
+  saveFirst,
   onGenerate,
   onSelect,
   onCrop,
@@ -34,6 +35,8 @@ function SheetBlock({
   job: JobBrief | undefined;
   canGenerate: boolean;
   busy: boolean;
+  /** 全身描述改了没保存：按钮变「保存描述并生成」 */
+  saveFirst: boolean;
   onGenerate: () => void;
   onSelect: (candidateId: number) => void;
   onCrop: (method: 'auto' | 'equal') => void;
@@ -56,7 +59,7 @@ function SheetBlock({
         {state && <span className={`badge ${state.cls}`}>{state.text}</span>}
         <div className="turn-actions">
           <button type="button" className="sm" disabled={busy || !!job || !canGenerate} onClick={onGenerate}>
-            {has ? '重新生成' : '生成'}
+            {saveFirst ? '保存描述并生成' : has ? '重新生成' : '生成'}
           </button>
           <button
             type="button"
@@ -166,13 +169,36 @@ export function TurnaroundPanel({ c, slug }: { c: Character; slug: string }) {
   const sheetJob = (key: string) => jobs.find((j) => j.type === 'image.turnaround' && j.sheet === key);
   const running = jobs.filter((j) => j.type === 'image.turnaround').length;
   const hasPortrait = c.portrait_candidate_id != null;
-  const hasLook = !!(look.trim() || c.visual_prompt.trim());
-  const canGenerate = hasPortrait && hasLook;
   const dirty = look.trim() !== t.look.trim();
+  // 出图用的是已保存的描述；描述改了没保存时按钮会先保存，所以按要保存的那份算
+  const hasLook = !!((dirty ? look : t.look).trim() || c.visual_prompt.trim());
+  const canGenerate = hasPortrait && hasLook;
+  // 「全部生成」只提交没在跑的设定图
+  const idleSheets = t.sheets.filter((sh) => !sheetJob(sh.sheet)).map((sh) => sh.sheet);
+  const allRunning = t.sheets.length > 0 && idleSheets.length === 0;
+  const blockedReason = !hasPortrait
+    ? '先选定定妆照：三视图用它锁脸'
+    : !hasLook
+      ? '先写全身描述或外貌提示词'
+      : allRunning
+        ? '两张设定图都在生成'
+        : null;
   const lookFailed = job.data && (job.data.status === 'failed' || job.data.status === 'canceled');
   const waitingInput = job.data?.status === 'waiting_input';
   const error = [lookJob.error, patchLook.error, gen.error, select.error, crop.error].find(Boolean);
   const busy = patchLook.isPending || gen.isPending || select.isPending || crop.isPending;
+
+  /** 出图：描述改了没保存时先保存，保存成功再提交。 */
+  const generate = async (sheets?: TurnaroundSheetKey[]) => {
+    if (dirty) {
+      try {
+        await patchLook.mutateAsync({ id: c.id, look: look.trim() });
+      } catch {
+        return; // 错误由 patchLook.error 显示
+      }
+    }
+    gen.mutate({ id: c.id, ...(sheets ? { sheets } : {}), engine: eng });
+  };
 
   return (
     <section className="turnaround" aria-label={`${c.name} 的三视图`}>
@@ -187,15 +213,14 @@ export function TurnaroundPanel({ c, slug }: { c: Character; slug: string }) {
           <button
             type="button"
             className="primary"
-            disabled={busy || !canGenerate}
-            title={!hasPortrait ? '先选定定妆照' : undefined}
-            onClick={() => gen.mutate({ id: c.id, engine: eng })}
+            disabled={busy || !canGenerate || allRunning}
+            onClick={() => generate(running > 0 ? idleSheets : undefined)}
           >
-            {running > 0 ? `全部生成（${running} 张进行中）` : '全部生成'}
+            {dirty ? '保存描述并生成' : running > 0 ? `全部生成（${running} 张进行中）` : '全部生成'}
           </button>
+          {blockedReason && <span className="muted small">{blockedReason}</span>}
         </div>
       </div>
-      {!hasPortrait && <p className="notice">先选定定妆照：三视图用它锁脸。</p>}
 
       <div className="turn-look">
         <label htmlFor={`turn-look-${c.id}`}>全身描述</label>
@@ -243,7 +268,8 @@ export function TurnaroundPanel({ c, slug }: { c: Character; slug: string }) {
           job={sheetJob(sh.sheet)}
           canGenerate={canGenerate}
           busy={busy}
-          onGenerate={() => gen.mutate({ id: c.id, sheets: [sh.sheet], engine: eng })}
+          saveFirst={dirty}
+          onGenerate={() => generate([sh.sheet])}
           onSelect={(candidateId) => select.mutate({ id: c.id, sheet: sh.sheet, candidateId })}
           onCrop={(method) => crop.mutate({ id: c.id, sheet: sh.sheet, method })}
         />

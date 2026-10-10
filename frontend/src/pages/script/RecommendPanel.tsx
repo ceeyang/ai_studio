@@ -1,6 +1,6 @@
 // 按剧本推荐角色：LLM 读这一集，列出剧本需要、角色表里还没有的人物，一键添加。
-import { useState } from 'react';
-import { Link } from 'react-router-dom';
+// 任务号记在地址的 ?recommend=<id> 里：刷新或离开再回来还能看到这次的结果。
+import { Link, useSearchParams } from 'react-router-dom';
 import { errorText } from '../../api/client';
 import { useCreateCharacter, useJob, useRecommendCharacters } from '../../api/queries';
 import type { Character, RecommendedCharacter } from '../../api/types';
@@ -8,7 +8,18 @@ import type { Character, RecommendedCharacter } from '../../api/types';
 export function RecommendPanel({ slug, episodeId, existing }: { slug: string; episodeId: number; existing: Character[] }) {
   const recommend = useRecommendCharacters(episodeId);
   const create = useCreateCharacter(slug);
-  const [jobId, setJobId] = useState<number | null>(null);
+  const [params, setParams] = useSearchParams();
+  const fromUrl = Number(params.get('recommend'));
+  const jobId = Number.isInteger(fromUrl) && fromUrl > 0 ? fromUrl : null;
+  const setJobId = (id: number) =>
+    setParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.set('recommend', String(id));
+        return next;
+      },
+      { replace: true },
+    );
   const job = useJob(jobId);
   const status = job.data?.status;
   const running = recommend.isPending || status === 'queued' || status === 'running';
