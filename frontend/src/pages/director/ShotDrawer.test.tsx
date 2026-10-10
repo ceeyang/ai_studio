@@ -45,6 +45,18 @@ describe('ShotDrawer', () => {
     expect(patch?.body).toEqual({ image_prompt: 'new prompt', duration: 7 });
   });
 
+  it('候选排在提示词前面；英文提示词收在「高级」里', async () => {
+    installFetch({ 'GET /api/engines': ENGINES });
+    renderAt(<ShotDrawer shot={SHOT} episodeId={1} onClose={() => {}} onGenerate={() => {}} />);
+    const cands = screen.getByRole('heading', { name: /首帧候选/ });
+    const params = screen.getByRole('heading', { name: '提示词与参数' });
+    expect(cands.compareDocumentPosition(params) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    const adv = screen.getByLabelText('图像提示词（英文）').closest('details');
+    expect(adv?.querySelector('summary')?.textContent).toBe('高级');
+    expect(adv?.open).toBe(false);
+    expect(screen.getByLabelText('动作').closest('details')).toBeNull();
+  });
+
   it('选定另一个候选；槽位过期时标题旁有标记', async () => {
     const calls = installFetch({
       'GET /api/engines': ENGINES,

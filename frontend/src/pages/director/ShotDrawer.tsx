@@ -40,9 +40,9 @@ function shotFields(image: EngineRow[] | undefined, video: EngineRow[] | undefin
     },
     { name: 'image_engine', label: '图像引擎', kind: 'select', options: engineOptions(image) },
     { name: 'video_engine', label: '视频引擎', kind: 'select', options: engineOptions(video) },
-    { name: 'image_prompt', label: '图像提示词（英文）', kind: 'textarea', rows: 6 },
-    { name: 'motion_prompt', label: '运动提示词（英文）', kind: 'textarea', rows: 3 },
-    { name: 'audio_prompt', label: '声音提示词（英文）', kind: 'textarea', rows: 3 },
+    { name: 'image_prompt', label: '图像提示词（英文）', kind: 'textarea', rows: 6, advanced: true },
+    { name: 'motion_prompt', label: '运动提示词（英文）', kind: 'textarea', rows: 3, advanced: true },
+    { name: 'audio_prompt', label: '声音提示词（英文）', kind: 'textarea', rows: 3, advanced: true },
   ];
 }
 
@@ -230,6 +230,20 @@ export function ShotDrawer({
         </div>
         {notice}
 
+        {/* 候选在最前：打开抽屉多半是来挑首帧 / 视频的；英文提示词收在「高级」里 */}
+        {slots.length === 0 && <p className="muted">还没有生成任何首帧或视频。</p>}
+        {slots.map((sl) => (
+          <section key={sl.id}>
+            <h4>
+              {SLOT_LABEL[sl.kind] ?? sl.kind}候选
+              {sl.stale && <span className="badge stale">已过期</span>}
+            </h4>
+            {sl.stale && sl.stale_reason && <p className="muted stale-reason">过期原因：{sl.stale_reason}</p>}
+            <CandidateGrid slot={sl} selecting={select.isPending} onSelect={(cid) => select.mutate(cid)} />
+          </section>
+        ))}
+        {select.error && <p className="error">{errorText(select.error)}</p>}
+
         <section>
           <h4>提示词与参数</h4>
           <EditableFields
@@ -256,18 +270,6 @@ export function ShotDrawer({
           </section>
         )}
 
-        {slots.length === 0 && <p className="muted">还没有生成任何首帧或视频。</p>}
-        {slots.map((sl) => (
-          <section key={sl.id}>
-            <h4>
-              {SLOT_LABEL[sl.kind] ?? sl.kind}候选
-              {sl.stale && <span className="badge stale">已过期</span>}
-            </h4>
-            {sl.stale && sl.stale_reason && <p className="muted stale-reason">过期原因：{sl.stale_reason}</p>}
-            <CandidateGrid slot={sl} selecting={select.isPending} onSelect={(cid) => select.mutate(cid)} />
-          </section>
-        ))}
-        {select.error && <p className="error">{errorText(select.error)}</p>}
       </aside>
     </>
   );
