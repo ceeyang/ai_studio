@@ -8,6 +8,8 @@ export interface DialogueEditorProps {
   error?: string | null;
   /** 有没有未保存的修改变化时通知父组件（抽屉关闭前确认用） */
   onDirtyChange?: (dirty: boolean) => void;
+  /** 每次内容变化时报当前对白（「保存并生成」要拿没保存的改动） */
+  onLinesChange?: (lines: DialogueLine[], dirty: boolean) => void;
 }
 
 /**
@@ -48,7 +50,14 @@ export function mergeDialogue(current: DialogueLine[], oldBase: DialogueLine[], 
   });
 }
 
-export function DialogueEditor({ dialogue, onSave, saving = false, error = null, onDirtyChange }: DialogueEditorProps) {
+export function DialogueEditor({
+  dialogue,
+  onSave,
+  saving = false,
+  error = null,
+  onDirtyChange,
+  onLinesChange,
+}: DialogueEditorProps) {
   const key = JSON.stringify(dialogue);
   const [lines, setLines] = useState<DialogueLine[]>(dialogue);
   // 正在改的时候任务把对白更新了：合并后提示，可以一键载入最新
@@ -82,6 +91,12 @@ export function DialogueEditor({ dialogue, onSave, saving = false, error = null,
     lastDirty.current = dirty;
     dirtyCb.current?.(dirty);
   }, [dirty]);
+  const linesCb = useRef(onLinesChange);
+  linesCb.current = onLinesChange;
+  const linesKey = JSON.stringify(lines);
+  useEffect(() => {
+    linesCb.current?.(JSON.parse(linesKey) as DialogueLine[], linesKey !== key);
+  }, [linesKey, key]);
   const loadLatest = () => {
     setLines(JSON.parse(key) as DialogueLine[]);
     setUpdated(false);

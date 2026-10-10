@@ -128,6 +128,7 @@ describe('ShotTable', () => {
 
   it('失败的格子带「失败」角标和原因，点「重试」重新生成这一格', async () => {
     const onGenerate = vi.fn();
+    const onRetry = vi.fn();
     const shots = [
       makeShot({
         id: 11, code: 'S01',
@@ -136,12 +137,13 @@ describe('ShotTable', () => {
     ];
     render(
       <ShotTable shots={shots} selected={new Set()} onToggle={vi.fn()} onToggleAll={vi.fn()} onOpen={vi.fn()} onMove={vi.fn()}
-        onSplit={vi.fn()} onInsertAfter={vi.fn()} onDelete={vi.fn()} onGenerate={onGenerate} />,
+        onSplit={vi.fn()} onInsertAfter={vi.fn()} onDelete={vi.fn()} onGenerate={onGenerate} onRetry={onRetry} />,
     );
     const row = screen.getByTestId('shot-S01');
     expect(within(row).getByText('失败')).toBeTruthy();
     expect(within(row).getByText('显存不足')).toBeTruthy();
     await userEvent.setup().click(screen.getByRole('button', { name: '重试视频 S01' }));
-    expect(onGenerate).toHaveBeenCalledWith(11, 'videos');
+    expect(onRetry).toHaveBeenCalledWith(11, 'videos');
+    expect(onGenerate).not.toHaveBeenCalled();
   });
 });

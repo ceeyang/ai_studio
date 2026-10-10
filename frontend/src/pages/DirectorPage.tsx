@@ -34,6 +34,28 @@ interface Batch {
   stage: GenStage;
   ids: number[];
   force: boolean;
+  /** 接着跑的阶段：重出首帧后接着按新首帧重出视频 */
+  then?: GenStage[];
+}
+
+/** 一批会产生多少个任务：首帧每镜 × 候选数，视频每镜一个（后端视频不按候选数出） */
+function batchParts(b: Batch, count: number): EstimatePart[] {
+  const parts: EstimatePart[] = [];
+  for (const st of [b.stage, ...(b.then ?? [])]) {
+    parts.push({ type: cellOf(st).type, n: st === 'keyframes' ? b.ids.length * count : b.ids.length });
+  }
+  return parts;
+}
+
+/** 把几批的任务数按类型合起来，给预估用 */
+function mergeParts(list: EstimatePart[]): EstimatePart[] {
+  const out: EstimatePart[] = [];
+  for (const p of list) {
+    const hit = out.find((x) => x.type === p.type);
+    if (hit) hit.n += p.n;
+    else out.push({ ...p });
+  }
+  return out;
 }
 
 export function DirectorPage() {
@@ -108,6 +130,7 @@ export function DirectorPage() {
       for (const b of batches) {
         const body: RunIn = { stage: b.stage, candidates: count, force: b.force };
         if (b.ids.length > 0) body.shots = b.ids.map(String);
+        if (b.then && b.then.length > 0) body.then = b.then;
         const r = await run.mutateAsync(body);
         ids.push(...r.job_ids);
       }
@@ -120,28 +143,35 @@ export function DirectorPage() {
     }
   };
 
-  /** justSaved：抽屉刚保存了提示词，手上的镜头数据是保存前的，不能拿它判断"都是最新的" */
-  const generate = async (stage: GenStage, ids: number[], what: string, justSaved = false) => {
+  /**
+   * skipFresh：不做「都是最新的」判断——抽屉刚保存了改动（手上的镜头数据是保存前的），或者是失败格子的重试。
+   * forceRun：这一次强制重出（重试要强制，不然后端看选定的结果还是最新的会跳过）。
+   */
+  const generate = async (stage: GenStage, ids: number[], what: string, opt: { skipFresh?: boolean; forceRun?: boolean } = {}) => {
     notice.clear();
     const cell = cellOf(stage);
     const targets = ids.length > 0 ? shots.filter((s) => ids.includes(s.id)) : shots;
+    const doForce = force || !!opt.forceRun;
     // 单候选、不强制时后端会跳过已经是最新的：都是最新的就别提交了
-    if (!justSaved && count === 1 && !force && targets.length > 0 && targets.every((s) => slotMark(slotOf(s, kindOf(stage))) === 'ok')) {
+    if (!opt.skipFresh && count === 1 && !doForce && targets.length > 0 && targets.every((s) => slotMark(slotOf(s, kindOf(stage))) === 'ok')) {
       notice.info('都是最新的，勾强制重跑才会重出');
       return;
     }
-    if (!(await confirmBatch(`批量生成${cell.label}？`, [{ type: cell.type, n: targets.length * count }]))) return;
-    await submit([{ stage, ids, force }], `生成${cell.label}${what}`);
+    const batch: Batch = { stage, ids, force: doForce };
+    if (!(await confirmBatch(`批量生成${cell.label}？`, batchParts({ ...batch, ids: targets.map((s) => s.id) }, count)))) return;
+    await submit([batch], `${opt.forceRun && !force ? '重试' : '生成'}${cell.label}${what}`);
   };
 
   const redoStale = async () => {
     notice.clear();
+    // 首帧过期的镜头：首帧接着视频一起重出（视频依赖新首帧）；只有视频过期的单独重出视频
+    const videoOnly = staleVid.filter((sid) => !staleKf.includes(sid));
     const batches: Batch[] = [
-      { stage: 'keyframes' as const, ids: staleKf, force: true },
-      { stage: 'videos' as const, ids: staleVid, force: true },
+      { stage: 'keyframes' as const, ids: staleKf, force: true, then: ['videos' as const] },
+      { stage: 'videos' as const, ids: videoOnly, force: true },
     ].filter((b) => b.ids.length > 0);
     if (batches.length === 0) return;
-    const parts = batches.map((b) => ({ type: cellOf(b.stage).type, n: b.ids.length * count }));
+    const parts = mergeParts(batches.flatMap((b) => batchParts(b, count)));
     if (!(await confirmBatch('重做过期的格子？', parts))) return;
     await submit(batches, `只重做过期的（${staleCount}）`);
   };
@@ -261,6 +291,10 @@ export function DirectorPage() {
               const code = shots.find((s) => s.id === shotId)?.code ?? '';
               void generate(stage, [shotId], ` ${code}`);
             }}
+            onRetry={(shotId, stage) => {
+              const code = shots.find((s) => s.id === shotId)?.code ?? '';
+              void generate(stage, [shotId], ` ${code}`, { skipFresh: true, forceRun: true });
+            }}
           />
         )}
       </div>
@@ -277,7 +311,7 @@ export function DirectorPage() {
           onForceChange={setForce}
           notice={notice.view}
           onClose={close}
-          onGenerate={(stage, saved) => void generate(stage, [openShot.id], ` ${openShot.code}`, saved)}
+          onGenerate={(stage, saved) => void generate(stage, [openShot.id], ` ${openShot.code}`, { skipFresh: saved })}
         />
       )}
     </div>

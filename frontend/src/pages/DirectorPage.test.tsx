@@ -90,21 +90,41 @@ describe('DirectorPage', () => {
     expect(calls.find((c) => c.method === 'POST')?.body).toEqual({ stage: 'keyframes', candidates: 1, force: true, shots: ['11'] });
   });
 
-  it('「只重做过期的」按格子分阶段提交、强制重跑；没有过期时禁用', async () => {
+  it('「只重做过期的」：首帧过期的镜头首帧接着视频一起重出，只有视频过期的单独重出视频，都强制', async () => {
     const shots = [
       makeShot({ id: 11, code: 'S01', slots: [chosen(1, 'first_frame', true), chosen(2, 'video')] }),
       makeShot({ id: 12, code: 'S02', order: 1, slots: [chosen(3, 'first_frame', true), chosen(4, 'video', true)] }),
+      makeShot({ id: 13, code: 'S03', order: 2, slots: [chosen(5, 'first_frame'), chosen(6, 'video', true)] }),
     ];
     const calls = installFetch(
       routes({ 'GET /api/episodes/4': makeEpisode({ id: 4, shots }), 'POST /api/episodes/4/run': { job_ids: [91] } }),
     );
     renderAt(<DirectorPage />, AT);
     const user = userEvent.setup();
-    await user.click(await screen.findByRole('button', { name: '只重做过期的（3）' }));
+    await user.click(await screen.findByRole('button', { name: '只重做过期的（4）' }));
+    // 2 个首帧 + 接着的 2 个视频 + 单独 1 个视频 = 5 个任务：先预估
+    const dlg = await screen.findByRole('dialog', { name: '重做过期的格子？' });
+    expect(dlg.textContent).toContain('将提交 2 个首帧任务、3 个视频任务');
+    await user.click(within(dlg).getByRole('button', { name: '继续提交' }));
     await waitFor(() => expect(calls.filter((c) => c.method === 'POST')).toHaveLength(2));
     const runs = calls.filter((c) => c.method === 'POST');
-    expect(runs[0].body).toEqual({ stage: 'keyframes', candidates: 1, force: true, shots: ['11', '12'] });
-    expect(runs[1].body).toEqual({ stage: 'videos', candidates: 1, force: true, shots: ['12'] });
+    expect(runs[0].body).toEqual({ stage: 'keyframes', candidates: 1, force: true, shots: ['11', '12'], then: ['videos'] });
+    // S02 的视频已经在链里了，不再单独提交
+    expect(runs[1].body).toEqual({ stage: 'videos', candidates: 1, force: true, shots: ['13'] });
+  });
+
+  it('失败格子已有最新的选定结果时，「重试」也要强制提交，不被「都是最新的」吞掉', async () => {
+    const shot = makeShot({
+      id: 11, code: 'S01', slots: [chosen(1, 'first_frame')],
+      failures: [{ id: 80, type: 'image.keyframe', status: 'failed', error: '显存不足' }],
+    });
+    const calls = installFetch(
+      routes({ 'GET /api/episodes/4': makeEpisode({ id: 4, shots: [shot] }), 'POST /api/episodes/4/run': { job_ids: [94] } }),
+    );
+    renderAt(<DirectorPage />, AT);
+    await userEvent.setup().click(await screen.findByRole('button', { name: '重试首帧 S01' }));
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST')).toBe(true));
+    expect(calls.find((c) => c.method === 'POST')?.body).toEqual({ stage: 'keyframes', candidates: 1, force: true, shots: ['11'] });
   });
 
   it('没有过期的格子时「只重做过期的（0）」禁用', async () => {

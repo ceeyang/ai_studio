@@ -188,4 +188,38 @@ describe('ShotDrawer', () => {
     const gen = screen.getByRole('button', { name: '首帧生成中 50%' }) as HTMLButtonElement;
     expect(gen.disabled).toBe(true);
   });
+
+  it('对白改了没保存时也变「保存并生成」：对白和提示词一起先保存', async () => {
+    const shot = makeShot({ id: 6, code: 'S02', dialogue: [{ speaker: '陈师傅', zh: '换？', start: 2, end: 2.6 }] });
+    const calls = installFetch({
+      'GET /api/engines': ENGINES,
+      'PATCH /api/shots/6': (c: { body: unknown }) => ({ ...shot, ...(c.body as object) }),
+    });
+    const onGenerate = vi.fn();
+    renderAt(<ShotDrawer shot={shot} episodeId={1} onClose={() => {}} onGenerate={onGenerate} />);
+    const user = userEvent.setup();
+    const zh = screen.getByLabelText('第 1 句中文');
+    await user.clear(zh);
+    await user.type(zh, '换什么？');
+    await user.click(screen.getByRole('button', { name: '保存并生成视频' }));
+    await waitFor(() => expect(onGenerate).toHaveBeenCalledWith('videos', true));
+    const patches = calls.filter((c) => c.method === 'PATCH');
+    expect(patches).toHaveLength(1);
+    expect(patches[0].body).toEqual({ dialogue: [{ speaker: '陈师傅', zh: '换什么？', start: 2, end: 2.6 }] });
+  });
+
+  it('保存失败就不生成', async () => {
+    const shot = makeShot({ id: 6, code: 'S02', dialogue: [{ speaker: '陈师傅', zh: '换？', start: 2, end: 2.6 }] });
+    installFetch({
+      'GET /api/engines': ENGINES,
+      'PATCH /api/shots/6': () => new Response(JSON.stringify({ detail: '时长不对' }), { status: 400 }),
+    });
+    const onGenerate = vi.fn();
+    renderAt(<ShotDrawer shot={shot} episodeId={1} onClose={() => {}} onGenerate={onGenerate} />);
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText('第 1 句中文'), '吗');
+    await user.click(screen.getByRole('button', { name: '保存并生成视频' }));
+    expect(await screen.findByText(/时长不对/)).toBeTruthy();
+    expect(onGenerate).not.toHaveBeenCalled();
+  });
 });

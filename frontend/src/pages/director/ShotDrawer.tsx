@@ -1,7 +1,7 @@
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { errorText } from '../../api/client';
 import { useEngines, usePatchShot, useSelectCandidate } from '../../api/queries';
-import { type EngineRow, type ShotDetail, type ShotPatch, TRANSITIONS, type Transition } from '../../api/types';
+import { type DialogueLine, type EngineRow, type ShotDetail, type ShotPatch, TRANSITIONS, type Transition } from '../../api/types';
 import { useConfirm } from '../../components/ConfirmDialog';
 import { EditableFields, type FieldSpec, type FieldValues, type FieldsState } from '../../components/EditableFields';
 import { engineLabel } from '../../format';
@@ -95,9 +95,12 @@ export function ShotDrawer({
   const confirm = useConfirm();
   const [fields, setFields] = useState<FieldsState | null>(null);
   const [dialogueDirty, setDialogueDirty] = useState(false);
+  const [dialogueDraft, setDialogueDraft] = useState<DialogueLine[] | null>(null);
   const [saving, setSaving] = useState(false);
   const box = useRef<HTMLElement>(null);
   const fieldsDirty = !!fields?.dirty;
+  // 提示词或对白有没保存的修改：生成按钮先保存（生成按旧内容跑就白跑了）
+  const unsaved = fieldsDirty || dialogueDirty;
   const latest = useRef({ dirty: false, onClose });
   latest.current = { dirty: fieldsDirty || dialogueDirty, onClose };
 
@@ -132,14 +135,16 @@ export function ShotDrawer({
     };
   }, [requestClose]);
 
-  /** 提示词改了没保存：先保存再生成（生成按旧提示词跑就白跑了）。 */
+  /** 提示词或对白改了没保存：一次 PATCH 一起先保存，保存失败就不生成。 */
   const generate = async (stage: GenStage) => {
-    const saveFirst = !!fields?.dirty;
-    if (fields?.dirty) {
-      if (!fields.valid) return;
+    const saveFirst = unsaved;
+    if (saveFirst) {
+      if (fieldsDirty && !fields?.valid) return;
+      const body: ShotPatch = fieldsDirty && fields ? toShotPatch(fields.changed) : {};
+      if (dialogueDirty && dialogueDraft) body.dialogue = dialogueDraft;
       setSaving(true);
       try {
-        await patch.mutateAsync({ id: shot.id, ...toShotPatch(fields.changed) });
+        await patch.mutateAsync({ id: shot.id, ...body });
       } catch {
         return; // 错误显示在表单下面
       } finally {
@@ -194,11 +199,11 @@ export function ShotDrawer({
                 <button
                   key={st}
                   type="button"
-                  className={fieldsDirty ? 'primary' : 'soft'}
+                  className={unsaved ? 'primary' : 'soft'}
                   disabled={generating || saving || !!active || (fieldsDirty && !fields?.valid)}
                   onClick={() => void generate(st)}
                 >
-                  {active ? `${label}${activeText(active)}` : fieldsDirty ? `保存并生成${label}` : `生成${label}`}
+                  {active ? `${label}${activeText(active)}` : unsaved ? `保存并生成${label}` : `生成${label}`}
                 </button>
               );
             })}
@@ -246,6 +251,7 @@ export function ShotDrawer({
               saving={patchDialogue.isPending}
               error={patchDialogue.error ? errorText(patchDialogue.error) : null}
               onDirtyChange={setDialogueDirty}
+              onLinesChange={(lines) => setDialogueDraft(lines)}
               onSave={(lines) => patchDialogue.mutate({ id: shot.id, dialogue: lines })}
             />
           </section>

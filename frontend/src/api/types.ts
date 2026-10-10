@@ -273,6 +273,8 @@ export interface RunIn {
   force?: boolean;
   priority?: number;
   export?: ExportOptions;
+  /** 本阶段完成后接着跑（同一批提交，后面的任务依赖前面的），如 keyframes → videos */
+  then?: NextStage[];
 }
 
 /** 按高棉语时长改写中文（POST /api/episodes/{id}/dialogue/fit-khmer）。 */

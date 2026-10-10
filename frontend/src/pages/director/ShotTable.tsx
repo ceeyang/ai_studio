@@ -18,6 +18,8 @@ export interface ShotTableProps {
   onInsertAfter(id: number): void;
   onDelete(id: number): void;
   onGenerate(id: number, stage: GenStage): void;
+  /** 失败格子上的「重试」；不给时当普通生成 */
+  onRetry?(id: number, stage: GenStage): void;
 }
 
 export const STALE_TIP = '提示词、引擎或参考图改过，这个结果是按旧输入生成的，需要重新生成';
@@ -129,6 +131,7 @@ function MediaCell({
 
 export function ShotTable(props: ShotTableProps) {
   const { shots, selected, busy = false, generating = false } = props;
+  const retry = props.onRetry ?? props.onGenerate;
   const allChecked = shots.length > 0 && shots.every((s) => selected.has(s.id));
   return (
     <div className="shots-wrap">
@@ -171,7 +174,7 @@ export function ShotTable(props: ShotTableProps) {
                     shot={s}
                     kind="first_frame"
                     onOpen={() => props.onOpen(s.id)}
-                    onRetry={() => props.onGenerate(s.id, 'keyframes')}
+                    onRetry={() => retry(s.id, 'keyframes')}
                   />
                 </td>
                 <td>
@@ -179,7 +182,7 @@ export function ShotTable(props: ShotTableProps) {
                     shot={s}
                     kind="video"
                     onOpen={() => props.onOpen(s.id)}
-                    onRetry={() => props.onGenerate(s.id, 'videos')}
+                    onRetry={() => retry(s.id, 'videos')}
                   />
                 </td>
                 <td className="text-cell">
