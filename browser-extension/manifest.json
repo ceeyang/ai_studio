@@ -1,0 +1,23 @@
+{
+  "manifest_version": 3,
+  "name": "AI Studio 网页出图桥",
+  "version": "0.1.0",
+  "description": "让本机 AI Studio（127.0.0.1:8700）在你已登录的 ChatGPT / Gemini 标签页里出图。不读取、不上传 cookie。",
+  "minimum_chrome_version": "116",
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "permissions": ["tabs", "scripting", "storage", "alarms", "cookies"],
+  "host_permissions": [
+    "https://chatgpt.com/*",
+    "https://chat.openai.com/*",
+    "https://*.oaiusercontent.com/*",
+    "https://gemini.google.com/*",
+    "https://*.googleusercontent.com/*"
+  ],
+  "action": {
+    "default_title": "AI Studio 网页出图桥",
+    "default_popup": "popup.html"
+  }
+}

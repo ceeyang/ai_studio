@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <title>AI Studio 网页出图桥</title>
+  <style>
+    body { font: 13px/1.5 system-ui, "Microsoft YaHei", sans-serif; margin: 0; padding: 12px 14px; width: 320px; color: #1f2328; }
+    h1 { font-size: 14px; margin: 0 0 8px; }
+    .state { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+    .dot { width: 9px; height: 9px; border-radius: 50%; background: #999; flex: none; }
+    .dot.connected { background: #1a7f37; }
+    .dot.connecting { background: #bf8700; }
+    .dot.disconnected, .dot.error { background: #cf222e; }
+    .muted { color: #656d76; }
+    .err { color: #cf222e; }
+    table { width: 100%; border-collapse: collapse; margin: 8px 0; }
+    td { padding: 3px 0; border-top: 1px solid #eee; }
+    label { display: block; margin-top: 10px; }
+    input { width: 100%; box-sizing: border-box; font: inherit; padding: 4px 6px; margin-top: 2px; }
+    .row { display: flex; gap: 6px; margin-top: 6px; }
+    button { font: inherit; padding: 3px 10px; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <h1>AI Studio 网页出图桥</h1>
+  <div class="state"><span id="dot" class="dot"></span><span id="state">读取中…</span></div>
+  <div id="error" class="err"></div>
+  <table id="sites"></table>
+  <div class="muted">出图任务会在这个浏览器的 ChatGPT / Gemini 标签页里新开对话完成。没登录的话先在这里登录。</div>
+  <label>studio 地址
+    <input id="url" spellcheck="false">
+  </label>
+  <div class="row">
+    <button id="save" type="button">保存并重连</button>
+    <button id="refresh" type="button">刷新状态</button>
+  </div>
+  <script src="popup.js" type="module"></script>
+</body>
+</html>

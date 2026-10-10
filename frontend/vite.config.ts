@@ -28,7 +28,8 @@ export default defineConfig({
   test: {
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
-    include: ['src/**/*.test.{ts,tsx}'],
+    // src/extension/ 是 browser-extension 的单测（纯 JS，不做类型检查）
+    include: ['src/**/*.test.{ts,tsx}', 'src/extension/**/*.test.js'],
     restoreMocks: true,
   },
 });
