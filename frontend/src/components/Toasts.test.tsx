@@ -25,19 +25,20 @@ describe('Toasts', () => {
     act(() => emitJobSettled(makeJob({ id: 3, type: 'image.keyframe', status: 'done' })));
     const toast = await screen.findByText(/第 1 集 S03 首帧完成/);
     const box = toast.closest('[data-testid="toast"]') as HTMLElement;
-    expect(within(box).getByRole('link', { name: '查看' }).getAttribute('href')).toBe('/projects/demo/episodes/1/director?shot=3');
+    // 后端给的还是旧页面地址：换成工作台地址
+    expect(within(box).getByRole('link', { name: '查看' }).getAttribute('href')).toBe('/projects/demo/episodes/1?stage=keyframes&shot=3');
     await act(async () => {
       vi.advanceTimersByTime(8100);
     });
     expect(screen.queryByText(/S03 首帧完成/)).toBeNull();
   });
 
-  it('失败也提示；已经在那个页面上就不弹', async () => {
+  it('失败也提示；已经在那个页面（工作台对应阶段）上就不弹', async () => {
     installFetch({
       'GET /api/jobs/4': { ...makeJob({ id: 4, type: 'video.shot', status: 'failed' }), context: CTX(4, '/projects/demo/episodes/1/director') },
       'GET /api/jobs/5': { ...makeJob({ id: 5, type: 'video.shot', status: 'failed' }), context: CTX(5, '/elsewhere') },
     });
-    renderAt(<Toasts />, { route: '/projects/demo/episodes/1/director' });
+    renderAt(<Toasts />, { route: '/projects/demo/episodes/1?stage=keyframes' });
     act(() => {
       emitJobSettled(makeJob({ id: 4, type: 'video.shot', status: 'failed' }));
       emitJobSettled(makeJob({ id: 5, type: 'video.shot', status: 'failed' }));

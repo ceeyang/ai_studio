@@ -1,10 +1,11 @@
-import { screen, waitFor, within } from '@testing-library/react';
+import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
-import { installFetch } from '../test/fetch';
-import { makeEpisode } from '../test/factories';
-import { renderAt } from '../test/render';
-import { CastPage } from './CastPage';
+import { installFetch } from '../../test/fetch';
+import { NEXT_ACTION_EVENT } from '../../components/EpisodeHeader';
+import { makeEpisode, makeShot } from '../../test/factories';
+import { renderAt } from '../../test/render';
+import { CastStage } from './CastStage';
 
 const LIN = { id: 8, project_id: 1, name: '林夏', description: '女主播', visual_prompt: 'young woman', core_features: '', voice: null };
 const ROUTES = {
@@ -15,21 +16,16 @@ const ROUTES = {
   'GET /api/projects/demo/characters': [LIN],
   'GET /api/projects/demo/style': null,
 };
-const AT = { route: '/projects/demo/episodes/4/cast', path: '/projects/:slug/episodes/:episodeId/cast' };
+const AT = { route: '/projects/demo/episodes/4?stage=cast', path: '/projects/:slug/episodes/:episodeId' };
 const writes = <T extends { method: string }>(calls: T[]) => calls.filter((c) => c.method !== 'GET');
 
-describe('CastPage', () => {
-  it('三个页签：角色 / 场景 / 风格；页头的进度条能回剧本、去导演台', async () => {
+describe('CastStage', () => {
+  it('三个页签：角色 / 场景 / 风格；不带页头', async () => {
     installFetch(ROUTES);
-    renderAt(<CastPage />, AT);
+    renderAt(<CastStage />, AT);
     const user = userEvent.setup();
-    expect(await screen.findByRole('heading', { level: 2, name: '角色' })).toBeTruthy();
-    expect(screen.getByRole('navigation', { name: '面包屑' }).textContent).toContain('第 1 集 提词器');
-    const stepper = screen.getByRole('list', { name: '制作进度' });
-    expect(within(stepper).getByRole('link', { name: /剧本/ }).getAttribute('href')).toBe('/projects/demo/episodes/4/script');
-    expect(within(stepper).getByRole('link', { name: /首帧/ }).getAttribute('href')).toBe('/projects/demo/episodes/4/director');
-    expect(within(stepper).getByRole('link', { name: /角色/ }).getAttribute('aria-current')).toBe('step');
     expect(await screen.findByTestId('character-8')).toBeTruthy();
+    expect(screen.queryByRole('heading', { level: 2 })).toBeNull();
     expect(screen.getByRole('tab', { name: '角色（1）' }).getAttribute('aria-selected')).toBe('true');
     await user.click(screen.getByRole('tab', { name: '场景（1）' }));
     expect(screen.getByTestId('character-8').closest('[hidden]')).toBeTruthy();
@@ -41,7 +37,7 @@ describe('CastPage', () => {
 
   it('切换页签不丢正在编辑的内容', async () => {
     installFetch(ROUTES);
-    renderAt(<CastPage />, AT);
+    renderAt(<CastStage />, AT);
     const user = userEvent.setup();
     const card = await screen.findByTestId('character-8');
     const desc = within(card).getByLabelText('人物描述');
@@ -56,7 +52,7 @@ describe('CastPage', () => {
 
   it('角色卡可编辑；音色是下拉，「其他（手填）」切成输入框', async () => {
     const calls = installFetch({ ...ROUTES, 'PATCH /api/characters/8': LIN });
-    renderAt(<CastPage />, AT);
+    renderAt(<CastStage />, AT);
     const user = userEvent.setup();
     const card = await screen.findByTestId('character-8');
     const voice = within(card).getByLabelText(/配音音色/) as HTMLSelectElement;
@@ -77,7 +73,7 @@ describe('CastPage', () => {
 
   it('不在常用列表里的音色：直接显示成手填', async () => {
     installFetch({ ...ROUTES, 'GET /api/projects/demo/characters': [{ ...LIN, voice: 'en-US-AriaNeural' }] });
-    renderAt(<CastPage />, AT);
+    renderAt(<CastStage />, AT);
     const card = await screen.findByTestId('character-8');
     expect((within(card).getByLabelText('配音音色（手填）') as HTMLInputElement).value).toBe('en-US-AriaNeural');
   });
@@ -93,7 +89,7 @@ describe('CastPage', () => {
         return withPortrait;
       },
     });
-    renderAt(<CastPage />, AT);
+    renderAt(<CastStage />, AT);
     const user = userEvent.setup();
     const card = await screen.findByTestId('character-8');
     expect(within(card).getByText('还没有定妆照')).toBeTruthy();
@@ -107,7 +103,7 @@ describe('CastPage', () => {
 
   it('场景卡可编辑', async () => {
     const calls = installFetch({ ...ROUTES, 'PATCH /api/locations/3': ROUTES['GET /api/projects/demo/locations'][0] });
-    renderAt(<CastPage />, AT);
+    renderAt(<CastStage />, AT);
     const user = userEvent.setup();
     await user.click(await screen.findByRole('tab', { name: '场景（1）' }));
     const loc = screen.getByTestId('location-3');
@@ -119,39 +115,57 @@ describe('CastPage', () => {
 
   it('场景或风格改了没保存时换页面先问', async () => {
     installFetch(ROUTES);
-    renderAt(<CastPage />, AT);
+    const { router } = renderAt(<CastStage />, AT);
     const user = userEvent.setup();
+    const leave = () => act(() => void router.navigate('/jobs'));
     await user.click(await screen.findByRole('tab', { name: '风格' }));
     await user.type(screen.getByLabelText('色板'), '冷色');
-    await user.click(screen.getAllByRole('link', { name: /剧本/ })[0]);
+    await leave();
     const dlg = await screen.findByRole('dialog', { name: '有未保存的修改，确定离开？' });
     await user.click(within(dlg).getByRole('button', { name: '留下' }));
-    expect(screen.getByTestId('location').textContent).toBe('/projects/demo/episodes/4/cast');
+    expect(screen.getByTestId('location').textContent).toBe('/projects/demo/episodes/4?stage=cast');
     await user.clear(screen.getByLabelText('色板'));
     await user.click(screen.getByRole('tab', { name: '场景（1）' }));
     await user.type(within(screen.getByTestId('location-3')).getByLabelText('时间'), '晚');
-    await user.click(screen.getAllByRole('link', { name: /剧本/ })[0]);
+    await leave();
     expect(await screen.findByRole('dialog', { name: '有未保存的修改，确定离开？' })).toBeTruthy();
   });
 
-  it('下一步是抽定妆照：第一个缺定妆照的角色的「抽卡」是本页唯一的主按钮；点页头提示会切回角色页签并聚焦它', async () => {
+  it('地址里带 ?char=：切回角色页签', async () => {
+    installFetch(ROUTES);
+    const { router } = renderAt(<CastStage />, AT);
+    const user = userEvent.setup();
+    await screen.findByTestId('character-8');
+    await user.click(screen.getByRole('tab', { name: '风格' }));
+    await act(() => void router.navigate('/projects/demo/episodes/4?stage=cast&char=8'));
+    await waitFor(() => expect(screen.getByRole('tab', { name: /角色/ }).getAttribute('aria-selected')).toBe('true'));
+    expect(screen.getByTestId('character-8').closest('[hidden]')).toBeNull();
+  });
+
+  it('下一步是抽定妆照：第一个缺定妆照的出场角色的「抽卡」打上 data-next-action（不是主按钮）；收到下一步事件切回角色页签', async () => {
     const LAO = { ...LIN, id: 9, name: '老周', portrait_url: null };
     installFetch({
       ...ROUTES,
-      'GET /api/episodes/4': makeEpisode({ id: 4, title: '提词器', scene_blocks: [{ id: 1, order: 0, location_id: null, text: 'a' }] }),
+      'GET /api/episodes/4': makeEpisode({
+        id: 4,
+        title: '提词器',
+        scene_blocks: [{ id: 1, order: 0, location_id: null, text: 'a' }],
+        shots: [makeShot({ id: 1, cast: [{ character_id: 8, variation_id: null }, { character_id: 9, variation_id: null }] })],
+      }),
       'GET /api/projects/demo/characters': [{ ...LIN, portrait_url: '/media/p.png' }, LAO],
     });
-    const { container } = renderAt(<CastPage />, AT);
+    const { container } = renderAt(<CastStage />, AT);
     const user = userEvent.setup();
     const lao = await screen.findByTestId('character-9');
     const draw = within(lao).getByRole('button', { name: '抽卡' });
-    await waitFor(() => expect(draw.className).toContain('primary'));
-    expect(within(screen.getByTestId('character-8')).getByRole('button', { name: '抽卡' }).className).not.toContain('primary');
-    const draws = container.querySelectorAll('.draw-bar .primary');
-    expect(draws).toHaveLength(1);
+    await waitFor(() => expect(draw.hasAttribute('data-next-action')).toBe(true));
+    expect(within(screen.getByTestId('character-8')).getByRole('button', { name: '抽卡' }).hasAttribute('data-next-action')).toBe(false);
+    expect(container.querySelectorAll('[data-next-action]')).toHaveLength(1);
+    expect(container.querySelectorAll('.primary')).toHaveLength(0);
     await user.click(screen.getByRole('tab', { name: '风格' }));
-    await user.click(screen.getByRole('button', { name: /下一步：抽定妆照/ }));
-    await waitFor(() => expect(document.activeElement).toBe(draw));
+    act(() => {
+      window.dispatchEvent(new Event(NEXT_ACTION_EVENT));
+    });
     expect(screen.getByRole('tab', { name: /角色/ }).getAttribute('aria-selected')).toBe('true');
   });
 });

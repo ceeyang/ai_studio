@@ -1308,20 +1308,6 @@ div.error.banner.job-notice a { color: #ffd0d1; text-decoration: underline; }
 .script-solo { max-width: 980px; }
 .script-page .page-head > a + a, .cast-page .page-head > a + a { margin-left: 0; }
 /* 右上「本集角色」条：头像 + 名字 + 有几个有定妆照，点了去角色页 */
-.cast-strip {
-  margin-left: auto; display: inline-flex; align-items: center; gap: var(--s-2); min-width: 0; max-width: 100%;
-  padding: 4px 10px 4px 12px; border: 1px solid var(--border); border-radius: var(--r-pill); background: var(--surface-1);
-  color: var(--text-2); font-size: 12px; text-decoration: none;
-}
-.cast-strip:hover { border-color: var(--accent-line); color: var(--text); }
-.cast-strip-label { color: var(--muted); flex: none; }
-.cast-strip-list { display: inline-flex; align-items: center; gap: 6px; min-width: 0; overflow: hidden; }
-.cast-chip { display: inline-flex; align-items: center; gap: 4px; flex: none; }
-.cast-chip img, .cast-avatar { width: 22px; height: 22px; border-radius: 50%; object-fit: cover; flex: none; }
-.cast-avatar { display: inline-flex; align-items: center; justify-content: center; border: 1px dashed var(--border-strong); color: var(--faint); font-size: 11px; }
-.cast-chip.is-missing > span:last-child { color: var(--muted); }
-.cast-strip-count { flex: none; color: var(--muted); font-variant-numeric: tabular-nums; }
-.cast-strip .chev { margin-left: 2px; }
 /* 角色页：页签贴着顶栏 */
 .cast-pane .tabs { top: var(--taskbar-h, 0px); }
 /* 下拉选「其他（手填）」时出现的输入框 */
@@ -1343,7 +1329,7 @@ div.error.banner.job-notice a { color: #ffd0d1; text-decoration: underline; }
 }
 .btn.is-disabled { opacity: 0.42; cursor: not-allowed; pointer-events: none; }
 
-/* 剧集页头：面包屑 + 标题行（切集、下一步）+ 六段进度 */
+/* 单集工作台页头：面包屑 + 标题 + 切集 */
 .episode-header { flex-direction: column; align-items: stretch; gap: var(--s-3); }
 .crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); min-width: 0; }
 .crumbs a { color: var(--text-2); }
@@ -1353,21 +1339,22 @@ div.error.banner.job-notice a { color: #ffd0d1; text-decoration: underline; }
 .ep-head-main { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-3); min-width: 0; }
 .ep-head-main h2 { margin: 0; font-size: 22px; }
 .ep-head-main .grow { flex: 1; }
-.ep-head-main .cast-strip { margin-left: 0; }
 .ep-switch { display: inline-flex; gap: 4px; }
 .ep-all-done { color: var(--ok); }
 
 .stepper {
   list-style: none; margin: 0; padding: 0;
-  display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 6px;
+  display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px;
 }
-.step a {
+.step > button {
+  width: 100%; justify-content: flex-start; text-align: left; white-space: normal; font-weight: 400;
   display: flex; align-items: center; gap: var(--s-2); min-width: 0; height: 100%;
   padding: 8px 10px; border: 1px solid var(--border); border-radius: var(--r-md);
   background: var(--surface-1); color: var(--text-2); text-decoration: none;
   transition: border-color 140ms ease-out, background-color 140ms ease-out;
 }
-.step a:hover { border-color: var(--border-strong); background: var(--surface-2); color: var(--text); text-decoration: none; }
+.step > button:hover:not(:disabled) { border-color: var(--border-strong); background: var(--surface-2); color: var(--text); }
+.step > button:active:not(:disabled) { transform: none; }
 .step-dot {
   flex: none; width: 22px; height: 22px; border-radius: 50%;
   display: grid; place-items: center; font: 600 11px/1 var(--mono);
@@ -1378,16 +1365,16 @@ div.error.banner.job-notice a { color: #ffd0d1; text-decoration: underline; }
 .step-detail { font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
 .step.is-done .step-dot { background: var(--ok-soft); border-color: transparent; color: var(--ok); }
 .step.is-active .step-dot { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
-.step.is-active a { border-color: var(--accent-line); }
+.step.is-active > button { border-color: var(--accent-line); }
 .step.is-stale .step-dot { background: var(--warn-soft); border-color: transparent; color: var(--warn); }
 .step.is-stale .step-detail { color: var(--warn); }
-.step.is-here a { background: var(--surface-2); box-shadow: inset 0 -2px 0 var(--accent); }
+.step.is-here > button { background: var(--surface-2); box-shadow: inset 0 -2px 0 var(--accent); }
 @media (max-width: 1500px) {
-  .step a { padding: 6px 8px; gap: 6px; }
+  .step > button { padding: 6px 8px; gap: 6px; }
   .step-dot { width: 18px; height: 18px; font-size: 10px; }
 }
 
-/* 左侧导航：当前这一集 + 四个阶段页（缩进挂在它下面） */
+/* 左侧导航：当前这一集 + 「当前集」（缩进挂在它下面） */
 .nav-context {
   margin: var(--s-2) var(--s-2) 2px; padding-left: 10px; border-left: 2px solid var(--accent-line);
   font-size: 11.5px; color: var(--text-2); line-height: 1.45; overflow-wrap: anywhere;
@@ -1414,14 +1401,50 @@ div.error.banner.job-notice a { color: #ffd0d1; text-decoration: underline; }
 .meta .advanced { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
 .meta .advanced summary { cursor: pointer; }
 .meta .advanced[open] { flex-basis: 100%; }
-/* 下一步就在本页：页头只给提示，点了跳到本页的主按钮 */
-.next-hint {
-  height: 32px; padding: 0 12px; border-radius: var(--r-pill);
-  border: 1px dashed var(--accent-line); background: var(--accent-soft); color: var(--accent);
-  font-size: 12.5px; font-weight: 600;
-}
-.next-hint:hover:not(:disabled) { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-hover); }
 /* 根路由出错页 */
 .route-error { max-width: 640px; margin: 12vh auto 0; padding: 0 var(--s-6); display: flex; flex-direction: column; gap: var(--s-3); }
 .route-error h2 { margin: 0; font-size: 22px; }
 .route-error pre { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* =========================================================================
+   单集工作台：阶段条 + 左栏 + 主区（访问过的阶段用 hidden 保持挂载）
+   ========================================================================= */
+.stage-bar { display: flex; align-items: center; gap: var(--s-3); min-width: 0; }
+.stage-bar .stepper { flex: 1; min-width: 0; }
+.stage-next { flex: none; max-width: 340px; height: auto; min-height: 40px; padding: 8px 14px; white-space: normal; line-height: 1.35; text-align: left; }
+.stage-body { display: flex; flex-direction: column; gap: var(--s-4); min-width: 0; }
+.ws-body { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--s-4); align-items: start; }
+.ws-main { min-width: 0; }
+.ws-rail {
+  width: 260px; position: sticky; top: calc(var(--taskbar-h) + var(--s-3));
+  max-height: calc(100vh - var(--taskbar-h) - var(--s-6)); overflow-y: auto;
+  display: flex; flex-direction: column; gap: var(--s-2);
+  padding: var(--s-3); border: 1px solid var(--border); border-radius: var(--r-lg); background: var(--surface-1);
+}
+.ws-rail.is-collapsed { width: auto; padding: var(--s-2); }
+.rail-head { display: flex; align-items: center; justify-content: space-between; gap: var(--s-2); margin-top: var(--s-1); }
+.rail-head h3 { margin: 0; font-size: 13px; color: var(--text-2); }
+.rail-toggle { width: 28px; height: 28px; padding: 0; }
+.rail-source { margin: 0; font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.rail-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.rail-block, .rail-char {
+  width: 100%; height: auto; padding: 6px 8px; border-color: transparent; background: transparent;
+  color: var(--text-2); font-weight: 400; text-align: left; justify-content: flex-start;
+}
+.rail-block:active:not(:disabled), .rail-char:active:not(:disabled) { transform: none; }
+.rail-block:hover:not(:disabled), .rail-char:hover:not(:disabled) { background: var(--surface-hover); border-color: transparent; }
+.rail-block { flex-direction: column; align-items: stretch; gap: 3px; }
+.rail-block-head { font-size: 12px; font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; }
+.rail-block-text { font-size: 11.5px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; }
+.rail-char { gap: var(--s-2); }
+.rail-char.is-active { background: var(--surface-2); border-color: var(--accent-line); }
+.rail-avatar {
+  width: 28px; height: 28px; flex: none; border-radius: 50%; object-fit: cover;
+  display: inline-flex; align-items: center; justify-content: center;
+  border: 1px dashed var(--border-strong); color: var(--faint); font-size: 12px;
+}
+img.rail-avatar { border: 0; }
+.rail-char-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: var(--text); }
+@media (max-width: 1500px) {
+  .ws-rail { width: 220px; }
+}

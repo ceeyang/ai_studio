@@ -67,7 +67,7 @@ describe('ProjectsPage', () => {
     expect(await screen.findByText('项目 demo 已存在（HTTP 409）')).toBeTruthy();
   });
 
-  it('列出剧集；新建剧集提交原文和目标时长，跳到剧本页', async () => {
+  it('列出剧集；新建剧集提交原文和目标时长，跳到这一集的工作台', async () => {
     const calls = installFetch({
       'GET /api/projects': [makeProject()],
       'GET /api/engines': ENGINES,
@@ -93,11 +93,9 @@ describe('ProjectsPage', () => {
     const user = userEvent.setup();
     expect(await screen.findByText(/旧的一集/)).toBeTruthy();
     expect(screen.getByText(/已分镜/)).toBeTruthy();
-    expect(screen.getByRole('link', { name: '去导演台' }).getAttribute('href')).toBe('/projects/demo/episodes/3/director');
-    expect(screen.getByRole('link', { name: '去剧本' }).getAttribute('href')).toBe('/projects/demo/episodes/3/script');
-    // 已经分镜的集：主按钮是去导演台
-    expect(screen.getByRole('link', { name: '去导演台' }).classList.contains('primary')).toBe(true);
-    expect(screen.getByRole('link', { name: '去剧本' }).classList.contains('primary')).toBe(false);
+    // 每集一个入口：打开单集工作台（停在下一步所在的阶段）
+    expect(screen.getByRole('link', { name: '打开第 1 集' }).getAttribute('href')).toBe('/projects/demo/episodes/3');
+    expect(screen.queryByRole('link', { name: '去导演台' })).toBeNull();
     expect(screen.getByRole('link', { name: /全部项目/ }).getAttribute('href')).toBe('/');
     expect(await screen.findByText('2 个成片')).toBeTruthy();
     expect(screen.getByText('4 个镜头')).toBeTruthy();
@@ -125,7 +123,7 @@ describe('ProjectsPage', () => {
     await user.type(secs, '10');
     expect(screen.queryByText('目标时长要在 5–3600 秒之间')).toBeNull();
     await user.click(btn);
-    await waitFor(() => expect(where()).toBe('/projects/demo/episodes/5/script'));
+    await waitFor(() => expect(where()).toBe('/projects/demo/episodes/5'));
     expect(calls.find((c) => c.method === 'POST')?.body).toEqual({
       title: '',
       source_text: '深夜的直播间',
@@ -133,7 +131,7 @@ describe('ProjectsPage', () => {
     });
   });
 
-  it('项目总览：卡片带封面、集数和最新一集的导演台入口；没有首帧时用首字占位', async () => {
+  it('项目总览：卡片带封面、集数和最新一集的工作台入口；没有首帧时用首字占位', async () => {
     installFetch({
       'GET /api/projects': [makeProject(), makeProject({ id: 2, slug: 'b', title: '夜班' })],
       'GET /api/projects/demo/overview': {
@@ -151,16 +149,17 @@ describe('ProjectsPage', () => {
     await waitFor(() => expect(card.querySelector('img')?.getAttribute('src')).toBe('/media/demo/c.png'));
     expect(card.textContent).toContain('2 集');
     expect(card.textContent).toContain('已出剧本');
-    expect(screen.getByRole('link', { name: '导演台 · 第 2 集' }).getAttribute('href')).toBe('/projects/demo/episodes/7/director');
+    expect(screen.getByRole('link', { name: '工作台 · 第 2 集' }).getAttribute('href')).toBe('/projects/demo/episodes/7');
     const other = screen.getByTestId('project-b');
     expect(other.querySelector('img')).toBeNull();
     expect(other.querySelector('.cover-gen')?.textContent).toBe('夜');
     // 继续制作：没有上次记录时取最新一集
     const cont = screen.getByRole('region', { name: '继续制作' });
     expect(cont.textContent).toContain('第 2 集');
-    // 这一集还没分镜：主按钮是剧本，不把人带到空的导演台
-    expect(within(cont).getByRole('link', { name: '剧本' }).classList.contains('primary')).toBe(true);
-    expect(within(cont).getByRole('link', { name: '打开导演台' }).classList.contains('primary')).toBe(false);
+    // 一个入口：打开这一集的工作台（工作台自己停在下一步所在的阶段）
+    const open = within(cont).getByRole('link', { name: '继续制作' });
+    expect(open.getAttribute('href')).toBe('/projects/demo/episodes/7');
+    expect(open.classList.contains('primary')).toBe(true);
     expect(container.querySelector('.stat-tiles')?.textContent).toContain('剧集2');
   });
 

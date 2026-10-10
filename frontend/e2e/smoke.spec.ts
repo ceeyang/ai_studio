@@ -14,7 +14,11 @@ async function answerWaitingJob(page: Page, key: RegExp, text: string) {
   await page.getByRole('button', { name: '提交结果' }).click();
 }
 
-test('新建项目 → 剧本 → 分镜 → 导演台（manual LLM，不需要显卡）', async ({ page }) => {
+function stage(page: Page, name: RegExp) {
+  return page.getByRole('list', { name: '制作阶段' }).getByRole('button', { name });
+}
+
+test('新建项目 → 单集工作台：剧本 → 分镜 → 首帧阶段（manual LLM，不需要显卡）', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: '新建项目' }).click();
   await page.getByLabel('项目标题').fill('冒烟');
@@ -25,7 +29,9 @@ test('新建项目 → 剧本 → 分镜 → 导演台（manual LLM，不需要�
   await page.getByLabel('原文或梗概').fill(SYNOPSIS);
   await page.getByLabel('目标时长（秒）').fill('10');
   await page.getByRole('button', { name: '创建剧集' }).click();
-  await expect(page.getByRole('heading', { name: '剧本', exact: true, level: 2 })).toBeVisible();
+  // 新的一集：打开工作台，停在下一步所在的剧本阶段
+  await expect(stage(page, /剧本/)).toHaveAttribute('aria-current', 'step');
+  await expect(page).toHaveURL(/\?stage=script$/);
   await expect(page.getByRole('navigation', { name: '面包屑' })).toContainText('冒烟');
 
   await page.getByRole('button', { name: '生成剧本', exact: true }).click();
@@ -38,23 +44,27 @@ test('新建项目 → 剧本 → 分镜 → 导演台（manual LLM，不需要�
   await page.getByRole('button', { name: '提交结果' }).click();
   await expect(page.getByTestId('job-status')).toHaveText('完成');
 
-  await nav(page, '剧本').click();
+  // 左侧导航的「当前集」回到工作台：还没有镜头，下一步还在剧本阶段
+  await nav(page, '当前集').click();
   await expect(page.getByRole('heading', { name: '剧本段落（1）' })).toBeVisible();
-  await expect(page.getByRole('navigation', { name: '面包屑' })).toContainText('第 1 集 提词器');
-  // 剧本有了、角色还没定妆照：页头的下一步指向角色页
-  await expect(page.getByRole('link', { name: /^下一步：抽定妆照/ })).toBeVisible();
-  // 剧本跑完后角色在角色页：右上「本集角色」条进去
-  await page.getByRole('link', { name: /本集角色/ }).click();
+  await expect(page.getByRole('heading', { name: '第 1 集 提词器', level: 2 })).toBeVisible();
+  const next = page.getByRole('button', { name: '下一步：生成分镜' });
+  await expect(next).toBeVisible();
+  // 剧本跑完后角色在左栏：点了切到角色阶段
+  await page.getByRole('complementary', { name: '剧本大纲与角色' }).getByRole('button', { name: /^林夏/ }).click();
+  await expect(page).toHaveURL(/\?stage=cast&char=\d+$/);
   await expect(page.getByRole('heading', { name: '林夏', level: 4 })).toBeVisible();
-  await nav(page, '剧本').click();
-  await page.getByRole('button', { name: '生成分镜', exact: true }).click();
+  // 阶段条切回剧本，「下一步」就在本阶段：点它直接触发生成分镜
+  await stage(page, /剧本/).click();
+  await next.click();
   await expect(page.locator('.job-notice')).toContainText('生成分镜：');
 
   await answerWaitingJob(page, /^storyboard:\d+$/, JSON.stringify(STORYBOARD));
   await expect(page.getByTestId('job-status')).toHaveText('完成');
 
-  // 有镜头了：剧本页是「重新生成分镜…」，对话框里有修改意见和影响预估；取消不提交
-  await nav(page, '剧本').click();
+  // 有镜头了：剧本阶段是「重新生成分镜…」，对话框里有修改意见和影响预估；取消不提交
+  await nav(page, '当前集').click();
+  await stage(page, /剧本/).click();
   await page.getByRole('button', { name: '重新生成分镜…' }).click();
   const regen = page.getByRole('dialog', { name: '重新生成分镜' });
   await expect(regen).toContainText('范围：整集');
@@ -63,7 +73,8 @@ test('新建项目 → 剧本 → 分镜 → 导演台（manual LLM，不需要�
   await regen.getByRole('button', { name: '取消' }).click();
   await expect(regen).toBeHidden();
 
-  await nav(page, '导演台').click();
+  await stage(page, /首帧/).click();
+  await expect(page).toHaveURL(/\?stage=keyframes$/);
   await expect(page.getByTestId('shot-S01')).toBeVisible();
   await expect(page.getByTestId('shot-S02')).toBeVisible();
   await expect(page.getByTestId('shot-S01')).toContainText('林夏：欢迎回到直播间');
@@ -85,7 +96,9 @@ test('ComfyUI 不通时点生成首帧：提交被拒，页面说明原因并给
   expect((await answer(api, await run('storyboard'), [STORYBOARD])).status).toBe('done');
   const jobsBefore = (await (await api.get('/api/jobs')).json()).length;
 
+  // 旧的导演台地址重定向到工作台的首帧阶段
   await page.goto(`/projects/${slug}/episodes/${ep.id}/director`);
+  await expect(page).toHaveURL(/\?stage=keyframes$/);
   await expect(page.getByTestId('shot-S01')).toContainText('未生成');
   await page.getByRole('button', { name: '生成首帧（全部）' }).click();
 

@@ -1,18 +1,18 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
-import type { Slot } from '../api/types';
-import { installFetch } from '../test/fetch';
-import { makeCandidate, makeEpisode, makeJob, makeShot, makeSlot } from '../test/factories';
-import { renderAt } from '../test/render';
-import { DirectorPage } from './DirectorPage';
+import type { Slot } from '../../api/types';
+import { installFetch } from '../../test/fetch';
+import { makeCandidate, makeEpisode, makeJob, makeShot, makeSlot } from '../../test/factories';
+import { renderAt } from '../../test/render';
+import { DirectorStage } from './DirectorStage';
 
 const EP = makeEpisode({
   id: 4,
   shots: [makeShot({ id: 11, code: 'S01', duration: 5 }), makeShot({ id: 12, code: 'S02', order: 1, duration: 6 })],
 });
 const ENGINES = { image: [], video: [] };
-const AT = { route: '/projects/demo/episodes/4/director', path: '/projects/:slug/episodes/:episodeId/director' };
+const AT = { route: '/projects/demo/episodes/4?stage=keyframes', path: '/projects/:slug/episodes/:episodeId' };
 
 /** 选定了一张的槽位；stale 表示已过期 */
 function chosen(id: number, kind: string, stale = false): Slot {
@@ -35,7 +35,7 @@ function routes(extra: Record<string, unknown> = {}) {
   };
 }
 
-describe('DirectorPage', () => {
+describe('DirectorStage', () => {
   it('没勾选时整集生成；勾选后只提交选中镜头的 id；超过 3 个任务先确认并给出耗时预估', async () => {
     const calls = installFetch(
       routes({
@@ -43,7 +43,7 @@ describe('DirectorPage', () => {
         'GET /api/jobs': [doneJob(1, 'image.keyframe', 50), doneJob(2, 'image.keyframe', 66), doneJob(3, 'video.shot', 300)],
       }),
     );
-    renderAt(<DirectorPage />, AT);
+    renderAt(<DirectorStage />, AT);
     const user = userEvent.setup();
     await screen.findByTestId('shot-S01');
     expect(screen.getByText('2 个镜头，共 11.0 秒')).toBeTruthy();
@@ -64,7 +64,7 @@ describe('DirectorPage', () => {
   it('没有同类任务的耗时记录时写「耗时未知」；取消就不提交', async () => {
     const shots = [11, 12, 13, 14].map((id, i) => makeShot({ id, code: `S0${i + 1}`, order: i }));
     const calls = installFetch(routes({ 'GET /api/episodes/4': makeEpisode({ id: 4, shots }) }));
-    renderAt(<DirectorPage />, AT);
+    renderAt(<DirectorStage />, AT);
     const user = userEvent.setup();
     await user.click(await screen.findByRole('button', { name: '生成视频（全部）' }));
     const dlg = await screen.findByRole('dialog', { name: '批量生成视频？' });
@@ -82,7 +82,7 @@ describe('DirectorPage', () => {
     const calls = installFetch(
       routes({ 'GET /api/episodes/4': makeEpisode({ id: 4, shots }), 'POST /api/episodes/4/run': { job_ids: [90] } }),
     );
-    renderAt(<DirectorPage />, AT);
+    renderAt(<DirectorStage />, AT);
     const user = userEvent.setup();
     await user.click(await screen.findByRole('button', { name: '重拍首帧 S01' }));
     await waitFor(() => expect(calls.filter((c) => c.method === 'POST')).toHaveLength(1));
@@ -104,7 +104,7 @@ describe('DirectorPage', () => {
     const calls = installFetch(
       routes({ 'GET /api/episodes/4': makeEpisode({ id: 4, shots }), 'POST /api/episodes/4/run': { job_ids: [91] } }),
     );
-    renderAt(<DirectorPage />, AT);
+    renderAt(<DirectorStage />, AT);
     const user = userEvent.setup();
     await user.click(await screen.findByRole('button', { name: '只重做过期的（4）' }));
     // 2 个首帧 + 接着的 2 个视频 + 单独 1 个视频 = 5 个任务：先预估
@@ -126,7 +126,7 @@ describe('DirectorPage', () => {
     const calls = installFetch(
       routes({ 'GET /api/episodes/4': makeEpisode({ id: 4, shots: [shot] }), 'POST /api/episodes/4/run': { job_ids: [94] } }),
     );
-    renderAt(<DirectorPage />, AT);
+    renderAt(<DirectorStage />, AT);
     await userEvent.setup().click(await screen.findByRole('button', { name: '重试首帧 S01' }));
     await waitFor(() => expect(calls.some((c) => c.method === 'POST')).toBe(true));
     expect(calls.find((c) => c.method === 'POST')?.body).toEqual({ stage: 'keyframes', candidates: 1, force: true, shots: ['11'] });
@@ -134,7 +134,7 @@ describe('DirectorPage', () => {
 
   it('没有过期的格子时「只重做过期的（0）」禁用', async () => {
     installFetch(routes());
-    renderAt(<DirectorPage />, AT);
+    renderAt(<DirectorStage />, AT);
     expect(((await screen.findByRole('button', { name: '只重做过期的（0）' })) as HTMLButtonElement).disabled).toBe(true);
   });
 
@@ -144,14 +144,14 @@ describe('DirectorPage', () => {
         'POST /api/episodes/4/run': () => new Response(JSON.stringify({ detail: 'S01 还没有首帧，不能出视频' }), { status: 400 }),
       }),
     );
-    renderAt(<DirectorPage />, AT);
+    renderAt(<DirectorStage />, AT);
     await userEvent.setup().click(await screen.findByRole('button', { name: '生成视频 S01' }));
     expect((await screen.findByRole('alert')).textContent).toContain('S01 还没有首帧');
   });
 
   it('上移镜头时提交完整的新顺序', async () => {
     const calls = installFetch(routes({ 'POST /api/episodes/4/shots/reorder': [] }));
-    renderAt(<DirectorPage />, AT);
+    renderAt(<DirectorStage />, AT);
     const user = userEvent.setup();
     await user.click(await screen.findByRole('button', { name: '更多操作 S02' }));
     await user.click(screen.getByRole('menuitem', { name: '上移' }));
@@ -161,7 +161,7 @@ describe('DirectorPage', () => {
 
   it('删除前用确认框问，取消就不删', async () => {
     const calls = installFetch(routes({ 'DELETE /api/shots/11': () => new Response(null, { status: 204 }) }));
-    renderAt(<DirectorPage />, AT);
+    renderAt(<DirectorStage />, AT);
     const user = userEvent.setup();
     await user.click(await screen.findByRole('button', { name: '更多操作 S01' }));
     await user.click(screen.getByRole('menuitem', { name: '删除' }));
@@ -174,36 +174,36 @@ describe('DirectorPage', () => {
     await waitFor(() => expect(calls.some((c) => c.method === 'DELETE' && c.url === '/api/shots/11')).toBe(true));
   });
 
-  it('没有分镜时引导去剧本页', async () => {
+  it('没有分镜时引导去剧本阶段', async () => {
     installFetch(routes({ 'GET /api/episodes/4': makeEpisode({ id: 4, shots: [] }) }));
-    renderAt(<DirectorPage />, AT);
-    expect((await screen.findByRole('link', { name: '去剧本页生成分镜' })).getAttribute('href')).toBe('/projects/demo/episodes/4/script');
+    renderAt(<DirectorStage />, AT);
+    expect((await screen.findByRole('link', { name: '去剧本阶段生成分镜' })).getAttribute('href')).toBe('/projects/demo/episodes/4?stage=script');
   });
 
-  it('导出在导出页：导演台只给「去导出」链接并写明几镜有视频', async () => {
+  it('导出在成片阶段：这里只给「去成片」链接并写明几镜有视频', async () => {
     const withVideo = makeShot({ id: 11, code: 'S01', duration: 5, slots: [chosen(1, 'video')] });
     installFetch(routes({ 'GET /api/episodes/4': makeEpisode({ id: 4, shots: [withVideo, EP.shots[1]] }) }));
-    renderAt(<DirectorPage />, AT);
-    const link = await screen.findByRole('link', { name: '去导出（1/2 镜有视频）' });
-    expect(link.getAttribute('href')).toBe('/projects/demo/episodes/4/export');
+    renderAt(<DirectorStage />, AT);
+    const link = await screen.findByRole('link', { name: '去成片（1/2 镜有视频）' });
+    expect(link.getAttribute('href')).toBe('/projects/demo/episodes/4?stage=export');
     expect(screen.queryByRole('button', { name: '合成导出' })).toBeNull();
     expect(screen.queryByLabelText('高棉语字幕')).toBeNull();
     expect(screen.queryByRole('button', { name: '翻译高棉语字幕' })).toBeNull();
     expect(screen.queryByText('片尾卡设置')).toBeNull();
   });
 
-  it('点编号在地址栏记下镜头并打开详情抽屉；抽屉和工具栏共用候选数', async () => {
+  it('点编号在地址栏记下镜头（保留 stage）并打开详情抽屉；抽屉和工具栏共用候选数', async () => {
     installFetch(routes());
-    renderAt(<DirectorPage />, AT);
+    renderAt(<DirectorStage />, AT);
     const user = userEvent.setup();
     await user.selectOptions(await screen.findByLabelText('候选数'), '3');
     await user.click(screen.getByRole('button', { name: '打开 S02' }));
-    expect(screen.getByTestId('location').textContent).toBe('/projects/demo/episodes/4/director?shot=12');
+    expect(screen.getByTestId('location').textContent).toBe('/projects/demo/episodes/4?stage=keyframes&shot=12');
     const dlg = await screen.findByRole('dialog', { name: '镜头 S02 详情' });
     expect((within(dlg).getByLabelText('候选数') as HTMLSelectElement).value).toBe('3');
     await user.click(within(dlg).getByRole('button', { name: '关闭' }));
     expect(screen.queryByRole('dialog')).toBeNull();
-    expect(screen.getByTestId('location').textContent).toBe('/projects/demo/episodes/4/director');
+    expect(screen.getByTestId('location').textContent).toBe('/projects/demo/episodes/4?stage=keyframes');
   });
 
   it('抽屉里「保存并重拍」：已有选定首帧的镜头先保存再强制重拍', async () => {
@@ -215,7 +215,7 @@ describe('DirectorPage', () => {
         'POST /api/episodes/4/run': { job_ids: [93] },
       }),
     );
-    renderAt(<DirectorPage />, { ...AT, route: '/projects/demo/episodes/4/director?shot=11' });
+    renderAt(<DirectorStage />, { ...AT, route: '/projects/demo/episodes/4?stage=keyframes&shot=11' });
     const user = userEvent.setup();
     const dlg = await screen.findByRole('dialog', { name: '镜头 S01 详情' });
     const ta = within(dlg).getByLabelText('图像提示词（英文）');
@@ -226,44 +226,42 @@ describe('DirectorPage', () => {
     expect(calls.find((c) => c.method === 'POST')?.body).toEqual({ stage: 'keyframes', candidates: 1, force: true, shots: ['11'] });
   });
 
-  it('用剧集页头：只有一个主按钮（下一步），工具栏的生成按钮是次要的', async () => {
+  it('不带页头，也没有主按钮（全页唯一的主按钮在阶段条）；下一步不在这里时不打 data-next-action', async () => {
     installFetch(routes());
-    const { container } = renderAt(<DirectorPage />, AT);
-    await screen.findByRole('heading', { level: 2, name: '导演台' });
-    expect(screen.getByRole('link', { name: '下一步：生成剧本' })).toBeTruthy();
-    expect(container.querySelectorAll('.primary')).toHaveLength(1);
-    expect(screen.getByRole('button', { name: '生成首帧（全部）' }).className).not.toContain('primary');
+    const { container } = renderAt(<DirectorStage />, AT);
+    await screen.findByRole('button', { name: '生成首帧（全部）' });
+    expect(screen.queryByRole('heading', { level: 2 })).toBeNull();
+    expect(container.querySelectorAll('.primary')).toHaveLength(0);
+    expect(container.querySelectorAll('[data-next-action]')).toHaveLength(0);
   });
 
   it('剧集加载失败：显示原因和「回到项目」', async () => {
     installFetch({ 'GET /api/episodes/4': new Response(JSON.stringify({ detail: '剧集 4 不存在' }), { status: 404 }) });
-    renderAt(<DirectorPage />, AT);
+    renderAt(<DirectorStage />, AT);
     expect(await screen.findByText(/剧集 4 不存在/)).toBeTruthy();
     expect(screen.getByRole('link', { name: '回到项目' }).getAttribute('href')).toBe('/projects/demo');
   });
 
-  it('下一步在导演台：对应的生成按钮是本页唯一的主按钮', async () => {
+  it('下一步在首帧阶段：对应的生成按钮打上 data-next-action（不是主按钮）', async () => {
     const ep = { ...EP, scene_blocks: [{ id: 1, order: 0, location_id: null, text: 'a' }] };
     installFetch(routes({ 'GET /api/episodes/4': ep, 'GET /api/projects/demo/characters': [{ id: 8, project_id: 1, name: '林夏', description: '', visual_prompt: '', core_features: '', voice: null, portrait_url: '/p.png' }], 'GET /api/episodes/4/exports': [] }));
-    const { container } = renderAt(<DirectorPage />, AT);
+    const { container } = renderAt(<DirectorStage />, AT);
     const kf = await screen.findByRole('button', { name: '生成首帧（全部）' });
-    await waitFor(() => expect(kf.className).toContain('primary'));
-    expect(kf.hasAttribute('data-next-action')).toBe(true);
-    expect(screen.getByRole('button', { name: '生成视频（全部）' }).className).not.toContain('primary');
-    expect(screen.getByRole('button', { name: /下一步：生成首帧/ })).toBeTruthy();
-    expect(container.querySelectorAll('.primary')).toHaveLength(1);
+    await waitFor(() => expect(kf.hasAttribute('data-next-action')).toBe(true));
+    expect(screen.getByRole('button', { name: '生成视频（全部）' }).hasAttribute('data-next-action')).toBe(false);
+    expect(container.querySelectorAll('.primary')).toHaveLength(0);
   });
 
-  it('首帧有过期：「只重做过期的」是主按钮', async () => {
+  it('首帧有过期：「只重做过期的」打上 data-next-action', async () => {
     const ep = {
       ...EP,
       scene_blocks: [{ id: 1, order: 0, location_id: null, text: 'a' }],
       shots: [makeShot({ id: 11, code: 'S01', slots: [chosen(1, 'first_frame', true)] })],
     };
     installFetch(routes({ 'GET /api/episodes/4': ep, 'GET /api/projects/demo/characters': [{ id: 8, project_id: 1, name: '林夏', description: '', visual_prompt: '', core_features: '', voice: null, portrait_url: '/p.png' }], 'GET /api/episodes/4/exports': [] }));
-    renderAt(<DirectorPage />, AT);
+    renderAt(<DirectorStage />, AT);
     const redo = await screen.findByRole('button', { name: '只重做过期的（1）' });
-    await waitFor(() => expect(redo.className).toContain('primary'));
-    expect(screen.getByRole('button', { name: '生成首帧（全部）' }).className).not.toContain('primary');
+    await waitFor(() => expect(redo.hasAttribute('data-next-action')).toBe(true));
+    expect(screen.getByRole('button', { name: '生成首帧（全部）' }).hasAttribute('data-next-action')).toBe(false);
   });
 });

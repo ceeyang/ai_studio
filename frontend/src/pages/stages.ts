@@ -1,8 +1,14 @@
-// 一集的六段制作进度（剧本 → 角色 → 分镜 → 首帧 → 视频 → 导出）和「下一步」。纯函数，剧集页头和测试共用。
+// 一集的五段制作进度（剧本 → 角色 → 首帧 → 视频 → 成片）和「下一步」。纯函数，单集工作台的阶段条和测试共用。
 import type { Character, EpisodeDetail, ExportRow, ShotDetail } from '../api/types';
 import { slotMark, slotOf } from './director/slots';
 
-export type StageKey = 'script' | 'cast' | 'storyboard' | 'keyframes' | 'videos' | 'export';
+export type StageKey = 'script' | 'cast' | 'keyframes' | 'videos' | 'export';
+
+export const STAGE_KEYS: StageKey[] = ['script', 'cast', 'keyframes', 'videos', 'export'];
+
+export function isStageKey(v: string | null | undefined): v is StageKey {
+  return !!v && (STAGE_KEYS as string[]).includes(v);
+}
 
 export interface Stage {
   key: StageKey;
@@ -10,16 +16,19 @@ export interface Stage {
   /** done 完成；active 第一段没完成的（该做它了）；todo 还没轮到；stale 有过期的结果要重做 */
   state: 'done' | 'active' | 'todo' | 'stale';
   detail: string;
-  to: string;
 }
 
-/** 如 {label: '下一步：生成视频（2 镜缺视频）', to: '.../director', key: 'videos', stale: false} */
+/**
+ * 下一步，如 {label: '生成视频（2 镜缺视频）', stage: 'videos', action: 'run', count: 2, stale: false}。
+ * label 不带「下一步：」前缀（阶段条自己加）；stage 是要在哪个阶段做；
+ * action：run = 在那个阶段触发它的动作按钮（data-next-action），goto = 只切过去；
+ * count 是这一步涉及几个（镜头 / 角色 / 段落），没有可数的为 0；stale 表示是因为有过期的结果才没完成。
+ */
 export interface NextStep {
   label: string;
-  to: string;
-  /** 是哪一段：页面据此把对应的动作按钮标成主按钮 */
-  key: StageKey;
-  /** 这一段是因为有过期的结果才没完成（导演台用「只重做过期的」） */
+  stage: StageKey;
+  action: 'goto' | 'run';
+  count: number;
   stale: boolean;
 }
 
@@ -37,7 +46,7 @@ export function castOf(shots: ShotDetail[], chars: Character[]): Character[] {
   return appearing.length > 0 ? appearing : chars;
 }
 
-const hasPortrait = (c: Character) => !!(c.portrait_url || c.portrait_candidate_id);
+export const hasPortrait = (c: Character) => !!(c.portrait_url || c.portrait_candidate_id);
 
 /** 首帧 / 视频这一格：几镜有选定的、几镜过期、几镜缺 */
 function slotStats(shots: ShotDetail[], kind: string) {
@@ -47,29 +56,26 @@ function slotStats(shots: ShotDetail[], kind: string) {
   return { total: shots.length, selected: shots.length - missing, missing, stale };
 }
 
-type Draft = Omit<Stage, 'state'> & { state: 'done' | 'todo' | 'stale'; next: string };
+type Draft = Omit<Stage, 'state'> & { state: 'done' | 'todo' | 'stale'; next: string; count: number };
 
-function slotStage(key: 'keyframes' | 'videos', label: string, shots: ShotDetail[], to: string): Draft {
+function slotStage(key: 'keyframes' | 'videos', label: string, shots: ShotDetail[]): Draft {
   const st = slotStats(shots, key === 'keyframes' ? 'first_frame' : 'video');
   const detail = st.total === 0 ? '还没有镜头' : `${st.selected}/${st.total}${st.stale > 0 ? ` · ${st.stale} 过期` : ''}`;
   if (st.total > 0 && st.stale > 0) {
-    return { key, label, to, detail, state: 'stale', next: `重做过期的${label}（${st.stale} 镜过期）` };
+    return { key, label, detail, state: 'stale', next: `重做过期的${label}（${st.stale} 镜过期）`, count: st.stale };
   }
   const done = st.total > 0 && st.missing === 0;
-  return { key, label, to, detail, state: done ? 'done' : 'todo', next: `生成${label}（${st.missing} 镜缺${label}）` };
+  return { key, label, detail, state: done ? 'done' : 'todo', next: `生成${label}（${st.missing} 镜缺${label}）`, count: st.missing };
 }
 
-/**
- * 算一集的六段进度。base 是这一集的路由前缀（/projects/<slug>/episodes/<id>），各段的 to 指向要去的页面。
- * next 取第一段没完成的（过期也算没完成）；全部完成时为 null。
- */
+/** 算一集的五段进度。next 取第一段没完成的（过期也算没完成）；全部完成时为 null。 */
 export function episodeStages(
   ep: EpisodeDetail,
   chars: Character[],
   exports: ExportRow[],
-  base: string,
 ): { stages: Stage[]; next: NextStep | null } {
   const shots = ep.shots;
+  const blocks = ep.scene_blocks.length;
   const cast = castOf(shots, chars);
   const withPortrait = cast.filter(hasPortrait).length;
   const finalCut = exports.some((x) => x.is_final);
@@ -78,45 +84,40 @@ export function episodeStages(
     {
       key: 'script',
       label: '剧本',
-      to: `${base}/script`,
-      state: ep.scene_blocks.length > 0 ? 'done' : 'todo',
-      detail: ep.scene_blocks.length > 0 ? `${ep.scene_blocks.length} 段` : '还没有段落',
-      next: '生成剧本',
+      // 剧本 = 有段落且有镜头（分镜也在剧本阶段做）
+      state: blocks > 0 && shots.length > 0 ? 'done' : 'todo',
+      detail: blocks === 0 ? '还没有段落' : `${blocks} 段 · ${shots.length > 0 ? `${shots.length} 镜` : '还没有镜头'}`,
+      next: blocks === 0 ? '生成剧本' : '生成分镜',
+      count: blocks === 0 ? 0 : blocks,
     },
     {
       key: 'cast',
       label: '角色',
-      to: `${base}/cast`,
       state: cast.length > 0 && withPortrait === cast.length ? 'done' : 'todo',
-      detail: cast.length === 0 ? '还没有角色' : `${withPortrait}/${cast.length} 有定妆照`,
+      detail: cast.length === 0 ? '还没有角色' : `${withPortrait}/${cast.length}`,
       next: cast.length === 0 ? '添加角色' : `抽定妆照（${cast.length - withPortrait} 个角色缺定妆照）`,
+      count: cast.length - withPortrait,
     },
-    {
-      key: 'storyboard',
-      label: '分镜',
-      to: `${base}/script`,
-      state: shots.length > 0 ? 'done' : 'todo',
-      detail: shots.length > 0 ? `${shots.length} 镜` : '还没有镜头',
-      next: '生成分镜',
-    },
-    slotStage('keyframes', '首帧', shots, `${base}/director`),
-    slotStage('videos', '视频', shots, `${base}/director`),
+    slotStage('keyframes', '首帧', shots),
+    slotStage('videos', '视频', shots),
     {
       key: 'export',
-      label: '导出',
-      to: `${base}/export`,
+      label: '成片',
       state: exports.length > 0 ? 'done' : 'todo',
       detail: exports.length > 0 ? `${exports.length} 版${finalCut ? ' · 已定稿' : ''}` : '还没有成片',
       next: '合成导出',
+      count: shots.length,
     },
   ];
 
   const first = drafts.findIndex((d) => d.state !== 'done');
-  const stages: Stage[] = drafts.map(({ next: _next, ...d }, i) => ({
+  const stages: Stage[] = drafts.map(({ next: _next, count: _count, ...d }, i) => ({
     ...d,
     state: i === first && d.state === 'todo' ? 'active' : d.state,
   }));
   const d = first >= 0 ? drafts[first] : null;
-  const next = d ? { label: `下一步：${d.next}`, to: d.to, key: d.key, stale: d.state === 'stale' } : null;
+  const next: NextStep | null = d
+    ? { label: d.next, stage: d.key, action: 'run', count: d.count, stale: d.state === 'stale' }
+    : null;
   return { stages, next };
 }

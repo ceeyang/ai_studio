@@ -7,7 +7,7 @@ import { makeCandidate, makeEpisode, makeJob, makeShot } from '../../test/factor
 import { renderAt } from '../../test/render';
 import { EventsContext } from '../../ws/EventsContext';
 import { initialEvents } from '../../ws/events';
-import { CastPage } from '../CastPage';
+import { CastStage } from '../workspace/CastStage';
 
 const UPLOAD = makeCandidate({ id: 19, engine: 'upload', url: '/media/p/up.png', params: { source: 'chen.png' } });
 const DRAWN = makeCandidate({ id: 46, engine: 'h3_image', url: '/media/p/ai.png', params: { visual_prompt: 'smiling mechanic' } });
@@ -30,11 +30,11 @@ const ROUTES = {
   'GET /api/projects/demo/locations': [],
   'GET /api/projects/demo/style': null,
 };
-const AT = { route: '/projects/demo/episodes/5/cast', path: '/projects/:slug/episodes/:episodeId/cast' };
+const AT = { route: '/projects/demo/episodes/5?stage=cast', path: '/projects/:slug/episodes/:episodeId' };
 
 function setup(chen: Character, extra: Record<string, unknown> = {}) {
   const calls = installFetch({ ...ROUTES, 'GET /api/projects/demo/characters': [chen], ...extra });
-  renderAt(<CastPage />, AT);
+  renderAt(<CastStage />, AT);
   return { calls, user: userEvent.setup() };
 }
 
@@ -121,7 +121,7 @@ describe('角色卡', () => {
     installFetch({ ...ROUTES, 'GET /api/projects/demo/characters': [running], 'POST /api/characters/6/portraits/draw': { job_ids: [82] } });
     renderAt(
       <EventsContext.Provider value={{ ...initialEvents, progress: { 80: { value: 5, max: 20 } } }}>
-        <CastPage />
+        <CastStage />
       </EventsContext.Provider>,
       AT,
     );
@@ -158,7 +158,7 @@ describe('角色卡', () => {
     installFetch({ ...ROUTES, 'GET /api/projects/demo/characters': [running] });
     renderAt(
       <EventsContext.Provider value={{ ...initialEvents, progress: { 80: { value: 20, max: 20 } } }}>
-        <CastPage />
+        <CastStage />
       </EventsContext.Provider>,
       AT,
     );
@@ -225,7 +225,7 @@ describe('角色卡', () => {
     const rec = await screen.findByTestId('recommend-前台小李');
     expect(screen.queryByTestId('recommend-陈师傅')).toBeNull(); // 已有的不再列
     // 任务号记在地址里：刷新或离开再回来还能看到结果
-    expect(screen.getByTestId('location').textContent).toBe('/projects/demo/episodes/5/cast?recommend=90');
+    expect(screen.getByTestId('location').textContent).toBe('/projects/demo/episodes/5?stage=cast&recommend=90');
     await user.click(within(rec).getByRole('button', { name: '添加角色' }));
     await waitFor(() => expect(posts(calls)).toHaveLength(2));
     expect(posts(calls)[0]).toMatchObject({ url: '/api/episodes/5/characters/recommend', body: { count: 3 } });
@@ -251,7 +251,7 @@ describe('角色卡', () => {
         result: { characters: [{ name: '前台小李', description: '', visual_prompt: 'young clerk', core_features: '' }] },
       }),
     });
-    renderAt(<CastPage />, { ...AT, route: '/projects/demo/episodes/5/cast?recommend=90' });
+    renderAt(<CastStage />, { ...AT, route: '/projects/demo/episodes/5?stage=cast&recommend=90' });
     expect(await screen.findByTestId('recommend-前台小李')).toBeTruthy();
   });
 });

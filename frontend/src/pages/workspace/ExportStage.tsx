@@ -1,13 +1,15 @@
+// 单集工作台的成片阶段：就绪检查、导出选项、高棉语工具、成片列表。
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { enc, errorText } from '../api/client';
-import { useEpisode, useExports, useFitKhmer, usePatchExport, useRunStage, useTranslateSubtitles } from '../api/queries';
-import type { ExportOptions, ExportRow, ShotDetail } from '../api/types';
-import { EpisodeHeader, EpisodeLoadError, nextActionProps, useNextAction } from '../components/EpisodeHeader';
-import { useJobNotice } from '../components/JobNotice';
-import { fmtTime } from '../format';
-import { EndCardPanel } from './director/EndCardPanel';
-import { slotMark, slotOf } from './director/slots';
+import { errorText } from '../../api/client';
+import { useEpisode, useExports, useFitKhmer, usePatchExport, useRunStage, useTranslateSubtitles } from '../../api/queries';
+import type { ExportOptions, ExportRow, ShotDetail } from '../../api/types';
+import { EpisodeLoadError, nextActionProps, useNextAction } from '../../components/EpisodeHeader';
+import { useJobNotice } from '../../components/JobNotice';
+import { fmtTime } from '../../format';
+import { EndCardPanel } from '../director/EndCardPanel';
+import { slotMark, slotOf } from '../director/slots';
+import { workspacePath } from './urls';
 
 const SUBTITLE_TAG: Record<string, string> = { zh: '中文字幕', 'zh+km': '中高字幕' };
 
@@ -161,13 +163,14 @@ function ExportBody({ slug, id }: { slug: string; id: number }) {
   const [choice, setChoice] = useState<Choice>(() => loadChoice(id));
   useEffect(() => saveChoice(id, choice), [id, choice]);
   const set = (patch: Partial<Choice>) => setChoice((c) => ({ ...c, ...patch }));
-  const nextAct = useNextAction(slug, ep.data, 'export');
+  const nextAct = useNextAction(slug, ep.data, ['export']);
 
   if (ep.isLoading) return <p className="loading">加载中…</p>;
   if (ep.error || !ep.data) return <EpisodeLoadError slug={slug} error={ep.error} />;
   const e = ep.data;
   const r = readiness(e.shots);
-  const director = `/projects/${enc(slug)}/episodes/${id}/director`;
+  const videosStage = `${workspacePath(slug, id)}?stage=videos`;
+  const keyframesStage = `${workspacePath(slug, id)}?stage=keyframes`;
   const canExport = r.total > 0 && r.missing.length === 0;
 
   const doExport = () => {
@@ -202,9 +205,7 @@ function ExportBody({ slug, id }: { slug: string; id: number }) {
   };
 
   return (
-    <div className="page export-page">
-      <EpisodeHeader slug={slug} ep={e} page="export" title="导出" />
-
+    <div className="stage-body export-page">
       <section className="panel" aria-label="就绪检查">
         <div className="row export-ready">
           <span data-testid="readiness" className={r.missing.length > 0 ? 'warn' : undefined}>
@@ -212,10 +213,10 @@ function ExportBody({ slug, id }: { slug: string; id: number }) {
             {r.stale.length > 0 && ` · ${r.stale.length} 镜视频已过期（${r.stale.join('、')}）`}
           </span>
           <span className="grow" aria-hidden="true" />
-          {/* 下一步是合成导出时它是本页唯一的主按钮，否则页头的「下一步」才是 */}
+          {/* 下一步是合成导出时打上 data-next-action：阶段条的「下一步」触发它 */}
           <button
             type="button"
-            {...nextActionProps(nextAct?.key === 'export')}
+            {...nextActionProps(!!nextAct)}
             disabled={!canExport || run.isPending}
             title={canExport ? undefined : '每个镜头都要有选定的视频才能合成'}
             onClick={doExport}
@@ -225,12 +226,12 @@ function ExportBody({ slug, id }: { slug: string; id: number }) {
         </div>
         {r.missing.length > 0 && (
           <p className="warn" data-testid="missing-videos">
-            还缺视频：{r.missing.join('、')}。<Link to={director}>去导演台</Link>
+            还缺视频：{r.missing.join('、')}。<Link to={videosStage}>去视频阶段</Link>
           </p>
         )}
         {r.total === 0 && (
           <p className="muted">
-            先在导演台生成首帧和视频。<Link to={director}>去导演台</Link>
+            先生成首帧和视频。<Link to={keyframesStage}>去首帧阶段</Link>
           </p>
         )}
         {notice.view}
@@ -295,7 +296,7 @@ function ExportBody({ slug, id }: { slug: string; id: number }) {
       <section className="panel" aria-label="高棉语工具">
         <h3>高棉语工具</h3>
         <p className="muted">
-          先翻译出高棉语字幕（只补缺的句子，AI 译稿要请母语者校对）；想让嘴型跟着高棉语配音的长短走，再按高棉语时长改写中文，改完要回导演台重新生成视频。
+          先翻译出高棉语字幕（只补缺的句子，AI 译稿要请母语者校对）；想让嘴型跟着高棉语配音的长短走，再按高棉语时长改写中文，改完要回视频阶段重新生成视频。
         </p>
         <div className="row">
           <button type="button" className="ghost" disabled={r.total === 0 || translate.isPending} onClick={doTranslate}>
@@ -315,7 +316,7 @@ function ExportBody({ slug, id }: { slug: string; id: number }) {
   );
 }
 
-export function ExportPage() {
+export function ExportStage() {
   const { slug = '', episodeId = '' } = useParams();
   const id = Number(episodeId);
   // 换集时整个重建：选项按剧集读回来

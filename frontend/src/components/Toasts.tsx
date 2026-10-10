@@ -5,6 +5,7 @@ import { api } from '../api/client';
 import { keys } from '../api/queries';
 import type { Job } from '../api/types';
 import { jobTypeLabel } from '../format';
+import { toWorkspaceUrl } from '../pages/workspace/urls';
 import { subscribeJobSettled } from '../ws/events';
 
 interface Toast {
@@ -52,8 +53,10 @@ export function Toasts() {
         .then((job) => {
           if (!alive) return;
           const ctx = job.context ?? null;
-          const to = ctx?.url ?? `/jobs?job=${ev.id}`;
-          if (ctx?.url && ctx.url === here.current) return;
+          // 后端给的是旧的剧集页面地址（/director?shot= 等）：换成单集工作台的地址再比、再链
+          const url = ctx?.url ? toWorkspaceUrl(ctx.url) : null;
+          const to = url ?? `/jobs?job=${ev.id}`;
+          if (url && url === here.current) return;
           const ok = ev.status === 'done';
           const text = `${ctx?.label ? `${ctx.label} ` : ''}${jobTypeLabel(ev.type)}${ok ? '完成' : '失败'}`;
           setToasts((list) => [...list, { key, ok, text, to }].slice(-MAX_TOASTS));

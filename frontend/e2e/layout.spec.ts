@@ -45,7 +45,7 @@ async function expectNoOverflow(page: Page, label: string) {
   const r = await page.evaluate(() => {
     const iw = window.innerWidth;
     const bad: string[] = [];
-    const sel = '.content, .panel, .toolbar, .shots-wrap, .drawer, .char-card, .turn-sheet, .turn-cell, .turn-look, .option-card, .project-card, .episode-card, .bible, .modal';
+    const sel = '.content, .panel, .toolbar, .stage-bar, .ws-rail, .ws-main, .shots-wrap, .drawer, .char-card, .turn-sheet, .turn-cell, .turn-look, .option-card, .project-card, .episode-card, .bible, .modal';
     for (const el of Array.from(document.querySelectorAll<HTMLElement>(sel))) {
       const rc = el.getBoundingClientRect();
       if (rc.width === 0) continue;
@@ -72,26 +72,26 @@ for (const width of WIDTHS) {
     await expect(page.getByRole('heading', { name: /布局检查/ })).toBeVisible();
     await expectNoOverflow(page, `${width} 项目详情`);
 
-    await page.goto(`${ep}/script`);
+    await page.goto(`${ep}?stage=script`);
     await expect(page.getByRole('heading', { name: /剧本段落/ })).toBeVisible();
-    await expect(page.getByRole('link', { name: /本集角色/ })).toBeVisible();
+    await expect(page.getByRole('complementary', { name: '剧本大纲与角色' })).toBeVisible();
     await expectNoOverflow(page, `${width} 剧本`);
 
-    await page.goto(`${ep}/cast`);
+    await page.goto(`${ep}?stage=cast`);
     await expect(page.getByRole('region', { name: /的三视图/ })).toBeVisible();
     await expect(page.getByTestId('option-2')).toBeVisible();
     await expectNoOverflow(page, `${width} 角色`);
 
-    await page.goto(`${ep}/director`);
+    await page.goto(`${ep}?stage=keyframes`);
     await expect(page.getByTestId('shot-S02')).toBeVisible();
-    await expectNoOverflow(page, `${width} 导演台`);
+    await expectNoOverflow(page, `${width} 首帧`);
     await page.getByTestId('shot-S01').locator('.code-cell button').click();
     await expect(page.locator('.drawer')).toBeVisible();
     // 抽屉滑入动画（translateX 40px）中途量会多出 40px：等动画放完
     await page.locator('.drawer').evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
     await expectNoOverflow(page, `${width} 镜头抽屉`);
 
-    await page.goto(`${ep}/export`);
+    await page.goto(`${ep}?stage=export`);
     await expect(page.getByTestId('readiness')).toBeVisible();
     await expectNoOverflow(page, `${width} 导出`);
 

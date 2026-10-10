@@ -1,7 +1,8 @@
+// 单集工作台的首帧 / 视频阶段（过渡版，Task 4 换成按段落分组的镜头卡片网格）：镜头表 + 镜头抽屉（?shot=<id>）。
 import { useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
-import { api, enc, errorText } from '../api/client';
+import { api, errorText } from '../../api/client';
 import {
   keys,
   useCreateShot,
@@ -10,15 +11,16 @@ import {
   useReorderShots,
   useRunStage,
   useSplitShot,
-} from '../api/queries';
-import type { Job, RunIn, ShotDetail } from '../api/types';
-import { useConfirm } from '../components/ConfirmDialog';
-import { EpisodeHeader, EpisodeLoadError, nextActionProps, useNextAction } from '../components/EpisodeHeader';
-import { useJobNotice } from '../components/JobNotice';
-import { type EstimatePart, estimateText } from './director/estimate';
-import { ShotDrawer } from './director/ShotDrawer';
-import { CELL, type GenStage, ShotTable, hasSelected } from './director/ShotTable';
-import { moveId, selectedOf, slotMark, slotOf } from './director/slots';
+} from '../../api/queries';
+import type { Job, RunIn, ShotDetail } from '../../api/types';
+import { useConfirm } from '../../components/ConfirmDialog';
+import { EpisodeLoadError, nextActionProps, useNextAction } from '../../components/EpisodeHeader';
+import { useJobNotice } from '../../components/JobNotice';
+import { type EstimatePart, estimateText } from '../director/estimate';
+import { ShotDrawer } from '../director/ShotDrawer';
+import { CELL, type GenStage, ShotTable, hasSelected } from '../director/ShotTable';
+import { moveId, selectedOf, slotMark, slotOf } from '../director/slots';
+import { workspacePath } from './urls';
 
 /** 超过这么多个任务才先弹预估确认 */
 const CONFIRM_OVER = 3;
@@ -59,7 +61,7 @@ function mergeParts(list: EstimatePart[]): EstimatePart[] {
   return out;
 }
 
-export function DirectorPage() {
+export function DirectorStage() {
   const { slug = '', episodeId = '' } = useParams();
   const id = Number(episodeId);
   const [params, setParams] = useSearchParams();
@@ -75,8 +77,8 @@ export function DirectorPage() {
   const [selected, setSelected] = useState<Set<number>>(() => new Set());
   const [count, setCount] = useState(1);
   const [submitting, setSubmitting] = useState(false);
-  // 下一步在导演台时：缺首帧 / 缺视频 → 对应的生成按钮，有过期 → 只重做过期的，是本页唯一的主按钮
-  const nextAct = useNextAction(slug, ep.data, 'director');
+  // 下一步在首帧 / 视频阶段时：缺首帧 / 缺视频 → 对应的生成按钮，有过期 → 只重做过期的；打上 data-next-action 由阶段条触发
+  const nextAct = useNextAction(slug, ep.data, ['keyframes', 'videos']);
 
   if (ep.isLoading) return <p className="loading">加载中…</p>;
   if (ep.error || !ep.data) return <EpisodeLoadError slug={slug} error={ep.error} />;
@@ -196,8 +198,25 @@ export function DirectorPage() {
     if (next) report(reorder.mutateAsync(next), '已调整顺序');
   };
 
-  const open = (shotId: number) => setParams({ shot: String(shotId) }, { replace: true });
-  const close = () => setParams({}, { replace: true });
+  // 只动 shot 参数，stage 等其他参数保留
+  const open = (shotId: number) =>
+    setParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.set('shot', String(shotId));
+        return next;
+      },
+      { replace: true },
+    );
+  const close = () =>
+    setParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete('shot');
+        return next;
+      },
+      { replace: true },
+    );
 
   const remove = async (shotId: number) => {
     const s = shots.find((x) => x.id === shotId);
@@ -219,14 +238,11 @@ export function DirectorPage() {
   };
 
   return (
-    <div className="page">
-      <EpisodeHeader slug={slug} ep={e} page="director" title="导演台">
+    <div className="stage-body director-page">
+      <div className="toolbar">
         <span className="chip">
           {shots.length} 个镜头，共 {total.toFixed(1)} 秒
         </span>
-      </EpisodeHeader>
-
-      <div className="toolbar">
         <label>
           候选数{' '}
           <select aria-label="候选数" value={count} onChange={(ev) => setCount(Number(ev.target.value))}>
@@ -240,7 +256,7 @@ export function DirectorPage() {
         <span className="sep" aria-hidden="true" />
         <button
           type="button"
-          {...nextActionProps(nextAct?.key === 'keyframes' && !nextAct.stale)}
+          {...nextActionProps(nextAct?.stage === 'keyframes' && !nextAct.stale)}
           disabled={shots.length === 0 || generating}
           onClick={() => void generate('keyframes', selIds, `（${scope}）`)}
         >
@@ -248,7 +264,7 @@ export function DirectorPage() {
         </button>
         <button
           type="button"
-          {...nextActionProps(nextAct?.key === 'videos' && !nextAct.stale)}
+          {...nextActionProps(nextAct?.stage === 'videos' && !nextAct.stale)}
           disabled={shots.length === 0 || generating}
           onClick={() => void generate('videos', selIds, `（${scope}）`)}
         >
@@ -267,8 +283,8 @@ export function DirectorPage() {
         <button type="button" className="ghost" disabled={busy} onClick={() => report(create.mutateAsync({}), '已在末尾新增镜头')}>
           新增镜头
         </button>
-        <Link className="btn" to={`/projects/${enc(slug)}/episodes/${id}/export`}>
-          去导出（{withVideo}/{shots.length} 镜有视频）
+        <Link className="btn" to={`${workspacePath(slug, id)}?stage=export`}>
+          去成片（{withVideo}/{shots.length} 镜有视频）
         </Link>
       </div>
       {!openShot && notice.view}
@@ -276,7 +292,7 @@ export function DirectorPage() {
       <div className="director-body">
         {shots.length === 0 ? (
           <p className="panel empty">
-            这一集还没有分镜。<Link to={`/projects/${enc(slug)}/episodes/${id}/script`}>去剧本页生成分镜</Link>
+            这一集还没有分镜。<Link to={`${workspacePath(slug, id)}?stage=script`}>去剧本阶段生成分镜</Link>
           </p>
         ) : (
           <ShotTable

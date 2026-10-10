@@ -1,14 +1,15 @@
-// 角色页：角色 / 场景 / 风格三个页签，全宽。页签用 hidden 切换、都保持挂载，切页签不丢正在编辑的内容。
+// 单集工作台的角色阶段（过渡版，Task 5 换成角色卡网格 + 抽屉）：角色 / 场景 / 风格三个页签。
+// 页签用 hidden 切换、都保持挂载，切页签不丢正在编辑的内容。地址里有 ?char=<id> 时切到角色页签并滚到那张卡。
 import { useEffect, useState } from 'react';
-import { useParams } from 'react-router-dom';
-import { errorText } from '../api/client';
-import { useCharacters, useEpisode, useLocations, usePatchLocation, usePutStyle, useStyle } from '../api/queries';
-import type { LocationPatch, Style } from '../api/types';
-import { EpisodeHeader, EpisodeLoadError, NEXT_ACTION_EVENT, useNextAction } from '../components/EpisodeHeader';
-import { castOf } from './stages';
-import { EditableFields, type FieldSpec, type FieldValues, useUnsavedGuard } from '../components/EditableFields';
-import { CharacterCard } from './script/CharacterCard';
-import { RecommendPanel } from './script/RecommendPanel';
+import { useParams, useSearchParams } from 'react-router-dom';
+import { errorText } from '../../api/client';
+import { useCharacters, useEpisode, useLocations, usePatchLocation, usePutStyle, useStyle } from '../../api/queries';
+import type { LocationPatch, Style } from '../../api/types';
+import { EpisodeLoadError, NEXT_ACTION_EVENT, useNextAction } from '../../components/EpisodeHeader';
+import { castOf, hasPortrait } from '../stages';
+import { EditableFields, type FieldSpec, type FieldValues, useUnsavedGuard } from '../../components/EditableFields';
+import { CharacterCard } from '../script/CharacterCard';
+import { RecommendPanel } from '../script/RecommendPanel';
 
 const LOCATION_FIELDS: FieldSpec[] = [
   { name: 'name', label: '名字' },
@@ -48,8 +49,10 @@ function toStyle(v: FieldValues): Style {
 
 type Tab = 'chars' | 'locs' | 'style';
 
-export function CastPage() {
+export function CastStage() {
   const { slug = '', episodeId = '' } = useParams();
+  const [params] = useSearchParams();
+  const charId = Number(params.get('char')) || null;
   const id = Number(episodeId);
   const ep = useEpisode(id);
   const characters = useCharacters(slug);
@@ -58,13 +61,23 @@ export function CastPage() {
   const patchLoc = usePatchLocation(slug);
   const putStyle = usePutStyle(slug);
   const [tab, setTab] = useState<Tab>('chars');
-  // 下一步是抽定妆照 / 添加角色时：点页头提示先切回角色页签，好让它聚焦到那个按钮
-  const nextAct = useNextAction(slug, ep.data, 'cast');
+  // 下一步是抽定妆照 / 添加角色时：点阶段条的「下一步」先切回角色页签，好让它触发那个按钮
+  const nextAct = useNextAction(slug, ep.data, ['cast']);
   useEffect(() => {
     const onNext = () => setTab('chars');
     window.addEventListener(NEXT_ACTION_EVENT, onNext);
     return () => window.removeEventListener(NEXT_ACTION_EVENT, onNext);
   }, []);
+  // 左栏点了角色（?char=<id>）：切到角色页签，等页签显示出来再滚到那张卡
+  const charsLoaded = !!characters.data;
+  useEffect(() => {
+    if (!charId || !charsLoaded) return;
+    setTab('chars');
+    const t = window.setTimeout(() => {
+      document.querySelector(`[data-testid="character-${charId}"]`)?.scrollIntoView?.({ block: 'start', behavior: 'smooth' });
+    }, 0);
+    return () => window.clearTimeout(t);
+  }, [charId, charsLoaded]);
   // 改过没保存的场景（按 id）和风格：换页面前问一句（角色卡自己挂了）
   const [dirtyLocs, setDirtyLocs] = useState<Set<number>>(() => new Set());
   const [styleDirty, setStyleDirty] = useState(false);
@@ -86,7 +99,7 @@ export function CastPage() {
   const st = style.data ?? EMPTY_STYLE;
   const withPortrait = chars.filter((c) => c.portrait_url).length;
   // 轮到的角色：出场角色里第一个还没定妆照的（和进度条的算法一致）
-  const nextCharId = nextAct?.key === 'cast' ? castOf(e.shots, chars).find((c) => !c.portrait_url && !c.portrait_candidate_id)?.id : undefined;
+  const nextCharId = nextAct ? castOf(e.shots, chars).find((c) => !hasPortrait(c))?.id : undefined;
 
   const tabs: { key: Tab; label: string }[] = [
     { key: 'chars', label: `角色（${chars.length}）` },
@@ -95,14 +108,14 @@ export function CastPage() {
   ];
 
   return (
-    <div className="page cast-page">
-      <EpisodeHeader slug={slug} ep={e} page="cast" title="角色">
-        {chars.length > 0 && (
+    <div className="stage-body cast-page">
+      {chars.length > 0 && (
+        <div className="toolbar">
           <span className="chip">
             {withPortrait}/{chars.length} 个角色有定妆照
           </span>
-        )}
-      </EpisodeHeader>
+        </div>
+      )}
 
       <section className="panel cast-pane" aria-label="角色、场景与风格">
         <div className="tabs" role="tablist" aria-label="设定">
@@ -123,7 +136,7 @@ export function CastPage() {
         </div>
 
         <div role="tabpanel" id="tabpanel-chars" aria-labelledby="tab-chars" className="tab-body" hidden={tab !== 'chars'}>
-          <RecommendPanel slug={slug} episodeId={id} existing={chars} isNext={nextAct?.key === 'cast' && chars.length === 0} />
+          <RecommendPanel slug={slug} episodeId={id} existing={chars} isNext={!!nextAct && chars.length === 0} />
           {chars.length === 0 && <p className="muted">生成剧本后自动抽取，也可以按剧本推荐角色。</p>}
           <div className="char-list">
             {chars.map((c) => (

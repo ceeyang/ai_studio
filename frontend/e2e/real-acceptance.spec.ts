@@ -42,12 +42,14 @@ test('真实环境：梗概 → 带 H3 原生声音的成片', async ({ page }) 
   await page.getByRole('button', { name: '生成分镜', exact: true }).click();
   await waitQueueIdle(page, slug);
 
-  await page.getByRole('navigation', { name: '阶段导航' }).getByRole('link', { name: '导演台', exact: true }).click();
+  const stages = page.getByRole('list', { name: '制作阶段' });
+  await stages.getByRole('button', { name: /首帧/ }).click();
   await expect(page.getByTestId('shot-S01')).toBeVisible();
   await page.getByRole('button', { name: '生成首帧（全部）' }).click();
   await waitQueueIdle(page, slug);
   await page.getByRole('button', { name: '生成视频（全部）' }).click();
   await waitQueueIdle(page, slug);
+  await stages.getByRole('button', { name: /成片/ }).click();
   await page.getByRole('button', { name: '合成导出' }).click();
   await waitQueueIdle(page, slug);
 

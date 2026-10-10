@@ -23,6 +23,7 @@ import { Dialog } from '../components/Dialog';
 import { Menu, type MenuItem } from '../components/Menu';
 import { EPISODE_STATUS_LABEL, engineLabel } from '../format';
 import { forgetEpisode, readLastEpisode } from '../lastEpisode';
+import { workspacePath } from './workspace/urls';
 
 function pickDefault(rows: EngineRow[] | undefined, preferred: string): string {
   if (!rows || rows.length === 0) return '';
@@ -249,10 +250,10 @@ function ProjectCard({ p }: { p: Project }) {
           {latest && (
             <Link
               className="btn sm ghost"
-              to={`/projects/${enc(p.slug)}/episodes/${latest.id}/director`}
-              title={`第 ${latest.number} 集的导演台`}
+              to={workspacePath(p.slug, latest.id)}
+              title={`打开第 ${latest.number} 集的工作台`}
             >
-              导演台 · 第 {latest.number} 集
+              工作台 · 第 {latest.number} 集
             </Link>
           )}
         </div>
@@ -283,7 +284,6 @@ function pickContinue(rows: Project[], overviews: (ProjectOverview | undefined)[
 
 function ContinueCard({ target }: { target: ContinueTarget }) {
   const { project: p, episode: ep } = target;
-  const base = `/projects/${enc(p.slug)}/episodes/${ep.id}`;
   return (
     <section className="continue-card" aria-label="继续制作">
       <Cover title={p.title} url={ep.cover_url} className="continue-cover" />
@@ -301,13 +301,10 @@ function ContinueCard({ target }: { target: ContinueTarget }) {
           <span className={ep.export_count ? 'has' : undefined}>{ep.export_count} 个成片</span>
         </div>
       </div>
-      {/* 还没分镜的集，下一步在剧本页：主按钮跟着走，别把人带到空的导演台 */}
+      {/* 一个入口：单集工作台自己停在下一步所在的阶段 */}
       <div className="continue-actions">
-        <Link className={ep.shot_count === 0 ? 'btn primary' : 'btn'} to={`${base}/script`}>
-          剧本
-        </Link>
-        <Link className={ep.shot_count === 0 ? 'btn' : 'btn primary'} to={`${base}/director`}>
-          打开导演台
+        <Link className="btn primary" to={workspacePath(p.slug, ep.id)}>
+          继续制作
         </Link>
       </div>
     </section>
@@ -425,13 +422,13 @@ function NewEpisodeDialog({ slug, nextNumber, onClose }: { slug: string; nextNum
     e.preventDefault();
     create.mutate(
       { title: title.trim(), source_text: text, target_seconds: Number(seconds) },
-      { onSuccess: (ep) => navigate(`/projects/${enc(slug)}/episodes/${ep.id}/script`) },
+      { onSuccess: (ep) => navigate(workspacePath(slug, ep.id)) },
     );
   };
   return (
     <Dialog
       title={`新建剧集 · 第 ${nextNumber} 集`}
-      subtitle="贴原文或梗概，创建后到剧本页生成剧本。"
+      subtitle="贴原文或梗概，创建后在工作台的剧本阶段生成剧本。"
       onClose={onClose}
       wide
       guard={() => text.trim() !== ''}
@@ -568,7 +565,6 @@ function ProjectDetail({ slug }: { slug: string }) {
   const shotTotal = overview.data?.episodes.reduce((n, e) => n + e.shot_count, 0) ?? 0;
   const nextNumber = eps.reduce((n, e) => Math.max(n, e.number), 0) + 1;
   const title = p?.title ?? slug;
-  const base = `/projects/${enc(slug)}/episodes`;
 
   const removeEpisode = async (ep: Episode) => {
     const shots = stats.get(ep.id)?.shot_count;
@@ -654,8 +650,6 @@ function ProjectDetail({ slug }: { slug: string }) {
             <ul className="episode-grid">
               {eps.map((ep) => {
                 const st = stats.get(ep.id);
-                // 还没分镜：主按钮是「去剧本」
-                const noShots = st?.shot_count === 0;
                 return (
                   <li key={ep.id} className="episode-card" data-testid={`episode-${ep.id}`}>
                     <Cover title={ep.title || title} url={st?.cover_url} className="ep-cover" />
@@ -677,11 +671,9 @@ function ProjectDetail({ slug }: { slug: string }) {
                         {st && <span className={st.export_count ? 'has' : undefined}>{st.export_count} 个成片</span>}
                       </div>
                       <div className="ep-actions">
-                        <Link className={noShots ? 'btn sm primary' : 'btn sm'} to={`${base}/${ep.id}/script`}>
-                          去剧本
-                        </Link>
-                        <Link className={noShots ? 'btn sm' : 'btn sm primary'} to={`${base}/${ep.id}/director`}>
-                          去导演台
+                        {/* 一个入口：单集工作台自己停在下一步所在的阶段 */}
+                        <Link className="btn sm" to={workspacePath(slug, ep.id)} aria-label={`打开第 ${ep.number} 集`}>
+                          打开
                         </Link>
                       </div>
                     </div>

@@ -1,10 +1,10 @@
-// 剧本页：只管剧本——原文 / 梗概 + 剧本段落（都可折叠，收起时保持挂载不丢编辑）。
-// 角色、场景、风格在角色页（右上「本集角色」条进去）。
+// 单集工作台的剧本阶段：原文 / 梗概 + 剧本段落（都可折叠，收起时保持挂载不丢编辑），生成剧本、生成分镜都在这里。
+// 角色、场景、风格在角色阶段；左栏有剧本大纲和角色列表。
 // 第一次生成剧本 / 分镜前先问后端会删什么、覆盖什么；已经有了再点是「重新生成…」，打开对话框（可写修改意见、看影响预估、一定强制重出）。
 import { useQueries } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
-import { api, enc, errorText } from '../api/client';
+import { useParams } from 'react-router-dom';
+import { api, errorText } from '../../api/client';
 import {
   fetchRerunImpact,
   keys,
@@ -15,16 +15,17 @@ import {
   usePatchSceneBlock,
   useRunStage,
   useStyle,
-} from '../api/queries';
-import type { Character, EpisodePatch, Job, RerunImpact, SceneBlock } from '../api/types';
-import { useConfirm } from '../components/ConfirmDialog';
-import { RegenerateDialog, impactText } from '../components/RegenerateDialog';
-import { EpisodeHeader, EpisodeLoadError, nextActionProps, useNextAction } from '../components/EpisodeHeader';
-import { EditableFields, type FieldSpec, type FieldValues, type FieldsState, useUnsavedGuard } from '../components/EditableFields';
-import { useJobNotice } from '../components/JobNotice';
-import { EPISODE_STATUS_LABEL } from '../format';
+} from '../../api/queries';
+import type { EpisodePatch, Job, RerunImpact, SceneBlock } from '../../api/types';
+import { useConfirm } from '../../components/ConfirmDialog';
+import { RegenerateDialog, impactText } from '../../components/RegenerateDialog';
+import { EpisodeLoadError, nextActionProps, useNextAction } from '../../components/EpisodeHeader';
+import { EditableFields, type FieldSpec, type FieldValues, type FieldsState, useUnsavedGuard } from '../../components/EditableFields';
+import { useJobNotice } from '../../components/JobNotice';
+import { EPISODE_STATUS_LABEL } from '../../format';
+import { workspacePath } from './urls';
 
-export { toCharacterPatch } from './script/CharacterCard';
+export { toCharacterPatch } from '../script/CharacterCard';
 export { impactText };
 
 const EPISODE_FIELDS: FieldSpec[] = [
@@ -67,41 +68,6 @@ function useOnStageDone(run: { stage: Stage; ids: number[] } | null, onDone: (st
     // key 概括了 jobs 里会影响结果的部分
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key, run]);
-}
-
-/** 右上的「本集角色」条：头像、名字、有没有定妆照，点了去角色页。 */
-function CastStrip({ to, chars }: { to: string; chars: Character[] }) {
-  const withPortrait = chars.filter((c) => c.portrait_url).length;
-  return (
-    <Link className="cast-strip" to={to} title="去角色页：定妆照、三视图、场景和风格">
-      <span className="cast-strip-label">本集角色</span>
-      {chars.length === 0 ? (
-        <span className="muted">还没有角色</span>
-      ) : (
-        <>
-          <span className="cast-strip-list">
-            {chars.slice(0, 6).map((c) => (
-              <span key={c.id} className={`cast-chip${c.portrait_url ? '' : ' is-missing'}`}>
-                {c.portrait_url ? (
-                  <img src={c.portrait_url} alt={c.name} />
-                ) : (
-                  <span className="cast-avatar" aria-hidden="true">
-                    {Array.from(c.name)[0] ?? '?'}
-                  </span>
-                )}
-                <span>{c.name}</span>
-              </span>
-            ))}
-            {chars.length > 6 && <span className="muted">等 {chars.length} 个</span>}
-          </span>
-          <span className="cast-strip-count">
-            {withPortrait}/{chars.length} 有定妆照
-          </span>
-        </>
-      )}
-      <span className="chev" aria-hidden="true" />
-    </Link>
-  );
 }
 
 /** 一个段落：收起时一行摘要（编号 · 场景 · 正文开头），点开编辑；收起时编辑区只是藏起来，不丢内容。 */
@@ -164,7 +130,7 @@ function BlockRow({
   );
 }
 
-export function ScriptPage() {
+export function ScriptStage() {
   const { slug = '', episodeId = '' } = useParams();
   const id = Number(episodeId);
   const ep = useEpisode(id);
@@ -188,18 +154,18 @@ export function ScriptPage() {
   // 每个段落编辑框的当前内容：「保存并生成分镜」「重新生成分镜…」要先把没保存的改动存上
   const blockStates = useRef(new Map<number, FieldsState>());
   useUnsavedGuard(!!src?.dirty || dirtyBlocks.size > 0);
-  // 下一步是生成剧本 / 生成分镜时，对应按钮是本页唯一的主按钮
-  const nextAct = useNextAction(slug, ep.data, 'script');
-  const base = `/projects/${enc(slug)}/episodes/${id}`;
+  // 下一步是生成剧本 / 生成分镜时，对应按钮打上 data-next-action，阶段条的「下一步」触发它
+  const nextAct = useNextAction(slug, ep.data, ['script']);
+  const base = workspacePath(slug, id);
 
   useOnStageDone(
     lastRun,
     (stage) => {
       setLastRun(null);
       if (stage === 'script') {
-        notice.info('剧本好了。下一步：去角色页抽定妆照', { action: { label: '去角色页', to: `${base}/cast` } });
+        notice.info('剧本好了。下一步：生成分镜');
       } else {
-        notice.info('分镜好了。下一步：去导演台生成首帧', { action: { label: '去导演台', to: `${base}/director` } });
+        notice.info('分镜好了。下一步：确认角色定妆照，再生成首帧', { action: { label: '去角色', to: `${base}?stage=cast` } });
       }
     },
     () => setLastRun(null),
@@ -335,15 +301,12 @@ export function ScriptPage() {
   const hasShots = e.shots.length > 0;
 
   return (
-    <div className="page script-page">
-      <EpisodeHeader slug={slug} ep={e} page="script" title="剧本">
+    <div className="stage-body script-page">
+      <div className="toolbar">
         <span className="chip">
           {EPISODE_STATUS_LABEL[e.status] ?? e.status} · 已有 {e.shots.length} 个镜头
         </span>
-        <CastStrip to={`${base}/cast`} chars={chars} />
-      </EpisodeHeader>
-
-      <div className="toolbar">
+        <span className="grow" aria-hidden="true" />
         {hasBlocks ? (
           <button
             type="button"
@@ -356,7 +319,7 @@ export function ScriptPage() {
         ) : (
           <button
             type="button"
-            {...nextActionProps(nextAct?.key === 'script')}
+            {...nextActionProps(!!nextAct)}
             disabled={busy || (srcDirty && !srcValid)}
             title={srcDirty ? '先保存原文的修改，再按新原文生成剧本' : undefined}
             onClick={() => runStage('script')}
@@ -376,7 +339,7 @@ export function ScriptPage() {
         ) : (
           <button
             type="button"
-            {...nextActionProps(nextAct?.key === 'storyboard')}
+            {...nextActionProps(!!nextAct && hasBlocks)}
             disabled={busy || !hasBlocks}
             title={
               !hasBlocks

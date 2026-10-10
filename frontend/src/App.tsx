@@ -8,10 +8,7 @@ import { RouteError } from './components/RouteError';
 import { EventsProvider } from './ws/EventsContext';
 import { SettingsPage } from './pages/SettingsPage';
 import { JobsPage } from './pages/JobsPage';
-import { DirectorPage } from './pages/DirectorPage';
-import { ScriptPage } from './pages/ScriptPage';
-import { CastPage } from './pages/CastPage';
-import { ExportPage } from './pages/ExportPage';
+import { episodeRoutes } from './pages/EpisodeWorkspace';
 import { ProjectsPage } from './pages/ProjectsPage';
 
 const queryClient = new QueryClient({
@@ -37,10 +34,8 @@ const router = createBrowserRouter([
     children: [
       { path: '/settings', element: <SettingsPage /> },
       { path: '/jobs', element: <JobsPage /> },
-      { path: '/projects/:slug/episodes/:episodeId/director', element: <DirectorPage /> },
-      { path: '/projects/:slug/episodes/:episodeId/script', element: <ScriptPage /> },
-      { path: '/projects/:slug/episodes/:episodeId/cast', element: <CastPage /> },
-      { path: '/projects/:slug/episodes/:episodeId/export', element: <ExportPage /> },
+      // 单集工作台；旧的 /script /cast /director /export 重定向过去（后端任务的 context.url 还是旧形式）
+      ...episodeRoutes,
       { path: '/', element: <ProjectsPage /> },
       { path: '/projects/:slug', element: <ProjectsPage /> },
       { path: '*', element: <NotFound /> },

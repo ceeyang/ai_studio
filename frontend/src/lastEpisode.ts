@@ -1,4 +1,4 @@
-// 左侧导航的"剧本 / 导演台"指向最近打开的那一集。只是本机浏览器里的便利记忆，读不到就当没有。
+// 左侧导航的「当前集」指向最近打开的那一集。只是本机浏览器里的便利记忆，读不到就当没有。
 const KEY = 'studio.lastEpisode';
 
 export interface EpisodeRef {

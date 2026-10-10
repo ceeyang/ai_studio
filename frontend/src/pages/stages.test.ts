@@ -1,9 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Character, ExportRow } from '../api/types';
 import { makeCandidate, makeEpisode, makeShot, makeSlot } from '../test/factories';
-import { episodeStages } from './stages';
-
-const BASE = '/projects/demo/episodes/4';
+import { STAGE_KEYS, episodeStages, isStageKey } from './stages';
 
 function char(id: number, portrait: boolean): Character {
   return {
@@ -32,89 +30,85 @@ function exp(id: number, isFinal = false): ExportRow {
   return { id, episode_id: 4, variant: '9:16', file_path: `x/${id}.mp4`, url: `/media/${id}.mp4`, settings: {}, is_final: isFinal, created_at: '2026-10-08T10:00:00' };
 }
 
+const BLOCKS = [{ id: 1, order: 0, location_id: null, text: 'a' }, { id: 2, order: 1, location_id: null, text: 'b' }];
 const byKey = (r: ReturnType<typeof episodeStages>) => Object.fromEntries(r.stages.map((s) => [s.key, s]));
 
 describe('episodeStages', () => {
-  it('空剧集：第一段是进行中的剧本，其余待做；下一步去生成剧本', () => {
-    const r = episodeStages(makeEpisode({ id: 4 }), [], [], BASE);
-    expect(r.stages.map((s) => s.key)).toEqual(['script', 'cast', 'storyboard', 'keyframes', 'videos', 'export']);
-    expect(r.stages.map((s) => s.label)).toEqual(['剧本', '角色', '分镜', '首帧', '视频', '导出']);
-    expect(r.stages.map((s) => s.state)).toEqual(['active', 'todo', 'todo', 'todo', 'todo', 'todo']);
+  it('五段：剧本 / 角色 / 首帧 / 视频 / 成片；空剧集下一步是在剧本阶段生成剧本', () => {
+    const r = episodeStages(makeEpisode({ id: 4 }), [], []);
+    expect(r.stages.map((s) => s.key)).toEqual(['script', 'cast', 'keyframes', 'videos', 'export']);
+    expect(STAGE_KEYS).toEqual(['script', 'cast', 'keyframes', 'videos', 'export']);
+    expect(r.stages.map((s) => s.label)).toEqual(['剧本', '角色', '首帧', '视频', '成片']);
+    expect(r.stages.map((s) => s.state)).toEqual(['active', 'todo', 'todo', 'todo', 'todo']);
     const s = byKey(r);
     expect(s.script.detail).toBe('还没有段落');
     expect(s.cast.detail).toBe('还没有角色');
-    expect(s.storyboard.detail).toBe('还没有镜头');
+    expect(s.keyframes.detail).toBe('还没有镜头');
     expect(s.export.detail).toBe('还没有成片');
-    expect(s.script.to).toBe(`${BASE}/script`);
-    expect(s.cast.to).toBe(`${BASE}/cast`);
-    expect(s.storyboard.to).toBe(`${BASE}/script`);
-    expect(s.keyframes.to).toBe(`${BASE}/director`);
-    expect(s.videos.to).toBe(`${BASE}/director`);
-    expect(s.export.to).toBe(`${BASE}/export`);
-    expect(r.next).toEqual({ label: '下一步：生成剧本', to: `${BASE}/script`, key: 'script', stale: false });
+    expect(r.next).toEqual({ label: '生成剧本', stage: 'script', action: 'run', count: 0, stale: false });
   });
 
-  it('只有剧本：角色缺定妆照时下一步去抽定妆照；没有镜头时按项目全部角色算', () => {
-    const ep = makeEpisode({ id: 4, scene_blocks: [{ id: 1, order: 0, location_id: null, text: 'a' }, { id: 2, order: 1, location_id: null, text: 'b' }] });
-    const r = episodeStages(ep, [char(1, true), char(2, false)], [], BASE);
-    const s = byKey(r);
-    expect(s.script).toMatchObject({ state: 'done', detail: '2 段' });
-    expect(s.cast).toMatchObject({ state: 'active', detail: '1/2 有定妆照' });
-    expect(s.storyboard.state).toBe('todo');
-    expect(r.next).toEqual({ label: '下一步：抽定妆照（1 个角色缺定妆照）', to: `${BASE}/cast`, key: 'cast', stale: false });
-    // 角色都有定妆照了：下一步生成分镜
-    const r2 = episodeStages(ep, [char(1, true), char(2, true)], [], BASE);
-    expect(byKey(r2).cast).toMatchObject({ state: 'done', detail: '2/2 有定妆照' });
-    expect(r2.next).toEqual({ label: '下一步：生成分镜', to: `${BASE}/script`, key: 'storyboard', stale: false });
+  it('有段落没镜头：剧本还没完成，下一步生成分镜（按段数）', () => {
+    const ep = makeEpisode({ id: 4, scene_blocks: BLOCKS });
+    const r = episodeStages(ep, [char(1, false)], []);
+    expect(byKey(r).script).toMatchObject({ state: 'active', detail: '2 段 · 还没有镜头' });
+    expect(r.next).toEqual({ label: '生成分镜', stage: 'script', action: 'run', count: 2, stale: false });
   });
 
-  it('有镜头没首帧：只看出场的角色；下一步生成首帧并写缺几镜', () => {
-    const ep = makeEpisode({
-      id: 4,
-      scene_blocks: [{ id: 1, order: 0, location_id: null, text: 'a' }],
-      shots: [shot(1, 'none', 'none', [1]), shot(2, 'none', 'none', [1])],
-    });
-    // 角色 2 没出场，没定妆照也不挡路
-    const r = episodeStages(ep, [char(1, true), char(2, false)], [], BASE);
+  it('有段落有镜头：剧本完成；出场角色缺定妆照时下一步在角色阶段', () => {
+    const ep = makeEpisode({ id: 4, scene_blocks: BLOCKS, shots: [shot(1, 'none', 'none', [1, 2])] });
+    const r = episodeStages(ep, [char(1, true), char(2, false), char(3, false)], []);
     const s = byKey(r);
-    expect(s.cast).toMatchObject({ state: 'done', detail: '1/1 有定妆照' });
-    expect(s.storyboard).toMatchObject({ state: 'done', detail: '2 镜' });
+    expect(s.script).toMatchObject({ state: 'done', detail: '2 段 · 1 镜' });
+    // 角色 3 没出场，不算
+    expect(s.cast).toMatchObject({ state: 'active', detail: '1/2' });
+    expect(r.next).toEqual({ label: '抽定妆照（1 个角色缺定妆照）', stage: 'cast', action: 'run', count: 1, stale: false });
+  });
+
+  it('剧本完成但项目里没有角色：下一步添加角色', () => {
+    const ep = makeEpisode({ id: 4, scene_blocks: BLOCKS, shots: [shot(1, 'none', 'none', [])] });
+    const r = episodeStages(ep, [], []);
+    expect(r.next).toEqual({ label: '添加角色', stage: 'cast', action: 'run', count: 0, stale: false });
+  });
+
+  it('有镜头没首帧：下一步在首帧阶段生成缺的首帧', () => {
+    const ep = makeEpisode({ id: 4, scene_blocks: BLOCKS, shots: [shot(1, 'none', 'none'), shot(2, 'none', 'none')] });
+    const r = episodeStages(ep, [char(1, true), char(2, false)], []);
+    const s = byKey(r);
+    expect(s.cast).toMatchObject({ state: 'done', detail: '1/1' });
     expect(s.keyframes).toMatchObject({ state: 'active', detail: '0/2' });
     expect(s.videos).toMatchObject({ state: 'todo', detail: '0/2' });
-    expect(r.next).toEqual({ label: '下一步：生成首帧（2 镜缺首帧）', to: `${BASE}/director`, key: 'keyframes', stale: false });
+    expect(r.next).toEqual({ label: '生成首帧（2 镜缺首帧）', stage: 'keyframes', action: 'run', count: 2, stale: false });
   });
 
-  it('部分过期：状态是过期、detail 写几镜过期，下一步先重做过期的', () => {
-    const ep = makeEpisode({
-      id: 4,
-      scene_blocks: [{ id: 1, order: 0, location_id: null, text: 'a' }],
-      shots: [shot(1, 'ok', 'ok'), shot(2, 'stale', 'stale'), shot(3, 'stale', 'none')],
-    });
-    const r = episodeStages(ep, [char(1, true)], [], BASE);
+  it('部分过期：状态是过期、detail 写几镜过期，下一步先重做过期的；首帧都好了才轮到视频', () => {
+    const ep = makeEpisode({ id: 4, scene_blocks: BLOCKS, shots: [shot(1, 'ok', 'ok'), shot(2, 'stale', 'stale'), shot(3, 'stale', 'none')] });
+    const r = episodeStages(ep, [char(1, true)], []);
     const s = byKey(r);
     expect(s.keyframes).toMatchObject({ state: 'stale', detail: '3/3 · 2 过期' });
     expect(s.videos).toMatchObject({ state: 'stale', detail: '2/3 · 1 过期' });
-    expect(r.next).toEqual({ label: '下一步：重做过期的首帧（2 镜过期）', to: `${BASE}/director`, key: 'keyframes', stale: true });
-    // 首帧都是最新的、只是视频缺：下一步生成视频
+    expect(r.next).toEqual({ label: '重做过期的首帧（2 镜过期）', stage: 'keyframes', action: 'run', count: 2, stale: true });
     const ep2 = { ...ep, shots: [shot(1, 'ok', 'ok'), shot(2, 'ok', 'none'), shot(3, 'ok', 'none')] };
-    const r2 = episodeStages(ep2, [char(1, true)], [], BASE);
+    const r2 = episodeStages(ep2, [char(1, true)], []);
     expect(byKey(r2).keyframes).toMatchObject({ state: 'done', detail: '3/3' });
-    expect(r2.next).toEqual({ label: '下一步：生成视频（2 镜缺视频）', to: `${BASE}/director`, key: 'videos', stale: false });
+    expect(r2.next).toEqual({ label: '生成视频（2 镜缺视频）', stage: 'videos', action: 'run', count: 2, stale: false });
   });
 
-  it('全部完成并定稿：没有下一步', () => {
-    const ep = makeEpisode({
-      id: 4,
-      scene_blocks: [{ id: 1, order: 0, location_id: null, text: 'a' }],
-      shots: [shot(1, 'ok', 'ok'), shot(2, 'ok', 'ok')],
-    });
-    const before = episodeStages(ep, [char(1, true)], [], BASE);
-    expect(before.next).toEqual({ label: '下一步：合成导出', to: `${BASE}/export`, key: 'export', stale: false });
-    const r = episodeStages(ep, [char(1, true)], [exp(1), exp(2, true)], BASE);
+  it('视频都有了：下一步在成片阶段合成导出；有成片后全部完成，没有下一步', () => {
+    const ep = makeEpisode({ id: 4, scene_blocks: BLOCKS, shots: [shot(1, 'ok', 'ok'), shot(2, 'ok', 'ok')] });
+    const before = episodeStages(ep, [char(1, true)], []);
+    expect(before.next).toEqual({ label: '合成导出', stage: 'export', action: 'run', count: 2, stale: false });
+    const r = episodeStages(ep, [char(1, true)], [exp(1), exp(2, true)]);
     expect(r.stages.every((s) => s.state === 'done')).toBe(true);
     expect(byKey(r).videos.detail).toBe('2/2');
     expect(byKey(r).export.detail).toBe('2 版 · 已定稿');
-    expect(byKey(episodeStages(ep, [char(1, true)], [exp(1)], BASE)).export.detail).toBe('1 版');
+    expect(byKey(episodeStages(ep, [char(1, true)], [exp(1)])).export.detail).toBe('1 版');
     expect(r.next).toBeNull();
+  });
+
+  it('isStageKey：只认五段的名字', () => {
+    expect(isStageKey('keyframes')).toBe(true);
+    expect(isStageKey('director')).toBe(false);
+    expect(isStageKey(null)).toBe(false);
   });
 });

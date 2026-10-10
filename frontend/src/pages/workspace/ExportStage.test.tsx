@@ -1,11 +1,11 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
-import type { ExportRow } from '../api/types';
-import { installFetch } from '../test/fetch';
-import { makeCandidate, makeEpisode, makeShot, makeSlot } from '../test/factories';
-import { renderAt } from '../test/render';
-import { ExportPage, OPTIONS_KEY } from './ExportPage';
+import type { ExportRow } from '../../api/types';
+import { installFetch } from '../../test/fetch';
+import { makeCandidate, makeEpisode, makeShot, makeSlot } from '../../test/factories';
+import { renderAt } from '../../test/render';
+import { ExportStage, OPTIONS_KEY } from './ExportStage';
 
 /** 有选定视频的镜头；stale 表示视频已过期 */
 function withVideo(id: number, code: string, stale = false) {
@@ -23,7 +23,7 @@ function withVideo(id: number, code: string, stale = false) {
 }
 
 const READY = makeEpisode({ id: 4, shots: [withVideo(11, 'S01'), withVideo(12, 'S02')] });
-const AT = { route: '/projects/demo/episodes/4/export', path: '/projects/:slug/episodes/:episodeId/export' };
+const AT = { route: '/projects/demo/episodes/4?stage=export', path: '/projects/:slug/episodes/:episodeId' };
 
 function exportRow(p: Partial<ExportRow> = {}): ExportRow {
   return {
@@ -42,19 +42,19 @@ function routes(extra: Record<string, unknown> = {}) {
   };
 }
 
-describe('ExportPage', () => {
-  it('缺视频时「合成导出」禁用，列出缺的镜号并给出去导演台的链接', async () => {
+describe('ExportStage', () => {
+  it('缺视频时「合成导出」禁用，列出缺的镜号并给出去视频阶段的链接', async () => {
     installFetch(routes({ 'GET /api/episodes/4': makeEpisode({ id: 4, shots: [withVideo(11, 'S01'), makeShot({ id: 12, code: 'S02' }), makeShot({ id: 13, code: 'S03' })] }) }));
-    renderAt(<ExportPage />, AT);
+    renderAt(<ExportStage />, AT);
     expect(await screen.findByText('1/3 镜有视频')).toBeTruthy();
     expect((screen.getByRole('button', { name: '合成导出' }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByTestId('missing-videos').textContent).toContain('S02、S03');
-    expect(screen.getByRole('link', { name: '去导演台' }).getAttribute('href')).toBe('/projects/demo/episodes/4/director');
+    expect(screen.getByRole('link', { name: '去视频阶段' }).getAttribute('href')).toBe('/projects/demo/episodes/4?stage=videos');
   });
 
   it('就绪检查标出视频已过期的镜头；都有视频时可以导出', async () => {
     installFetch(routes({ 'GET /api/episodes/4': makeEpisode({ id: 4, shots: [withVideo(11, 'S01'), withVideo(12, 'S02', true)] }) }));
-    renderAt(<ExportPage />, AT);
+    renderAt(<ExportStage />, AT);
     expect((await screen.findByTestId('readiness')).textContent).toBe('2/2 镜有视频 · 1 镜视频已过期（S02）');
     expect((screen.getByRole('button', { name: '合成导出' }) as HTMLButtonElement).disabled).toBe(false);
     expect(screen.queryByTestId('missing-videos')).toBeNull();
@@ -63,7 +63,7 @@ describe('ExportPage', () => {
   it('合成导出带上字幕、配音、片尾卡选项；勾高棉语字幕会连带勾中文字幕', async () => {
     localStorage.clear();
     const calls = installFetch(routes({ 'POST /api/episodes/4/run': { job_ids: [41] } }));
-    renderAt(<ExportPage />, AT);
+    renderAt(<ExportStage />, AT);
     const user = userEvent.setup();
     await user.click(await screen.findByRole('button', { name: '合成导出' }));
     await user.click(screen.getByLabelText('高棉语字幕'));
@@ -89,7 +89,7 @@ describe('ExportPage', () => {
   it('不保留原声底、配音对齐实际说话；对齐只在勾了配音时可选', async () => {
     localStorage.clear();
     const calls = installFetch(routes({ 'POST /api/episodes/4/run': { job_ids: [44] } }));
-    renderAt(<ExportPage />, AT);
+    renderAt(<ExportStage />, AT);
     const user = userEvent.setup();
     await screen.findByTestId('readiness');
     const bed = screen.getByLabelText('保留原声底') as HTMLInputElement;
@@ -116,7 +116,7 @@ describe('ExportPage', () => {
           new Response(JSON.stringify({ detail: 'S02 还没有视频，不能导出' }), { status: 400 }),
       }),
     );
-    renderAt(<ExportPage />, AT);
+    renderAt(<ExportStage />, AT);
     await userEvent.setup().click(await screen.findByRole('button', { name: '合成导出' }));
     expect((await screen.findByRole('alert')).textContent).toContain('S02 还没有视频');
   });
@@ -124,14 +124,14 @@ describe('ExportPage', () => {
   it('选项按剧集记住：重新打开还在；本地存储不可用时照常工作', async () => {
     localStorage.clear();
     installFetch(routes());
-    const first = renderAt(<ExportPage />, AT);
+    const first = renderAt(<ExportStage />, AT);
     const user = userEvent.setup();
     await user.click(await screen.findByLabelText('高棉语字幕'));
     await user.click(screen.getByLabelText('保留原声底'));
     expect(JSON.parse(localStorage.getItem(OPTIONS_KEY(4)) ?? '{}')).toMatchObject({ subKm: true, subZh: true, bed: false });
     first.unmount();
 
-    const second = renderAt(<ExportPage />, AT);
+    const second = renderAt(<ExportStage />, AT);
     expect(((await screen.findByLabelText('高棉语字幕')) as HTMLInputElement).checked).toBe(true);
     expect((screen.getByLabelText('中文字幕') as HTMLInputElement).checked).toBe(true);
     expect((screen.getByLabelText('保留原声底') as HTMLInputElement).checked).toBe(false);
@@ -146,7 +146,7 @@ describe('ExportPage', () => {
       throw new Error('denied');
     });
     try {
-      renderAt(<ExportPage />, AT);
+      renderAt(<ExportStage />, AT);
       const zh = (await screen.findByLabelText('中文字幕')) as HTMLInputElement;
       expect(zh.checked).toBe(false);
       await user.click(zh);
@@ -166,7 +166,7 @@ describe('ExportPage', () => {
         ],
       }),
     );
-    renderAt(<ExportPage />, AT);
+    renderAt(<ExportStage />, AT);
     const list = await screen.findByRole('list', { name: '成片列表' });
     const items = within(list).getAllByRole('listitem');
     expect(items[0].textContent).toContain('9:16 · 中高字幕 · 高棉语配音 · 37.1 秒');
@@ -187,7 +187,7 @@ describe('ExportPage', () => {
         'PATCH /api/exports/3': exportRow({ id: 3, is_final: false }),
       }),
     );
-    renderAt(<ExportPage />, AT);
+    renderAt(<ExportStage />, AT);
     const user = userEvent.setup();
     await user.click(await screen.findByRole('button', { name: '取消定稿' }));
     await waitFor(() => expect(calls.some((c) => c.method === 'PATCH')).toBe(true));
@@ -202,7 +202,7 @@ describe('ExportPage', () => {
         ],
       }),
     );
-    renderAt(<ExportPage />, AT);
+    renderAt(<ExportStage />, AT);
     const item = within(await screen.findByRole('list', { name: '成片列表' })).getAllByRole('listitem')[0];
     for (const t of ['中高字幕', '高棉语配音', '片尾卡', '33.6 秒', '无原声底', '配音对齐说话']) expect(item.textContent).toContain(t);
   });
@@ -214,7 +214,7 @@ describe('ExportPage', () => {
         'PATCH /api/exports/2': exportRow({ id: 2, is_final: true }),
       }),
     );
-    renderAt(<ExportPage />, AT);
+    renderAt(<ExportStage />, AT);
     const user = userEvent.setup();
     const player = (await screen.findByTestId('export-player')) as HTMLVideoElement;
     expect(player.getAttribute('src')).toBe('/media/a.mp4');
@@ -229,7 +229,7 @@ describe('ExportPage', () => {
 
   it('没有成片时说明怎么导出', async () => {
     installFetch(routes());
-    renderAt(<ExportPage />, AT);
+    renderAt(<ExportStage />, AT);
     expect(await screen.findByText(/还没有导出/)).toBeTruthy();
   });
 
@@ -240,7 +240,7 @@ describe('ExportPage', () => {
         'POST /api/episodes/4/dialogue/fit-khmer': { job_ids: [60] },
       }),
     );
-    renderAt(<ExportPage />, AT);
+    renderAt(<ExportStage />, AT);
     const user = userEvent.setup();
     await user.click(await screen.findByRole('button', { name: '翻译高棉语字幕' }));
     expect((await screen.findByRole('status')).textContent).toContain('翻译高棉语字幕');
@@ -253,7 +253,7 @@ describe('ExportPage', () => {
     expect(posts[1].body).toEqual({});
   });
 
-  it('前面都做完、下一步是合成导出：「合成导出」是本页唯一的主按钮，页头是提示', async () => {
+  it('前面都做完、下一步是合成导出：「合成导出」打上 data-next-action（主按钮在阶段条）', async () => {
     const full = (id: number, code: string) =>
       makeShot({
         id, code, order: id, cast: [{ character_id: 8, variation_id: null }],
@@ -271,11 +271,9 @@ describe('ExportPage', () => {
         ],
       }),
     );
-    const { container } = renderAt(<ExportPage />, AT);
+    const { container } = renderAt(<ExportStage />, AT);
     const btn = await screen.findByRole('button', { name: '合成导出' });
-    await waitFor(() => expect(btn.className).toContain('primary'));
-    expect(btn.hasAttribute('data-next-action')).toBe(true);
-    expect(screen.getByRole('button', { name: /下一步：合成导出/ })).toBeTruthy();
-    expect(container.querySelectorAll('.primary')).toHaveLength(1);
+    await waitFor(() => expect(btn.hasAttribute('data-next-action')).toBe(true));
+    expect(container.querySelectorAll('.primary')).toHaveLength(0);
   });
 });
