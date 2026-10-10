@@ -251,3 +251,19 @@ def test_character_last_failure(api):
     sv.comfy = FakeRunner()
     m._execute(m._claim(gpu=True))
     assert api.get("/api/projects/demo/characters").json()[0]["last_failure"] is None
+
+
+def test_upload_after_failed_draw_clears_last_failure(api):
+    """抽卡失败后用户自己上传了定妆照：失败提示不该再挂着。"""
+    from backend.queue.errors import JobError
+
+    ch = make_char(api)
+    sv, m = api.app.state.services, api.app.state.manager
+    api.post(f"/api/characters/{ch['id']}/portraits/draw", json={})
+    sv.comfy = FakeRunner(fail=JobError("出图失败"))
+    m._execute(m._claim(gpu=True))
+    assert api.get("/api/projects/demo/characters").json()[0]["last_failure"] is not None
+    r = api.post(f"/api/characters/{ch['id']}/portrait",
+                 files={"file": ("chen.png", PNG, "image/png")})
+    assert r.status_code == 200 and r.json()["last_failure"] is None
+    assert api.get("/api/projects/demo/characters").json()[0]["last_failure"] is None

@@ -160,6 +160,11 @@ def character_out(s, c: Character, progress=None) -> CharacterOut:
     # 最近一次抽卡失败（之后成功过、或又排上了新的抽卡就不提示）
     portrait_jobs = owner_jobs(s, "character", [c.id], ("image.portrait",))[c.id]
     failed = portrait_jobs.failure("image.portrait")
+    if failed is not None and slot is not None and slot.candidates:
+        # 失败之后又有了新定妆照（用户自己上传的、或别的途径加的）：失败提示作废
+        newest = max(x.created_at for x in slot.candidates)
+        if newest > (failed.finished_at or failed.created_at):
+            failed = None
     return CharacterOut.model_validate(c).model_copy(update={
         "portrait_candidate_id": pc.id if pc else None,
         "portrait_url": "/media/" + quote(pc.file_path) if pc else None,
