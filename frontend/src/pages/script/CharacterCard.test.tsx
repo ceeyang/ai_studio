@@ -75,7 +75,7 @@ describe('角色卡', () => {
     });
     const card = await screen.findByTestId('character-6');
     const pick = within(card).getByLabelText('抽卡引擎');
-    await waitFor(() => expect(within(pick).getByRole('option', { name: 'gpt_image（浏览器）' })).toBeTruthy());
+    await waitFor(() => expect(within(pick).getByRole('option', { name: 'ChatGPT 网页' })).toBeTruthy());
     await user.selectOptions(pick, 'gpt_image');
     await user.click(within(card).getByRole('button', { name: /^抽卡/ }));
     await waitFor(() => expect(posts(calls)).toHaveLength(1));

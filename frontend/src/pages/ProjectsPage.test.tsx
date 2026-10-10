@@ -34,7 +34,7 @@ describe('ProjectsPage', () => {
     expect(screen.queryByLabelText('项目标题')).toBeNull();
     await user.click(screen.getByRole('button', { name: '新建项目' }));
     const dialog = screen.getByRole('dialog', { name: '新建项目' });
-    await screen.findByRole('option', { name: 'zimage' });
+    await screen.findByRole('option', { name: 'Z-Image 快速' });
     expect((screen.getByLabelText('图像引擎') as HTMLSelectElement).value).toBe('zimage');
     expect((screen.getByLabelText('视频引擎') as HTMLSelectElement).value).toBe('h3_video');
     expect(document.activeElement).toBe(screen.getByLabelText('项目标题'));
@@ -60,7 +60,7 @@ describe('ProjectsPage', () => {
     renderAt(<ProjectsPage />, { route: '/', path: '/' });
     const user = userEvent.setup();
     await user.click(await screen.findByRole('button', { name: '新建项目' }));
-    await screen.findByRole('option', { name: 'zimage' });
+    await screen.findByRole('option', { name: 'Z-Image 快速' });
     await user.type(screen.getByLabelText('项目标题'), 'demo');
     await user.click(screen.getByRole('button', { name: '创建项目' }));
     expect(await screen.findByText('项目 demo 已存在（HTTP 409）')).toBeTruthy();

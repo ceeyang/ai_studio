@@ -841,6 +841,9 @@ pre.error { background: rgba(255, 90, 95, 0.06); border-color: rgba(255, 90, 95,
 .modal-foot { display: flex; justify-content: flex-end; align-items: center; gap: var(--s-2); padding-top: var(--s-4); margin-top: var(--s-1); border-top: 1px solid var(--divider); }
 .modal-foot > .muted:first-child { margin-right: auto; font-size: 12px; }
 .modal textarea { min-height: 280px; }
+.modal-discard { position: sticky; bottom: calc(-1 * var(--s-6)); background: var(--surface-1); padding-bottom: var(--s-1); }
+.modal-discard > span:first-child { margin-right: auto; font-size: 13px; font-weight: 500; }
+.confirm-body { color: var(--text-2); line-height: 1.6; text-wrap: pretty; margin-bottom: var(--s-2); }
 .field-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--s-3); }
 .field-grid.two { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
 .field-grid select, .field-grid input { width: 100%; }
@@ -1154,3 +1157,48 @@ pre.error { background: rgba(255, 90, 95, 0.06); border-color: rgba(255, 90, 95,
   .script-workspace { grid-template-columns: minmax(0, 0.62fr) minmax(0, 1.38fr); }
   .char-list { grid-template-columns: repeat(auto-fill, minmax(1000px, 1fr)); }
 }
+
+/* =========================================================================
+   任务跟踪提示 / 健康横幅 / 右下角完成提示
+   ========================================================================= */
+.job-notice { flex-wrap: wrap; align-items: center; }
+.job-notice.is-pending::before { animation: pulse 1.2s ease-in-out infinite; }
+div.error.banner.job-notice { align-items: center; }
+div.error.banner.job-notice > span:first-child { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+div.error.banner.job-notice a { color: #ffd0d1; text-decoration: underline; }
+.job-notice .icon-btn { width: 24px; height: 24px; margin-left: auto; color: inherit; }
+
+.taskbar a.idle.is-waiting { color: var(--warn); text-decoration: none; }
+.taskbar a.idle.is-waiting::before { background: var(--warn); box-shadow: 0 0 0 3px var(--warn-soft); }
+.taskbar a.idle.is-waiting:hover { text-decoration: underline; }
+
+.health-banner {
+  display: flex; align-items: center; gap: var(--s-3);
+  padding: var(--s-2) var(--s-6);
+  background: var(--warn-soft); border-bottom: 1px solid rgba(242, 193, 78, 0.3);
+  color: #f6dc9c; font-size: 13px;
+  animation: enter 220ms var(--ease);
+}
+.health-banner .health-msgs { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; text-wrap: pretty; }
+.health-banner a { color: var(--warn); font-weight: 500; white-space: nowrap; }
+.health-banner .icon-btn { width: 28px; height: 28px; color: inherit; }
+
+.toasts {
+  position: fixed; right: var(--s-5); bottom: var(--s-5); z-index: 30;
+  display: flex; flex-direction: column; gap: var(--s-2); align-items: flex-end;
+  pointer-events: none;
+}
+.toast {
+  pointer-events: auto;
+  display: flex; align-items: center; gap: var(--s-2);
+  max-width: min(420px, calc(100vw - 40px));
+  padding: 8px 8px 8px var(--s-3);
+  background: var(--surface-2); border: 1px solid var(--border-strong); border-radius: var(--r-md);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  font-size: 13px; color: var(--text);
+  animation: enter 220ms var(--ease);
+}
+.toast::before { content: ''; flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--ok); box-shadow: 0 0 0 3px var(--ok-soft); }
+.toast.is-fail::before { background: var(--danger); box-shadow: 0 0 0 3px var(--danger-soft); }
+.toast > span:first-of-type { min-width: 0; overflow-wrap: anywhere; }
+.toast .icon-btn { width: 24px; height: 24px; color: var(--muted); }

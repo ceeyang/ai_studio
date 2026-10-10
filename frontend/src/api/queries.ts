@@ -33,6 +33,7 @@ import type {
   ShotIn,
   ShotPatch,
   Style,
+  SystemHealth,
   FitKhmerIn,
   TranslateIn,
   TurnaroundSheetKey,
@@ -57,6 +58,7 @@ export const keys = {
   doctor: ['doctor'] as const,
   browserStatus: ['browserStatus'] as const,
   config: ['config'] as const,
+  health: ['health'] as const,
 };
 
 function invalidate(qc: QueryClient, ...list: QueryKey[]): Promise<void[]> {
@@ -186,6 +188,16 @@ export function useDoctor() {
     queryKey: keys.doctor,
     queryFn: () => api.get<DoctorCheck[]>('/api/doctor'),
     staleTime: Infinity,
+    retry: false,
+  });
+}
+
+/** ComfyUI、浏览器扩展能不能用：30 秒问一次；接口出错时不重试（横幅只在拿到明确的"不可用"时出现）。 */
+export function useHealth() {
+  return useQuery({
+    queryKey: keys.health,
+    queryFn: () => api.get<SystemHealth>('/api/system/health'),
+    refetchInterval: 30000,
     retry: false,
   });
 }

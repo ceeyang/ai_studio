@@ -433,6 +433,16 @@ export interface JobResult {
   [key: string]: unknown;
 }
 
+/** 任务在说哪一集/哪个镜头/哪个角色：label 是给人看的名字，url 是对应页面（可能为空）。只有 HTTP 接口带，WS 事件不带。 */
+export interface JobContext {
+  label: string;
+  url: string | null;
+  project_slug: string | null;
+  episode_id: number | null;
+  shot_id: number | null;
+  character_id: number | null;
+}
+
 export interface Job {
   id: number;
   type: string;
@@ -451,6 +461,7 @@ export interface Job {
   created_at: string | null;
   started_at: string | null;
   finished_at: string | null;
+  context?: JobContext | null;
 }
 
 export interface QueueCounts {
@@ -491,4 +502,15 @@ export interface ExportRow {
   url: string;
   settings: Record<string, unknown>;
   created_at: string;
+}
+
+export interface HealthItem {
+  ok: boolean;
+  message: string;
+}
+
+/** GET /api/system/health：任务条下面的横幅用，很便宜，30 秒轮询一次 */
+export interface SystemHealth {
+  comfyui: HealthItem;
+  browser_ext: HealthItem;
 }

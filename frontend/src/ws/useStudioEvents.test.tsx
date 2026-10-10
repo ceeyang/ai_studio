@@ -4,6 +4,7 @@ import type { ReactNode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { makeJob } from '../test/factories';
 import { newQueryClient } from '../test/render';
+import { subscribeJobSettled } from './events';
 import { defaultWsUrl, useStudioEvents, type WebSocketCtor } from './useStudioEvents';
 
 class FakeWS {
@@ -124,5 +125,40 @@ describe('useStudioEvents', () => {
       vi.advanceTimersByTime(5000);
     });
     expect(FakeWS.all).toHaveLength(1);
+  });
+
+  it('日志事件节流：同一个任务 500ms 内只刷新一次，窗口结束再补一次', () => {
+    vi.useFakeTimers();
+    const { spy, ws } = setup();
+    act(() => ws().open());
+    spy.mockClear();
+    act(() => {
+      for (let i = 0; i < 10; i++) ws().emit({ type: 'log', job_id: 4, line: `l${i}` });
+      ws().emit({ type: 'log', job_id: 5, line: 'other' });
+    });
+    const forJob = (id: number) => spy.mock.calls.filter((c) => JSON.stringify(c[0]) === JSON.stringify({ queryKey: ['job', id] })).length;
+    expect(forJob(4)).toBe(1);
+    expect(forJob(5)).toBe(1);
+    act(() => {
+      vi.advanceTimersByTime(500);
+    });
+    expect(forJob(4)).toBe(2); // 窗口里攒下的日志补刷一次
+    expect(forJob(5)).toBe(1);
+  });
+
+  it('生成类任务完成/失败时广播出去（给右下角提示用），其他任务和中间状态不广播', () => {
+    const { ws } = setup();
+    const seen: number[] = [];
+    const off = subscribeJobSettled((j) => seen.push(j.id));
+    act(() => ws().open());
+    act(() => {
+      ws().emit({ type: 'job', job: makeJob({ id: 1, type: 'image.keyframe', status: 'running' }) });
+      ws().emit({ type: 'job', job: makeJob({ id: 2, type: 'image.keyframe', status: 'done' }) });
+      ws().emit({ type: 'job', job: makeJob({ id: 3, type: 'video.shot', status: 'failed' }) });
+      ws().emit({ type: 'job', job: makeJob({ id: 4, type: 'script', status: 'done' }) });
+      ws().emit({ type: 'job', job: makeJob({ id: 5, type: 'export.episode', status: 'canceled' }) });
+    });
+    off();
+    expect(seen).toEqual([2, 3]);
   });
 });

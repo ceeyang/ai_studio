@@ -3,6 +3,7 @@ import { NavLink, Outlet, matchPath, useLocation } from 'react-router-dom';
 import { enc } from '../api/client';
 import { type EpisodeRef, readLastEpisode, rememberEpisode } from '../lastEpisode';
 import { TaskBar } from './TaskBar';
+import { Toasts } from './Toasts';
 
 function safeDecode(s: string): string {
   try {
@@ -101,6 +102,7 @@ export function Layout() {
           <Outlet />
         </main>
       </div>
+      <Toasts />
     </div>
   );
 }

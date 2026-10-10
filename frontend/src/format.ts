@@ -1,11 +1,20 @@
 import type { JobStatus } from './api/types';
 
+/** 后端全部任务类型（backend 里 HANDLERS.register 登记的）→ 中文名。新增任务类型时这里也要补。 */
 export const JOB_TYPE_LABEL: Record<string, string> = {
   script: '剧本',
   storyboard: '分镜',
   'image.keyframe': '首帧',
   'video.shot': '视频',
   'export.episode': '合成导出',
+  'image.portrait': '定妆照',
+  'image.turnaround': '三视图',
+  'character.suggest': '推荐造型',
+  'character.recommend': '推荐角色',
+  'character.turnaround_look': '三视图描述',
+  'post.dub': '配音',
+  'subtitles.translate': '字幕翻译',
+  'dialogue.fit_khmer': '高棉语台词适配',
 };
 
 export const JOB_STATUS_LABEL: Record<JobStatus, string> = {
@@ -26,14 +35,43 @@ export const EPISODE_STATUS_LABEL: Record<string, string> = {
 
 export const ACTIVE_STATUSES: JobStatus[] = ['queued', 'running', 'waiting_input'];
 
-/** 引擎在下拉框里的名字：网页出图的引擎标上「浏览器」，和本机显卡上的区分开。 */
-export function engineLabel(e: { name: string; runtime?: string }): string {
-  return e.runtime === 'browser' ? `${e.name}（浏览器）` : e.name;
+/** 引擎 id → 界面上的中文名。网页出图的名字里已经带「网页」，和本机显卡上的区分开。 */
+export const ENGINE_LABEL: Record<string, string> = {
+  zimage: 'Z-Image 快速',
+  h3_image: 'H3 图像',
+  krea2: 'Krea2',
+  gpt_image: 'ChatGPT 网页',
+  gemini_image: 'Gemini 网页',
+  h3_video: 'H3 视频（有声）',
+  wan22_i2v: 'Wan2.2 图生视频（无声）',
+};
+
+/** 引擎名字：传 id 或 /api/engines 的一行都行；没见过的回退到 id（浏览器引擎再标上「浏览器」）。 */
+export function engineLabel(e: string | { name: string; runtime?: string }): string {
+  const name = typeof e === 'string' ? e : e.name;
+  const known = ENGINE_LABEL[name];
+  if (known) return known;
+  return typeof e !== 'string' && e.runtime === 'browser' ? `${name}（浏览器）` : name;
 }
 
 export function jobTypeLabel(t: string): string {
-  return JOB_TYPE_LABEL[t] ?? t;
+  return JOB_TYPE_LABEL[t] ?? '其他任务';
 }
+
+export interface VoiceOption {
+  id: string;
+  label: string;
+}
+
+/** 配音常用音色（Edge TTS 的音色 id）。下拉框显示 label，存 id。 */
+export const VOICES: VoiceOption[] = [
+  { id: 'zh-CN-XiaoxiaoNeural', label: '普通话 · 女声 晓晓（温暖）' },
+  { id: 'zh-CN-XiaoyiNeural', label: '普通话 · 女声 晓伊（活泼）' },
+  { id: 'zh-CN-YunxiNeural', label: '普通话 · 男声 云希（阳光）' },
+  { id: 'zh-CN-YunjianNeural', label: '普通话 · 男声 云健（沉稳）' },
+  { id: 'km-KH-PisethNeural', label: '高棉语 · 男声' },
+  { id: 'km-KH-SreymomNeural', label: '高棉语 · 女声' },
+];
 
 export function jobStatusLabel(s: string): string {
   return (JOB_STATUS_LABEL as Record<string, string>)[s] ?? s;

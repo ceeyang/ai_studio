@@ -45,7 +45,7 @@ describe('TaskBar', () => {
   it('暂停队列后显示"恢复队列"；可以取消当前任务', async () => {
     const calls = installFetch({
       'GET /api/queue': QUEUE,
-      'GET /api/jobs': [makeJob({ id: 7, status: 'running' })],
+      'GET /api/jobs': [makeJob({ id: 7, status: 'running', started_at: '2026-10-08T10:00:00Z' })],
       'POST /api/queue/pause': { ...QUEUE, paused: true },
       'POST /api/jobs/7/cancel': { ok: true },
     });
@@ -55,6 +55,11 @@ describe('TaskBar', () => {
     expect(await screen.findByRole('button', { name: '恢复队列' })).toBeTruthy();
     expect(screen.getByText('队列已暂停')).toBeTruthy();
     await user.click(within(screen.getByTestId('taskbar-current')).getByRole('button', { name: '取消' }));
+    // 先确认，正文写已经跑了多久
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog.textContent).toContain('已运行');
+    expect(calls.some((c) => c.url === '/api/jobs/7/cancel')).toBe(false);
+    await user.click(within(dialog).getByRole('button', { name: '取消任务' }));
     await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.url === '/api/jobs/7/cancel')).toBe(true));
   });
 
@@ -124,5 +129,55 @@ describe('TaskBar', () => {
     renderBar({ connected: true, everConnected: true, progress: {}, gpuFreedAt: Date.now() });
     const status = await screen.findByRole('status');
     expect(status.textContent).toContain('已自动释放显存');
+  });
+
+  it('取消确认框里选"继续运行"就不取消', async () => {
+    const calls = installFetch({ 'GET /api/queue': QUEUE, 'GET /api/jobs': [makeJob({ id: 7, status: 'running' })] });
+    renderBar({ connected: true, everConnected: true, progress: {} });
+    const user = userEvent.setup();
+    await user.click(within(await screen.findByTestId('taskbar-current')).getByRole('button', { name: '取消' }));
+    await user.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '继续运行' }));
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(calls.some((c) => c.method === 'POST')).toBe(false);
+  });
+
+  it('没在跑、只有等待输入的任务：写「N 个任务在等你输入」；排队 0 不显示', async () => {
+    installFetch({ 'GET /api/queue': { ...QUEUE, counts: { queued: 0, running: 0, waiting_input: 2 } }, 'GET /api/jobs': [] });
+    renderBar({ connected: true, everConnected: true, progress: {} });
+    const link = await screen.findByRole('link', { name: '2 个任务在等你输入' });
+    expect(link.getAttribute('href')).toBe('/jobs?status=waiting_input');
+    expect(screen.queryByText('没有运行中的任务')).toBeNull();
+    expect(screen.queryByText(/排队/)).toBeNull();
+  });
+
+  it('ComfyUI 或浏览器扩展不可用：任务条下面出黄色横幅，可去设置、可关掉', async () => {
+    installFetch({
+      'GET /api/queue': { ...QUEUE, counts: { queued: 0, running: 0, waiting_input: 0 } },
+      'GET /api/jobs': [],
+      'GET /api/system/health': {
+        comfyui: { ok: false, message: 'ComfyUI 没启动（127.0.0.1:8188 连不上）' },
+        browser_ext: { ok: true, message: '已连接' },
+      },
+    });
+    renderBar({ connected: true, everConnected: true, progress: {} });
+    const banner = await screen.findByTestId('health-banner');
+    expect(banner.textContent).toContain('ComfyUI 没启动');
+    expect(banner.textContent).not.toContain('已连接');
+    expect(within(banner).getByRole('link', { name: '去设置' }).getAttribute('href')).toBe('/settings');
+    const user = userEvent.setup();
+    await user.click(within(banner).getByRole('button', { name: '关闭提醒' }));
+    expect(screen.queryByTestId('health-banner')).toBeNull();
+  });
+
+  it('都正常时不显示横幅', async () => {
+    installFetch({
+      'GET /api/queue': { ...QUEUE, counts: { queued: 0, running: 0, waiting_input: 0 } },
+      'GET /api/jobs': [],
+      'GET /api/system/health': { comfyui: { ok: true, message: '' }, browser_ext: { ok: true, message: '' } },
+    });
+    renderBar({ connected: true, everConnected: true, progress: {} });
+    await screen.findByText('没有运行中的任务');
+    await new Promise((r) => setTimeout(r, 20));
+    expect(screen.queryByTestId('health-banner')).toBeNull();
   });
 });

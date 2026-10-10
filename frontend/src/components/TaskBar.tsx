@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { errorText } from '../api/client';
 import { useCancelJob, useFreeGpu, useJobs, usePauseQueue, useQueue, useResumeQueue } from '../api/queries';
-import { jobTypeLabel } from '../format';
+import { fmtDuration, jobTypeLabel } from '../format';
+import { useConfirm } from './ConfirmDialog';
+import { HealthBanner } from './HealthBanner';
 import { useEvents } from '../ws/EventsContext';
 import { isDecoding } from '../ws/events';
 
@@ -20,6 +22,7 @@ export function TaskBar() {
   const resume = useResumeQueue();
   const cancel = useCancelJob();
   const freeGpu = useFreeGpu();
+  const confirm = useConfirm();
   const [gpuNotice, setGpuNotice] = useState<string | null>(null);
   const q = queue.data;
   const jobs = running.data ?? [];
@@ -39,6 +42,23 @@ export function TaskBar() {
     return () => clearTimeout(t);
   }, [gpuNotice]);
 
+  const waiting = q?.counts.waiting_input ?? 0;
+
+  // 取消会丢掉这次已经跑的进度：先确认，正文写已经跑了多久
+  const handleCancel = async () => {
+    if (!current) return;
+    const id = current.id;
+    const ran = current.started_at ? `已运行 ${fmtDuration(current.started_at, null)}` : '还没开始运行';
+    const ok = await confirm({
+      title: `取消任务 #${id}？`,
+      body: `${jobTypeLabel(current.type)}任务${ran}，取消后这次的进度会丢掉。`,
+      confirmText: '取消任务',
+      cancelText: '继续运行',
+      danger: true,
+    });
+    if (ok) cancel.mutate(id);
+  };
+
   const handleFreeGpu = () => {
     freeGpu.mutate(undefined, {
       onSuccess: (r) => setGpuNotice(freeGpuNoticeText(r.before.vram_free_gb, r.after.vram_free_gb)),
@@ -47,65 +67,73 @@ export function TaskBar() {
   };
 
   return (
-    <header className="taskbar" aria-label="任务条">
-      {everConnected && !connected && <span className="pill warn">实时连接已断开，正在重连…</span>}
-      {current ? (
-        <span className="current" data-testid="taskbar-current">
-          运行中：#{current.id} {jobTypeLabel(current.type)}
-          {p &&
-            (isDecoding(p) ? (
-              <>
-                {' '}
-                <progress className="is-decoding" value={p.max} max={p.max} /> 采样完成，解码保存中…
-              </>
-            ) : (
-              <>
-                {' '}
-                <progress value={p.value} max={p.max} /> {p.value}/{p.max}
-              </>
-            ))}
-          {jobs.length > 1 && <span className="muted">（另有 {jobs.length - 1} 个）</span>}{' '}
-          <button type="button" className="ghost" disabled={cancel.isPending} onClick={() => cancel.mutate(current.id)}>
-            取消
-          </button>
-        </span>
-      ) : (
-        <span className="idle">没有运行中的任务</span>
-      )}
-      {q && <span className="pill job-queued">排队 {q.counts.queued}</span>}
-      {q && q.counts.waiting_input > 0 && (
-        <Link to="/jobs?status=waiting_input" className="pill job-waiting_input">等待输入 {q.counts.waiting_input}</Link>
-      )}
-      {q &&
-        (q.paused ? (
-          <>
-            <span className="pill warn">队列已暂停</span>
-            <button type="button" className="soft" disabled={resume.isPending} onClick={() => resume.mutate()}>
-              恢复队列
+    <>
+      <header className="taskbar" aria-label="任务条">
+        {everConnected && !connected && <span className="pill warn">实时连接已断开，正在重连…</span>}
+        {current ? (
+          <span className="current" data-testid="taskbar-current">
+            运行中：#{current.id} {jobTypeLabel(current.type)}
+            {p &&
+              (isDecoding(p) ? (
+                <>
+                  {' '}
+                  <progress className="is-decoding" value={p.max} max={p.max} /> 采样完成，解码保存中…
+                </>
+              ) : (
+                <>
+                  {' '}
+                  <progress value={p.value} max={p.max} /> {p.value}/{p.max}
+                </>
+              ))}
+            {jobs.length > 1 && <span className="muted">（另有 {jobs.length - 1} 个）</span>}{' '}
+            <button type="button" className="ghost" disabled={cancel.isPending} onClick={() => void handleCancel()}>
+              取消
             </button>
-          </>
+          </span>
+        ) : waiting > 0 ? (
+          // 没有在跑的，只剩等人工输入的：这时候卡住的是"人"，直接说清楚
+          <Link to="/jobs?status=waiting_input" className="idle is-waiting">
+            {waiting} 个任务在等你输入
+          </Link>
         ) : (
-          <button type="button" className="ghost" disabled={pause.isPending} onClick={() => pause.mutate()}>
-            暂停队列
-          </button>
-        ))}
-      <button
-        type="button"
-        className="ghost"
-        disabled={gpuBusy || freeGpu.isPending}
-        title={gpuBusy ? '有任务正在用显卡，等它结束再释放' : undefined}
-        onClick={handleFreeGpu}
-      >
-        释放显存
-      </button>
-      {gpuNotice && (
-        <span className="pill" role="status">
-          {gpuNotice}
-        </span>
-      )}
-      <Link to="/jobs" className="taskbar-all">
-        全部任务
-      </Link>
-    </header>
+          <span className="idle">没有运行中的任务</span>
+        )}
+        {q && q.counts.queued > 0 && <span className="pill job-queued">排队 {q.counts.queued}</span>}
+        {current && waiting > 0 && (
+          <Link to="/jobs?status=waiting_input" className="pill job-waiting_input">等待输入 {waiting}</Link>
+        )}
+        {q &&
+          (q.paused ? (
+            <>
+              <span className="pill warn">队列已暂停</span>
+              <button type="button" className="soft" disabled={resume.isPending} onClick={() => resume.mutate()}>
+                恢复队列
+              </button>
+            </>
+          ) : (
+            <button type="button" className="ghost" disabled={pause.isPending} onClick={() => pause.mutate()}>
+              暂停队列
+            </button>
+          ))}
+        <button
+          type="button"
+          className="ghost"
+          disabled={gpuBusy || freeGpu.isPending}
+          title={gpuBusy ? '有任务正在用显卡，等它结束再释放' : undefined}
+          onClick={handleFreeGpu}
+        >
+          释放显存
+        </button>
+        {gpuNotice && (
+          <span className="pill" role="status">
+            {gpuNotice}
+          </span>
+        )}
+        <Link to="/jobs" className="taskbar-all">
+          全部任务
+        </Link>
+      </header>
+      <HealthBanner />
+    </>
   );
 }

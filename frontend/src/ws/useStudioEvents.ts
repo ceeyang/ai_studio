@@ -2,7 +2,16 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useReducer } from 'react';
 import { keys } from '../api/queries';
 import type { QueueState } from '../api/types';
-import { type EventsState, type WsEvent, eventsReducer, initialEvents, invalidationsFor } from './events';
+import {
+  type EventsState,
+  type WsEvent,
+  createLogThrottle,
+  emitJobSettled,
+  eventsReducer,
+  initialEvents,
+  invalidationsFor,
+  isGenerationSettled,
+} from './events';
 
 export type WebSocketCtor = new (url: string) => WebSocket;
 
@@ -38,6 +47,7 @@ export function useStudioEvents({ url, WebSocketImpl, retryMs = 2000 }: StudioEv
     let timer: ReturnType<typeof setTimeout> | undefined;
     let stopped = false;
     let dropped = false;
+    const logs = createLogThrottle((jobId) => void qc.invalidateQueries({ queryKey: keys.job(jobId) }));
 
     const connect = () => {
       ws = new Impl(target);
@@ -61,7 +71,12 @@ export function useStudioEvents({ url, WebSocketImpl, retryMs = 2000 }: StudioEv
             current_family: ev.current_family,
           });
         }
+        if (ev.type === 'log') {
+          logs.log(ev.job_id);
+          return;
+        }
         for (const queryKey of invalidationsFor(ev)) void qc.invalidateQueries({ queryKey });
+        if (ev.type === 'job' && isGenerationSettled(ev.job)) emitJobSettled(ev.job);
       };
       ws.onclose = () => {
         dispatch({ type: 'disconnected' });
@@ -74,6 +89,7 @@ export function useStudioEvents({ url, WebSocketImpl, retryMs = 2000 }: StudioEv
     connect();
     return () => {
       stopped = true;
+      logs.dispose();
       if (timer) clearTimeout(timer);
       if (ws) {
         ws.onclose = null;

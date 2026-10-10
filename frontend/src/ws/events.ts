@@ -84,3 +84,65 @@ export function invalidationsFor(ev: WsEvent): QueryKey[] {
       return [];
   }
 }
+
+// ------------------------------------------------------------ 日志节流
+
+/**
+ * 跑视频时日志一秒能来几十行，每行都让任务详情重新拉取太浪费：同一个任务 ms 毫秒内只刷新一次。
+ * 第一行立刻刷新；窗口里又来了日志，就在窗口结束时再补刷一次，保证最后几行能显示出来。
+ */
+export function createLogThrottle(refresh: (jobId: number) => void, ms = 500) {
+  const timers = new Map<number, ReturnType<typeof setTimeout>>();
+  const pending = new Set<number>();
+  const open = (jobId: number) => {
+    timers.set(
+      jobId,
+      setTimeout(() => {
+        timers.delete(jobId);
+        if (pending.delete(jobId)) {
+          refresh(jobId);
+          open(jobId);
+        }
+      }, ms),
+    );
+  };
+  return {
+    log(jobId: number) {
+      if (timers.has(jobId)) {
+        pending.add(jobId);
+        return;
+      }
+      refresh(jobId);
+      open(jobId);
+    },
+    dispose() {
+      for (const t of timers.values()) clearTimeout(t);
+      timers.clear();
+      pending.clear();
+    },
+  };
+}
+
+// ------------------------------------------------------------ 生成任务结束的广播（右下角提示用）
+
+/** 结束时要在右下角提示一下的任务：出图、出视频、出定妆照/三视图、合成导出。 */
+export const GENERATION_TYPES = ['image.keyframe', 'video.shot', 'image.portrait', 'image.turnaround', 'export.episode'];
+
+export function isGenerationSettled(job: Job): boolean {
+  return GENERATION_TYPES.includes(job.type) && (job.status === 'done' || job.status === 'failed');
+}
+
+type JobListener = (job: Job) => void;
+const jobListeners = new Set<JobListener>();
+
+/** WS 连接在路由外面（EventsProvider），提示组件在路由里面：用一个小广播把"哪个任务结束了"递过去。 */
+export function subscribeJobSettled(fn: JobListener): () => void {
+  jobListeners.add(fn);
+  return () => {
+    jobListeners.delete(fn);
+  };
+}
+
+export function emitJobSettled(job: Job): void {
+  for (const fn of [...jobListeners]) fn(job);
+}

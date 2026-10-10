@@ -199,7 +199,7 @@ describe('三视图', () => {
     });
     const pick = screen.getByLabelText('三视图引擎');
     expect(within(pick).getByRole('option', { name: '默认（h3_image）' })).toBeTruthy();
-    await waitFor(() => expect(within(pick).getByRole('option', { name: 'gpt_image（浏览器）' })).toBeTruthy());
+    await waitFor(() => expect(within(pick).getByRole('option', { name: 'ChatGPT 网页' })).toBeTruthy());
     await user.selectOptions(pick, 'gpt_image');
     await user.click(screen.getByRole('button', { name: '全部生成' }));
     await waitFor(() => expect(posts(calls)).toHaveLength(1));
