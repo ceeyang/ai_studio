@@ -16,7 +16,11 @@ describe('CandidateGrid', () => {
     expect(within(first).getByText('已选定')).toBeTruthy();
     expect(within(first).queryByRole('button', { name: '选定' })).toBeNull();
     const second = screen.getByTestId('candidate-102');
-    expect(within(second).getByText(/seed 9/)).toBeTruthy();
+    // 默认只写引擎中文名和时间；编号、种子、参数收在「高级」里
+    expect(within(second).getByText('Z-Image 快速')).toBeTruthy();
+    const adv = within(second).getByText('高级').closest('details') as HTMLDetailsElement;
+    expect(adv.open).toBe(false);
+    expect(within(adv).getByText(/#102 · zimage · seed 9/)).toBeTruthy();
     await userEvent.setup().click(within(second).getByRole('button', { name: '选定' }));
     expect(onSelect).toHaveBeenCalledWith(102);
     // 新的在前

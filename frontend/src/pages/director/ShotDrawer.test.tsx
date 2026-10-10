@@ -106,4 +106,86 @@ describe('ShotDrawer', () => {
       dialogue: [{ speaker: '陈师傅', zh: '换？', start: 2, end: 2.6, km: 'ដូរ?' }],
     });
   });
+
+  it('是模态对话框：打开就聚焦，Esc 和点遮罩都能关', async () => {
+    installFetch({ 'GET /api/engines': ENGINES });
+    const onClose = vi.fn();
+    renderAt(<ShotDrawer shot={SHOT} episodeId={1} onClose={onClose} onGenerate={() => {}} />);
+    const dlg = screen.getByRole('dialog', { name: '镜头 S03 详情' });
+    expect(dlg.getAttribute('aria-modal')).toBe('true');
+    expect(document.activeElement).toBe(dlg);
+    const user = userEvent.setup();
+    await user.keyboard('{Escape}');
+    expect(onClose).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByTestId('drawer-scrim'));
+    expect(onClose).toHaveBeenCalledTimes(2);
+  });
+
+  it('有没保存的修改时关抽屉先确认，选继续编辑就不关', async () => {
+    installFetch({ 'GET /api/engines': ENGINES });
+    const onClose = vi.fn();
+    renderAt(<ShotDrawer shot={SHOT} episodeId={1} onClose={onClose} onGenerate={() => {}} />);
+    const user = userEvent.setup();
+    await user.type(screen.getByLabelText('动作'), '再加一句');
+    await user.click(screen.getByTestId('drawer-scrim'));
+    const confirm = await screen.findByRole('dialog', { name: '放弃没保存的修改？' });
+    await user.click(within(confirm).getByRole('button', { name: '继续编辑' }));
+    expect(onClose).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('button', { name: '关闭' }));
+    await user.click(within(await screen.findByRole('dialog', { name: '放弃没保存的修改？' })).getByRole('button', { name: '放弃修改' }));
+    await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
+  });
+
+  it('改了提示词没保存时，生成按钮变成「保存并生成」：先保存再生成', async () => {
+    const calls = installFetch({
+      'GET /api/engines': ENGINES,
+      'PATCH /api/shots/5': (c: { body: unknown }) => ({ ...SHOT, ...(c.body as object) }),
+    });
+    const onGenerate = vi.fn(() => {
+      // 生成时保存已经完成
+      expect(calls.some((c) => c.method === 'PATCH')).toBe(true);
+    });
+    renderAt(<ShotDrawer shot={SHOT} episodeId={1} onClose={() => {}} onGenerate={onGenerate} />);
+    const user = userEvent.setup();
+    expect(screen.getByRole('button', { name: '生成首帧' })).toBeTruthy();
+    const ta = screen.getByLabelText('图像提示词（英文）');
+    await user.clear(ta);
+    await user.type(ta, 'new prompt');
+    await user.click(screen.getByRole('button', { name: '保存并生成首帧' }));
+    await waitFor(() => expect(onGenerate).toHaveBeenCalledWith('keyframes', true));
+    expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({ image_prompt: 'new prompt' });
+  });
+
+  it('候选数和强制重跑在抽屉里也能改（和导演台工具栏共用）', async () => {
+    installFetch({ 'GET /api/engines': ENGINES });
+    const onCountChange = vi.fn();
+    const onForceChange = vi.fn();
+    renderAt(
+      <ShotDrawer shot={SHOT} episodeId={1} onClose={() => {}} onGenerate={() => {}} count={2} force={false}
+        onCountChange={onCountChange} onForceChange={onForceChange} />,
+    );
+    const user = userEvent.setup();
+    const sel = screen.getByLabelText('候选数') as HTMLSelectElement;
+    expect(sel.value).toBe('2');
+    await user.selectOptions(sel, '3');
+    expect(onCountChange).toHaveBeenCalledWith(3);
+    await user.click(screen.getByLabelText('强制重跑'));
+    expect(onForceChange).toHaveBeenCalledWith(true);
+    expect(screen.queryByText(/导演台工具栏上的设置/)).toBeNull();
+  });
+
+  it('写出过期原因、上次失败的原因，进行中的那一格按钮显示生成中', () => {
+    installFetch({ 'GET /api/engines': ENGINES });
+    const shot = makeShot({
+      ...SHOT,
+      slots: [{ ...SHOT.slots[0], stale_reason: '林夏 定妆照换了' }],
+      failures: [{ id: 80, type: 'video.shot', status: 'failed', error: '显存不足' }],
+      active_jobs: [{ id: 81, type: 'image.keyframe', status: 'running', progress: 0.5 }],
+    });
+    renderAt(<ShotDrawer shot={shot} episodeId={1} onClose={() => {}} onGenerate={() => {}} />);
+    expect(screen.getByText('过期原因：林夏 定妆照换了')).toBeTruthy();
+    expect(screen.getByText('视频上次生成失败：显存不足')).toBeTruthy();
+    const gen = screen.getByRole('button', { name: '首帧生成中 50%' }) as HTMLButtonElement;
+    expect(gen.disabled).toBe(true);
+  });
 });

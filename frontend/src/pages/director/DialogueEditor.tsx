@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useState } from 'react';
+import { type FormEvent, useEffect, useRef, useState } from 'react';
 import type { DialogueLine, KmReview } from '../../api/types';
 
 export interface DialogueEditorProps {
@@ -6,6 +6,8 @@ export interface DialogueEditorProps {
   onSave(lines: DialogueLine[]): void;
   saving?: boolean;
   error?: string | null;
+  /** 有没有未保存的修改变化时通知父组件（抽屉关闭前确认用） */
+  onDirtyChange?: (dirty: boolean) => void;
 }
 
 /**
@@ -24,15 +26,66 @@ export function fitNote(d: DialogueLine): string | null {
   return parts.join(' · ');
 }
 
-export function DialogueEditor({ dialogue, onSave, saving = false, error = null }: DialogueEditorProps) {
+const same = (a: unknown, b: unknown) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+
+/**
+ * 服务器的对白变了（翻译、改写任务写回）时按句按字段合并：用户没动过的字段（当前值等于旧的服务器值）
+ * 换成新值，动过的保留。句数变了没法逐句对上，就整段保留用户的版本。
+ */
+export function mergeDialogue(current: DialogueLine[], oldBase: DialogueLine[], next: DialogueLine[]): DialogueLine[] {
+  if (current.length !== oldBase.length || next.length !== oldBase.length) return current;
+  return next.map((n, i) => {
+    const cur = current[i] as unknown as Record<string, unknown>;
+    const old = oldBase[i] as unknown as Record<string, unknown>;
+    const out: Record<string, unknown> = { ...n };
+    for (const k of new Set([...Object.keys(cur), ...Object.keys(old)])) {
+      if (!same(cur[k], old[k])) {
+        if (cur[k] === undefined) delete out[k];
+        else out[k] = cur[k];
+      }
+    }
+    return out as unknown as DialogueLine;
+  });
+}
+
+export function DialogueEditor({ dialogue, onSave, saving = false, error = null, onDirtyChange }: DialogueEditorProps) {
   const key = JSON.stringify(dialogue);
   const [lines, setLines] = useState<DialogueLine[]>(dialogue);
+  // 正在改的时候任务把对白更新了：合并后提示，可以一键载入最新
+  const [updated, setUpdated] = useState(false);
+  const baseRef = useRef(key);
+  const linesRef = useRef(lines);
+  linesRef.current = lines;
   useEffect(() => {
-    setLines(JSON.parse(key) as DialogueLine[]);
+    const oldKey = baseRef.current;
+    if (oldKey === key) return;
+    baseRef.current = key;
+    const next = JSON.parse(key) as DialogueLine[];
+    const cur = linesRef.current;
+    if (JSON.stringify(cur) === oldKey) {
+      setLines(next);
+      setUpdated(false);
+      return;
+    }
+    const merged = mergeDialogue(cur, JSON.parse(oldKey) as DialogueLine[], next);
+    setLines(merged);
+    setUpdated(JSON.stringify(merged) !== key);
   }, [key]);
 
   const base = JSON.parse(key) as DialogueLine[];
   const dirty = JSON.stringify(lines) !== key;
+  const dirtyCb = useRef(onDirtyChange);
+  dirtyCb.current = onDirtyChange;
+  const lastDirty = useRef(false);
+  useEffect(() => {
+    if (dirty === lastDirty.current) return;
+    lastDirty.current = dirty;
+    dirtyCb.current?.(dirty);
+  }, [dirty]);
+  const loadLatest = () => {
+    setLines(JSON.parse(key) as DialogueLine[]);
+    setUpdated(false);
+  };
   const zhChanged = lines.some((l, i) => l.zh !== base[i]?.zh);
   const set = (i: number, patch: Partial<DialogueLine>) =>
     setLines((prev) => prev.map((l, j) => (j === i ? { ...l, ...patch } : l)));
@@ -43,6 +96,15 @@ export function DialogueEditor({ dialogue, onSave, saving = false, error = null 
 
   return (
     <form className="fields dialogue-editor" onSubmit={submit}>
+      {updated && dirty && (
+        <p className="notice dialogue-updated" role="status">
+          <span>对白已被任务更新</span>
+          <span aria-hidden="true">·</span>
+          <button type="button" className="link" onClick={loadLatest}>
+            载入最新
+          </button>
+        </p>
+      )}
       {lines.map((d, i) => {
         const n = i + 1;
         const review: KmReview | null = d.km_review ?? null;

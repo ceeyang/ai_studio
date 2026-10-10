@@ -1,7 +1,9 @@
+import { useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
-import { enc, errorText } from '../api/client';
+import { api, enc, errorText } from '../api/client';
 import {
+  keys,
   useCreateShot,
   useDeleteShot,
   useEpisode,
@@ -9,15 +11,38 @@ import {
   useRunStage,
   useSplitShot,
 } from '../api/queries';
-import type { RunIn } from '../api/types';
+import type { Job, RunIn, ShotDetail } from '../api/types';
+import { useConfirm } from '../components/ConfirmDialog';
+import { useJobNotice } from '../components/JobNotice';
+import { type EstimatePart, estimateText } from './director/estimate';
 import { ShotDrawer } from './director/ShotDrawer';
-import { type GenStage, ShotTable } from './director/ShotTable';
-import { moveId, selectedOf, slotOf } from './director/slots';
+import { CELL, type GenStage, ShotTable } from './director/ShotTable';
+import { moveId, selectedOf, slotMark, slotOf } from './director/slots';
+
+/** 超过这么多个任务才先弹预估确认 */
+const CONFIRM_OVER = 3;
+
+const cellOf = (stage: GenStage) => (stage === 'keyframes' ? CELL.first_frame : CELL.video);
+const kindOf = (stage: GenStage) => (stage === 'keyframes' ? 'first_frame' : 'video');
+
+/** 这些镜头这一格过期了（选定的那张是按旧输入出的） */
+function staleIds(shots: ShotDetail[], stage: GenStage): number[] {
+  return shots.filter((s) => slotMark(slotOf(s, kindOf(stage))) === 'stale').map((s) => s.id);
+}
+
+interface Batch {
+  stage: GenStage;
+  ids: number[];
+  force: boolean;
+}
 
 export function DirectorPage() {
   const { slug = '', episodeId = '' } = useParams();
   const id = Number(episodeId);
   const [params, setParams] = useSearchParams();
+  const qc = useQueryClient();
+  const confirm = useConfirm();
+  const notice = useJobNotice();
   const ep = useEpisode(id);
   const run = useRunStage(id);
   const reorder = useReorderShots(id);
@@ -27,7 +52,7 @@ export function DirectorPage() {
   const [selected, setSelected] = useState<Set<number>>(() => new Set());
   const [count, setCount] = useState(1);
   const [force, setForce] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   if (ep.isLoading) return <p className="loading">加载中…</p>;
   if (ep.error || !ep.data) return <p className="error">{ep.error ? errorText(ep.error) : '找不到这一集'}</p>;
@@ -36,26 +61,89 @@ export function DirectorPage() {
   const openId = Number(params.get('shot')) || null;
   const openShot = shots.find((s) => s.id === openId) ?? null;
   const busy = reorder.isPending || split.isPending || del.isPending || create.isPending;
+  const generating = run.isPending || submitting;
   const selIds = shots.filter((s) => selected.has(s.id)).map((s) => s.id);
   const scope = selIds.length > 0 ? `选中 ${selIds.length} 镜` : '全部';
   const total = shots.reduce((a, s) => a + s.duration, 0);
   const withVideo = shots.filter((s) => selectedOf(slotOf(s, 'video'))).length;
+  const staleKf = staleIds(shots, 'keyframes');
+  const staleVid = staleIds(shots, 'videos');
+  const staleCount = staleKf.length + staleVid.length;
 
   const report = (p: Promise<unknown>, ok: string) => {
     p.then(
-      () => setNotice(ok),
-      (err: unknown) => setNotice(errorText(err)),
+      () => notice.info(ok),
+      (err: unknown) => notice.error(errorText(err)),
     );
   };
 
-  // 镜头用 id 而不是 S01 这类编号：编号在排序、拆分、删除后会变
-  const generate = (stage: GenStage, ids: number[] = []) => {
-    const body: RunIn = { stage, candidates: count, force };
-    if (ids.length > 0) body.shots = ids.map(String);
-    run.mutate(body, {
-      onSuccess: (r) => setNotice(`已提交 ${r.job_ids.length} 个任务（#${r.job_ids.join(', #')}），进度见顶部任务条`),
-      onError: (err) => setNotice(errorText(err)),
-    });
+  /** 最近完成的任务（和任务页共用缓存）：拿来估耗时，拿不到就当没有样本 */
+  const doneJobs = async (): Promise<Job[]> => {
+    try {
+      return await qc.fetchQuery({
+        queryKey: keys.jobs('done', 100),
+        queryFn: () => api.get<Job[]>('/api/jobs?status=done&limit=100'),
+        staleTime: 30_000,
+      });
+    } catch {
+      return [];
+    }
+  };
+
+  /** 任务数超过 CONFIRM_OVER 时先弹预估；返回要不要继续。 */
+  const confirmBatch = async (title: string, parts: EstimatePart[]): Promise<boolean> => {
+    const n = parts.reduce((a, p) => a + p.n, 0);
+    if (n <= CONFIRM_OVER) return true;
+    setSubmitting(true);
+    const jobs = await doneJobs();
+    setSubmitting(false);
+    return confirm({ title, body: estimateText(parts, jobs), confirmText: '继续提交' });
+  };
+
+  /** 依次提交几批（镜头用 id 而不是 S01 这类编号：编号在排序、拆分、删除后会变），合起来跟踪。 */
+  const submit = async (batches: Batch[], text: string) => {
+    const ids: number[] = [];
+    setSubmitting(true);
+    try {
+      for (const b of batches) {
+        const body: RunIn = { stage: b.stage, candidates: count, force: b.force };
+        if (b.ids.length > 0) body.shots = b.ids.map(String);
+        const r = await run.mutateAsync(body);
+        ids.push(...r.job_ids);
+      }
+      notice.track(ids, text);
+    } catch (err) {
+      // 前面几批已经提交了的也跟踪上，错误一起说
+      notice.error(ids.length > 0 ? `${errorText(err)}（已提交的 ${ids.length} 个任务照常进行）` : errorText(err));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  /** justSaved：抽屉刚保存了提示词，手上的镜头数据是保存前的，不能拿它判断"都是最新的" */
+  const generate = async (stage: GenStage, ids: number[], what: string, justSaved = false) => {
+    notice.clear();
+    const cell = cellOf(stage);
+    const targets = ids.length > 0 ? shots.filter((s) => ids.includes(s.id)) : shots;
+    // 单候选、不强制时后端会跳过已经是最新的：都是最新的就别提交了
+    if (!justSaved && count === 1 && !force && targets.length > 0 && targets.every((s) => slotMark(slotOf(s, kindOf(stage))) === 'ok')) {
+      notice.info('都是最新的，勾强制重跑才会重出');
+      return;
+    }
+    if (!(await confirmBatch(`批量生成${cell.label}？`, [{ type: cell.type, n: targets.length * count }]))) return;
+    await submit([{ stage, ids, force }], `生成${cell.label}${what}`);
+  };
+
+  const redoStale = async () => {
+    notice.clear();
+    const batches: Batch[] = [
+      { stage: 'keyframes' as const, ids: staleKf, force: true },
+      { stage: 'videos' as const, ids: staleVid, force: true },
+    ].filter((b) => b.ids.length > 0);
+    if (batches.length === 0) return;
+    const parts = batches.map((b) => ({ type: cellOf(b.stage).type, n: b.ids.length * count }));
+    if (!(await confirmBatch('重做过期的格子？', parts))) return;
+    await submit(batches, `只重做过期的（${staleCount}）`);
   };
 
   const toggle = (shotId: number) =>
@@ -75,15 +163,25 @@ export function DirectorPage() {
     if (next) report(reorder.mutateAsync(next), '已调整顺序');
   };
 
-  const remove = (shotId: number) => {
+  const open = (shotId: number) => setParams({ shot: String(shotId) }, { replace: true });
+  const close = () => setParams({}, { replace: true });
+
+  const remove = async (shotId: number) => {
     const s = shots.find((x) => x.id === shotId);
-    if (!s || !window.confirm(`删除镜头 ${s.code}？它的候选会一起删掉（媒体文件留在磁盘上）。`)) return;
+    if (!s) return;
+    const ok = await confirm({
+      title: `删除镜头 ${s.code}？`,
+      body: '它的首帧和视频候选会一起删掉（媒体文件留在磁盘上）。',
+      confirmText: '删除',
+      danger: true,
+    });
+    if (!ok) return;
     setSelected((prev) => {
       const next = new Set(prev);
       next.delete(shotId);
       return next;
     });
-    if (openId === shotId) setParams({});
+    if (openId === shotId) close();
     report(del.mutateAsync(shotId), `已删除 ${s.code}`);
   };
 
@@ -117,11 +215,19 @@ export function DirectorPage() {
           <input type="checkbox" aria-label="强制重跑" checked={force} onChange={(ev) => setForce(ev.target.checked)} /> 强制重跑
         </label>
         <span className="sep" aria-hidden="true" />
-        <button type="button" className="primary" disabled={shots.length === 0 || run.isPending} onClick={() => generate('keyframes', selIds)}>
+        <button type="button" className="primary" disabled={shots.length === 0 || generating} onClick={() => void generate('keyframes', selIds, `（${scope}）`)}>
           生成首帧（{scope}）
         </button>
-        <button type="button" className="primary" disabled={shots.length === 0 || run.isPending} onClick={() => generate('videos', selIds)}>
+        <button type="button" className="primary" disabled={shots.length === 0 || generating} onClick={() => void generate('videos', selIds, `（${scope}）`)}>
           生成视频（{scope}）
+        </button>
+        <button
+          type="button"
+          disabled={staleCount === 0 || generating}
+          title={staleCount === 0 ? '没有过期的首帧或视频' : '把过期的首帧、视频按当前输入强制重出'}
+          onClick={() => void redoStale()}
+        >
+          只重做过期的（{staleCount}）
         </button>
         <span className="grow" aria-hidden="true" />
         <button type="button" className="ghost" disabled={busy} onClick={() => report(create.mutateAsync({}), '已在末尾新增镜头')}>
@@ -131,11 +237,7 @@ export function DirectorPage() {
           去导出（{withVideo}/{shots.length} 镜有视频）
         </Link>
       </div>
-      {notice && (
-        <p className="notice" role="status">
-          {notice}
-        </p>
-      )}
+      {!openShot && notice.view}
 
       <div className="director-body">
         {shots.length === 0 ? (
@@ -147,27 +249,35 @@ export function DirectorPage() {
             shots={shots}
             selected={selected}
             busy={busy}
-            generating={run.isPending}
+            generating={generating}
             onToggle={toggle}
             onToggleAll={toggleAll}
-            onOpen={(shotId) => setParams({ shot: String(shotId) })}
+            onOpen={open}
             onMove={move}
             onSplit={(shotId) => report(split.mutateAsync(shotId), '已拆分')}
             onInsertAfter={(shotId) => report(create.mutateAsync({ after_shot_id: shotId }), '已插入新镜头')}
-            onDelete={remove}
-            onGenerate={(shotId, stage) => generate(stage, [shotId])}
+            onDelete={(shotId) => void remove(shotId)}
+            onGenerate={(shotId, stage) => {
+              const code = shots.find((s) => s.id === shotId)?.code ?? '';
+              void generate(stage, [shotId], ` ${code}`);
+            }}
           />
         )}
       </div>
 
-      {openShot && <div className="drawer-scrim" aria-hidden="true" />}
       {openShot && (
         <ShotDrawer
+          key={openShot.id}
           shot={openShot}
           episodeId={id}
-          generating={run.isPending}
-          onClose={() => setParams({})}
-          onGenerate={(stage) => generate(stage, [openShot.id])}
+          generating={generating}
+          count={count}
+          force={force}
+          onCountChange={setCount}
+          onForceChange={setForce}
+          notice={notice.view}
+          onClose={close}
+          onGenerate={(stage, saved) => void generate(stage, [openShot.id], ` ${openShot.code}`, saved)}
         />
       )}
     </div>

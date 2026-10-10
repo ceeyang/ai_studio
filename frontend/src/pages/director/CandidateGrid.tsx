@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { ApiError, detailText, errorText } from '../../api/client';
 import type { Slot } from '../../api/types';
-import { fmtTime } from '../../format';
+import { engineLabel, fmtTime } from '../../format';
 
 export interface CandidateGridProps {
   slot: Slot;
@@ -92,10 +92,7 @@ export function CandidateGrid({ slot, onSelect, selecting = false }: CandidateGr
               </a>
             )}
             <figcaption>
-              <span>
-                #{c.id} · {c.engine}
-                {typeof seed === 'number' ? ` · seed ${seed}` : ''}
-              </span>
+              <span>{engineLabel(c.engine)}</span>
               <span className="muted">{fmtTime(c.created_at)}</span>
               {selected ? (
                 <span className="badge ok">已选定</span>
@@ -105,8 +102,12 @@ export function CandidateGrid({ slot, onSelect, selecting = false }: CandidateGr
                 </button>
               )}
               {typeof c.params.workflow === 'string' && <ExportComfyButton candidateId={c.id} engine={c.engine} />}
-              <details>
-                <summary>生成参数</summary>
+              <details className="cand-adv">
+                <summary>高级</summary>
+                <p className="muted">
+                  #{c.id} · {c.engine}
+                  {typeof seed === 'number' ? ` · seed ${seed}` : ''}
+                </p>
                 <pre>{JSON.stringify(c.params, null, 2)}</pre>
               </details>
             </figcaption>

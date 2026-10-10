@@ -1,11 +1,13 @@
+import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { errorText } from '../../api/client';
 import { useEngines, usePatchShot, useSelectCandidate } from '../../api/queries';
 import { type EngineRow, type ShotDetail, type ShotPatch, TRANSITIONS, type Transition } from '../../api/types';
-import { EditableFields, type FieldSpec, type FieldValues } from '../../components/EditableFields';
+import { useConfirm } from '../../components/ConfirmDialog';
+import { EditableFields, type FieldSpec, type FieldValues, type FieldsState } from '../../components/EditableFields';
 import { engineLabel } from '../../format';
 import { CandidateGrid } from './CandidateGrid';
 import { DialogueEditor } from './DialogueEditor';
-import type { GenStage } from './ShotTable';
+import { type GenStage, CELL, activeJob, activeText, failedJob } from './ShotTable';
 import { SLOT_LABEL } from './slots';
 
 const TRANSITION_LABEL: Record<Transition, string> = {
@@ -61,14 +63,93 @@ export interface ShotDrawerProps {
   /** 生成任务（首帧/视频）提交后、还没拿到响应期间为 true：生成按钮禁用，防止重复点击提交两次。 */
   generating?: boolean;
   onClose(): void;
-  onGenerate(stage: GenStage): void;
+  /** saved：刚把改过的提示词保存了（本地的镜头数据还没刷新，不能按它判断"已是最新"） */
+  onGenerate(stage: GenStage, saved?: boolean): void;
+  /** 候选数和强制重跑：和导演台工具栏共用一份 */
+  count?: number;
+  force?: boolean;
+  onCountChange?(n: number): void;
+  onForceChange?(force: boolean): void;
+  /** 导演台的提示条：抽屉开着时显示在抽屉里，免得被遮罩挡住 */
+  notice?: ReactNode;
 }
 
-export function ShotDrawer({ shot, episodeId, onClose, onGenerate, generating = false }: ShotDrawerProps) {
+const STAGES: GenStage[] = ['keyframes', 'videos'];
+
+export function ShotDrawer({
+  shot,
+  episodeId,
+  onClose,
+  onGenerate,
+  generating = false,
+  count = 1,
+  force = false,
+  onCountChange,
+  onForceChange,
+  notice,
+}: ShotDrawerProps) {
   const engines = useEngines();
   const patch = usePatchShot(episodeId);
   const patchDialogue = usePatchShot(episodeId);
   const select = useSelectCandidate(episodeId);
+  const confirm = useConfirm();
+  const [fields, setFields] = useState<FieldsState | null>(null);
+  const [dialogueDirty, setDialogueDirty] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const box = useRef<HTMLElement>(null);
+  const fieldsDirty = !!fields?.dirty;
+  const latest = useRef({ dirty: false, onClose });
+  latest.current = { dirty: fieldsDirty || dialogueDirty, onClose };
+
+  /** 想关抽屉：有没保存的修改先问一句。 */
+  const requestClose = useRef(async () => {
+    if (latest.current.dirty) {
+      const ok = await confirm({
+        title: '放弃没保存的修改？',
+        body: '这个镜头有改过但没保存的内容，关掉抽屉就没了。',
+        confirmText: '放弃修改',
+        cancelText: '继续编辑',
+        danger: true,
+      });
+      if (!ok) return;
+    }
+    latest.current.onClose();
+  }).current;
+
+  // 打开时把焦点放进抽屉，关掉后还给原来的元素；Esc 关闭（上面叠着确认框时归确认框管）
+  useEffect(() => {
+    const prev = document.activeElement as HTMLElement | null;
+    box.current?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape' || e.defaultPrevented || document.querySelector('.modal-scrim')) return;
+      e.preventDefault();
+      void requestClose();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('keydown', onKey);
+      prev?.focus?.();
+    };
+  }, [requestClose]);
+
+  /** 提示词改了没保存：先保存再生成（生成按旧提示词跑就白跑了）。 */
+  const generate = async (stage: GenStage) => {
+    const saveFirst = !!fields?.dirty;
+    if (fields?.dirty) {
+      if (!fields.valid) return;
+      setSaving(true);
+      try {
+        await patch.mutateAsync({ id: shot.id, ...toShotPatch(fields.changed) });
+      } catch {
+        return; // 错误显示在表单下面
+      } finally {
+        setSaving(false);
+      }
+    }
+    if (saveFirst) onGenerate(stage, true);
+    else onGenerate(stage);
+  };
+
   const initial: FieldValues = {
     action: shot.action,
     shot_size: shot.shot_size,
@@ -83,60 +164,106 @@ export function ShotDrawer({ shot, episodeId, onClose, onGenerate, generating = 
   };
   const slots = [...shot.slots].sort((a, b) => SLOT_ORDER.indexOf(a.kind) - SLOT_ORDER.indexOf(b.kind));
 
+  const failures = STAGES.map((st) => ({ st, job: failedJob(shot, st) })).filter((x) => x.job && !activeJob(shot, x.st));
+
   return (
-    <aside className="drawer" role="dialog" aria-label={`镜头 ${shot.code} 详情`}>
-      <header className="drawer-head">
-        <h3>
-          镜头 <span className="code">{shot.code}</span>
-        </h3>
-        <button type="button" className="ghost" onClick={onClose}>
-          关闭
-        </button>
-      </header>
-      <div className="row gen-row">
-        <button type="button" className="soft" disabled={generating} onClick={() => onGenerate('keyframes')}>
-          生成首帧
-        </button>
-        <button type="button" className="soft" disabled={generating} onClick={() => onGenerate('videos')}>
-          生成视频
-        </button>
-        <span className="muted">候选数和"强制重跑"用导演台工具栏上的设置</span>
-      </div>
+    <>
+      <div className="drawer-scrim" data-testid="drawer-scrim" aria-hidden="true" onMouseDown={() => void requestClose()} />
+      <aside
+        ref={box}
+        className="drawer"
+        role="dialog"
+        aria-modal="true"
+        aria-label={`镜头 ${shot.code} 详情`}
+        tabIndex={-1}
+      >
+        <header className="drawer-head">
+          <h3>
+            镜头 <span className="code">{shot.code}</span>
+          </h3>
+          <button type="button" className="ghost" onClick={() => void requestClose()}>
+            关闭
+          </button>
+        </header>
+        <div className="gen-row">
+          <div className="row">
+            {STAGES.map((st) => {
+              const label = CELL[st === 'keyframes' ? 'first_frame' : 'video'].label;
+              const active = activeJob(shot, st);
+              return (
+                <button
+                  key={st}
+                  type="button"
+                  className={fieldsDirty ? 'primary' : 'soft'}
+                  disabled={generating || saving || !!active || (fieldsDirty && !fields?.valid)}
+                  onClick={() => void generate(st)}
+                >
+                  {active ? `${label}${activeText(active)}` : fieldsDirty ? `保存并生成${label}` : `生成${label}`}
+                </button>
+              );
+            })}
+          </div>
+          <div className="row gen-opts">
+            <label>
+              候选数{' '}
+              <select aria-label="候选数" value={count} onChange={(ev) => onCountChange?.(Number(ev.target.value))}>
+                {[1, 2, 3, 4].map((n) => (
+                  <option key={n} value={n}>
+                    {n}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <input type="checkbox" aria-label="强制重跑" checked={force} onChange={(ev) => onForceChange?.(ev.target.checked)} /> 强制重跑
+            </label>
+          </div>
+          {failures.map(({ st, job }) => (
+            <p key={st} className="error">
+              {`${CELL[st === 'keyframes' ? 'first_frame' : 'video'].label}上次生成失败：${job?.error || '没有错误信息'}`}
+            </p>
+          ))}
+        </div>
+        {notice}
 
-      <section>
-        <h4>提示词与参数</h4>
-        <EditableFields
-          fields={shotFields(engines.data?.image, engines.data?.video)}
-          initial={initial}
-          saving={patch.isPending}
-          error={patch.error ? errorText(patch.error) : null}
-          onSave={(_v, changed) => patch.mutate({ id: shot.id, ...toShotPatch(changed) })}
-        />
-      </section>
-
-      {shot.dialogue.length > 0 && (
         <section>
-          <h4>对白与字幕</h4>
-          <DialogueEditor
-            dialogue={shot.dialogue}
-            saving={patchDialogue.isPending}
-            error={patchDialogue.error ? errorText(patchDialogue.error) : null}
-            onSave={(lines) => patchDialogue.mutate({ id: shot.id, dialogue: lines })}
+          <h4>提示词与参数</h4>
+          <EditableFields
+            fields={shotFields(engines.data?.image, engines.data?.video)}
+            initial={initial}
+            saving={patch.isPending}
+            error={patch.error ? errorText(patch.error) : null}
+            onValuesChange={setFields}
+            onSave={(_v, changed) => patch.mutate({ id: shot.id, ...toShotPatch(changed) })}
           />
         </section>
-      )}
 
-      {slots.length === 0 && <p className="muted">还没有生成任何首帧或视频。</p>}
-      {slots.map((sl) => (
-        <section key={sl.id}>
-          <h4>
-            {SLOT_LABEL[sl.kind] ?? sl.kind}候选
-            {sl.stale && <span className="badge stale">已过期</span>}
-          </h4>
-          <CandidateGrid slot={sl} selecting={select.isPending} onSelect={(cid) => select.mutate(cid)} />
-        </section>
-      ))}
-      {select.error && <p className="error">{errorText(select.error)}</p>}
-    </aside>
+        {shot.dialogue.length > 0 && (
+          <section>
+            <h4>对白与字幕</h4>
+            <DialogueEditor
+              dialogue={shot.dialogue}
+              saving={patchDialogue.isPending}
+              error={patchDialogue.error ? errorText(patchDialogue.error) : null}
+              onDirtyChange={setDialogueDirty}
+              onSave={(lines) => patchDialogue.mutate({ id: shot.id, dialogue: lines })}
+            />
+          </section>
+        )}
+
+        {slots.length === 0 && <p className="muted">还没有生成任何首帧或视频。</p>}
+        {slots.map((sl) => (
+          <section key={sl.id}>
+            <h4>
+              {SLOT_LABEL[sl.kind] ?? sl.kind}候选
+              {sl.stale && <span className="badge stale">已过期</span>}
+            </h4>
+            {sl.stale && sl.stale_reason && <p className="muted stale-reason">过期原因：{sl.stale_reason}</p>}
+            <CandidateGrid slot={sl} selecting={select.isPending} onSelect={(cid) => select.mutate(cid)} />
+          </section>
+        ))}
+        {select.error && <p className="error">{errorText(select.error)}</p>}
+      </aside>
+    </>
   );
 }

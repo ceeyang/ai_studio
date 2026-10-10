@@ -1,4 +1,4 @@
-import { screen } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import type { DialogueLine } from '../../api/types';
@@ -50,5 +50,34 @@ describe('DialogueEditor', () => {
     await user.click(screen.getByLabelText('第 1 句母语已校对'));
     await user.click(screen.getByRole('button', { name: '保存对白' }));
     expect(onSave).toHaveBeenCalledWith([{ ...LINES[0], zh: '换什么？', km_review: 'ai_draft' }]);
+  });
+
+  it('没改过时任务更新了对白就直接换成新的', () => {
+    const { rerender } = render(<DialogueEditor dialogue={LINES} onSave={vi.fn()} />);
+    const next = [{ ...LINES[0], km: 'ប្ដូរ?' }, LINES[1]];
+    rerender(<DialogueEditor dialogue={next} onSave={vi.fn()} />);
+    expect((screen.getByLabelText('第 1 句高棉语') as HTMLTextAreaElement).value).toBe('ប្ដូរ?');
+    expect(screen.queryByText(/对白已被任务更新/)).toBeNull();
+  });
+
+  it('正在改时任务更新了对白：按句按字段合并，改过的不覆盖，提示可载入最新', async () => {
+    const onDirtyChange = vi.fn();
+    const { rerender } = render(<DialogueEditor dialogue={LINES} onSave={vi.fn()} onDirtyChange={onDirtyChange} />);
+    const user = userEvent.setup();
+    const zh2 = screen.getByLabelText('第 2 句中文');
+    await user.clear(zh2);
+    await user.type(zh2, '我先看看。');
+    expect(onDirtyChange).toHaveBeenLastCalledWith(true);
+    // 任务（比如翻译）改了第 1 句高棉语和第 2 句中文
+    const next = [{ ...LINES[0], km: 'ប្ដូរ?' }, { ...LINES[1], zh: '让我先看看。', km: 'សុំមើលសិន។' }];
+    rerender(<DialogueEditor dialogue={next} onSave={vi.fn()} onDirtyChange={onDirtyChange} />);
+    expect((screen.getByLabelText('第 1 句高棉语') as HTMLTextAreaElement).value).toBe('ប្ដូរ?');
+    expect((screen.getByLabelText('第 2 句高棉语') as HTMLTextAreaElement).value).toBe('សុំមើលសិន។');
+    expect((screen.getByLabelText('第 2 句中文') as HTMLInputElement).value).toBe('我先看看。');
+    expect(screen.getByText(/对白已被任务更新/)).toBeTruthy();
+    await user.click(screen.getByRole('button', { name: '载入最新' }));
+    expect((screen.getByLabelText('第 2 句中文') as HTMLInputElement).value).toBe('让我先看看。');
+    expect(screen.queryByText(/对白已被任务更新/)).toBeNull();
+    expect(onDirtyChange).toHaveBeenLastCalledWith(false);
   });
 });
