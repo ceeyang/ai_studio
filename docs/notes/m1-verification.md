@@ -135,3 +135,16 @@
   - Gemini：登录墙选择器命中 1 个（`a[href*="accounts.google.com/ServiceLogin"]`，aria-label「登录」），输入框 `div.ql-editor` 命中，没有常驻的 file input（要走上传菜单 → 文件选择框）。
   - ChatGPT：已换新界面——输入框 `textarea#mobile-composer-prompt`（占位「询问 ChatGPT」），发送按钮 aria-label「发送消息」，「添加文件等」按钮，隐藏的 `input#octane-mobile-composer-photos-input`（accept=image/*，multiple），「创建图像」按钮写着「登录后使用」；旧的 `#prompt-textarea`、`data-testid=login-button` 都没有了。已把新界面的选择器加进 `sites/chatgpt.py`（新旧并存），登录墙改用文字恰为「登录 / Log in」的按钮；登录后的回复区和生成图的结构还没实测。
 - 这次没能重启后端：运行中的 studio-server.exe 锁着 `.venv`，`uv add playwright` 装不进去；pyproject 和 uv.lock 已加上 playwright 1.63，下次用 start.ps1 启动时 `uv run` 会自动装上。测试用 `uv run --no-sync`：pytest 392 passed，vitest 119 passed，typecheck 通过，e2e 5 passed。
+
+## 网页出图改走浏览器扩展桥（2026-10-10）
+
+用户要在自己平时用的、已经登录 ChatGPT / Gemini 的浏览器里出图，不要 studio 另开浏览器。Chrome 136 起默认配置目录不许远程调试，也不该去解密、拷贝用户的 cookie，所以做成浏览器扩展桥：`browser.transport: extension`（默认），cdp 方式保留为备用。设计见规格 7.4。
+
+- 扩展：`browser-extension/`（MV3，Chrome/Edge 加载已解压）。service worker 连 `ws://127.0.0.1:8700/api/browser/ext`，任务在已登录的标签页里开新对话跑完，原图分块传回，Python 校验、落盘、裁切。
+- 机械冒烟（`uv run --no-sync python browser-extension/dev/smoke.py`）：临时后端（18799）+ Playwright 自带 Chromium 153 用临时配置目录 `--load-extension`，chatgpt.com 被拦成假页面、加了假的登录 cookie，没碰真网站和用户的浏览器配置。结果：扩展 4 秒内连上（hello：v0.1.0 / Chromium 153）；第一张 gpt_image 9:16 带一张参考图——后台新开标签页、参考图经 DataTransfer 进了 file input（假页面收到 `chen.png:761`）、提示词进了 contenteditable 输入框、等停止按钮消失和图片稳定、页面里带 cookie 取回 1024×1536 PNG、居中裁成 864×1536；第二张 1:1 复用上次的标签页并跳到新对话，裁成 1024×1024；状态 `chatgpt: tabs 1, cookie true, page logged_in, logged_in true`、`gemini: tabs 0, logged_in false`。
+- 冒烟里踩到的坑：Playwright Python 同步 API 的路由回调只在主线程待在 Playwright 调用里时才处理，出图要放到线程里、主线程一直 `wait_for_timeout` 泵事件，否则假页面一直加载不出来（第一次跑报「45 秒内没出现输入框」就是这个）。
+- 清理：studio 以前用 `--remote-debugging-port=9333 --user-data-dir=D:\works\ai_studio\browser-profile` 起的那个 Chrome 已经不在了（按命令行同时含 browser-profile 和 9333 查 chrome.exe，没有），没有动用户的任何 Chrome/Edge 进程；`browser-profile/` 目录留在磁盘上（git 忽略）。
+- 重启工作台：停掉 start.ps1 那棵进程树（powershell → uv/studio-server、npm/vite），重新 `start.ps1`，8700 和 5173 都在听，`/api/health` 正常。
+- 连接状态：`/api/browser/status` 为 `transport: extension, connected: false`——用户还没在自己的浏览器里加载扩展（要在 chrome://extensions 里手动点，studio 替不了），所以**这次没有真出图**。doctor：「扩展连接」warn（给出加载步骤和 `D:\works\ai_studio\browser-extension`），两个网站登录 warn（「在该浏览器里登录 ChatGPT / Gemini」）。装好后重跑实测：陈师傅（cambodia-no1-car）9:16，带定妆照当参考图，两个网站各出一张。
+- 测试：pytest 425 passed（新增扩展桥协议 30 个、扩展与 Python 选择器一致性 3 个），vitest 153 passed（新增扩展流程 / 纯函数 / DOM 助手 32 个、设置页 2 个），typecheck 通过，e2e 5 passed。
+- 还没在真网站上验证、最可能出问题的地方：ChatGPT 新界面登录后的回复区和生成图选择器（之前也没实测过）；ChatGPT / Gemini 是否接受脚本发出的 `isTrusted=false` 粘贴/拖放（Gemini 没有常驻 file input，只能靠这两条）；Gemini `=s0` 原尺寸地址是否有效（不行会退回页面里的缩小图）；后台标签页长时间不看可能被浏览器冻结（出不来图时把 `browser.activate_tab` 打开）。

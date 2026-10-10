@@ -201,17 +201,26 @@ class PostEngine(Protocol):  # upscale / interpolate / tts
 
 每次调用都把最终工作流 JSON 和参数写到 `projects/<slug>/runs/<job_id>/`，方便复现，也能直接拖进 ComfyUI 手调。
 
-### 7.4 网页图像引擎（gpt_image / gemini_image，2026-10-10 增补）
+### 7.4 网页图像引擎（gpt_image / gemini_image，2026-10-10 增补，同日改为浏览器扩展桥）
 
-不用 API key，而是驱动一个**已经登录**的真实浏览器在 chatgpt.com / gemini.google.com 上出图（代码在 `backend/engines/browser/`）。
+不用 API key，而是在一个**已经登录**的真实浏览器里，在 chatgpt.com / gemini.google.com 上出图（后端代码在 `backend/engines/browser/`，扩展在 `browser-extension/`）。`browser.transport` 选执行方式，默认 `extension`。
 
-- **浏览器**：studio 自己管一个 Chrome（找不到用 Edge），用独立配置目录 `browser.user_data_dir`（默认 `browser-profile/`，不进 git）带 `--remote-debugging-port=browser.cdp_port`（默认 9333）按普通方式启动、脱离后端进程组；端口已在听就复用。Chrome 136 起默认配置目录不许远程调试，所以不能复用平时的浏览器配置；也不用 Playwright 的 launch（带 `--enable-automation`，Google 登录会拦）。Playwright 只用 `connect_over_cdp` 连上去，每次出图在任务线程里现连现断。
-- **登录**：设置页「打开浏览器登录」（`POST /api/browser/login`）在两个网站首页各开一个标签页，用户手动登录一次，登录态留在配置目录里。studio 从不输入账号密码、不碰验证码。登录状态按 cookie 判断（ChatGPT `__Secure-next-auth.session-token`，Gemini `__Secure-1PSID`），doctor 走 CDP `Storage.getCookies`，不开页面、不出图。
-- **流程**（`flow.py`，只经 `PageDriver` 操作页面）：新对话 → 上传参考图（file input → 文件选择框 → 粘贴，依次兜底）→ 输入一行提示词（开头写明直接出一张图、画幅和大致尺寸，网页没有尺寸/种子/负面提示词参数）→ 发送 → 轮询：停止按钮消失且结果图地址稳定几秒才算出完 → 取原图（ChatGPT 在页面里带 cookie fetch 图片地址；Gemini 先点「下载原尺寸图片」）→ 宽高比不对就居中裁成要求的画幅（原图留在任务目录）。
-- **出错**：没登录（登录墙或缺 cookie）、限额/限流、内容被拒、超时、页面元素找不到（指明要改哪个选择器）都抛 `BrowserError`（JobError），中文原因显示在任务上，不静默失败。
-- **选择器**：每个网站一个文件（`sites/chatgpt.py`、`sites/gemini.py`），所有选择器和文案正则集中在 `SiteSpec` 里，附改版排查顺序。
+- **extension（默认）：在用户平时用的浏览器里出图**。用户在日常用的 Chrome/Edge 里以「加载已解压的扩展程序」装上 `browser-extension/`（MV3，权限 tabs / scripting / storage / alarms / cookies，host 权限只有 chatgpt.com、chat.openai.com、gemini.google.com 和出图的图床 `*.oaiusercontent.com`、`*.googleusercontent.com`），并在那个浏览器里照常登录 ChatGPT 和 Gemini。studio 不启动任何浏览器、不用配置目录、不读也不拷 cookie（Chrome 136 起默认配置目录不许远程调试，也不该去解密用户的 cookie）。
+  - **连接**：扩展的 service worker 用 WebSocket 连 `ws://127.0.0.1:8700/api/browser/ext`（弹窗里能改地址），断了按 1s、2s、4s… 最多 30s 重连；每 20 秒 ping 一次（MV3 的 service worker 空闲 30 秒会被挂起，有 WebSocket 收发就不会），`chrome.alarms` 每 30 秒兜底唤醒重连。连上先发 `hello`（版本、支持的网站、浏览器）。
+  - **安全**：这个端点只接受 `chrome-extension://<id>`（少数浏览器报 `extension://`）来源，本机页面、别的网站、不带 Origin 的客户端一律在握手时 1008 拒绝；Host 检查照旧；`browser.extension_id` 写了就只认这一个扩展。`/api/ws` 仍然只接受本机页面，不接受扩展来源。同一时间只认一个扩展连接：新连接替换旧的（关闭码 4000，扩展收到后 1 分钟内不抢回来，免得两个浏览器来回抢）。
+  - **协议**（JSON 文本帧，详见 `backend/engines/browser/extension.py` 文件头）：studio → 扩展 `job {job_id, site, prompt, refs:[{name, mime, b64}], aspect, timeout, options}`、`cancel`、`status_request`、`open {urls}`；扩展 → studio `progress`、`log`、`image`（原图 base64 每 512K 字符一块，避开 uvicorn 16MB 单帧上限）、`result {count}`、`error {kind, message}`、`status {sites:{key:{tabs, cookie, page, logged_in}}}`、`ping`。等结果的是队列的网页通道线程，WebSocket 在事件循环里，中间每个任务一个队列；扩展断开时正在等的任务立刻失败（不干等超时），超时 = 任务 timeout + 120 秒（开标签页、传参考图不算在出图时间里），取消会发 `cancel`，扩展点停止按钮。
+  - **标签页**：每个网站在扩展里也串行。依次找：扩展上次出图用过、还开着的那个；（`reuse_user_tabs`，默认开）用户开着的这个网站的其他标签页里，不是窗口当前显示的、没在生成（没有停止按钮）、输入框里没写到一半的，最久没碰的优先；都没有就在后台新开一个（`activate_tab` 可以切到前台）。每次先跳到新对话（`reuse_conversation: true` 才在当前对话里接着发），不混进用户自己的对话。
+  - **页面流程**（`browser-extension/lib/flow.js`，逐条照搬 `flow.py`：同样的等待、判断、超时和中文原因）：等输入框（页面上有登录按钮或被跳到 accounts.google.com / auth.openai.com 就判没登录；输入框在但没读到登录 cookie 时等 5 秒后按已登录继续并记一条日志）→ 上传参考图（DataTransfer 造 FileList 塞进隐藏的 `input[type=file]` 并发 change；没有就点开「+」菜单再找；再没有就往输入框粘贴图片，6 秒没出缩略图再试拖放；扩展替不了用户在文件选择框里选文件，所以不点会弹选择框的按钮）→ 输提示词（`execCommand('insertText')`，ProseMirror / Quill / textarea 都吃；不行再模拟粘贴纯文本，最后直接写内容 + input 事件）→ 点发送（不行按回车）→ 轮询：限额 / 登录墙 / 停止按钮消失且结果图地址稳定 settle 秒 / 只回文字 no_image_grace 秒后判被拒或没出图 / 超时点停止；提交后 5 秒内冒出来的「结果图」当成回显的参考图 → 取原图：先在页面里带登录态 `fetch`（同源、blob: 也行），不行由扩展直接取（有 host 权限，不受 CORS 限制）；Gemini 先把 googleusercontent 地址末尾的尺寸参数换成 `=s0` 取原尺寸，不行再取页面里那张；按文件头确认是图片。
+  - **轮询在 service worker 里**：每一步页面操作都是一次 `chrome.scripting.executeScript` 调 `content/dom.js`（注入到隔离环境，不和网页脚本共享变量；选择器沿用 Playwright 写法，自己实现了 `:has-text()` / `:text-is()`），等待和轮询放在 service worker——后台标签页里的定时器会被浏览器节流，service worker 里的不会。
+  - **Python 这边**：解得开才算（PIL），落盘原图，宽高比不对就居中裁成要求的画幅，和 cdp 方式共用 `_save`。
+  - **选择器**：每个网站在扩展里也有一份 SiteSpec（`browser-extension/sites/chatgpt.js`、`gemini.js`，带改版排查注释），和 `sites/*.py` 是同一份选择器和文案正则；`test_browser_extension_js.py` 用 node 读出扩展的 SiteSpec 和 Python 的逐项比对，防止只改一边。
+  - **登录状态**：扩展用 `chrome.cookies` 看登录 cookie 在不在（只看名字，不读值），再探一下开着的标签页有没有登录按钮 / 输入框；页面上有登录按钮算没登录，否则 cookie 在或输入框在算登录。连上时、标签页加载完、出图结束后和每分钟报一次；`/api/browser/status` 和 doctor 用它，不开页面、不出图。
+  - **界面和 doctor**：设置页「网页出图（浏览器扩展）」面板每 5 秒刷新：扩展是否连上（版本、浏览器）、每个网站登没登录、开着几个标签页；没连上时显示安装步骤和 `browser-extension` 文件夹的完整路径；连上后「在浏览器里打开 ChatGPT / Gemini」让扩展在用户浏览器里打开两个网站去登录。doctor 没连上时警告「在你平时用的 Chrome/Edge 里加载 browser-extension（开发者模式→加载已解压的扩展程序）」，没登录时警告「在该浏览器里登录 ChatGPT / Gemini」。
+  - **机械冒烟**：`uv run --no-sync python browser-extension/dev/smoke.py`——临时后端 + Playwright 自带 Chromium 用临时配置目录加载扩展，把 chatgpt.com 拦成假页面，跑两次 gpt_image（新开标签页带参考图、复用标签页切新对话），不碰真网站和用户的浏览器配置。
+- **cdp（备用）**：studio 自己管一个 Chrome（找不到用 Edge），用独立配置目录 `browser.user_data_dir`（默认 `browser-profile/`，不进 git）带 `--remote-debugging-port=browser.cdp_port`（默认 9333）按普通方式启动、脱离后端进程组；端口已在听就复用。不用 Playwright 的 launch（带 `--enable-automation`，Google 登录会拦），Playwright 只用 `connect_over_cdp` 连上去，每次出图在任务线程里现连现断，跑 `flow.py`（只经 `PageDriver` 操作页面；Gemini 用「下载原尺寸图片」按钮拿原图）。设置页「打开浏览器登录」（`POST /api/browser/login`）在两个网站首页各开一个标签页，用户在那个窗口里登录一次；登录状态 doctor 走 CDP `Storage.getCookies`。transport=extension 时这条路完全不走，不会启动浏览器。
+- **出错**：没登录、限额/限流、内容被拒、只回文字、超时、页面元素找不到（指明要改哪个文件的哪个选择器）、扩展没连上（给安装步骤）、扩展中途断开都是 `BrowserError`（JobError），中文原因显示在任务上，不静默失败。
 - **能力**：gpt_image 参考图上限 4、gemini_image 上限 3；不支持负面提示词；画幅 9:16 / 16:9 / 1:1 / 21:9（写进提示词）；没有种子，结果每次不同——首帧哈希本来就不含种子，过期判断不受影响。
-- **调度**：这两个引擎的 `model_family`（`chatgpt_web` / `gemini_web`）在队列里各有一条串行通道（lane 线程），任务一律 `gpu=False`，不占 GPU worker、不触发换族 `/free`、不参与空闲释放显存；runner 里每个网站再加一把锁，一个网站一个标签页、同时只出一张。
+- **调度**：这两个引擎的 `model_family`（`chatgpt_web` / `gemini_web`）在队列里各有一条串行通道（lane 线程），任务一律 `gpu=False`，不占 GPU worker、不触发换族 `/free`、不参与空闲释放显存；runner 里每个网站再加一把锁，一个网站一个标签页、同时只出一张。两种 transport 都一样。
 - **界面**：引擎表和各处引擎下拉标「浏览器」；角色抽卡、三视图可以选引擎。
 
 ## 8. 任务队列与显存调度
