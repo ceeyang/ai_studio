@@ -6,12 +6,11 @@ from dataclasses import dataclass
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
-from backend.domain.hashing import input_hash
 from backend.domain.models import Episode, Shot
 from backend.domain.shots import renumber_shots
 from backend.domain.slots import delete_slots
 from backend.llm.schemas import StoryboardOut
-from backend.pipeline.common import continue_chain, load_episode
+from backend.pipeline.common import clean_note, continue_chain, load_episode, prompt_fp
 from backend.queue.errors import JobError
 from backend.queue.handlers import HANDLERS
 
@@ -86,23 +85,41 @@ def build_storyboard_plan(s: Session, sv, episode_id: int) -> StoryboardPlan:
                           prompts=sv.prompts(proj.slug))
 
 
+def previous_shot_lines(db, block_id: int) -> list[str]:
+    """这一段现有 llm 镜头，每镜一行「动作｜台词（说话人：内容；…）」，带修改意见重写时给模型参考。"""
+    with db.session() as s:
+        shots = s.scalars(select(Shot).where(Shot.scene_block_id == block_id,
+                                             Shot.origin == "llm")
+                          .order_by(Shot.order, Shot.id)).all()
+        lines = []
+        for sh in shots:
+            said = "；".join(f"{d.get('speaker', '')}：{d.get('zh', '')}"
+                            for d in (sh.dialogue or []))
+            lines.append(f"{sh.action}｜{said or '无台词'}")
+        return lines
+
+
 def storyboard_prompt_fp(prompts, anchor, characters, location, text, count, shot_seconds,
-                         max_seconds, prev_action) -> tuple[str, str, str]:
+                         max_seconds, prev_action, note: str | None = None,
+                         previous_shots: list[str] | None = None) -> tuple[str, str, str]:
     """某段落这次会用到的分镜提示词及其输入指纹（不调用 LLM）。
 
     分镜阶段决定跳过还是重跑、重跑影响预估决定会不会动这一段，都走这一个函数，避免两边判断走偏。
+    note 是修改意见；previous_shots 是这一段上一版的镜头（只在有修改意见时提供）。
     """
     system, user = prompts.render(
         "storyboard", anchor=anchor, characters=characters, location=location, text=text,
-        count=count, shot_seconds=shot_seconds, max_seconds=max_seconds, prev_action=prev_action)
-    return system, user, input_hash("storyboard", system, user)
+        count=count, shot_seconds=shot_seconds, max_seconds=max_seconds, prev_action=prev_action,
+        note=note, previous_shots=previous_shots or [])
+    return system, user, prompt_fp("storyboard", system, user, note)
 
 
 @HANDLERS.register("storyboard")
 def run_storyboard(ctx, payload: dict) -> dict:
     sv = ctx.services
     episode_id = int(payload["episode_id"])
-    force = bool(payload.get("force"))
+    note = clean_note(payload.get("note"))
+    force = bool(payload.get("force")) or note is not None  # 带修改意见就一定重跑
     manual = payload.get("manual") or {}
     only = set(payload.get("scene_block_ids") or [])
     with sv.db.session() as s:
@@ -120,9 +137,10 @@ def run_storyboard(ctx, payload: dict) -> dict:
             continue
         ctx.check_canceled()
         n = blk["count"]
+        previous = previous_shot_lines(sv.db, blk["id"]) if note else []
         system, user, fp = storyboard_prompt_fp(prompts, anchor, characters, blk["location"],
                                                blk["text"], n, shot_seconds, max_seconds,
-                                               prev_action)
+                                               prev_action, note, previous)
         key = f"storyboard:{blk['id']}"
         with sv.db.session() as s:
             ep = s.get(Episode, episode_id)

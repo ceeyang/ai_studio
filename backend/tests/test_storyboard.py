@@ -204,3 +204,44 @@ def test_block_with_only_manual_shots_is_not_skipped(tmp_path, db):
         s.add(Shot(episode_id=ep_id, scene_block_id=b1, order=5, action="动作1", origin="manual"))
     assert run_storyboard(ctx, {"episode_id": ep_id}) == {"blocks_done": 1, "blocks_skipped": 1}
     assert len(prov.calls) == 3
+
+
+def test_note_forces_every_block_and_goes_into_prompt(tmp_path, db):
+    ctx, ep_id, prov = setup(tmp_path, db, [shots_json(2)] * 4)
+    run_storyboard(ctx, {"episode_id": ep_id})
+    assert "修改意见" not in prov.calls[0]["messages"][0]["content"]
+    assert "上一版本段镜头" not in prov.calls[0]["messages"][0]["content"]
+    assert run_storyboard(ctx, {"episode_id": ep_id, "note": "更紧凑"}) == {"blocks_done": 2,
+                                                                         "blocks_skipped": 0}
+    for call in prov.calls[2:]:
+        user = call["messages"][0]["content"]
+        assert "修改意见：更紧凑" in user
+        # 上一版本段的镜头（动作｜台词）附在提示词里
+        assert "上一版本段镜头" in user
+        assert "动作0｜林夏：词被改了" in user and "动作1｜无台词" in user
+
+
+def test_scene_block_ids_only_replaces_that_block(tmp_path, db):
+    ctx, ep_id, prov = setup(tmp_path, db, [shots_json(2)] * 3)
+    run_storyboard(ctx, {"episode_id": ep_id})
+    with db.session() as s:
+        ep = s.get(Episode, ep_id)
+        b1, b2 = ep.scene_blocks[0].id, ep.scene_blocks[1].id
+        b1_ids = sorted(x.id for x in ep.shots if x.scene_block_id == b1)
+        b2_ids = sorted(x.id for x in ep.shots if x.scene_block_id == b2)
+        manual = Shot(episode_id=ep_id, scene_block_id=b2, order=1999, action="手工",
+                      origin="manual")
+        s.add(manual)
+        s.flush()
+        manual_id = manual.id
+    out = run_storyboard(ctx, {"episode_id": ep_id, "scene_block_ids": [b2], "note": "换个机位"})
+    assert out == {"blocks_done": 1, "blocks_skipped": 0}
+    assert len(prov.calls) == 3
+    user = prov.calls[2]["messages"][0]["content"]
+    assert "乙" * 50 in user and "修改意见：换个机位" in user
+    with db.session() as s:
+        ep = s.get(Episode, ep_id)
+        assert sorted(x.id for x in ep.shots if x.scene_block_id == b1) == b1_ids
+        new_b2 = [x.id for x in ep.shots if x.scene_block_id == b2 and x.origin == "llm"]
+        assert len(new_b2) == 2 and not set(new_b2) & set(b2_ids)
+        assert manual_id in [x.id for x in ep.shots]

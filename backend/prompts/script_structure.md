@@ -14,3 +14,6 @@
 
 素材：
 {{ source_text }}
+{% if note is defined and note %}
+修改意见：{{ note }}
+在满足以上全部要求的前提下按修改意见调整。{% endif %}

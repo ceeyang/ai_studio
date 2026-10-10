@@ -19,3 +19,6 @@
 {% endfor %}
 剧本素材节选：
 {{ excerpt }}
+{% if note is defined and note %}
+修改意见：{{ note }}
+在满足以上全部要求的前提下按修改意见调整。{% endif %}

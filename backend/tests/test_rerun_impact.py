@@ -173,3 +173,67 @@ def test_rerun_impact_block_with_only_manual_shots_will_run(tmp_path, db):
         impact = rerun_impact(s, ctx.services, ep_id, "storyboard", False)
     assert impact.will_run is True and impact.blocks == [1]
     assert impact.shots_deleted == 0 and impact.manual_kept == 1
+
+
+def test_rerun_impact_by_block_and_note(tmp_path, db):
+    gw, prov = make_gateway([shots_json(2), shots_json(2)])
+    ctx = FakeCtx(make_services(tmp_path, db, llm=gw))
+    ep_id = seed_scripted(db)
+    run_storyboard(ctx, {"episode_id": ep_id})
+    sv = ctx.services
+    with db.session() as s:
+        ep = s.get(Episode, ep_id)
+        b2 = ep.scene_blocks[1].id
+        # 一个没挂段落的 llm 孤儿：按段重写时不会被清掉，不该算进去
+        s.add(Shot(episode_id=ep_id, order=5000, origin="llm"))
+    with db.session() as s:
+        forced = rerun_impact(s, sv, ep_id, "storyboard", True, scene_block_ids=[b2])
+    assert forced.will_run is True and forced.blocks == [2] and forced.shots_deleted == 2
+    with db.session() as s:
+        unchanged = rerun_impact(s, sv, ep_id, "storyboard", False, scene_block_ids=[b2])
+    assert unchanged.will_run is False and unchanged.blocks == []
+    with db.session() as s:
+        noted = rerun_impact(s, sv, ep_id, "storyboard", False, scene_block_ids=[b2],
+                             note="更紧凑")
+    assert noted.will_run is True and noted.blocks == [2] and noted.shots_deleted == 2
+    with db.session() as s:
+        whole = rerun_impact(s, sv, ep_id, "storyboard", False, note="更紧凑")
+    assert whole.blocks == [1, 2] and whole.shots_deleted == 5  # 整集：含孤儿
+    with db.session() as s:
+        blank = rerun_impact(s, sv, ep_id, "storyboard", False, note="  ")
+    assert blank.will_run is False
+
+
+def test_rerun_impact_script_note_forces(tmp_path, db):
+    gw, prov = make_gateway([STRUCTURE, VISUAL])
+    sv = make_services(tmp_path, db, llm=gw)
+    _, ep_id = seed_episode(db, source="林夏在直播间发现提词器被人改了。")
+    run_script(FakeCtx(sv), {"episode_id": ep_id})
+    with db.session() as s:
+        impact = rerun_impact(s, sv, ep_id, "script", False, note="更紧凑")
+    assert impact.will_run is True
+
+
+def test_api_rerun_impact_block_params(api):
+    api.post("/api/projects", json={"title": "demo"})
+    ep_id = api.post("/api/projects/demo/episodes",
+                     json={"source_text": "x", "target_seconds": 10}).json()["id"]
+    other = api.post("/api/projects/demo/episodes", json={"source_text": "y"}).json()["id"]
+    with api.app.state.services.db.session() as s:
+        ep, oth = s.get(Episode, ep_id), s.get(Episode, other)
+        ep.scene_blocks.append(SceneBlock(order=0, text="段落甲" * 10))
+        ep.scene_blocks.append(SceneBlock(order=1, text="段落乙" * 10))
+        oth.scene_blocks.append(SceneBlock(order=0, text="别集"))
+        s.flush()
+        b2, foreign = ep.scene_blocks[1].id, oth.scene_blocks[0].id
+    url = f"/api/episodes/{ep_id}/rerun-impact"
+    r = api.get(url, params={"stage": "storyboard", "force": 0, "scene_block_ids": str(b2),
+                             "note": "更紧凑"})
+    assert r.status_code == 200
+    assert r.json()["will_run"] is True and r.json()["blocks"] == [2]
+    r = api.get(url, params={"stage": "storyboard", "scene_block_ids": f"{b2},{foreign}"})
+    assert r.status_code == 400 and "段落" in r.json()["detail"]
+    r = api.get(url, params={"stage": "storyboard", "scene_block_ids": "a,b"})
+    assert r.status_code == 400
+    r = api.get(url, params={"stage": "script", "scene_block_ids": str(b2)})
+    assert r.status_code == 400 and "只有分镜能按段重写" in r.json()["detail"]

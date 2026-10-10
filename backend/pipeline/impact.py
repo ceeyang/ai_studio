@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from backend.app.schemas import RerunImpact
 from backend.domain.models import Shot, Slot
-from backend.pipeline.common import load_episode
+from backend.pipeline.common import check_scene_blocks, clean_note, load_episode
 from backend.pipeline.script import (structure_prompt_fp, visual_chars_and_locations,
                                      visual_prompt_fp)
 from backend.pipeline.storyboard import build_storyboard_plan, storyboard_prompt_fp
@@ -43,16 +43,22 @@ def _last_action(s: Session, block_id: int) -> str:
     return sh.action if sh else ""
 
 
-def _storyboard_impact(s: Session, sv, episode_id: int, force: bool) -> RerunImpact:
+def _storyboard_impact(s: Session, sv, episode_id: int, force: bool,
+                       only: list[int] | None = None) -> RerunImpact:
     # 预算、风格锚、角色表、场景表都走和 run_storyboard 相同的 build_storyboard_plan，
     # 避免这里自己拼一遍 anchor/characters/locs/counts 而和真正跑的时候对不上。
     plan_data = build_storyboard_plan(s, sv, episode_id)
     stage_hashes = plan_data.ep.stage_hashes or {}
+    only_set = set(only or [])
 
     rerun_block_ids: list[int] = []
     rerun_block_numbers: list[int] = []
     prev_action = ""
     for blk in plan_data.blocks:
+        if only_set and blk["id"] not in only_set:
+            # 按段重写：其他段不动（和 run_storyboard 里跳过 only 之外的段一致）
+            prev_action = _last_action(s, blk["id"]) or prev_action
+            continue
         _, _, fp = storyboard_prompt_fp(plan_data.prompts, plan_data.anchor, plan_data.characters,
                                         blk["location"], blk["text"], blk["count"],
                                         plan_data.shot_seconds, plan_data.max_seconds, prev_action)
@@ -70,10 +76,11 @@ def _storyboard_impact(s: Session, sv, episode_id: int, force: bool) -> RerunImp
     will_run = bool(rerun_block_numbers)
     shot_ids: list[int] = []
     if will_run:
-        # 整段重跑时，会先删掉这几段自己的 llm 镜头，跑完后再把剩下没挂段落的 llm 孤儿也清掉
-        # （对应 run_storyboard 里 done 且 not only 时的孤儿清理；预估按不勾段落的整集重跑算）
+        # 重跑时会先删掉这几段自己的 llm 镜头；整集重跑（不按段）跑完后还会把没挂段落的 llm 孤儿也清掉
+        # （对应 run_storyboard 里 done 且 not only 时的孤儿清理），按段重写不清孤儿
+        in_blocks = Shot.scene_block_id.in_(rerun_block_ids)
         cond = (Shot.episode_id == episode_id, Shot.origin == "llm",
-               (Shot.scene_block_id.in_(rerun_block_ids) | Shot.scene_block_id.is_(None)))
+               in_blocks if only_set else (in_blocks | Shot.scene_block_id.is_(None)))
         shot_ids = list(s.scalars(select(Shot.id).where(*cond)))
     first_sel, video_sel = _selected_counts(s, shot_ids)
     return RerunImpact(stage="storyboard", will_run=will_run, blocks=rerun_block_numbers,
@@ -120,9 +127,16 @@ def _script_impact(s: Session, sv, episode_id: int, force: bool) -> RerunImpact:
                        overwrites=overwrites)
 
 
-def rerun_impact(s: Session, sv, episode_id: int, stage: str, force: bool) -> RerunImpact:
+def rerun_impact(s: Session, sv, episode_id: int, stage: str, force: bool, *,
+                 scene_block_ids: list[int] | None = None,
+                 note: str | None = None) -> RerunImpact:
+    """scene_block_ids：只重写这些段落的分镜（只对 storyboard 有效）；note 有内容时按 force 算。"""
+    if clean_note(note):
+        force = True
+    if scene_block_ids:
+        check_scene_blocks(s, episode_id, stage, scene_block_ids)
     if stage == "storyboard":
-        return _storyboard_impact(s, sv, episode_id, force)
+        return _storyboard_impact(s, sv, episode_id, force, scene_block_ids)
     if stage == "script":
         return _script_impact(s, sv, episode_id, force)
     raise JobError(f"未知阶段：{stage}，可选：script、storyboard")

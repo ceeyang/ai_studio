@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Query, Request
 
 from backend.app.deps import get_or_404, manager, services
 from backend.app.schemas import FitKhmerIn, RerunImpact, RunIn, RunOut, TranslateIn
@@ -11,6 +11,7 @@ from backend.domain.models import Episode
 from backend.engines.comfyui import health
 from backend.pipeline.impact import rerun_impact
 from backend.pipeline.runs import FIT_STAGE, STAGES, Precheck, RunOptions, submit_chain
+from backend.queue.errors import JobError
 
 router = APIRouter(prefix="/api", tags=["runs"])
 
@@ -25,12 +26,25 @@ def _precheck(sv) -> Precheck:
 
 @router.get("/episodes/{episode_id}/rerun-impact", response_model=RerunImpact)
 def get_rerun_impact(episode_id: int, stage: Literal["script", "storyboard"], request: Request,
-                     force: bool = False):
-    """现在跑这个阶段会不会动、会删什么——给前端跑之前弹确认用，不调用 LLM。"""
+                     force: bool = False, scene_block_ids: str | None = None,
+                     note: str | None = Query(None, max_length=500)):
+    """现在跑这个阶段会不会动、会删什么——给前端跑之前弹确认用，不调用 LLM。
+
+    scene_block_ids：逗号分隔的段落 id，只计这些段（只对 storyboard 有效）；note 有内容时按 force 算。
+    """
     sv = services(request)
+    block_ids = _parse_ids(scene_block_ids)
     with sv.db.session() as s:
         get_or_404(s, Episode, episode_id, "剧集")
-        return rerun_impact(s, sv, episode_id, stage, force)
+        return rerun_impact(s, sv, episode_id, stage, force, scene_block_ids=block_ids, note=note)
+
+
+def _parse_ids(raw: str | None) -> list[int] | None:
+    toks = [t.strip() for t in (raw or "").split(",") if t.strip()]
+    try:
+        return [int(t) for t in toks] or None
+    except ValueError:
+        raise JobError(f"段落 id 格式不对：{raw}（应为逗号分隔的数字）") from None
 
 
 @router.post("/episodes/{episode_id}/run", response_model=RunOut)
@@ -39,7 +53,8 @@ def run_stage(episode_id: int, body: RunIn, request: Request):
     stages = list(STAGES) if body.stage == "all" else [body.stage, *(body.then or [])]
     opts = RunOptions(shots=body.shots, candidates=body.candidates, force=body.force,
                       priority=body.priority,
-                      export=body.export.model_dump() if body.export else None)
+                      export=body.export.model_dump() if body.export else None,
+                      scene_block_ids=body.scene_block_ids, note=body.note)
     return RunOut(job_ids=submit_chain(manager(request), sv.db, sv.engines, episode_id, stages, opts,
                                        precheck=_precheck(sv)))
 

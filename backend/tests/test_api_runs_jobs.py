@@ -275,3 +275,38 @@ def test_job_context_for_episode_and_export_jobs(api):
     # 没有归属的任务：context 为空
     jid = api.app.state.manager.submit("script", {"episode_id": ep_id})
     assert api.get(f"/api/jobs/{jid}").json()["context"] is None
+
+
+def test_run_regenerate_params(api):
+    from backend.domain.models import Episode, SceneBlock
+    api.post("/api/projects", json={"title": "demo"})
+    ep_id = api.post("/api/projects/demo/episodes", json={"source_text": "梗概"}).json()["id"]
+    other = api.post("/api/projects/demo/episodes", json={"source_text": "别集"}).json()["id"]
+    with api.app.state.services.db.session() as s:
+        ep, oth = s.get(Episode, ep_id), s.get(Episode, other)
+        ep.scene_blocks.append(SceneBlock(order=0, text="甲"))
+        oth.scene_blocks.append(SceneBlock(order=0, text="乙"))
+        s.flush()
+        mine, foreign = ep.scene_blocks[0].id, oth.scene_blocks[0].id
+    url = f"/api/episodes/{ep_id}/run"
+
+    [jid] = api.post(url, json={"stage": "storyboard", "scene_block_ids": [mine],
+                                "note": "  更紧凑 ", "then": ["keyframes"]}).json()["job_ids"]
+    p = api.get(f"/api/jobs/{jid}").json()["payload"]
+    assert p["scene_block_ids"] == [mine] and p["note"] == "更紧凑" and p["force"] is True
+    # 修改意见和按段只作用于本阶段，不带进后续阶段
+    assert p["options"]["note"] is None and p["options"]["scene_block_ids"] is None
+
+    [jid] = api.post(url, json={"stage": "script", "note": "更紧凑"}).json()["job_ids"]
+    p = api.get(f"/api/jobs/{jid}").json()["payload"]
+    assert p["note"] == "更紧凑" and p["force"] is True
+
+    [jid] = api.post(url, json={"stage": "script", "note": "   "}).json()["job_ids"]
+    p = api.get(f"/api/jobs/{jid}").json()["payload"]
+    assert "note" not in p and p["force"] is False
+
+    r = api.post(url, json={"stage": "script", "scene_block_ids": [mine]})
+    assert r.status_code == 400 and "只有分镜能按段重写" in r.json()["detail"]
+    r = api.post(url, json={"stage": "storyboard", "scene_block_ids": [foreign]})
+    assert r.status_code == 400 and "段落" in r.json()["detail"]
+    assert api.post(url, json={"stage": "script", "note": "长" * 501}).status_code == 422

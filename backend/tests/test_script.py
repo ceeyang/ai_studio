@@ -99,3 +99,28 @@ def test_manual_provider_waits_for_input(tmp_path, db):
         run_script(ctx, {"episode_id": ep_id,
                          "manual": {"script_structure": json.dumps(STRUCTURE, ensure_ascii=False)}})
     assert ei.value.request["key"] == "script_visual"
+
+
+def test_note_forces_rerun_and_goes_into_prompt(tmp_path, db):
+    """输入没变、不 force，但带了修改意见：结构和视觉都真正调 LLM，提示词末尾带上修改意见。"""
+    ctx, ep_id, prov = setup(tmp_path, db, [STRUCTURE, VISUAL, STRUCTURE, VISUAL])
+    run_script(ctx, {"episode_id": ep_id})
+    with db.session() as s:
+        before = dict(s.get(Episode, ep_id).stage_hashes)
+    assert "修改意见" not in prov.calls[0]["messages"][0]["content"]
+    assert run_script(ctx, {"episode_id": ep_id, "note": "更紧凑"}) == {"structure": "done",
+                                                                       "visual": "done"}
+    assert len(prov.calls) == 4
+    for call in prov.calls[2:]:
+        user = call["messages"][0]["content"]
+        assert "修改意见：更紧凑" in user and "在满足以上全部要求的前提下按修改意见调整。" in user
+    with db.session() as s:
+        after = s.get(Episode, ep_id).stage_hashes
+    assert after["structure"] != before["structure"]  # 指纹里有修改意见
+
+
+def test_blank_note_is_ignored(tmp_path, db):
+    ctx, ep_id, prov = setup(tmp_path, db, [STRUCTURE, VISUAL])
+    run_script(ctx, {"episode_id": ep_id})
+    assert run_script(ctx, {"episode_id": ep_id, "note": "   "}) == {"structure": "skipped",
+                                                                    "visual": "skipped"}

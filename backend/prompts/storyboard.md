@@ -36,3 +36,9 @@
 {{ text }}
 
 请拆成正好 {{ count }} 个镜头。
+{% if previous_shots is defined and previous_shots %}
+上一版本段镜头（每镜一行：动作｜台词），在它的基础上调整：
+{% for p in previous_shots %}- {{ p }}
+{% endfor %}{% endif %}{% if note is defined and note %}
+修改意见：{{ note }}
+在满足以上全部要求的前提下按修改意见调整。{% endif %}

@@ -6,28 +6,29 @@ from __future__ import annotations
 
 from sqlalchemy import select
 
-from backend.domain.hashing import input_hash
 from backend.domain.models import Character, Location, SceneBlock, StyleBible
 from backend.llm.schemas import ScriptStructure, ScriptVisual
-from backend.pipeline.common import continue_chain, load_episode
+from backend.pipeline.common import clean_note, continue_chain, load_episode, prompt_fp
 from backend.queue.errors import JobError
 from backend.queue.handlers import HANDLERS
 
 
 def structure_prompt_fp(prompts, project_title: str, target_seconds: float,
-                        source_text: str) -> tuple[str, str, str]:
+                        source_text: str, note: str | None = None) -> tuple[str, str, str]:
     """剧本结构这次要用的提示词及其输入指纹（不调用 LLM）。script 阶段和重跑影响预估共用。"""
     system, user = prompts.render("script_structure", project_title=project_title,
-                                  target_seconds=target_seconds, source_text=source_text)
-    return system, user, input_hash("structure", system, user)
+                                  target_seconds=target_seconds, source_text=source_text,
+                                  note=note)
+    return system, user, prompt_fp("structure", system, user, note)
 
 
 def visual_prompt_fp(prompts, project_title: str, characters: list[dict], locations: list[dict],
-                     excerpt: str) -> tuple[str, str, str]:
+                     excerpt: str, note: str | None = None) -> tuple[str, str, str]:
     """视觉设定这次要用的提示词及其输入指纹（不调用 LLM）。script 阶段和重跑影响预估共用。"""
     system, user = prompts.render("script_visual", project_title=project_title,
-                                  characters=characters, locations=locations, excerpt=excerpt)
-    return system, user, input_hash("visual", system, user)
+                                  characters=characters, locations=locations, excerpt=excerpt,
+                                  note=note)
+    return system, user, prompt_fp("visual", system, user, note)
 
 
 def visual_chars_and_locations(proj) -> tuple[list[dict], list[dict]]:
@@ -44,22 +45,23 @@ def visual_chars_and_locations(proj) -> tuple[list[dict], list[dict]]:
 @HANDLERS.register("script")
 def run_script(ctx, payload: dict) -> dict:
     episode_id = int(payload["episode_id"])
-    force = bool(payload.get("force"))
+    note = clean_note(payload.get("note"))
+    force = bool(payload.get("force")) or note is not None  # 带修改意见就一定重跑
     manual = payload.get("manual") or {}
-    structure = _structure(ctx, episode_id, force, manual)
-    visual = _visual(ctx, episode_id, force, manual)
+    structure = _structure(ctx, episode_id, force, manual, note)
+    visual = _visual(ctx, episode_id, force, manual, note)
     continue_chain(ctx, episode_id, payload)
     return {"structure": structure, "visual": visual}
 
 
-def _structure(ctx, episode_id: int, force: bool, manual: dict) -> str:
+def _structure(ctx, episode_id: int, force: bool, manual: dict, note: str | None = None) -> str:
     sv = ctx.services
     with sv.db.session() as s:
         ep, proj = load_episode(s, episode_id)
         if not ep.source_text.strip():
             raise JobError("这一集还没有原文或梗概，先填写 source_text")
         system, user, fp = structure_prompt_fp(sv.prompts(proj.slug), proj.title,
-                                               ep.target_seconds, ep.source_text)
+                                               ep.target_seconds, ep.source_text, note)
         if not force and (ep.stage_hashes or {}).get("structure") == fp and ep.scene_blocks:
             ctx.log("剧本结构：输入没变，跳过")
             return "skipped"
@@ -100,13 +102,13 @@ def _structure(ctx, episode_id: int, force: bool, manual: dict) -> str:
     return "done"
 
 
-def _visual(ctx, episode_id: int, force: bool, manual: dict) -> str:
+def _visual(ctx, episode_id: int, force: bool, manual: dict, note: str | None = None) -> str:
     sv = ctx.services
     with sv.db.session() as s:
         ep, proj = load_episode(s, episode_id)
         chars, locs = visual_chars_and_locations(proj)
         system, user, fp = visual_prompt_fp(sv.prompts(proj.slug), proj.title, chars, locs,
-                                            ep.source_text[:4000])
+                                            ep.source_text[:4000], note)
         if not force and (ep.stage_hashes or {}).get("visual") == fp and proj.style_bible_id:
             ctx.log("视觉设定：输入没变，跳过")
             return "skipped"

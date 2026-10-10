@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 
 from sqlalchemy import select
 
 from backend.domain.db import Database
 from backend.domain.models import Episode, Slot
 from backend.engines.registry import runtime_of
+from backend.pipeline.common import check_scene_blocks, clean_note
 from backend.pipeline.post import lines_missing_km, speakers_without_voice
 from backend.post.options import ExportOptions
 from backend.queue.errors import JobError
@@ -28,6 +29,8 @@ class RunOptions:
     force: bool = False
     priority: int = 0
     export: dict | None = None   # ExportOptions 的字段：subtitles / dub / end_card / trim
+    scene_block_ids: list[int] | None = None   # 只重写这些段落的分镜（只对 storyboard 有效）
+    note: str | None = None      # 修改意见：写进 script / storyboard 提示词，非空时等同 force
 
 
 @dataclass
@@ -106,10 +109,13 @@ def submit_chain(manager, db: Database, engines, episode_id: int, stages: list[s
     if FIT_STAGE in stages[1:]:
         raise JobError(f"{FIT_STAGE} 必须排在最前面（它改完台词才能出视频、导出）")
     deps = list(depends_on or [])
+    note = clean_note(opts.note)
     with db.session() as s:
         ep = s.get(Episode, episode_id)
         if ep is None:
             raise LookupError(f"找不到剧集 {episode_id}")
+        if opts.scene_block_ids:
+            check_scene_blocks(s, episode_id, stages[0], opts.scene_block_ids)
         proj = ep.project
         common = {"project_id": proj.id, "priority": opts.priority}
         picked = [] if stages[0] in LLM_STAGES else [
@@ -140,10 +146,15 @@ def submit_chain(manager, db: Database, engines, episode_id: int, stages: list[s
         return [manager.submit(FIT_TASK, fit, owner_type="episode", owner_id=episode_id,
                                depends_on=deps, **common)]
     if first in LLM_STAGES:
-        payload: dict = {"episode_id": episode_id, "force": opts.force}
+        payload: dict = {"episode_id": episode_id, "force": opts.force or note is not None}
+        if note:
+            payload["note"] = note
+        if opts.scene_block_ids:
+            payload["scene_block_ids"] = list(opts.scene_block_ids)
         if stages[1:]:
             payload["then"] = stages[1:]
-            payload["options"] = asdict(opts)
+            # 修改意见和按段只作用于这一阶段，不带进后续阶段
+            payload["options"] = asdict(replace(opts, note=None, scene_block_ids=None))
         return [manager.submit(first, payload, owner_type="episode", owner_id=episode_id,
                                depends_on=deps, **common)]
 

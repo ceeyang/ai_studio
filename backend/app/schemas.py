@@ -391,6 +391,8 @@ class RunIn(BaseModel):
     priority: int = 0
     export: ExportOptions | None = None   # 只对 export 阶段有效：字幕 / 配音 / 片尾卡 / 裁尾
     then: list[NextStage] | None = None   # 本阶段完成后接着跑，如 fit_khmer → videos → export
+    scene_block_ids: list[int] | None = None   # 只重写这些段落的分镜（只对 storyboard 有效）
+    note: str | None = Field(None, max_length=500)   # 修改意见，写进提示词；非空时等同 force
 
 
 class FitKhmerIn(BaseModel):
