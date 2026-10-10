@@ -60,10 +60,11 @@ function RegenerateDialogBody({
   const [error, setError] = useState<string | null>(null);
   const run = useRunStage(episodeId);
   const trimmed = note.trim();
-  const impact = useRerunImpact(episodeId, stage, blockIds, trimmed !== '');
+  const impact = useRerunImpact(episodeId, stage, blockIds);
   const busy = saving || run.isPending;
   const im = impact.data;
-  const danger = !!im && im.selected_videos > 0;
+  // 会删掉已选定的视频或首帧（用户挑过的结果）：危险样式
+  const danger = !!im && (im.selected_videos > 0 || im.selected_first_frames > 0);
 
   const submit = async (ev?: FormEvent) => {
     ev?.preventDefault();

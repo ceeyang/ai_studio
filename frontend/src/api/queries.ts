@@ -56,8 +56,7 @@ export const keys = {
   style: (slug: string) => ['style', slug] as const,
   endCard: (slug: string) => ['endCard', slug] as const,
   exports: (episodeId: number) => ['exports', episodeId] as const,
-  rerunImpact: (episodeId: number, stage: string, blockIds: number[] | null, hasNote: boolean) =>
-    ['rerunImpact', episodeId, stage, blockIds, hasNote] as const,
+  rerunImpact: (episodeId: number, stage: string, blockIds: number[] | null) => ['rerunImpact', episodeId, stage, blockIds] as const,
   jobs: (status: string, limit: number) => ['jobs', status, limit] as const,
   job: (id: number) => ['job', id] as const,
   queue: ['queue'] as const,
@@ -525,18 +524,17 @@ export function fetchRerunImpact(
 }
 
 /**
- * 重新生成对话框里的影响预估：总是按强制算（对话框提交时一定强制）。
- * 查询键只看「有没有意见」，不随意见里每个字重新请求（强制时意见不影响预估）。
+ * 重新生成对话框里的影响预估：总是按强制算（对话框提交时一定强制），所以修改意见不影响预估，
+ * 查询键里也不带它（不随意见里每个字重新请求）。
  */
 export function useRerunImpact(
   episodeId: number,
   stage: 'script' | 'storyboard',
   blockIds: number[] | undefined,
-  hasNote: boolean,
   enabled = true,
 ) {
   return useQuery({
-    queryKey: keys.rerunImpact(episodeId, stage, blockIds ?? null, hasNote),
+    queryKey: keys.rerunImpact(episodeId, stage, blockIds ?? null),
     queryFn: () => fetchRerunImpact(episodeId, stage, true, { sceneBlockIds: blockIds }),
     enabled,
     staleTime: 0,

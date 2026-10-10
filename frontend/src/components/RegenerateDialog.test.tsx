@@ -9,7 +9,7 @@ const IMPACT = {
   stage: 'storyboard', will_run: true, blocks: [3, 5], shots_deleted: 12, selected_first_frames: 10,
   selected_videos: 8, manual_kept: 2, overwrites: ['角色描述', '场景氛围'],
 };
-const MILD = { ...IMPACT, blocks: [2], shots_deleted: 3, selected_first_frames: 1, selected_videos: 0, manual_kept: 0, overwrites: [] };
+const MILD = { ...IMPACT, blocks: [2], shots_deleted: 3, selected_first_frames: 0, selected_videos: 0, manual_kept: 0, overwrites: [] };
 const NOTHING = { ...IMPACT, stage: 'script', blocks: [], shots_deleted: 0, selected_first_frames: 0, selected_videos: 0, manual_kept: 0, overwrites: [] };
 
 const writes = <T extends { method: string }>(calls: T[]) => calls.filter((c) => c.method !== 'GET');
@@ -55,6 +55,13 @@ describe('RegenerateDialog', () => {
     const ta = within(dlg).getByLabelText('修改意见（可选）') as HTMLTextAreaElement;
     expect(ta.maxLength).toBe(500);
     expect(ta.placeholder).toBe('例如「第 3 段改成在车底对话」「镜头更紧凑，少用远景」');
+    expect(within(dlg).getByRole('button', { name: '重新生成' }).className).toContain('danger');
+  });
+
+  it('会删掉有选定首帧的镜头（没有选定视频）时也是危险样式', async () => {
+    setup({}, { 'GET /api/episodes/4/rerun-impact': { ...MILD, selected_first_frames: 1 } });
+    const dlg = await screen.findByRole('dialog');
+    await within(dlg).findByText('将重建段落 2 的镜头：删除 3 个镜头（其中 1 个有选定首帧）');
     expect(within(dlg).getByRole('button', { name: '重新生成' }).className).toContain('danger');
   });
 
