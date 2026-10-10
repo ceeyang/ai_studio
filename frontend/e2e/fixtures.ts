@@ -1,3 +1,5 @@
+import { type APIRequestContext, expect } from '@playwright/test';
+
 // manual provider 的固定"模型输出"。结构要过 backend/llm/schemas.py 的校验：
 // 场景必须在 locations 里；anchor_text ≥ 40 字符；visual_prompt ≥ 20 字符；
 // 分镜正好 2 个镜头（10 秒 ÷ h3_video 默认 5 秒），image_prompt 60–180 个英文词，cast 只能用已有角色。
@@ -71,3 +73,22 @@ export const STORYBOARD = {
     },
   ],
 };
+
+export async function waitJob(api: APIRequestContext, id: number, until: string[]) {
+  for (let i = 0; i < 100; i++) {
+    const j = await (await api.get(`/api/jobs/${id}`)).json();
+    if (until.includes(j.status)) return j;
+    await new Promise((r) => setTimeout(r, 150));
+  }
+  throw new Error(`任务 ${id} 没等到 ${until.join('/')}`);
+}
+
+/** manual LLM：提交任务后它会停在 waiting_input，按顺序把这些输出喂给它。 */
+export async function answer(api: APIRequestContext, id: number, outputs: unknown[]) {
+  for (const out of outputs) {
+    await waitJob(api, id, ['waiting_input']);
+    const r = await api.post(`/api/jobs/${id}/input`, { data: { text: JSON.stringify(out) } });
+    expect(r.ok()).toBeTruthy();
+  }
+  return waitJob(api, id, ['done', 'failed']);
+}

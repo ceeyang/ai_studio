@@ -1,7 +1,7 @@
 // 布局守卫：每个页面在 1280 / 1580 / 1920 / 3412 宽下都不能横向溢出，主要面板里的内容也不能被挤出面板。
 // 数据走 API + manual LLM 准备（剧本、分镜、造型方案、三视图全身描述、一个带长报错的失败任务），不需要显卡。
-import { type APIRequestContext, expect, type Page, test } from '@playwright/test';
-import { STORYBOARD, STRUCTURE, SYNOPSIS, VISUAL } from './fixtures';
+import { expect, type Page, test } from '@playwright/test';
+import { answer, STORYBOARD, STRUCTURE, SYNOPSIS, VISUAL, waitJob } from './fixtures';
 
 const SLUG = 'layout-check';
 const WIDTHS = [1280, 1580, 1920, 3412];
@@ -11,25 +11,6 @@ const PNG = Buffer.from(
   'base64',
 );
 const LOOK = Array.from({ length: 70 }, (_, i) => (i % 7 === 0 ? 'navy-cotton-twill-workjacket' : 'detail')).join(' ');
-
-async function waitJob(api: APIRequestContext, id: number, until: string[]) {
-  for (let i = 0; i < 100; i++) {
-    const j = await (await api.get(`/api/jobs/${id}`)).json();
-    if (until.includes(j.status)) return j;
-    await new Promise((r) => setTimeout(r, 150));
-  }
-  throw new Error(`任务 ${id} 没等到 ${until.join('/')}`);
-}
-
-/** manual LLM：提交任务后它会停在 waiting_input，按顺序把这些输出喂给它。 */
-async function answer(api: APIRequestContext, id: number, outputs: unknown[]) {
-  for (const out of outputs) {
-    await waitJob(api, id, ['waiting_input']);
-    const r = await api.post(`/api/jobs/${id}/input`, { data: { text: JSON.stringify(out) } });
-    expect(r.ok()).toBeTruthy();
-  }
-  return waitJob(api, id, ['done', 'failed']);
-}
 
 let episodeId = 0;
 let failedJob = 0;

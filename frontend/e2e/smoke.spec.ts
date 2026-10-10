@@ -1,5 +1,5 @@
 import { expect, type Page, test } from '@playwright/test';
-import { STORYBOARD, STRUCTURE, SYNOPSIS, VISUAL } from './fixtures';
+import { answer, STORYBOARD, STRUCTURE, SYNOPSIS, VISUAL } from './fixtures';
 
 function nav(page: Page, name: string) {
   return page.getByRole('navigation', { name: '阶段导航' }).getByRole('link', { name, exact: true });
@@ -62,4 +62,34 @@ test('新建项目 → 剧本 → 分镜 → 导演台（manual LLM，不需要�
   // 生产态深链接刷新仍然是这个页面（后端 SPA 回落）
   await page.reload();
   await expect(page.getByTestId('shot-S02')).toBeVisible();
+});
+
+test('ComfyUI 不通时点生成首帧：提交被拒，页面说明原因并给去设置的入口', async ({ page, playwright, baseURL }) => {
+  // 数据走 API 准备到「分镜已有、首帧未生成」；项目默认的出图引擎跑在 ComfyUI 上，而 e2e 服务器把 ComfyUI 指到了死地址
+  const api = await playwright.request.newContext({ baseURL });
+  const slug = 'comfy-down';
+  expect((await api.post('/api/projects', { data: { title: 'ComfyUI 断开', slug } })).ok()).toBeTruthy();
+  const ep = await (await api.post(`/api/projects/${slug}/episodes`, { data: { number: 1, source_text: SYNOPSIS, target_seconds: 10 } })).json();
+  const run = async (stage: string) => (await (await api.post(`/api/episodes/${ep.id}/run`, { data: { stage } })).json()).job_ids[0];
+  expect((await answer(api, await run('script'), [STRUCTURE, VISUAL])).status).toBe('done');
+  expect((await answer(api, await run('storyboard'), [STORYBOARD])).status).toBe('done');
+  const jobsBefore = (await (await api.get('/api/jobs')).json()).length;
+
+  await page.goto(`/projects/${slug}/episodes/${ep.id}/director`);
+  await expect(page.getByTestId('shot-S01')).toContainText('未生成');
+  await page.getByRole('button', { name: '生成首帧（全部）' }).click();
+
+  // 提交前就被拒：就地提示写明原因，不排进队列
+  await expect(page.locator('.job-notice')).toContainText('ComfyUI 连不上');
+  await expect(page.locator('.job-notice')).toContainText('设置页');
+  expect((await (await api.get('/api/jobs')).json()).length).toBe(jobsBefore);
+  await expect(page.getByTestId('shot-S01')).toContainText('未生成');
+
+  // 健康横幅给出根因和去设置的入口
+  const banner = page.getByTestId('health-banner');
+  await expect(banner).toContainText('ComfyUI 不可用');
+  await banner.getByRole('link', { name: '去设置' }).click();
+  await expect(page).toHaveURL(/\/settings$/);
+  await expect(page.getByRole('heading', { name: '引擎' })).toBeVisible();
+  await api.dispose();
 });
