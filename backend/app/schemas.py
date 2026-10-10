@@ -131,6 +131,7 @@ class TurnaroundCropIn(BaseModel):
 class PortraitDrawIn(BaseModel):
     count: int = Field(1, ge=1, le=4)
     visual_prompt: str | None = None     # 不给就用角色当前的外貌提示词
+    engine: str | None = None            # 不给用项目的图像引擎
 
 
 class SuggestIn(BaseModel):

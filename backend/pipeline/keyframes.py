@@ -23,14 +23,24 @@ def load_shot(s, shot_id: int):
 
 
 def run_comfy(ctx, call, slug: str, ref_labels: dict[str, str] | None = None):
+    """执行引擎调用：ComfyUI 工作流交给 ComfyRunner，网页出图（call.runner == "browser"）交给
+    BrowserRunner。两者都把产物下载到任务目录，返回文件列表和任务目录。"""
     sv = ctx.services
-    if sv.comfy is None:
+    browser = getattr(call, "runner", "comfyui") == "browser"
+    if browser and getattr(sv, "browser", None) is None:
+        raise JobError("网页出图的浏览器没有配置")
+    if not browser and sv.comfy is None:
         raise JobError("ComfyUI 未配置")
     labels = ref_labels or {}
     for ref in call.dropped_refs:
         ctx.log(f"超出引擎参考图上限，已丢弃：{labels.get(ref, ref)}")
     run_dir = sv.media.run_dir(slug, ctx.job_id)
-    files = sv.comfy.run(call, run_dir=run_dir, cancel=ctx.cancel_event, on_progress=ctx.progress)
+    if browser:
+        files = sv.browser.run(call, run_dir=run_dir, cancel=ctx.cancel_event,
+                               on_progress=ctx.progress, log=ctx.log)
+    else:
+        files = sv.comfy.run(call, run_dir=run_dir, cancel=ctx.cancel_event,
+                             on_progress=ctx.progress)
     return files, run_dir
 
 
@@ -71,7 +81,8 @@ def run_keyframe(ctx, payload: dict) -> dict:
         raise JobError(f"镜头 {code} 没有 image_prompt")
     call = engine.build(ImageRequest(prompt=prompt, negative=negative, aspect=aspect, seed=seed,
                                      refs=refs, prefix=f"studio/{slug}/kf_{code}"))
-    ctx.log(f"首帧 {code} · {engine_name} · seed {seed} · 参考图 {len(refs)} 张"
+    seed_text = "无种子（网页出图每次不同）" if call.runner == "browser" else f"seed {seed}"
+    ctx.log(f"首帧 {code} · {engine_name} · {seed_text} · 参考图 {len(refs)} 张"
             f"{'：' + '、'.join(labels.values()) if labels else ''}")
     files, run_dir = run_comfy(ctx, call, slug, labels)
     dst = sv.media.new_media_path(slug, "first_frame", files[0].suffix)

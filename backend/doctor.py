@@ -1,4 +1,5 @@
-"""环境检查：ComfyUI、各引擎的节点与模型、LLM、ffmpeg、磁盘、内存。只报告，不改状态。"""
+"""环境检查：ComfyUI、各引擎的节点与模型、网页出图浏览器与登录、LLM、ffmpeg、磁盘、内存。
+只报告，不改状态（不会为了检查去启动浏览器）。"""
 from __future__ import annotations
 
 import shutil
@@ -11,7 +12,9 @@ import httpx
 import psutil
 
 from backend.config import Config
+from backend.engines.browser.errors import LOGIN_HINT
 from backend.engines.comfyui.errors import ComfyError
+from backend.engines.registry import runtime_of
 
 
 @dataclass
@@ -38,7 +41,51 @@ def _basename(f: str) -> str:
     return f.replace("\\", "/").rsplit("/", 1)[-1].lower()
 
 
-def run_doctor(cfg: Config, engines, comfy, ffmpeg, *,
+def check_browser(engines, browser) -> list[Check]:
+    """网页图像引擎：浏览器程序、调试端口、各网站是否登录（按 cookie，不开页面、不出图）。"""
+    used = {e.site: e for e in engines.all().values() if runtime_of(e) == "browser"}
+    if not used or browser is None:
+        return []
+    out: list[Check] = []
+    sess = browser.session
+    exe = sess.executable()
+    out.append(Check("浏览器", "程序", "ok" if exe else "fail",
+                     str(exe) if exe else "找不到 Chrome 或 Edge：装一个，或在 config.yaml 的 browser.executable 写路径"))
+    v = sess.version()
+    if v is not None:
+        out.append(Check("浏览器", "调试端口", "ok",
+                         f"{sess.endpoint} · {v.get('Browser', '?')} · 配置目录 {sess.cfg.user_data_dir}"))
+    elif sess.port_taken():
+        out.append(Check("浏览器", "调试端口", "fail",
+                         f"端口 {sess.cfg.cdp_port} 被别的程序占用，在 config.yaml 的 browser.cdp_port 换一个"))
+    else:
+        out.append(Check("浏览器", "调试端口", "ok" if exe else "fail",
+                         f"{sess.endpoint} 没在运行，出图或点“打开浏览器登录”时自动启动"
+                         f"（配置目录 {sess.cfg.user_data_dir}）"))
+    status: dict[str, bool] | None = None
+    err = ""
+    if v is not None:
+        try:
+            status = browser.login_status()
+        except Exception as e:
+            err = f"读登录状态失败：{e}"
+    else:
+        err = "浏览器没在运行，查不了登录状态"
+    for key, eng in sorted(used.items()):
+        site = browser.sites.get(key)
+        label = site.label if site else key
+        name = f"{label} 登录（{eng.name}）"
+        if status is None:
+            out.append(Check("浏览器", name, "warn", f"{err}。{LOGIN_HINT}"))
+        elif status.get(key):
+            out.append(Check("浏览器", name, "ok", f"已登录 {site.host if site else key}"))
+        else:
+            out.append(Check("浏览器", name, "warn",
+                             f"没登录 {site.host if site else key}，{eng.name} 出图会失败。{LOGIN_HINT}"))
+    return out
+
+
+def run_doctor(cfg: Config, engines, comfy, ffmpeg, *, browser=None,
                http_get: Callable[[str], Any] = _http_get,
                which: Callable[[str], str | None] = shutil.which) -> list[Check]:
     out: list[Check] = []
@@ -66,6 +113,8 @@ def run_doctor(cfg: Config, engines, comfy, ffmpeg, *,
         out.append(Check("引擎", "模型目录", "warn",
                          "没配置 comfyui.models_dir 或目录不存在，跳过模型文件检查"))
     for name, eng in sorted(engines.all().items()):
+        if runtime_of(eng) != "comfyui":
+            continue
         if info is not None:
             types = eng.tpl.class_types()
             missing = sorted(types - set(info))
@@ -76,6 +125,8 @@ def run_doctor(cfg: Config, engines, comfy, ffmpeg, *,
             miss = [f for f in files if _basename(f) not in index]
             out.append(Check("引擎", f"{name} 模型", "fail" if miss else "ok",
                              "缺少：" + "、".join(miss) if miss else f"{len(files)} 个模型文件都在"))
+
+    out += check_browser(engines, browser)
 
     for p in cfg.llm.providers:
         if p.kind == "openai":

@@ -33,6 +33,10 @@ def portrait_prompt(visual_prompt: str, anchor: str) -> str:
                                 anchor)
 
 
+def seed_label(call, seed: int) -> str:
+    return "无种子（网页出图每次不同）" if getattr(call, "runner", "") == "browser" else f"seed {seed}"
+
+
 def _load_char(s, char_id: int) -> Character:
     ch = s.get(Character, char_id)
     if ch is None:
@@ -47,7 +51,7 @@ def _episode_ctx(ep: Episode) -> dict:
 
 @HANDLERS.register("image.portrait", gpu=True)
 def run_portrait(ctx, payload: dict) -> dict:
-    """出一张正面半身定妆照候选。visual_prompt 不给就用角色当前的外貌提示词。"""
+    """出一张正面半身定妆照候选。visual_prompt 不给就用角色当前的外貌提示词；engine 不给用项目的图像引擎。"""
     sv = ctx.services
     char_id = int(payload["character_id"])
     with sv.db.session() as s:
@@ -56,7 +60,7 @@ def run_portrait(ctx, payload: dict) -> dict:
         vp = (payload.get("visual_prompt") or ch.visual_prompt or "").strip()
         if not vp:
             raise JobError(f"角色 {ch.name} 还没有外貌提示词，先写一个或用 AI 推荐造型")
-        engine_name = proj.image_engine
+        engine_name = str(payload.get("engine") or proj.image_engine)
         try:
             engine = sv.engines.image(engine_name)
         except KeyError as e:
@@ -67,7 +71,7 @@ def run_portrait(ctx, payload: dict) -> dict:
         slug, name = proj.slug, ch.name
     call = engine.build(ImageRequest(prompt=prompt, negative=negative, aspect=PORTRAIT_ASPECT,
                                      seed=seed, prefix=f"studio/{slug}/portrait_{char_id}"))
-    ctx.log(f"定妆照 {name} · {engine_name} · seed {seed}")
+    ctx.log(f"定妆照 {name} · {engine_name} · {seed_label(call, seed)}")
     files, run_dir = run_comfy(ctx, call, slug)
     dst = sv.media.new_media_path(slug, "portrait", files[0].suffix)
     shutil.copyfile(files[0], dst)
@@ -210,7 +214,7 @@ def run_turnaround_sheet(ctx, payload: dict) -> dict:
     call = engine.build(ImageRequest(prompt=prompt, negative=negative, aspect=spec.aspect,
                                      seed=seed, refs=refs,
                                      prefix=f"studio/{slug}/turnaround_{char_id}_{sheet}"))
-    ctx.log(f"三视图 {name} · {spec.label}设定图 · {engine_name} · seed {seed}"
+    ctx.log(f"三视图 {name} · {spec.label}设定图 · {engine_name} · {seed_label(call, seed)}"
             f"{' · 定妆照锁脸' if refs else ''}")
     files, run_dir = run_comfy(ctx, call, slug)
     dst = sv.media.new_media_path(slug, "turnaround", files[0].suffix)

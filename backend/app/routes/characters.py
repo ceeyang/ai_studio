@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Request
 
-from backend.app.deps import get_or_404, manager, services
+from backend.app.deps import check_engines, get_or_404, manager, services
 from backend.app.routes.projects import character_out
 from backend.app.schemas import (CharacterOut, PortraitDrawIn, RecommendIn, RunOut, SuggestIn,
                                  TurnaroundCropIn, TurnaroundGenerateIn, TurnaroundLookPatch,
@@ -20,14 +20,16 @@ router = APIRouter(prefix="/api", tags=["characters"])
 
 @router.post("/characters/{char_id}/portraits/draw", response_model=RunOut)
 def draw_portraits(char_id: int, body: PortraitDrawIn, request: Request):
-    """抽卡：用项目的本地图像引擎出 count 张正面半身定妆照，每张一个 GPU 任务。"""
+    """抽卡：用项目的图像引擎（或指定的 engine）出 count 张正面半身定妆照，每张一个任务。"""
     sv = services(request)
     vp = (body.visual_prompt or "").strip()
     with sv.db.session() as s:
         c = get_or_404(s, Character, char_id, "角色")
         if not vp and not c.visual_prompt.strip():
             raise JobError(f"角色 {c.name} 还没有外貌提示词，先写一个或用 AI 推荐造型")
-        project_id, engine_name = c.project_id, c.project.image_engine
+        project_id, engine_name = c.project_id, body.engine or c.project.image_engine
+    if body.engine:
+        check_engines(sv, body.engine, None)
     try:
         family = sv.engines.image(engine_name).family
     except KeyError:
@@ -35,6 +37,8 @@ def draw_portraits(char_id: int, body: PortraitDrawIn, request: Request):
     payload: dict = {"character_id": char_id}
     if vp:
         payload["visual_prompt"] = vp
+    if body.engine:
+        payload["engine"] = body.engine
     m = manager(request)
     return RunOut(job_ids=[m.submit("image.portrait", payload, project_id=project_id,
                                     owner_type="character", owner_id=char_id,

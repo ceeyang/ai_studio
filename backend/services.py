@@ -1,4 +1,4 @@
-"""服务容器：处理器和 API 通过它拿到数据库、媒体、引擎、LLM、ffmpeg、ComfyUI。"""
+"""服务容器：处理器和 API 通过它拿到数据库、媒体、引擎、LLM、ffmpeg、ComfyUI、网页出图浏览器。"""
 from __future__ import annotations
 
 import logging
@@ -25,12 +25,16 @@ class Services:
     ffmpeg: FFmpeg
     comfy: Any = None        # ComfyRunner
     comfy_client: Any = None  # ComfyClient
+    browser: Any = None      # BrowserRunner（gpt_image / gemini_image）
 
     def prompts(self, slug: str) -> PromptLibrary:
         return PromptLibrary(BUILTIN_DIR, self.media.project_dir(slug) / "prompts")
 
 
 def build_services(cfg: Config, db: Database, manager: Any) -> Services:
+    from backend.engines.browser.engines import BROWSER_FAMILIES
+    from backend.engines.browser.runner import BrowserRunner
+    from backend.engines.browser.session import BrowserSession
     from backend.engines.comfyui.client import ComfyClient
     from backend.engines.comfyui.runner import ComfyRunner
     from backend.llm.gateway import LLMGateway
@@ -51,6 +55,9 @@ def build_services(cfg: Config, db: Database, manager: Any) -> Services:
 
     manager.idle_free_seconds = cfg.comfyui.idle_free_seconds
     manager.on_gpu_idle = on_gpu_idle
+    # 网页出图每个网站一条串行通道，不占 GPU worker、不触发换模型族/释放显存
+    manager.lanes = BROWSER_FAMILIES
     return Services(cfg=cfg, db=db, media=MediaStore(cfg.data_dir), engines=EngineRegistry(cfg),
                     llm=llm, ffmpeg=FFmpeg(cfg.ffmpeg.ffmpeg, cfg.ffmpeg.ffprobe),
-                    comfy=runner, comfy_client=client)
+                    comfy=runner, comfy_client=client,
+                    browser=BrowserRunner(BrowserSession(cfg.browser)))

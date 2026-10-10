@@ -1,7 +1,10 @@
-"""任务队列：一个 GPU worker（串行）+ N 个 CPU worker，状态持久化在 jobs 表。
+"""任务队列：一个 GPU worker（串行）+ N 个 CPU worker + 每个「通道」一个串行 worker，状态持久化在 jobs 表。
 
 - GPU worker 持有 _gpu_lock 期间执行任务；gpu_exclusive() 抢同一把锁，
   用于本机 LLM（LM Studio）与 ComfyUI 互斥。
+- 通道（lanes）：按 model_family 分出去的串行队列，目前给网页出图用（chatgpt_web / gemini_web）。
+  这些族的任务一律 gpu=False，只由自己的通道线程领取：一个网站同时只跑一个，不占 GPU worker，
+  也不会触发换模型族释放显存、空闲释放显存。
 - 依赖：depends_on 里的任务全部 done 才可执行；任一 failed/canceled/不存在，
   依赖它的任务直接判失败，不会永远挂着。
 """
@@ -16,7 +19,7 @@ from contextlib import contextmanager
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 
 from backend.domain.db import Database
 from backend.domain.models import Job, utcnow
@@ -60,6 +63,7 @@ class JobManager:
         self._last_gpu_finish: float | None = None
         self._gpu_idle_fired = False
         self.cpu_workers = cpu_workers
+        self.lanes: tuple[str, ...] = ()
         self.poll = poll
         self.current_family: str | None = None
         self._gpu_lock = threading.Lock()
@@ -84,10 +88,11 @@ class JobManager:
 
     def start(self) -> None:
         self._stop.clear()
-        loops = [("gpu-worker", self._gpu_loop)] + [
-            (f"cpu-worker-{i}", self._cpu_loop) for i in range(self.cpu_workers)]
-        for name, fn in loops:
-            t = threading.Thread(target=fn, name=name, daemon=True)
+        loops = [("gpu-worker", self._gpu_loop, ())] + [
+            (f"cpu-worker-{i}", self._cpu_loop, ()) for i in range(self.cpu_workers)] + [
+            (f"lane-{fam}", self._lane_loop, (fam,)) for fam in self.lanes]
+        for name, fn, args in loops:
+            t = threading.Thread(target=fn, args=args, name=name, daemon=True)
             t.start()
             self._threads.append(t)
 
@@ -105,8 +110,10 @@ class JobManager:
                owner_type: str | None = None, owner_id: int | None = None, priority: int = 0,
                model_family: str | None = None, depends_on: list[int] | None = None) -> int:
         spec = self.registry.get(job_type)
+        # 走通道的族（网页出图）不占显卡：即使处理器登记成 GPU 任务也改成 gpu=False
+        gpu = spec.gpu and not (model_family and model_family in self.lanes)
         with self.db.session() as s:
-            j = Job(type=job_type, payload=dict(payload or {}), gpu=spec.gpu,
+            j = Job(type=job_type, payload=dict(payload or {}), gpu=gpu,
                     project_id=project_id, owner_type=owner_type, owner_id=owner_id,
                     priority=priority, model_family=model_family,
                     depends_on=list(depends_on or []))
@@ -309,11 +316,31 @@ class JobManager:
                 log.exception("CPU worker 本轮出错")
                 self._sleep()
 
-    def _claim(self, *, gpu: bool) -> int | None:
+    def _lane_loop(self, family: str) -> None:
+        while not self._stop.is_set():
+            try:
+                if self._paused.is_set():
+                    self._sleep()
+                    continue
+                jid = self._claim(gpu=False, lane=family)
+                if jid is None:
+                    self._sleep()
+                    continue
+                self._execute(jid)
+            except Exception:
+                log.exception("通道 %s 本轮出错", family)
+                self._sleep()
+
+    def _claim(self, *, gpu: bool, lane: str | None = None) -> int | None:
         events: list[dict] = []
         picked: int | None = None
+        q = select(Job).where(Job.status == "queued", Job.gpu == gpu)
+        if lane is not None:
+            q = q.where(Job.model_family == lane)
+        elif not gpu and self.lanes:
+            q = q.where(or_(Job.model_family.is_(None), Job.model_family.not_in(self.lanes)))
         with self._claim_lock, self.db.session() as s:
-            rows = list(s.scalars(select(Job).where(Job.status == "queued", Job.gpu == gpu)))
+            rows = list(s.scalars(q))
             dep_ids = {d for j in rows for d in (j.depends_on or [])}
             statuses: dict[int, str] = {}
             if dep_ids:
