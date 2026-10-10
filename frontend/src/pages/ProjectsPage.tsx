@@ -301,11 +301,12 @@ function ContinueCard({ target }: { target: ContinueTarget }) {
           <span className={ep.export_count ? 'has' : undefined}>{ep.export_count} 个成片</span>
         </div>
       </div>
+      {/* 还没分镜的集，下一步在剧本页：主按钮跟着走，别把人带到空的导演台 */}
       <div className="continue-actions">
-        <Link className="btn" to={`${base}/script`}>
+        <Link className={ep.shot_count === 0 ? 'btn primary' : 'btn'} to={`${base}/script`}>
           剧本
         </Link>
-        <Link className="btn primary" to={`${base}/director`}>
+        <Link className={ep.shot_count === 0 ? 'btn' : 'btn primary'} to={`${base}/director`}>
           打开导演台
         </Link>
       </div>
@@ -653,6 +654,8 @@ function ProjectDetail({ slug }: { slug: string }) {
             <ul className="episode-grid">
               {eps.map((ep) => {
                 const st = stats.get(ep.id);
+                // 还没分镜：主按钮是「去剧本」
+                const noShots = st?.shot_count === 0;
                 return (
                   <li key={ep.id} className="episode-card" data-testid={`episode-${ep.id}`}>
                     <Cover title={ep.title || title} url={st?.cover_url} className="ep-cover" />
@@ -674,10 +677,10 @@ function ProjectDetail({ slug }: { slug: string }) {
                         {st && <span className={st.export_count ? 'has' : undefined}>{st.export_count} 个成片</span>}
                       </div>
                       <div className="ep-actions">
-                        <Link className="btn sm" to={`${base}/${ep.id}/script`}>
+                        <Link className={noShots ? 'btn sm primary' : 'btn sm'} to={`${base}/${ep.id}/script`}>
                           去剧本
                         </Link>
-                        <Link className="btn sm primary" to={`${base}/${ep.id}/director`}>
+                        <Link className={noShots ? 'btn sm' : 'btn sm primary'} to={`${base}/${ep.id}/director`}>
                           去导演台
                         </Link>
                       </div>

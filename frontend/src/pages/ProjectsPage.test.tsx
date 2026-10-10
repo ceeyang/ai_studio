@@ -95,6 +95,9 @@ describe('ProjectsPage', () => {
     expect(screen.getByText(/已分镜/)).toBeTruthy();
     expect(screen.getByRole('link', { name: '去导演台' }).getAttribute('href')).toBe('/projects/demo/episodes/3/director');
     expect(screen.getByRole('link', { name: '去剧本' }).getAttribute('href')).toBe('/projects/demo/episodes/3/script');
+    // 已经分镜的集：主按钮是去导演台
+    expect(screen.getByRole('link', { name: '去导演台' }).classList.contains('primary')).toBe(true);
+    expect(screen.getByRole('link', { name: '去剧本' }).classList.contains('primary')).toBe(false);
     expect(screen.getByRole('link', { name: /全部项目/ }).getAttribute('href')).toBe('/');
     expect(await screen.findByText('2 个成片')).toBeTruthy();
     expect(screen.getByText('4 个镜头')).toBeTruthy();
@@ -153,7 +156,11 @@ describe('ProjectsPage', () => {
     expect(other.querySelector('img')).toBeNull();
     expect(other.querySelector('.cover-gen')?.textContent).toBe('夜');
     // 继续制作：没有上次记录时取最新一集
-    expect(screen.getByRole('region', { name: '继续制作' }).textContent).toContain('第 2 集');
+    const cont = screen.getByRole('region', { name: '继续制作' });
+    expect(cont.textContent).toContain('第 2 集');
+    // 这一集还没分镜：主按钮是剧本，不把人带到空的导演台
+    expect(within(cont).getByRole('link', { name: '剧本' }).classList.contains('primary')).toBe(true);
+    expect(within(cont).getByRole('link', { name: '打开导演台' }).classList.contains('primary')).toBe(false);
     expect(container.querySelector('.stat-tiles')?.textContent).toContain('剧集2');
   });
 
