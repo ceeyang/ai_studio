@@ -9,7 +9,14 @@ import { useConfirm } from '../../components/ConfirmDialog';
 import { type LeaveCheck, confirmDiscard } from '../../components/confirmDiscard';
 import { EpisodeLoadError, useNextAction } from '../../components/EpisodeHeader';
 import { castTarget, hasPortrait } from '../stages';
-import { EditableFields, type FieldSpec, type FieldValues, useUnsavedGuard } from '../../components/EditableFields';
+import {
+  type DrawerLoss,
+  EditableFields,
+  type FieldSpec,
+  type FieldValues,
+  useDrawerDirty,
+  useUnsavedGuard,
+} from '../../components/EditableFields';
 import { RecommendPanel } from '../script/RecommendPanel';
 import { CastCard } from './CastCard';
 import { CharacterDrawer } from './CharacterDrawer';
@@ -50,6 +57,10 @@ function toStyle(v: FieldValues): Style {
   };
 }
 
+/** 角色抽屉会不会因这次跳转卸载：换了 ?char=，或离开角色阶段 */
+export const charDrawerLoss: DrawerLoss = (from, to) =>
+  from.get('char') !== to.get('char') || (from.get('stage') === 'cast' && to.get('stage') !== 'cast');
+
 export function CastStage({
   active = true,
   setLeaveCheck,
@@ -72,7 +83,8 @@ export function CastStage({
   const confirm = useConfirm();
   // 抽屉里显示的角色：跟着地址的 ?char= 走；抽屉有没保存的修改时（左栏 / 提示 / 后退换了 ?char=）先问一句
   const [shownId, setShownId] = useState<number | null>(charId);
-  const drawerDirty = useRef(false);
+  // 登记在全站拦截器里：浏览器后退 / 前进换了 ?char= 或离开角色阶段（抽屉会卸载）时也问
+  const drawerDirty = useDrawerDirty(charDrawerLoss);
   // 从卡片的「补外观提示词」打开：抽屉直接到资料页签、聚焦提示词
   const [promptFor, setPromptFor] = useState<number | null>(null);
   // 下一步是抽定妆照 / 按剧本推荐角色时：对应的按钮打上 data-next-action，阶段条的「下一步」会触发它
@@ -107,14 +119,19 @@ export function CastStage({
   // 切阶段前：抽屉有没保存的修改先问（抽屉卸载时会把脏标记清掉）
   useEffect(() => {
     if (!setLeaveCheck) return;
-    setLeaveCheck(async () => !drawerDirty.current || confirmDiscard(confirm, '这个角色', '切换阶段'));
+    setLeaveCheck(async () => {
+      if (!drawerDirty.dirty) return true;
+      if (!(await confirmDiscard(confirm, '这个角色', '切换阶段'))) return false;
+      drawerDirty.set(false);
+      return true;
+    });
     return () => setLeaveCheck(null);
-  }, [setLeaveCheck, confirm]);
+  }, [setLeaveCheck, confirm, drawerDirty]);
 
   useEffect(() => {
     if (charId === shownId) return;
     // 阶段藏起来时抽屉本来就不在（离开阶段由阶段条处理），没修改时直接换
-    if (!active || shownId == null || !drawerDirty.current) {
+    if (!active || shownId == null || !drawerDirty.dirty) {
       setShownId(charId);
       return;
     }
@@ -122,14 +139,14 @@ export function CastStage({
     void confirmDiscard(confirm, '这个角色', '换走').then((ok) => {
       if (stale) return;
       if (ok) {
-        drawerDirty.current = false;
+        drawerDirty.set(false);
         setShownId(charId);
       } else setCharRef.current(shownId);
     });
     return () => {
       stale = true;
     };
-  }, [charId, shownId, active, confirm]);
+  }, [charId, shownId, active, confirm, drawerDirty]);
 
   if (ep.isLoading) return <p className="loading">加载中…</p>;
   if (ep.error || !ep.data) return <EpisodeLoadError slug={slug} error={ep.error} />;
@@ -148,7 +165,7 @@ export function CastStage({
   };
   /** 抽屉自己确认过（或没修改）后关闭：先把显示的角色清掉，免得地址变化再问一次 */
   const closeDrawer = () => {
-    drawerDirty.current = false;
+    drawerDirty.set(false);
     setShownId(null);
     setPromptFor(null);
     setChar(null);
@@ -238,9 +255,7 @@ export function CastStage({
           slug={slug}
           episodeId={id}
           focusPrompt={promptFor === openChar.id}
-          onDirtyChange={(d) => {
-            drawerDirty.current = d;
-          }}
+          onDirtyChange={drawerDirty.set}
           onClose={closeDrawer}
         />
       )}

@@ -1,6 +1,7 @@
 import { type FormEvent, useContext, useEffect, useRef, useState } from 'react';
 import { UNSAFE_DataRouterContext, useBlocker } from 'react-router-dom';
 import { useConfirm } from './ConfirmDialog';
+import { confirmDiscard } from './confirmDiscard';
 
 export interface FieldOption {
   value: string;
@@ -265,25 +266,85 @@ export function useUnsavedGuard(dirty: boolean): void {
   }, [dirty, me]);
 }
 
+/** 这次站内跳转（同一路径、只改查询串）会不会让这个抽屉卸载、丢掉没保存的修改 */
+export type DrawerLoss = (from: URLSearchParams, to: URLSearchParams) => boolean;
+
+// 开着、有没保存修改的抽屉（单集工作台的镜头 / 角色抽屉）。和 dirtySources 分开：开关抽屉、只换查询串
+// 平时不拦；只有这次跳转会让有修改的抽屉卸载时（如浏览器后退把 ?stage= 换掉）才拦。
+const dirtyDrawers = new Map<symbol, DrawerLoss>();
+
+/** 抽屉的脏标记（登记在全站拦截器里）：dirty 读、set 写；卸载时自动清掉 */
+export interface DrawerDirty {
+  readonly dirty: boolean;
+  set(dirty: boolean): void;
+}
+
+/**
+ * 登记一个抽屉的「没保存」状态。loses 判断某次只改查询串的跳转会不会让抽屉卸载；会的话 LeaveGuard 先问。
+ * 站内自己已经问过的路径（关抽屉、切阶段的检查）确认后先 set(false)，免得再问一次。
+ */
+export function useDrawerDirty(loses: DrawerLoss): DrawerDirty {
+  const lossRef = useRef(loses);
+  lossRef.current = loses;
+  const [handle] = useState(() => {
+    const me = Symbol('drawer');
+    const check: DrawerLoss = (from, to) => lossRef.current(from, to);
+    return {
+      me,
+      get dirty() {
+        return dirtyDrawers.has(me);
+      },
+      set(d: boolean) {
+        if (d) dirtyDrawers.set(me, check);
+        else dirtyDrawers.delete(me);
+      },
+    };
+  });
+  useEffect(() => () => handle.set(false), [handle]);
+  return handle;
+}
+
+type BlockKind = 'leave' | 'drawer';
+
+/** 这次跳转要不要拦、按哪种问：换页面看 dirtySources；同一页只改查询串看有修改的抽屉会不会被卸载 */
+function blockKind(from: { pathname: string; search: string }, to: { pathname: string; search: string }): BlockKind | null {
+  if (from.pathname !== to.pathname) return dirtySources.size > 0 || dirtyDrawers.size > 0 ? 'leave' : null;
+  if (dirtyDrawers.size === 0 || from.search === to.search) return null;
+  const a = new URLSearchParams(from.search);
+  const b = new URLSearchParams(to.search);
+  for (const loses of dirtyDrawers.values()) if (loses(a, b)) return 'drawer';
+  return null;
+}
+
 function RouteLeaveGuard() {
   const confirm = useConfirm();
-  const blocker = useBlocker(
-    ({ currentLocation, nextLocation }) => dirtySources.size > 0 && currentLocation.pathname !== nextLocation.pathname,
-  );
+  const kind = useRef<BlockKind>('leave');
+  const blocker = useBlocker(({ currentLocation, nextLocation }) => {
+    const k = blockKind(currentLocation, nextLocation);
+    if (k) kind.current = k;
+    return k != null;
+  });
   const asking = useRef(false);
   useEffect(() => {
     if (blocker.state !== 'blocked' || asking.current) return;
     asking.current = true;
-    void confirm({
-      title: LEAVE_PROMPT,
-      body: '离开后，这一页上改过但没保存的内容会丢掉。',
-      confirmText: '离开',
-      cancelText: '留下',
-      danger: true,
-    }).then((ok) => {
+    const ask =
+      kind.current === 'drawer'
+        ? confirmDiscard(confirm, '抽屉里', '换走')
+        : confirm({
+            title: LEAVE_PROMPT,
+            body: '离开后，这一页上改过但没保存的内容会丢掉。',
+            confirmText: '离开',
+            cancelText: '留下',
+            danger: true,
+          });
+    void ask.then((ok) => {
       asking.current = false;
-      if (ok) blocker.proceed();
-      else blocker.reset();
+      if (ok) {
+        // 放弃了：抽屉的脏标记清掉，跳过去之后各阶段不会再问一次
+        dirtyDrawers.clear();
+        blocker.proceed();
+      } else blocker.reset();
     });
   }, [blocker, confirm]);
   return null;

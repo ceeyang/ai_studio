@@ -17,6 +17,7 @@ import {
 } from '../../api/queries';
 import type { Job, RunIn, ShotDetail } from '../../api/types';
 import { useConfirm } from '../../components/ConfirmDialog';
+import { type DrawerLoss, useDrawerDirty } from '../../components/EditableFields';
 import { type LeaveCheck, confirmDiscard } from '../../components/confirmDiscard';
 import { EpisodeLoadError, NEXT_ACTION_EVENT, isNextActionFor } from '../../components/EpisodeHeader';
 import { useJobNotice } from '../../components/JobNotice';
@@ -31,6 +32,12 @@ import { workspacePath } from './urls';
 
 /** 工作台里这块内容的名字（阶段条的下一步事件按它发） */
 export const SHOTS_PANEL = 'shots';
+
+/** 镜头抽屉会不会因这次跳转卸载：换了 ?shot=，或离开首帧 / 视频阶段 */
+export const shotDrawerLoss: DrawerLoss = (from, to) => {
+  const shotStage = (p: URLSearchParams) => p.get('stage') === 'keyframes' || p.get('stage') === 'videos';
+  return from.get('shot') !== to.get('shot') || (shotStage(from) && !shotStage(to));
+};
 
 /** 工作台和镜头阶段共用的状态：勾选、候选数会影响阶段条上「下一步」的字，所以放在工作台 */
 export interface ShotWork {
@@ -63,13 +70,19 @@ export function ShotStage({
   const [params, setParams] = useSearchParams();
   const qc = useQueryClient();
   const confirm = useConfirm();
-  // 镜头抽屉里有没保存的提示词 / 对白：切阶段前先问（抽屉卸载时清掉）
-  const drawerDirty = useRef(false);
+  // 镜头抽屉里有没保存的提示词 / 对白：切阶段前先问（抽屉卸载时清掉）。登记在全站拦截器里，
+  // 浏览器后退 / 前进换了 ?shot= 或离开首帧 / 视频阶段（抽屉会卸载）时也问；首帧↔视频抽屉还在，不问
+  const drawerDirty = useDrawerDirty(shotDrawerLoss);
   useEffect(() => {
     if (!setLeaveCheck) return;
-    setLeaveCheck(async () => !drawerDirty.current || confirmDiscard(confirm, '这个镜头', '切换阶段'));
+    setLeaveCheck(async () => {
+      if (!drawerDirty.dirty) return true;
+      if (!(await confirmDiscard(confirm, '这个镜头', '切换阶段'))) return false;
+      drawerDirty.set(false);
+      return true;
+    });
     return () => setLeaveCheck(null);
-  }, [setLeaveCheck, confirm]);
+  }, [setLeaveCheck, confirm, drawerDirty]);
   const notice = useJobNotice();
   const ep = useEpisode(id);
   const locations = useLocations(slug);
@@ -227,7 +240,10 @@ export function ShotStage({
     });
     if (!ok) return;
     selectMany([shotId], false);
-    if (openId === shotId) setShot(null);
+    if (openId === shotId) {
+      drawerDirty.set(false);
+      setShot(null);
+    }
     report(del.mutateAsync(shotId), `已删除 ${s.code}`);
   };
 
@@ -301,10 +317,12 @@ export function ShotStage({
           count={count}
           onCountChange={setCount}
           notice={notice.view}
-          onDirtyChange={(d) => {
-            drawerDirty.current = d;
+          onDirtyChange={drawerDirty.set}
+          onClose={() => {
+            // 抽屉自己问过了（或没修改）
+            drawerDirty.set(false);
+            setShot(null);
           }}
-          onClose={() => setShot(null)}
           onGenerate={(st) => void generateOne(openShot, st, hasSelected(openShot, st) ? '重拍' : '生成')}
         />
       )}
