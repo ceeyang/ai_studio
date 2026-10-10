@@ -34,7 +34,7 @@ describe('shotGate', () => {
     const g = shotGate(shots, 'keyframes', none, 2, JOBS);
     expect(g).toMatchObject({
       kind: 'run',
-      label: '生成缺少/过期的首帧（2 张，约 4 分钟）',
+      label: '生成缺少/过期的首帧（4 张，约 4 分钟）',
       batches: [
         { stage: 'keyframes', ids: [2], force: false },
         { stage: 'keyframes', ids: [3], force: true },
@@ -42,7 +42,8 @@ describe('shotGate', () => {
       parts: [{ type: 'image.keyframe', n: 4 }],
       confirm: true,
     });
-    expect(g?.kind === 'run' && g.note).toContain('1 张已过期');
+    expect(g?.kind === 'run' && g.note).toContain('1 镜已过期');
+    expect(g?.kind === 'run' && g.doneText).toBe('生成缺少/过期的首帧（4 张）');
     expect(g?.kind === 'run' && g.switchTo).toBeUndefined();
   });
 
@@ -132,18 +133,28 @@ describe('shotGate', () => {
     const note = g?.kind === 'run' ? g.note : '';
     expect(note).toContain('1 镜还没有视频，生成');
     expect(note).toContain('1 镜已有视频，重拍');
-    expect(note).toContain('1 镜还没有首帧，先跳过');
+    expect(note).toContain('1 镜首帧缺少或过期，先跳过');
   });
 
   it('多选的镜头都还没有首帧（视频阶段）：去首帧阶段', () => {
     const shots = [makeShot({ id: 1 }), makeShot({ id: 2 })];
     expect(shotGate(shots, 'videos', new Set([1, 2]), 1, JOBS)).toEqual({
-      kind: 'goto', label: '先出首帧（选中的 2 镜还没有首帧）', stage: 'keyframes',
+      kind: 'goto', label: '先补齐首帧（选中的 2 镜首帧缺少或过期）', stage: 'keyframes',
     });
   });
 
   it('勾选里已删掉的镜头不算', () => {
     const g = shotGate([makeShot({ id: 1 })], 'keyframes', new Set([1, 99]), 1, JOBS);
     expect(g).toMatchObject({ label: '对选中的 1 镜生成…' });
+  });
+
+  it('视频阶段多选：首帧过期的和没首帧的一样跳过并说明；都跳过时去首帧阶段', () => {
+    const shots = [makeShot({ id: 1, slots: [kf(1)] }), makeShot({ id: 2, slots: [kf(2, true)] })];
+    const g = shotGate(shots, 'videos', new Set([1, 2]), 1, JOBS);
+    expect(g).toMatchObject({ label: '对选中的 1 镜生成…', batches: [{ stage: 'videos', ids: [1], force: false }] });
+    expect(g?.kind === 'run' ? g.note : '').toContain('1 镜首帧缺少或过期，先跳过');
+    expect(shotGate(shots, 'videos', new Set([2]), 1, JOBS)).toEqual({
+      kind: 'goto', label: '先补齐首帧（选中的 1 镜首帧缺少或过期）', stage: 'keyframes',
+    });
   });
 });

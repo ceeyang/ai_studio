@@ -1,7 +1,7 @@
 // 单集工作台的首帧 / 视频阶段：工具栏（镜头数、候选数、勾选）+ 按段落分组的镜头卡片网格 + 镜头抽屉（?shot=<id>）。
 // 阶段条的「下一步」（首帧确认门，见 shotGate）由工作台算好传进来；点它时这里照着提交。
 import { useQueryClient } from '@tanstack/react-query';
-import { type Dispatch, type SetStateAction, useEffect, useRef, useState } from 'react';
+import { type Dispatch, type SetStateAction, useEffect, useRef } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { api, errorText } from '../../api/client';
 import {
@@ -40,6 +40,9 @@ export interface ShotWork {
   setSelected: Dispatch<SetStateAction<Set<number>>>;
   count: number;
   setCount(n: number): void;
+  /** 生成请求提交中（还没拿到响应）：阶段条的「下一步」和卡片按钮都禁用，防止重复提交 */
+  submitting: boolean;
+  setSubmitting(b: boolean): void;
   /** 切阶段，可以顺带设 ?shot= */
   goStage(stage: StageKey, extra?: Record<string, string>): void;
 }
@@ -59,8 +62,7 @@ export function ShotStage({ active = true, work }: { active?: boolean; work: Sho
   const split = useSplitShot(id);
   const del = useDeleteShot(id);
   const create = useCreateShot(id);
-  const [submitting, setSubmitting] = useState(false);
-  const { stage, selected, setSelected, count, setCount } = work;
+  const { stage, selected, setSelected, count, setCount, submitting, setSubmitting } = work;
   const generating = run.isPending || submitting;
 
   /** 最近完成的任务（和任务页共用缓存）：拿来估耗时，拿不到就当没有样本 */

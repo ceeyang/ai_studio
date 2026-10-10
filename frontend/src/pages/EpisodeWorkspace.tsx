@@ -59,6 +59,7 @@ function Workspace({ slug, id }: { slug: string; id: number }) {
   // 首帧 / 视频阶段的勾选和候选数：会改阶段条「下一步」的字（对选中的 N 镜…、预计耗时），所以放在这里
   const [selected, setSelected] = useState<Set<number>>(() => new Set());
   const [count, setCount] = useState(1);
+  const [submitting, setSubmitting] = useState(false);
 
   const progress = ep.data ? episodeStages(ep.data, characters.data ?? [], exports.data ?? []) : null;
   // 角色和成片也读到了（或读失败了）才算得准默认阶段
@@ -122,6 +123,8 @@ function Workspace({ slug, id }: { slug: string; id: number }) {
     setSelected,
     count,
     setCount,
+    submitting,
+    setSubmitting,
     goStage: select,
   };
 
@@ -133,7 +136,7 @@ function Workspace({ slug, id }: { slug: string; id: number }) {
           stages={progress.stages}
           current={stage}
           next={gate ? gateStep(gate, stage) : progress.next}
-          nextDisabled={gate?.kind === 'busy'}
+          nextDisabled={gate?.kind === 'busy' || (!!gate && submitting)}
           onSelect={(s) => select(s)}
           onRun={() => triggerNextAction(PANEL_OF[stage])}
         />

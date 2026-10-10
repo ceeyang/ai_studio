@@ -15,6 +15,15 @@ const LIN: Character = {
 };
 const ZHOU: Character = { id: 9, project_id: 1, name: '老周', description: '', visual_prompt: '', core_features: '', voice: null };
 
+/** 按钮 aria-describedby 指向的文字 */
+function description(el: HTMLElement): string {
+  return (el.getAttribute('aria-describedby') ?? '')
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((id) => document.getElementById(id)?.textContent ?? '')
+    .join(' ');
+}
+
 function setup(p: Partial<ComponentProps<typeof ShotCard>> = {}) {
   const h = {
     onToggle: vi.fn(), onOpen: vi.fn(), onAction: vi.fn(), onMove: vi.fn(), onSplit: vi.fn(), onInsertAfter: vi.fn(), onDelete: vi.fn(),
@@ -55,6 +64,8 @@ describe('ShotCard', () => {
     const { card } = setup({ shot });
     expect(within(card).getByAltText('S01 首帧').getAttribute('src')).toBe('/media/first_frame/1');
     expect(within(card).getByText('已过期').getAttribute('title')).toBe('林夏 定妆照换了');
+    // 过期原因也直接写在卡片上（不只是悬停提示）
+    expect(within(card).getByText('已过期：林夏 定妆照换了')).toBeTruthy();
     expect(within(card).getByText('2 张新候选')).toBeTruthy();
     expect(within(card).getByRole('button', { name: '重拍首帧 S01' }).textContent).toBe('重拍首帧');
   });
@@ -129,5 +140,33 @@ describe('ShotCard', () => {
     await user.click(screen.getByRole('menuitem', { name: '删除' }));
     expect(h.onDelete).toHaveBeenCalled();
     expect(h.onOpen).not.toHaveBeenCalled();
+  });
+
+  it('读屏：打开按钮的名字是「打开 S01」，描述里有状态角标和原因', () => {
+    const stale = makeShot({ id: 11, code: 'S01', slots: [chosen(1, 'first_frame', { stale: true, stale_reason: '定妆照换了', new_candidates: 2 })] });
+    const a = setup({ shot: stale });
+    const open = within(a.card).getByRole('button', { name: '打开 S01' });
+    expect(description(open)).toContain('已过期');
+    expect(description(open)).toContain('2 张新候选');
+    expect(description(open)).toContain('定妆照换了');
+    a.unmount();
+    const ok = setup({ shot: makeShot({ id: 12, code: 'S02', slots: [chosen(1, 'first_frame'), chosen(2, 'video')] }), stage: 'videos' });
+    const d = description(within(ok.card).getByRole('button', { name: '打开 S02' }));
+    expect(d).toContain('已选定');
+    expect(d).toContain('播放');
+    ok.unmount();
+    const busy = setup({ shot: makeShot({ id: 13, code: 'S03', active_jobs: [{ id: 70, type: 'image.keyframe', status: 'running', progress: 0.42 }] }) });
+    expect(description(within(busy.card).getByRole('button', { name: '打开 S03' }))).toContain('生成中 42%');
+    busy.unmount();
+    const failed = setup({ shot: makeShot({ id: 14, code: 'S04', failures: [{ id: 80, type: 'image.keyframe', status: 'failed', error: '显存不足' }] }) });
+    const fd = description(within(failed.card).getByRole('button', { name: '打开 S04' }));
+    expect(fd).toContain('失败');
+    expect(fd).toContain('显存不足');
+  });
+
+  it('视频阶段首帧过期：「先重拍首帧」', () => {
+    const shot = makeShot({ id: 11, code: 'S01', slots: [chosen(1, 'first_frame', { stale: true })] });
+    const { card } = setup({ shot, stage: 'videos' });
+    expect(within(card).getByRole('button', { name: '先重拍首帧 S01' }).textContent).toBe('先重拍首帧');
   });
 });

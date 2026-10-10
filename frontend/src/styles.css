@@ -1442,6 +1442,10 @@ img.rail-avatar { border: 0; }
   background: var(--surface-3); color: var(--text-2); border: 2px solid var(--surface-1);
 }
 .shot-avatar:first-child { margin-left: 0; }
+.shot-stale {
+  margin: 0; font-size: 11.5px; line-height: 1.35; color: var(--warn);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
 .shot-fail {
   margin: 0; font-size: 11.5px; line-height: 1.35; color: #ff9a9d; overflow-wrap: anywhere;
   display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden;

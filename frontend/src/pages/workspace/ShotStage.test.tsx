@@ -34,7 +34,8 @@ function routes(extra: Record<string, unknown> = {}) {
 function Harness({ stage = 'keyframes', goStage = vi.fn() }: { stage?: GenStage; goStage?: (s: string, extra?: Record<string, string>) => void }) {
   const [selected, setSelected] = useState<Set<number>>(() => new Set());
   const [count, setCount] = useState(1);
-  return <ShotStage work={{ stage, gate: null, selected, setSelected, count, setCount, goStage }} />;
+  const [submitting, setSubmitting] = useState(false);
+  return <ShotStage work={{ stage, gate: null, selected, setSelected, count, setCount, submitting, setSubmitting, goStage }} />;
 }
 
 const posts = <T extends { method: string }>(calls: T[]) => calls.filter((c) => c.method === 'POST');

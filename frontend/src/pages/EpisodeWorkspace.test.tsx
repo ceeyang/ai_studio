@@ -380,5 +380,19 @@ describe('EpisodeWorkspace', () => {
       const next = await screen.findByRole('button', { name: '下一步：等首帧生成完（2 镜生成中）' });
       expect((next as HTMLButtonElement).disabled).toBe(true);
     });
+  
+    it('提交还没拿到响应时「下一步」禁用，防止重复提交', async () => {
+      let release: (v: Response) => void = () => {};
+      const pending = new Promise<Response>((r) => { release = r; });
+      const calls = installFetch(routes({ 'POST /api/episodes/4/run': () => pending, 'GET /api/jobs/55': { id: 55, status: 'queued' } }));
+      renderRoute('/projects/demo/episodes/4?stage=keyframes');
+      const user = userEvent.setup();
+      const next = await screen.findByRole('button', { name: /^下一步：生成缺少\/过期的首帧/ });
+      await user.click(next);
+      await waitFor(() => expect(posts(calls)).toHaveLength(1));
+      expect((screen.getByRole('button', { name: /^下一步：/ }) as HTMLButtonElement).disabled).toBe(true);
+      release(new Response(JSON.stringify({ job_ids: [55] }), { status: 200 }));
+      await waitFor(() => expect((screen.getByRole('button', { name: /^下一步：/ }) as HTMLButtonElement).disabled).toBe(false));
+    });
   });
 });

@@ -2,7 +2,7 @@
 // 视频都就绪就「去成片」。勾选了镜头时变成「对选中的 N 镜生成… / 重拍…」。纯函数：阶段条算字、镜头阶段照着提交，两边结果一致。
 import type { Job, ShotDetail } from '../../api/types';
 import { type EstimatePart, etaText } from '../director/estimate';
-import { type GenStage, activeJob, cellOf, cellStatus, hasSelected } from '../director/shotStatus';
+import { type GenStage, activeJob, cellOf, cellStatus, firstFrameReady, hasSelected } from '../director/shotStatus';
 import type { StageKey } from '../stages';
 
 /** 超过这么多个任务才先弹预估确认 */
@@ -75,15 +75,15 @@ function run(
 
 const joinNote = (xs: (string | false)[]) => xs.filter(Boolean).join('；') || undefined;
 
-/** 勾选了镜头：已有结果的重拍（强制）、没有的生成（不强制）；视频阶段没首帧的跳过 */
+/** 勾选了镜头：已有结果的重拍（强制）、没有的生成（不强制）；视频阶段首帧缺少或过期的跳过 */
 function selectionGate(sel: ShotDetail[], stage: GenStage, count: number, jobs: Job[]): ShotGate {
   const { label } = cellOf(stage);
   const busyN = sel.filter((s) => busy(s, stage)).length;
   const free = sel.filter((s) => !busy(s, stage));
-  const noKf = stage === 'videos' ? free.filter((s) => !hasSelected(s, 'keyframes')) : [];
+  const noKf = stage === 'videos' ? free.filter((s) => !firstFrameReady(s)) : [];
   const targets = free.filter((s) => !noKf.includes(s));
   if (targets.length === 0) {
-    if (noKf.length > 0) return { kind: 'goto', label: `先出首帧（选中的 ${noKf.length} 镜还没有首帧）`, stage: 'keyframes' };
+    if (noKf.length > 0) return { kind: 'goto', label: `先补齐首帧（选中的 ${noKf.length} 镜首帧缺少或过期）`, stage: 'keyframes' };
     return { kind: 'busy', label: `等选中的镜头生成完（${busyN} 镜生成中）` };
   }
   const has = targets.filter((s) => hasSelected(s, stage));
@@ -97,7 +97,7 @@ function selectionGate(sel: ShotDetail[], stage: GenStage, count: number, jobs: 
       note: joinNote([
         has.length > 0 && fresh.length > 0 && `其中 ${fresh.length} 镜还没有${label}，生成；${has.length} 镜已有${label}，重拍（强制重出新的候选）`,
         has.length === n && `都已有${label}，重拍会强制重出新的候选`,
-        noKf.length > 0 && `另有 ${noKf.length} 镜还没有首帧，先跳过`,
+        noKf.length > 0 && `另有 ${noKf.length} 镜首帧缺少或过期，先跳过`,
         busyN > 0 && `另有 ${busyN} 镜正在生成，先跳过`,
       ]),
       batches: twoBatches(stage, fresh, has),
@@ -142,12 +142,13 @@ export function shotGate(
 
   if (stage === 'keyframes') {
     if (kf.list.length > 0) {
-      const n = kf.list.length;
+      // 张数 = 镜头数 × 候选数（和确认框里的任务数一致）
+      const n = kf.list.length * count;
       return run(
         {
           label: (eta) => `生成缺少/过期的首帧（${n} 张，${eta}）`,
           title: '生成缺少/过期的首帧？',
-          note: joinNote([kf.stale.length > 0 && `其中 ${kf.stale.length} 张已过期，强制重出`]),
+          note: joinNote([kf.stale.length > 0 && `其中 ${kf.stale.length} 镜已过期，强制重出`]),
           batches: twoBatches('keyframes', kf.fresh, kf.stale),
           doneText: `生成缺少/过期的首帧（${n} 张）`,
           selection: false,

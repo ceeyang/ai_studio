@@ -1,5 +1,6 @@
 // 镜头卡片（首帧 / 视频阶段）：9:16 缩略 + 镜号、时长、动作、台词数、出场角色 + 状态角标；
 // 一个随状态变的按钮（普通样式，全页唯一的主按钮在阶段条）和「⋯」菜单；点卡片打开镜头抽屉，左上角勾选多选。
+import { useId } from 'react';
 import type { Character, ShotDetail } from '../../api/types';
 import { Menu } from '../../components/Menu';
 import { type CardAction, type GenStage, activeText, cardAction, cellStatus } from '../director/shotStatus';
@@ -42,15 +43,16 @@ export function ShotCard(props: ShotCardProps) {
   const kf = stage === 'videos' ? cellStatus(shot, 'keyframes') : st;
   const action = cardAction(shot, stage);
   const code = shot.code;
+  // 打开按钮：名字「打开 S01」，描述 = 状态角标 + 过期 / 失败原因（读屏能听到，不被按钮名盖掉）
+  const uid = useId();
+  const ids = { open: `${uid}-open`, code: `${uid}-code`, status: `${uid}-status`, stale: `${uid}-stale`, fail: `${uid}-fail` };
+  const describedBy = [ids.status, st.mark === 'stale' && ids.stale, st.failed && ids.fail].filter(Boolean).join(' ');
 
   let media;
   if (st.cand && stage === 'videos') {
     media = (
       <>
         <video className="shot-media" src={st.cand.url} poster={kf.cand?.url} muted preload="metadata" aria-label={`${code} 视频`} />
-        <span className="shot-play" aria-hidden="true">
-          ▶<span className="visually-hidden">播放</span>
-        </span>
       </>
     );
   } else if (st.cand || (stage === 'videos' && kf.cand)) {
@@ -74,26 +76,45 @@ export function ShotCard(props: ShotCardProps) {
   return (
     <article className={cls.join(' ')} data-testid={`shot-${code}`} aria-label={`镜头 ${code}`}>
       <input type="checkbox" className="shot-check" aria-label={`选择 ${code}`} checked={selected} onChange={props.onToggle} />
-      <button type="button" className="shot-open" aria-label={`打开 ${code}`} onClick={props.onOpen}>
+      <button
+        type="button"
+        className="shot-open"
+        aria-labelledby={`${ids.open} ${ids.code}`}
+        aria-describedby={describedBy}
+        onClick={props.onOpen}
+      >
+        <span id={ids.open} className="visually-hidden">
+          打开
+        </span>
         <span className="shot-thumb">
           {media}
-          {st.mark === 'ok' && (
-            <span className="mark-ok" title="最新：按当前输入生成">
-              <span className="visually-hidden">已选定</span>
-            </span>
-          )}
-          {st.mark === 'stale' && (
-            <span className="badge stale" title={st.staleReason}>
-              已过期
-            </span>
-          )}
-          {st.failed && <span className="badge fail">失败</span>}
-          {st.active && <span className="media-busy">{activeText(st.active)}</span>}
-          {st.fresh > 0 && <span className="badge new-cands">{st.fresh} 张新候选</span>}
+          <span id={ids.status} className="shot-status">
+            {st.mark === 'ok' && (
+              <span className="mark-ok" title="最新：按当前输入生成">
+                <span className="visually-hidden">已选定</span>
+              </span>
+            )}
+            {st.mark === 'stale' && (
+              <span className="badge stale" title={st.staleReason}>
+                已过期
+              </span>
+            )}
+            {st.failed && <span className="badge fail">失败</span>}
+            {st.active && <span className="media-busy">{activeText(st.active)}</span>}
+            {st.fresh > 0 && <span className="badge new-cands">{st.fresh} 张新候选</span>}
+            {st.cand && stage === 'videos' && (
+              <span className="shot-play">
+                <span aria-hidden="true">▶</span>
+                <span className="visually-hidden">播放</span>
+              </span>
+            )}
+          </span>
         </span>
         <span className="shot-meta">
           <span className="shot-head">
-            <span className="shot-code">{code}</span>
+            <span id={ids.code} className="shot-code">
+              {code}
+            </span>
             <span className="shot-dur">{shot.duration.toFixed(1)} 秒</span>
           </span>
           <span className="shot-action">{shot.action || <span className="muted">（没有动作描述）</span>}</span>
@@ -109,8 +130,13 @@ export function ShotCard(props: ShotCardProps) {
           )}
         </span>
       </button>
+      {st.mark === 'stale' && (
+        <p id={ids.stale} className="shot-stale" title={st.staleReason}>
+          已过期：{st.staleReason}
+        </p>
+      )}
       {st.failed && (
-        <p className="shot-fail" title={st.failed.error ?? undefined}>
+        <p id={ids.fail} className="shot-fail" title={st.failed.error ?? undefined}>
           {st.failed.error || '没有错误信息'}
         </p>
       )}

@@ -58,9 +58,10 @@ describe('shotStatus', () => {
 
   it('cardAction：视频阶段 没首帧 = 先出首帧；有首帧 生成视频 / 重拍视频；失败 重试', () => {
     expect(cardAction(makeShot(), 'videos')).toEqual({ kind: 'need_first_frame', label: '先出首帧', aria: '先出首帧' });
-    // 首帧过期也有选定的首帧，可以出视频
+    // 首帧过期：先回首帧阶段重拍首帧，不拿旧首帧出视频
     const kf = makeShot({ slots: [chosen(1, 'first_frame', { stale: true })] });
-    expect(cardAction(kf, 'videos').label).toBe('生成视频');
+    expect(cardAction(kf, 'videos')).toEqual({ kind: 'need_first_frame', label: '先重拍首帧', aria: '先重拍首帧' });
+    expect(cardAction(makeShot({ slots: [chosen(1, 'first_frame', { stale: true }), chosen(2, 'video')] }), 'videos').label).toBe('先重拍首帧');
     const both = makeShot({ slots: [chosen(1, 'first_frame'), chosen(2, 'video')] });
     expect(cardAction(both, 'videos').label).toBe('重拍视频');
     const failed = makeShot({ slots: [chosen(1, 'first_frame')], failures: [{ id: 2, type: 'video.shot', status: 'failed', error: 'x' }] });

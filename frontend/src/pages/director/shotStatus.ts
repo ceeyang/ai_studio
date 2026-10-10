@@ -74,6 +74,11 @@ export function cellStatus(shot: ShotDetail, stage: GenStage): CellStatus {
   };
 }
 
+/** 能拿来出视频的首帧：选定了、而且不过期（过期的先回首帧阶段重拍，不拿旧首帧出视频） */
+export function firstFrameReady(shot: ShotDetail): boolean {
+  return slotMark(slotOf(shot, 'first_frame')) === 'ok';
+}
+
 export type CardActionKind = 'busy' | 'need_first_frame' | 'retry' | 'redo' | 'generate';
 
 export interface CardAction {
@@ -85,14 +90,15 @@ export interface CardAction {
 }
 
 /**
- * 镜头卡片唯一的按钮：进行中「生成中」（禁用）；视频阶段还没有首帧「先出首帧」；失败「重试」（强制）；
+ * 镜头卡片唯一的按钮：进行中「生成中」（禁用）；视频阶段首帧缺少「先出首帧」、过期「先重拍首帧」；失败「重试」（强制）；
  * 已有选定结果「重拍…」（强制）；否则「生成…」。
  */
 export function cardAction(shot: ShotDetail, stage: GenStage): CardAction {
   const label = cellOf(stage).label;
   if (activeJob(shot, stage)) return { kind: 'busy', label: '生成中', aria: `${label}生成中` };
-  if (stage === 'videos' && !hasSelected(shot, 'keyframes')) {
-    return { kind: 'need_first_frame', label: '先出首帧', aria: '先出首帧' };
+  if (stage === 'videos' && !firstFrameReady(shot)) {
+    const what = hasSelected(shot, 'keyframes') ? '先重拍首帧' : '先出首帧';
+    return { kind: 'need_first_frame', label: what, aria: what };
   }
   if (failedJob(shot, stage)) return { kind: 'retry', label: '重试', aria: `重试${label}` };
   const what = genLabel(shot, stage);
