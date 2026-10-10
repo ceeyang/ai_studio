@@ -1,15 +1,16 @@
-// 单集工作台的角色阶段（过渡版，Task 5 换成角色卡网格 + 抽屉）：角色 / 场景 / 风格三个页签。
-// 页签用 hidden 切换、都保持挂载，切页签不丢正在编辑的内容。地址里有 ?char=<id> 时切到角色页签并滚到那张卡。
-import { useEffect, useState } from 'react';
+// 单集工作台的角色阶段：顶部「按剧本推荐角色」，中间角色卡网格（深度编辑在角色抽屉，?char=<id> 打开），
+// 下方可折叠的「设定」放场景和风格编辑器（折叠用 hidden、保持挂载，收起不丢正在编辑的内容）。
+import { useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { errorText } from '../../api/client';
 import { useCharacters, useEpisode, useLocations, usePatchLocation, usePutStyle, useStyle } from '../../api/queries';
 import type { LocationPatch, Style } from '../../api/types';
-import { EpisodeLoadError, NEXT_ACTION_EVENT, isNextActionFor, useNextAction } from '../../components/EpisodeHeader';
+import { EpisodeLoadError, useNextAction } from '../../components/EpisodeHeader';
 import { castOf, hasPortrait } from '../stages';
 import { EditableFields, type FieldSpec, type FieldValues, useUnsavedGuard } from '../../components/EditableFields';
-import { CharacterCard } from '../script/CharacterCard';
 import { RecommendPanel } from '../script/RecommendPanel';
+import { CastCard } from './CastCard';
+import { CharacterDrawer } from './CharacterDrawer';
 
 const LOCATION_FIELDS: FieldSpec[] = [
   { name: 'name', label: '名字' },
@@ -47,11 +48,9 @@ function toStyle(v: FieldValues): Style {
   };
 }
 
-type Tab = 'chars' | 'locs' | 'style';
-
-export function CastStage() {
+export function CastStage({ active = true }: { active?: boolean }) {
   const { slug = '', episodeId = '' } = useParams();
-  const [params] = useSearchParams();
+  const [params, setParams] = useSearchParams();
   const charId = Number(params.get('char')) || null;
   const id = Number(episodeId);
   const ep = useEpisode(id);
@@ -60,28 +59,10 @@ export function CastStage() {
   const style = useStyle(slug);
   const patchLoc = usePatchLocation(slug);
   const putStyle = usePutStyle(slug);
-  const [tab, setTab] = useState<Tab>('chars');
-  // 下一步是抽定妆照 / 添加角色时：点阶段条的「下一步」先切回角色页签，好让它触发那个按钮
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  // 下一步是抽定妆照 / 按剧本推荐角色时：对应的按钮打上 data-next-action，阶段条的「下一步」会触发它
   const nextAct = useNextAction(slug, ep.data, ['cast']);
-  useEffect(() => {
-    // 只理发给角色阶段的（下一步在别的阶段时不切页签）
-    const onNext = (ev: Event) => {
-      if (isNextActionFor(ev, 'cast')) setTab('chars');
-    };
-    window.addEventListener(NEXT_ACTION_EVENT, onNext);
-    return () => window.removeEventListener(NEXT_ACTION_EVENT, onNext);
-  }, []);
-  // 左栏点了角色（?char=<id>）：切到角色页签，等页签显示出来再滚到那张卡
-  const charsLoaded = !!characters.data;
-  useEffect(() => {
-    if (!charId || !charsLoaded) return;
-    setTab('chars');
-    const t = window.setTimeout(() => {
-      document.querySelector(`[data-testid="character-${charId}"]`)?.scrollIntoView?.({ block: 'start', behavior: 'smooth' });
-    }, 0);
-    return () => window.clearTimeout(t);
-  }, [charId, charsLoaded]);
-  // 改过没保存的场景（按 id）和风格：换页面前问一句（角色卡自己挂了）
+  // 改过没保存的场景（按 id）和风格：换页面前问一句（角色抽屉自己挂了）
   const [dirtyLocs, setDirtyLocs] = useState<Set<number>>(() => new Set());
   const [styleDirty, setStyleDirty] = useState(false);
   useUnsavedGuard(styleDirty || dirtyLocs.size > 0);
@@ -100,55 +81,62 @@ export function CastStage() {
   const chars = characters.data ?? [];
   const locs = locations.data ?? [];
   const st = style.data ?? EMPTY_STYLE;
-  const withPortrait = chars.filter((c) => c.portrait_url).length;
+  const withPortrait = chars.filter(hasPortrait).length;
   // 轮到的角色：出场角色里第一个还没定妆照的（和进度条的算法一致）
   const nextCharId = nextAct ? castOf(e.shots, chars).find((c) => !hasPortrait(c))?.id : undefined;
+  const openChar = chars.find((c) => c.id === charId) ?? null;
 
-  const tabs: { key: Tab; label: string }[] = [
-    { key: 'chars', label: `角色（${chars.length}）` },
-    { key: 'locs', label: `场景（${locs.length}）` },
-    { key: 'style', label: '风格' },
-  ];
+  // 只动 char 参数（开关抽屉不记历史），stage 等其他参数保留
+  const setChar = (cid: number | null) =>
+    setParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (cid == null) next.delete('char');
+        else next.set('char', String(cid));
+        return next;
+      },
+      { replace: true },
+    );
 
   return (
-    <div className="stage-body cast-page">
-      {chars.length > 0 && (
-        <div className="toolbar">
+    <div className="stage-body cast-stage">
+      <div className="toolbar">
+        <RecommendPanel slug={slug} episodeId={id} existing={chars} isNext={!!nextAct && chars.length === 0} />
+        {chars.length > 0 && (
           <span className="chip">
             {withPortrait}/{chars.length} 个角色有定妆照
           </span>
+        )}
+      </div>
+
+      {chars.length === 0 ? (
+        <p className="panel empty muted">生成剧本后自动抽取，也可以按剧本推荐角色。</p>
+      ) : (
+        <div className="cast-grid" role="list" aria-label="角色">
+          {chars.map((c) => (
+            <div key={c.id} role="listitem" className="cast-cell">
+              <CastCard c={c} slug={slug} isNext={c.id === nextCharId} onOpen={() => setChar(c.id)} />
+            </div>
+          ))}
         </div>
       )}
 
-      <section className="panel cast-pane" aria-label="角色、场景与风格">
-        <div className="tabs" role="tablist" aria-label="设定">
-          {tabs.map((t) => (
-            <button
-              key={t.key}
-              type="button"
-              role="tab"
-              id={`tab-${t.key}`}
-              aria-selected={tab === t.key}
-              aria-controls={`tabpanel-${t.key}`}
-              className={tab === t.key ? 'is-active' : undefined}
-              onClick={() => setTab(t.key)}
-            >
-              {t.label}
-            </button>
-          ))}
-        </div>
-
-        <div role="tabpanel" id="tabpanel-chars" aria-labelledby="tab-chars" className="tab-body" hidden={tab !== 'chars'}>
-          <RecommendPanel slug={slug} episodeId={id} existing={chars} isNext={!!nextAct && chars.length === 0} />
-          {chars.length === 0 && <p className="muted">生成剧本后自动抽取，也可以按剧本推荐角色。</p>}
-          <div className="char-list">
-            {chars.map((c) => (
-              <CharacterCard key={c.id} c={c} slug={slug} episodeId={id} isNext={c.id === nextCharId} />
-            ))}
-          </div>
-        </div>
-
-        <div role="tabpanel" id="tabpanel-locs" aria-labelledby="tab-locs" className="tab-body" hidden={tab !== 'locs'}>
+      <section className="panel cast-settings" aria-label="设定">
+        <button
+          type="button"
+          className="fold-toggle"
+          aria-expanded={settingsOpen}
+          aria-controls="cast-settings-body"
+          onClick={() => setSettingsOpen((v) => !v)}
+        >
+          设定
+          <span className="muted">
+            场景 {locs.length} 个 · 风格{style.data ? '' : '（未设）'}
+            {styleDirty || dirtyLocs.size > 0 ? ' · 有未保存的修改' : ''}
+          </span>
+        </button>
+        <div id="cast-settings-body" className="cast-settings-body" hidden={!settingsOpen}>
+          <h4>场景（{locs.length}）</h4>
           {locs.length === 0 && <p className="muted">生成剧本后自动抽取。</p>}
           <div className="cards">
             {locs.map((l) => (
@@ -164,34 +152,32 @@ export function CastStage() {
               </div>
             ))}
           </div>
-        </div>
-
-        <div
-          role="tabpanel"
-          id="tabpanel-style"
-          aria-labelledby="tab-style"
-          className="tab-body style-body"
-          hidden={tab !== 'style'}
-        >
-          {!style.data && <p className="muted">还没有风格设定，生成剧本后自动生成，也可以直接填写保存。</p>}
-          <EditableFields
-            fields={STYLE_FIELDS}
-            initial={{
-              anchor_text: st.anchor_text,
-              palette: st.palette,
-              lighting: st.lighting,
-              texture: st.texture,
-              character_rules: st.character_rules,
-              mood_keywords: st.mood_keywords.join(', '),
-              negative: st.negative,
-            }}
-            saving={putStyle.isPending}
-            error={putStyle.error ? errorText(putStyle.error) : null}
-            onSave={(v) => putStyle.mutate(toStyle(v))}
-            onDirtyChange={setStyleDirty}
-          />
+          <h4>风格</h4>
+          <div className="style-body">
+            {!style.data && <p className="muted">还没有风格设定，生成剧本后自动生成，也可以直接填写保存。</p>}
+            <EditableFields
+              fields={STYLE_FIELDS}
+              initial={{
+                anchor_text: st.anchor_text,
+                palette: st.palette,
+                lighting: st.lighting,
+                texture: st.texture,
+                character_rules: st.character_rules,
+                mood_keywords: st.mood_keywords.join(', '),
+                negative: st.negative,
+              }}
+              saving={putStyle.isPending}
+              error={putStyle.error ? errorText(putStyle.error) : null}
+              onSave={(v) => putStyle.mutate(toStyle(v))}
+              onDirtyChange={setStyleDirty}
+            />
+          </div>
         </div>
       </section>
+
+      {openChar && active && (
+        <CharacterDrawer key={openChar.id} c={openChar} slug={slug} episodeId={id} onClose={() => setChar(null)} />
+      )}
     </div>
   );
 }

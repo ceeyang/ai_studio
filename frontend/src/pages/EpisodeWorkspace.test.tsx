@@ -139,7 +139,7 @@ describe('EpisodeWorkspace', () => {
   it('「下一步」是全页唯一的主按钮；下一步在别的阶段时点它切过去', async () => {
     installFetch(routes());
     const { container } = renderRoute('/projects/demo/episodes/4?stage=script');
-    const next = await screen.findByRole('button', { name: '下一步：抽定妆照（1 个角色缺定妆照）' });
+    const next = await screen.findByRole('button', { name: '下一步：抽定妆照（1 个角色缺）' });
     expect(next.className).toContain('primary');
     expect(container.querySelectorAll('.primary')).toHaveLength(1);
     await userEvent.setup().click(next);
@@ -196,24 +196,29 @@ describe('EpisodeWorkspace', () => {
     const rail = screen.getByRole('complementary', { name: '剧本大纲与角色' });
     await user.click(await within(rail).findByRole('button', { name: /^老周/ }));
     expect(where()).toBe('/projects/demo/episodes/4?stage=cast&char=9');
+    // 左栏点角色打开角色抽屉
+    expect(await screen.findByRole('dialog', { name: '角色 老周' })).toBeTruthy();
     await user.click(within(stageBar()).getByRole('button', { name: /成片/ }));
     expect(where()).toBe('/projects/demo/episodes/4?stage=export');
+    expect(screen.queryByRole('dialog')).toBeNull();
   });
 
-  it('下一步事件只发给当前阶段那块内容：下一步在剧本阶段时，藏着的角色阶段不切页签', async () => {
+  it('下一步只触发当前阶段里的按钮：下一步在剧本阶段时，藏着的角色阶段不提交抽卡，展开的「设定」保持展开', async () => {
     const noShots = { ...EP, shots: [] };
-    installFetch(
+    const calls = installFetch(
       routes({ 'GET /api/episodes/4': noShots, 'POST /api/episodes/4/run': { job_ids: [9] }, 'GET /api/jobs/9': { id: 9, status: 'running' } }),
     );
     renderRoute('/projects/demo/episodes/4?stage=cast');
     const user = userEvent.setup();
-    await user.click(await screen.findByRole('tab', { name: '风格' }));
+    const fold = await screen.findByRole('button', { name: /^设定/ });
+    await user.click(fold);
     await user.click(within(stageBar()).getByRole('button', { name: /剧本/ }));
     await user.click(await screen.findByRole('button', { name: '下一步：生成分镜' }));
-    await waitFor(() => expect(document.querySelector('[data-stage-panel="cast"] [role="tab"][aria-selected="true"]')?.textContent).toBe('风格'));
+    await waitFor(() => expect(calls.filter((c) => c.method === 'POST').map((c) => c.url)).toEqual(['/api/episodes/4/run']));
+    expect(fold.getAttribute('aria-expanded')).toBe('true');
   });
 
-  it('角色阶段（三视图、推荐角色、造型方案都在）和成片阶段（片尾卡改了没保存）里，看得见的主按钮都只有阶段条的「下一步」', async () => {
+  it('角色阶段（角色抽屉开着：三视图、造型方案都在；推荐角色）和成片阶段（片尾卡改了没保存）里，看得见的主按钮都只有阶段条的「下一步」', async () => {
     const visiblePrimaries = () =>
       Array.from(document.querySelectorAll('.primary')).filter((el) => !el.closest('[hidden]'));
     const turnaround = { look: 'full body', default_engine: 'h3_image', sheets: [], cells: [] };
@@ -231,12 +236,13 @@ describe('EpisodeWorkspace', () => {
         'GET /api/projects/demo/end-card': { seconds: 3, background: '#000000', lines: [{ text: '片尾', font: 'Khmer UI', size: 60, bold: false }] },
       }),
     );
-    renderRoute('/projects/demo/episodes/4?stage=cast&recommend=90');
+    renderRoute('/projects/demo/episodes/4?stage=cast&recommend=90&char=9');
     const user = userEvent.setup();
     expect(await screen.findByTestId('recommend-前台小李')).toBeTruthy();
-    await waitFor(() => expect(screen.getAllByRole('region', { name: /的三视图/ })).toHaveLength(2));
-    expect(screen.getAllByRole('button', { name: '用这个提示词抽卡' }).length).toBeGreaterThan(0);
-    await waitFor(() => expect(visiblePrimaries().map((el) => el.textContent)).toEqual(['下一步：抽定妆照（1 个角色缺定妆照）']));
+    const drawer = await screen.findByRole('dialog', { name: '角色 老周' });
+    expect(within(drawer).getByRole('region', { name: '老周 的三视图', hidden: true })).toBeTruthy();
+    expect(within(drawer).getAllByRole('button', { name: '用这个提示词抽卡' }).length).toBeGreaterThan(0);
+    await waitFor(() => expect(visiblePrimaries().map((el) => el.textContent)).toEqual(['下一步：抽定妆照（1 个角色缺）']));
 
     await user.click(within(stageBar()).getByRole('button', { name: /成片/ }));
     await user.click(await screen.findByLabelText('片尾卡'));

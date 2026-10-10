@@ -25,7 +25,7 @@ import { useJobNotice } from '../../components/JobNotice';
 import { EPISODE_STATUS_LABEL } from '../../format';
 import { workspacePath } from './urls';
 
-export { toCharacterPatch } from '../script/CharacterCard';
+export { toCharacterPatch } from '../script/CharacterProfile';
 export { impactText };
 
 const EPISODE_FIELDS: FieldSpec[] = [

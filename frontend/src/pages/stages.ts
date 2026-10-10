@@ -95,7 +95,7 @@ export function episodeStages(
       label: '角色',
       state: cast.length > 0 && withPortrait === cast.length ? 'done' : 'todo',
       detail: cast.length === 0 ? '还没有角色' : `${withPortrait}/${cast.length}`,
-      next: cast.length === 0 ? '添加角色' : `抽定妆照（${cast.length - withPortrait} 个角色缺定妆照）`,
+      next: cast.length === 0 ? '按剧本推荐角色' : `抽定妆照（${cast.length - withPortrait} 个角色缺）`,
       count: cast.length - withPortrait,
     },
     slotStage('keyframes', '首帧', shots),

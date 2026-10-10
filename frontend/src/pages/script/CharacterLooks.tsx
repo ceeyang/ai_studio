@@ -1,5 +1,5 @@
-// 角色卡：定妆照候选（上传的 + 本地 AI 抽的），单击看大图、「设为当前造型」确认后才切换；抽卡（失败时末尾有失败卡）；
-// AI 推荐造型；三视图；角色资料。
+// 角色抽屉的「造型」页签：定妆照候选（上传的 + 本地 AI 抽的），单击看大图、「设为当前造型」确认后才切换；
+// 抽卡（失败时末尾有失败卡）、上传、AI 推荐造型和方案卡。
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { errorText } from '../../api/client';
@@ -12,40 +12,14 @@ import {
   useUploadPortrait,
   useUsePortrait,
 } from '../../api/queries';
-import type { Candidate, Character, CharacterPatch, DesignOption } from '../../api/types';
+import type { Candidate, Character, DesignOption } from '../../api/types';
 import { useConfirm } from '../../components/ConfirmDialog';
-import { nextActionProps } from '../../components/EpisodeHeader';
-import { EditableFields, type FieldSpec, type FieldValues, useUnsavedGuard } from '../../components/EditableFields';
 import { ImageEngineSelect } from '../../components/ImageEngineSelect';
 import { Lightbox } from '../../components/Lightbox';
-import { VOICES } from '../../format';
 import { useEvents } from '../../ws/EventsContext';
 import { isDecoding } from '../../ws/events';
-import { TurnaroundPanel } from './TurnaroundPanel';
-
-const CHARACTER_FIELDS: FieldSpec[] = [
-  { name: 'name', label: '名字' },
-  { name: 'description', label: '人物描述', kind: 'textarea', rows: 2 },
-  { name: 'visual_prompt', label: '外貌提示词（英文，会原样写进每个出场镜头）', kind: 'textarea', rows: 5 },
-  { name: 'core_features', label: '核心特征', kind: 'textarea', rows: 2 },
-  {
-    name: 'voice',
-    label: '配音音色',
-    kind: 'select',
-    options: [{ value: '', label: '（不配音）' }, ...VOICES.map((v) => ({ value: v.id, label: v.label }))],
-    customLabel: '其他（手填）',
-    placeholder: 'Edge TTS 音色，如 km-KH-PisethNeural',
-  },
-];
 
 const DIRTY_HINT = '先保存或放弃修改';
-
-/** 角色卡改动转 PATCH 体：音色留空表示不配音（null）。 */
-export function toCharacterPatch(changed: FieldValues): CharacterPatch {
-  const out: CharacterPatch = { ...changed };
-  if (changed.voice !== undefined) out.voice = changed.voice.trim() === '' ? null : changed.voice.trim();
-  return out;
-}
 
 function promptOf(c: Candidate): string {
   const vp = c.params?.visual_prompt;
@@ -190,17 +164,17 @@ function OptionCard({
   );
 }
 
-export function CharacterCard({
+export function CharacterLooks({
   c,
   slug,
   episodeId,
-  isNext = false,
+  profileDirty,
 }: {
   c: Character;
   slug: string;
   episodeId: number;
-  /** 页头的下一步是「抽定妆照」且轮到这个角色：抽卡按钮是本页唯一的主按钮 */
-  isNext?: boolean;
+  /** 「资料」页签有没保存的修改：设为当前造型 / 设为角色提示词会覆盖外貌描述，先让用户保存或放弃 */
+  profileDirty: boolean;
 }) {
   const patch = usePatchCharacter(slug);
   const upload = useUploadPortrait(slug);
@@ -211,8 +185,7 @@ export function CharacterCard({
   const episode = useEpisode(episodeId);
   // 本集里这个角色出场的镜头数：换造型 / 换提示词后它们的首帧会过期
   const castShots = (episode.data?.shots ?? []).filter((sh) => (sh.cast ?? []).some((x) => x.character_id === c.id)).length;
-  const [dirty, setDirty] = useState(false);
-  useUnsavedGuard(dirty);
+  const dirty = profileDirty;
   const [hint, setHint] = useState<string | null>(null);
   useEffect(() => {
     if (!dirty) setHint(null);
@@ -261,103 +234,76 @@ export function CharacterCard({
   };
 
   return (
-    <article className="char-card" data-testid={`character-${c.id}`}>
-      <header className="char-head">
-        <h4>{c.name}</h4>
-        {c.description && <p className="char-desc">{c.description}</p>}
-      </header>
-
-      <div className="char-body">
-        <div className="char-looks">
-          <PortraitStrip
-            c={c}
-            switching={use.isPending}
-            retrying={draw.isPending}
-            onPreview={setPreview}
-            onUse={usePortrait}
-            onRetry={drawAgain}
-          />
-          {hint && <p className="notice small">{hint}</p>}
-          <p className="muted small">
-            单击看大图；点「设为当前造型」才会换（提示词跟着换）。出场镜头的首帧和视频会带上选定的这张锁脸（H3 引擎）。
-          </p>
-          <div className="row draw-bar">
-            <label className="inline-field">
-              <span>张数</span>
-              <select aria-label="抽卡张数" value={count} onChange={(e) => setCount(Number(e.target.value))}>
-                {[1, 2, 3, 4].map((n) => (
-                  <option key={n} value={n}>
-                    {n}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <ImageEngineSelect value={engine} onChange={setEngine} defaultLabel="项目图像引擎" ariaLabel="抽卡引擎" />
-            <button
-              type="button"
-              {...nextActionProps(isNext)}
-              disabled={draw.isPending || !c.visual_prompt.trim()}
-              title={c.visual_prompt.trim() ? '用角色当前的外貌提示词出正面半身定妆照（本机 ComfyUI，或选浏览器引擎走 ChatGPT / Gemini 网页）' : '先写外貌提示词或用 AI 推荐造型'}
-              onClick={drawAgain}
-            >
-              {drawingCount > 0 ? `抽卡（${drawingCount} 张进行中）` : '抽卡'}
-            </button>
-            <label className={`btn${upload.isPending ? ' is-disabled' : ''}`}>
-              {upload.isPending ? '上传中…' : '上传定妆照'}
-              <input
-                type="file"
-                accept="image/png,image/jpeg,image/webp"
-                aria-label="上传定妆照"
-                hidden
-                disabled={upload.isPending}
-                onChange={(ev) => {
-                  const f = ev.target.files?.[0];
-                  ev.target.value = '';
-                  if (f) upload.mutate({ id: c.id, file: f });
-                }}
-              />
-            </label>
-            <button
-              type="button"
-              disabled={suggest.isPending || suggesting}
-              onClick={() =>
-                suggest.mutate({ id: c.id, count: 3, episode_id: episodeId }, { onSuccess: (r) => setSuggestJob(r.job_ids[0]) })
-              }
-            >
-              {suggesting ? 'AI 推荐中…' : 'AI 推荐造型'}
-            </button>
-          </div>
-          {suggestFailed && (
-            <p className="error">
-              推荐造型失败：{job.data?.error ?? job.data?.status} · <Link to={`/jobs?job=${suggestJob}`}>查看任务</Link>
-            </p>
-          )}
-          {waitingInput && (
-            <p className="notice">
-              推荐造型在等人工输入 · <Link to={`/jobs?job=${suggestJob}`}>去填写</Link>
-            </p>
-          )}
-        </div>
-
-        <div className="char-fields">
-          <EditableFields
-            fields={CHARACTER_FIELDS}
-            initial={{
-              name: c.name,
-              description: c.description,
-              visual_prompt: c.visual_prompt,
-              core_features: c.core_features,
-              voice: c.voice ?? '',
+    <div className="char-looks">
+      <PortraitStrip
+        c={c}
+        switching={use.isPending}
+        retrying={draw.isPending}
+        onPreview={setPreview}
+        onUse={usePortrait}
+        onRetry={drawAgain}
+      />
+      {hint && <p className="notice small">{hint}</p>}
+      <p className="muted small">
+        单击看大图；点「设为当前造型」才会换（提示词跟着换）。出场镜头的首帧和视频会带上选定的这张锁脸（H3 引擎）。
+      </p>
+      <div className="row draw-bar">
+        <label className="inline-field">
+          <span>张数</span>
+          <select aria-label="抽卡张数" value={count} onChange={(e) => setCount(Number(e.target.value))}>
+            {[1, 2, 3, 4].map((n) => (
+              <option key={n} value={n}>
+                {n}
+              </option>
+            ))}
+          </select>
+        </label>
+        <ImageEngineSelect value={engine} onChange={setEngine} defaultLabel="项目图像引擎" ariaLabel="抽卡引擎" />
+        <button
+          type="button"
+          disabled={draw.isPending || !c.visual_prompt.trim()}
+          title={c.visual_prompt.trim() ? '用角色当前的外貌提示词出正面半身定妆照（本机 ComfyUI，或选浏览器引擎走 ChatGPT / Gemini 网页）' : '先写外貌提示词或用 AI 推荐造型'}
+          onClick={drawAgain}
+        >
+          {drawingCount > 0 ? `抽卡（${drawingCount} 张进行中）` : '抽卡'}
+        </button>
+        <label className={`btn${upload.isPending ? ' is-disabled' : ''}`}>
+          {upload.isPending ? '上传中…' : '上传定妆照'}
+          <input
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            aria-label="上传定妆照"
+            hidden
+            disabled={upload.isPending}
+            onChange={(ev) => {
+              const f = ev.target.files?.[0];
+              ev.target.value = '';
+              if (f) upload.mutate({ id: c.id, file: f });
             }}
-            saving={patch.isPending}
-            onDirtyChange={setDirty}
-            onSave={(_v, ch) => patch.mutate({ id: c.id, ...toCharacterPatch(ch) })}
           />
-        </div>
+        </label>
+        <button
+          type="button"
+          disabled={suggest.isPending || suggesting}
+          onClick={() =>
+            suggest.mutate({ id: c.id, count: 3, episode_id: episodeId }, { onSuccess: (r) => setSuggestJob(r.job_ids[0]) })
+          }
+        >
+          {suggesting ? 'AI 推荐中…' : 'AI 推荐造型'}
+        </button>
       </div>
-      <TurnaroundPanel c={c} slug={slug} />
+      {suggestFailed && (
+        <p className="error">
+          推荐造型失败：{job.data?.error ?? job.data?.status} · <Link to={`/jobs?job=${suggestJob}`}>查看任务</Link>
+        </p>
+      )}
+      {waitingInput && (
+        <p className="notice">
+          推荐造型在等人工输入 · <Link to={`/jobs?job=${suggestJob}`}>去填写</Link>
+        </p>
+      )}
       {options.length > 0 && (
-        <div className="options" aria-label={`${c.name} 的 AI 推荐造型`}>
+        <div className="options" role="group" aria-label={`${c.name} 的 AI 推荐造型`}>
           {options.map((o, i) => (
             <OptionCard
               key={`${i}-${o.label}`}
@@ -397,6 +343,6 @@ export function CharacterCard({
           }}
         />
       )}
-    </article>
+    </div>
   );
 }

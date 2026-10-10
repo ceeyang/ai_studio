@@ -20,6 +20,8 @@ export interface FieldSpec {
   /** 下拉框再加一项「其他（手填）」：选它（或当前值不在选项里）时下面出一个输入框手填 */
   customLabel?: string;
   placeholder?: string;
+  /** 收进表单末尾的「高级」折叠里（如英文提示词） */
+  advanced?: boolean;
 }
 
 /** 字段值不合法时的提示；合法返回 null。目前只校验带 min/max 的数字字段。 */
@@ -142,52 +144,48 @@ export function EditableFields({
     if (dirty && valid) onSave(values, changed);
   };
 
-  return (
-    <form className="fields" onSubmit={submit}>
-      {fields.map((f) => (
-        <label key={f.name} className="field">
-          <span>{f.label}</span>
-          {f.kind === 'textarea' ? (
-            <textarea rows={f.rows ?? 4} value={values[f.name] ?? ''} onChange={(e) => set(f.name, e.target.value)} />
-          ) : f.kind === 'select' ? (
-            <select
-              value={f.customLabel && isCustom(f) ? CUSTOM : (values[f.name] ?? '')}
-              onChange={(e) => {
-                const v = e.target.value;
-                if (v === CUSTOM) {
-                  setCustomMode((m) => ({ ...m, [f.name]: true }));
-                  set(f.name, '');
-                } else {
-                  if (f.customLabel) setCustomMode((m) => ({ ...m, [f.name]: false }));
-                  set(f.name, v);
-                }
-              }}
-            >
-              {(f.options ?? []).map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label}
-                </option>
-              ))}
-              {f.customLabel && <option value={CUSTOM}>{f.customLabel}</option>}
-            </select>
-          ) : (
-            <input
-              type={f.kind === 'number' ? 'number' : 'text'}
-              step={f.step}
-              min={f.min}
-              max={f.max}
-              placeholder={f.placeholder}
-              value={values[f.name] ?? ''}
-              onChange={(e) => set(f.name, e.target.value)}
-            />
-          )}
-        </label>
-      )).flatMap((el, i) => {
-        const f = fields[i];
-        if (!(f.kind === 'select' && f.customLabel && isCustom(f))) return [el];
-        // 手填框放在 label 外面：不和下拉框抢同一个标签
-        return [
-          el,
+  /** 一个字段：label + 输入控件；下拉选了「其他（手填）」时后面再跟一个手填框 */
+  const renderField = (f: FieldSpec) => [
+    <label key={f.name} className="field">
+      <span>{f.label}</span>
+      {f.kind === 'textarea' ? (
+        <textarea rows={f.rows ?? 4} value={values[f.name] ?? ''} onChange={(e) => set(f.name, e.target.value)} />
+      ) : f.kind === 'select' ? (
+        <select
+          value={f.customLabel && isCustom(f) ? CUSTOM : (values[f.name] ?? '')}
+          onChange={(e) => {
+            const v = e.target.value;
+            if (v === CUSTOM) {
+              setCustomMode((m) => ({ ...m, [f.name]: true }));
+              set(f.name, '');
+            } else {
+              if (f.customLabel) setCustomMode((m) => ({ ...m, [f.name]: false }));
+              set(f.name, v);
+            }
+          }}
+        >
+          {(f.options ?? []).map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label}
+            </option>
+          ))}
+          {f.customLabel && <option value={CUSTOM}>{f.customLabel}</option>}
+        </select>
+      ) : (
+        <input
+          type={f.kind === 'number' ? 'number' : 'text'}
+          step={f.step}
+          min={f.min}
+          max={f.max}
+          placeholder={f.placeholder}
+          value={values[f.name] ?? ''}
+          onChange={(e) => set(f.name, e.target.value)}
+        />
+      )}
+    </label>,
+    // 手填框放在 label 外面：不和下拉框抢同一个标签
+    ...(f.kind === 'select' && f.customLabel && isCustom(f)
+      ? [
           <input
             key={`${f.name}-custom`}
             type="text"
@@ -197,8 +195,21 @@ export function EditableFields({
             value={values[f.name] ?? ''}
             onChange={(e) => set(f.name, e.target.value)}
           />,
-        ];
-      })}
+        ]
+      : []),
+  ];
+  const basic = fields.filter((f) => !f.advanced);
+  const advanced = fields.filter((f) => f.advanced);
+
+  return (
+    <form className="fields" onSubmit={submit}>
+      {basic.flatMap(renderField)}
+      {advanced.length > 0 && (
+        <details className="fields-advanced">
+          <summary>高级</summary>
+          {advanced.flatMap(renderField)}
+        </details>
+      )}
       <div className="row">
         <button type="submit" className={dirty && valid ? 'soft' : undefined} disabled={!dirty || !valid || saving}>
           {saving ? '保存中…' : saveLabel}

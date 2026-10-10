@@ -13,6 +13,7 @@ const PNG = Buffer.from(
 const LOOK = Array.from({ length: 70 }, (_, i) => (i % 7 === 0 ? 'navy-cotton-twill-workjacket' : 'detail')).join(' ');
 
 let episodeId = 0;
+let charId = 0;
 let failedJob = 0;
 
 test.beforeAll(async ({ playwright, baseURL }) => {
@@ -25,6 +26,7 @@ test.beforeAll(async ({ playwright, baseURL }) => {
   await answer(api, await run('storyboard'), [STORYBOARD]);
 
   const [ch] = await (await api.get(`/api/projects/${SLUG}/characters`)).json();
+  charId = ch.id;
   await api.patch(`/api/characters/${ch.id}`, { data: { description: '二十多岁的女主播，'.repeat(12), visual_prompt: LOOK } });
   for (let i = 0; i < 6; i++) {
     await api.post(`/api/characters/${ch.id}/portrait`, { multipart: { file: { name: `p${i}.png`, mimeType: 'image/png', buffer: PNG } } });
@@ -45,7 +47,7 @@ async function expectNoOverflow(page: Page, label: string) {
   const r = await page.evaluate(() => {
     const iw = window.innerWidth;
     const bad: string[] = [];
-    const sel = '.content, .panel, .toolbar, .stage-bar, .ws-rail, .ws-main, .shot-grid-wrap, .shot-group, .shot-card, .drawer, .char-card, .turn-sheet, .turn-cell, .turn-look, .option-card, .project-card, .episode-card, .bible, .modal';
+    const sel = '.content, .panel, .toolbar, .stage-bar, .ws-rail, .ws-main, .shot-grid-wrap, .shot-group, .shot-card, .drawer, .cast-card, .cast-settings, .turn-sheet, .turn-cell, .turn-look, .option-card, .project-card, .episode-card, .bible, .modal';
     for (const el of Array.from(document.querySelectorAll<HTMLElement>(sel))) {
       const rc = el.getBoundingClientRect();
       if (rc.width === 0) continue;
@@ -78,9 +80,19 @@ for (const width of WIDTHS) {
     await expectNoOverflow(page, `${width} 剧本`);
 
     await page.goto(`${ep}?stage=cast`);
-    await expect(page.getByRole('region', { name: /的三视图/ })).toBeVisible();
-    await expect(page.getByTestId('option-2')).toBeVisible();
+    await expect(page.getByTestId(`character-${charId}`)).toBeVisible();
+    await page.getByRole('button', { name: /^设定/ }).click();
+    await expect(page.getByLabel(/风格锚/)).toBeVisible();
     await expectNoOverflow(page, `${width} 角色`);
+    // 角色抽屉：造型（方案卡）、三视图两个页签
+    await page.goto(`${ep}?stage=cast&char=${charId}`);
+    const drawer = page.getByRole('dialog', { name: /^角色 / });
+    await expect(drawer.getByTestId('option-2')).toBeVisible();
+    await drawer.evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
+    await expectNoOverflow(page, `${width} 角色抽屉 造型`);
+    await drawer.getByRole('tab', { name: '三视图' }).click();
+    await expect(drawer.getByRole('region', { name: /的三视图/ })).toBeVisible();
+    await expectNoOverflow(page, `${width} 角色抽屉 三视图`);
 
     await page.goto(`${ep}?stage=keyframes`);
     await expect(page.getByTestId('shot-S02')).toBeVisible();

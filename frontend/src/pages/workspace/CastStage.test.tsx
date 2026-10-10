@@ -1,176 +1,218 @@
 import { act, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
+import type { Character, TurnaroundCell } from '../../api/types';
 import { installFetch } from '../../test/fetch';
-import { NEXT_ACTION_EVENT } from '../../components/EpisodeHeader';
-import { makeEpisode, makeShot } from '../../test/factories';
+import { makeEpisode, makeJob, makeShot } from '../../test/factories';
 import { renderAt } from '../../test/render';
 import { CastStage } from './CastStage';
 
-const LIN = { id: 8, project_id: 1, name: '林夏', description: '女主播', visual_prompt: 'young woman', core_features: '', voice: null };
+const LIN: Character = {
+  id: 8, project_id: 1, name: '林夏', description: '女主播', visual_prompt: 'young woman', core_features: '', voice: null,
+  portrait_candidate_id: 80, portrait_url: '/media/p/lin.png',
+};
+const LAO: Character = { ...LIN, id: 9, name: '老周', description: '', voice: 'zh-CN-YunjianNeural', portrait_candidate_id: null, portrait_url: null };
+const EP = makeEpisode({
+  id: 4,
+  title: '提词器',
+  scene_blocks: [{ id: 1, order: 0, location_id: null, text: 'a' }],
+  shots: [makeShot({ id: 1, cast: [{ character_id: 8, variation_id: null }, { character_id: 9, variation_id: null }] })],
+});
 const ROUTES = {
-  'GET /api/episodes/4': makeEpisode({ id: 4, title: '提词器' }),
+  'GET /api/episodes/4': EP,
   'GET /api/projects/demo/locations': [
     { id: 3, project_id: 1, name: '直播间', time_of_day: '夜', atmosphere: '压抑', visual_prompt: 'a dim studio' },
   ],
-  'GET /api/projects/demo/characters': [LIN],
+  'GET /api/projects/demo/characters': [LIN, LAO],
   'GET /api/projects/demo/style': null,
 };
 const AT = { route: '/projects/demo/episodes/4?stage=cast', path: '/projects/:slug/episodes/:episodeId' };
 const writes = <T extends { method: string }>(calls: T[]) => calls.filter((c) => c.method !== 'GET');
+const where = () => screen.getByTestId('location').textContent;
+
+function cells(withUrl: number): TurnaroundCell[] {
+  return Array.from({ length: 7 }, (_, i) => ({
+    view: 'front_full' as const, label: `格 ${i}`, sheet: 'body' as const,
+    selected_candidate_id: i < withUrl ? i + 1 : null, url: i < withUrl ? `/media/c${i}.png` : null, stale: false,
+  }));
+}
 
 describe('CastStage', () => {
-  it('三个页签：角色 / 场景 / 风格；不带页头', async () => {
-    installFetch(ROUTES);
-    renderAt(<CastStage />, AT);
-    const user = userEvent.setup();
-    expect(await screen.findByTestId('character-8')).toBeTruthy();
-    expect(screen.queryByRole('heading', { level: 2 })).toBeNull();
-    expect(screen.getByRole('tab', { name: '角色（1）' }).getAttribute('aria-selected')).toBe('true');
-    await user.click(screen.getByRole('tab', { name: '场景（1）' }));
-    expect(screen.getByTestId('character-8').closest('[hidden]')).toBeTruthy();
-    expect(screen.getByTestId('location-3').closest('[hidden]')).toBeNull();
-    await user.click(screen.getByRole('tab', { name: '风格' }));
-    expect(screen.getByLabelText(/风格锚/).closest('[hidden]')).toBeNull();
-    expect(screen.getByTestId('location-3').closest('[hidden]')).toBeTruthy();
-  });
-
-  it('切换页签不丢正在编辑的内容', async () => {
-    installFetch(ROUTES);
-    renderAt(<CastStage />, AT);
-    const user = userEvent.setup();
-    const card = await screen.findByTestId('character-8');
-    const desc = within(card).getByLabelText('人物描述');
-    await user.type(desc, '（夜班）');
-    await user.click(screen.getByRole('tab', { name: '风格' }));
-    await user.type(screen.getByLabelText('色板'), '冷蓝');
-    await user.click(screen.getByRole('tab', { name: '角色（1）' }));
-    expect((within(screen.getByTestId('character-8')).getByLabelText('人物描述') as HTMLTextAreaElement).value).toBe('女主播（夜班）');
-    await user.click(screen.getByRole('tab', { name: '风格' }));
-    expect((screen.getByLabelText('色板') as HTMLInputElement).value).toBe('冷蓝');
-  });
-
-  it('角色卡可编辑；音色是下拉，「其他（手填）」切成输入框', async () => {
-    const calls = installFetch({ ...ROUTES, 'PATCH /api/characters/8': LIN });
-    renderAt(<CastStage />, AT);
-    const user = userEvent.setup();
-    const card = await screen.findByTestId('character-8');
-    const voice = within(card).getByLabelText(/配音音色/) as HTMLSelectElement;
-    expect(voice.tagName).toBe('SELECT');
-    expect(within(voice).getByRole('option', { name: '高棉语 · 女声' })).toBeTruthy();
-    await user.selectOptions(voice, 'km-KH-SreymomNeural');
-    await user.click(within(card).getByRole('button', { name: '保存' }));
-    await waitFor(() => expect(writes(calls)).toHaveLength(1));
-    expect(writes(calls)[0].body).toEqual({ voice: 'km-KH-SreymomNeural' });
-
-    await user.selectOptions(voice, '其他（手填）');
-    const custom = within(card).getByLabelText('配音音色（手填）');
-    await user.type(custom, 'en-US-AriaNeural');
-    await user.click(within(card).getByRole('button', { name: '保存' }));
-    await waitFor(() => expect(writes(calls)).toHaveLength(2));
-    expect(writes(calls)[1].body).toEqual({ voice: 'en-US-AriaNeural' });
-  });
-
-  it('不在常用列表里的音色：直接显示成手填', async () => {
-    installFetch({ ...ROUTES, 'GET /api/projects/demo/characters': [{ ...LIN, voice: 'en-US-AriaNeural' }] });
-    renderAt(<CastStage />, AT);
-    const card = await screen.findByTestId('character-8');
-    expect((within(card).getByLabelText('配音音色（手填）') as HTMLInputElement).value).toBe('en-US-AriaNeural');
-  });
-
-  it('角色定妆照：上传后提交 multipart 并刷新', async () => {
-    const withPortrait = { ...LIN, portrait_candidate_id: 31, portrait_url: '/media/demo/media/portrait/a.png' };
-    let uploaded = false;
-    const calls = installFetch({
+  it('角色卡网格：当前定妆照、名字、音色、状态；页面上没有表单，也没有主按钮', async () => {
+    installFetch({
       ...ROUTES,
-      'GET /api/projects/demo/characters': () => [uploaded ? withPortrait : { ...withPortrait, portrait_candidate_id: null, portrait_url: null }],
-      'POST /api/characters/8/portrait': () => {
-        uploaded = true;
-        return withPortrait;
-      },
+      'GET /api/projects/demo/characters': [
+        { ...LIN, turnaround: { look: '', default_engine: 'h3_image', sheets: [], cells: cells(3) } },
+        { ...LAO, active_jobs: [{ id: 5, type: 'image.portrait', status: 'running' }] },
+      ],
+    });
+    const { container } = renderAt(<CastStage />, AT);
+    const lin = await screen.findByTestId('character-8');
+    expect(screen.queryByRole('heading', { level: 2 })).toBeNull();
+    expect((within(lin).getByRole('img', { name: '林夏 定妆照' }) as HTMLImageElement).getAttribute('src')).toBe('/media/p/lin.png');
+    expect(lin.textContent).toContain('林夏');
+    expect(lin.textContent).toContain('未设音色');
+    expect(lin.textContent).toContain('已定妆');
+    expect(lin.textContent).toContain('三视图 3/7');
+    expect(within(lin).getAllByRole('button').filter((b) => !b.classList.contains('cast-open')).map((b) => b.textContent)).toEqual(['编辑']);
+    const lao = screen.getByTestId('character-9');
+    expect(lao.textContent).toContain('普通话 · 男声 云健（沉稳）');
+    expect(lao.textContent).toContain('缺定妆照');
+    expect(lao.textContent).toContain('生成中');
+    // 资料表单都收在抽屉里
+    expect(screen.queryByLabelText('人物描述')).toBeNull();
+    expect(container.querySelectorAll('.primary')).toHaveLength(0);
+    expect(screen.getByText('1/2 个角色有定妆照')).toBeTruthy();
+  });
+
+  it('最近一次抽卡失败：卡片标「抽卡失败」', async () => {
+    installFetch({
+      ...ROUTES,
+      'GET /api/projects/demo/characters': [
+        LIN,
+        { ...LAO, last_failure: { id: 77, type: 'image.portrait', status: 'failed', error: 'ComfyUI 没开' } },
+      ],
     });
     renderAt(<CastStage />, AT);
-    const user = userEvent.setup();
-    const card = await screen.findByTestId('character-8');
-    expect(within(card).getByText('还没有定妆照')).toBeTruthy();
-    await user.upload(within(card).getByLabelText('上传定妆照'), new File(['png'], 'lin.png', { type: 'image/png' }));
-    const img = (await within(card).findByRole('img', { name: '林夏 定妆照' })) as HTMLImageElement;
-    expect(img.getAttribute('src')).toBe('/media/demo/media/portrait/a.png');
-    expect(writes(calls)[0].url).toBe('/api/characters/8/portrait');
-    const init = vi.mocked(fetch).mock.calls.find(([, i]) => i?.method === 'POST')?.[1];
-    expect(init?.body).toBeInstanceOf(FormData);
+    expect((await screen.findByTestId('character-9')).textContent).toContain('抽卡失败');
   });
 
-  it('场景卡可编辑', async () => {
+  it('缺定妆照的卡：「抽定妆照」按默认 2 张、项目默认引擎提交；它是阶段条下一步要触发的那个', async () => {
+    const calls = installFetch({ ...ROUTES, 'POST /api/characters/9/portraits/draw': { job_ids: [70, 71] } });
+    const { container } = renderAt(<CastStage />, AT);
+    const user = userEvent.setup();
+    const lao = await screen.findByTestId('character-9');
+    const draw = within(lao).getByRole('button', { name: '抽定妆照' });
+    expect(draw.className).toContain('soft');
+    await waitFor(() => expect(draw.hasAttribute('data-next-action')).toBe(true));
+    expect(container.querySelectorAll('[data-next-action]')).toHaveLength(1);
+    await user.click(draw);
+    await waitFor(() => expect(writes(calls)).toHaveLength(1));
+    expect(writes(calls)[0]).toMatchObject({ url: '/api/characters/9/portraits/draw', body: { count: 2 } });
+    // 抽卡不打开抽屉
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('缺定妆照又没有外貌提示词：「抽定妆照」禁用并说明', async () => {
+    installFetch({ ...ROUTES, 'GET /api/projects/demo/characters': [LIN, { ...LAO, visual_prompt: '' }] });
+    renderAt(<CastStage />, AT);
+    const lao = await screen.findByTestId('character-9');
+    expect((within(lao).getByRole('button', { name: '抽定妆照' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(lao.textContent).toContain('先写外貌提示词');
+  });
+
+  it('还没有角色：「按剧本推荐角色」是下一步要触发的那个（次要按钮）', async () => {
+    installFetch({ ...ROUTES, 'GET /api/projects/demo/characters': [] });
+    const { container } = renderAt(<CastStage />, AT);
+    const rec = await screen.findByRole('button', { name: '按剧本推荐角色' });
+    expect(rec.className).toContain('soft');
+    await waitFor(() => expect(rec.hasAttribute('data-next-action')).toBe(true));
+    expect(container.querySelectorAll('.primary')).toHaveLength(0);
+  });
+
+  it('点卡片或「编辑」打开角色抽屉（?char=，不记历史）；关闭去掉 ?char=', async () => {
+    installFetch(ROUTES);
+    renderAt(<CastStage />, AT);
+    const user = userEvent.setup();
+    const lin = await screen.findByTestId('character-8');
+    await user.click(within(lin).getByRole('button', { name: '编辑 林夏' }));
+    const drawer = await screen.findByRole('dialog', { name: '角色 林夏' });
+    expect(where()).toBe('/projects/demo/episodes/4?stage=cast&char=8');
+    await user.click(within(drawer).getByRole('button', { name: '关闭' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(where()).toBe('/projects/demo/episodes/4?stage=cast');
+    await user.click(within(screen.getByTestId('character-9')).getByRole('button', { name: /^打开 老周/ }));
+    expect(await screen.findByRole('dialog', { name: '角色 老周' })).toBeTruthy();
+    expect(where()).toBe('/projects/demo/episodes/4?stage=cast&char=9');
+  });
+
+  it('地址里带 ?char=：直接打开那个角色的抽屉；阶段没在显示时不打开', async () => {
+    installFetch(ROUTES);
+    const { unmount } = renderAt(<CastStage />, { ...AT, route: '/projects/demo/episodes/4?stage=cast&char=9' });
+    expect(await screen.findByRole('dialog', { name: '角色 老周' })).toBeTruthy();
+    unmount();
+    installFetch(ROUTES);
+    renderAt(<CastStage active={false} />, { ...AT, route: '/projects/demo/episodes/4?stage=cast&char=9' });
+    await screen.findByTestId('character-9');
+    expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('「设定」默认收起；展开后场景卡可编辑', async () => {
     const calls = installFetch({ ...ROUTES, 'PATCH /api/locations/3': ROUTES['GET /api/projects/demo/locations'][0] });
     renderAt(<CastStage />, AT);
     const user = userEvent.setup();
-    await user.click(await screen.findByRole('tab', { name: '场景（1）' }));
+    const fold = await screen.findByRole('button', { name: /^设定/ });
+    expect(fold.getAttribute('aria-expanded')).toBe('false');
+    expect(screen.getByTestId('location-3').closest('[hidden]')).toBeTruthy();
+    await user.click(fold);
+    expect(fold.getAttribute('aria-expanded')).toBe('true');
     const loc = screen.getByTestId('location-3');
+    expect(loc.closest('[hidden]')).toBeNull();
+    expect(screen.getByLabelText(/风格锚/).closest('[hidden]')).toBeNull();
     await user.type(within(loc).getByLabelText('氛围'), '，安静');
     await user.click(within(loc).getByRole('button', { name: '保存' }));
     await waitFor(() => expect(writes(calls)).toHaveLength(1));
     expect(writes(calls)[0]).toMatchObject({ url: '/api/locations/3', body: { atmosphere: '压抑，安静' } });
   });
 
-  it('场景或风格改了没保存时换页面先问', async () => {
+  it('收起「设定」不丢正在编辑的内容；场景或风格改了没保存时换页面先问', async () => {
     installFetch(ROUTES);
     const { router } = renderAt(<CastStage />, AT);
     const user = userEvent.setup();
     const leave = () => act(() => void router.navigate('/jobs'));
-    await user.click(await screen.findByRole('tab', { name: '风格' }));
+    const fold = await screen.findByRole('button', { name: /^设定/ });
+    await user.click(fold);
     await user.type(screen.getByLabelText('色板'), '冷色');
+    await user.click(fold);
+    await user.click(fold);
+    expect((screen.getByLabelText('色板') as HTMLInputElement).value).toBe('冷色');
     await leave();
     const dlg = await screen.findByRole('dialog', { name: '有未保存的修改，确定离开？' });
     await user.click(within(dlg).getByRole('button', { name: '留下' }));
-    expect(screen.getByTestId('location').textContent).toBe('/projects/demo/episodes/4?stage=cast');
+    expect(where()).toBe('/projects/demo/episodes/4?stage=cast');
     await user.clear(screen.getByLabelText('色板'));
-    await user.click(screen.getByRole('tab', { name: '场景（1）' }));
     await user.type(within(screen.getByTestId('location-3')).getByLabelText('时间'), '晚');
     await leave();
     expect(await screen.findByRole('dialog', { name: '有未保存的修改，确定离开？' })).toBeTruthy();
   });
-
-  it('地址里带 ?char=：切回角色页签', async () => {
-    installFetch(ROUTES);
-    const { router } = renderAt(<CastStage />, AT);
+  it('按剧本推荐角色：任务完成后列出没建的角色，一键添加', async () => {
+    const result = {
+      characters: [
+        { name: '林夏', description: '', visual_prompt: 'x', core_features: '' },
+        { name: '前台小李', description: '修车厂前台', visual_prompt: 'young clerk', core_features: '工牌' },
+      ],
+    };
+    const calls = installFetch({
+      ...ROUTES,
+      'POST /api/episodes/4/characters/recommend': { job_ids: [90] },
+      'GET /api/jobs/90': makeJob({ id: 90, type: 'character.recommend', status: 'done', result }),
+      'POST /api/projects/demo/characters': { ...LIN, id: 10, name: '前台小李' },
+    });
+    renderAt(<CastStage />, AT);
     const user = userEvent.setup();
-    await screen.findByTestId('character-8');
-    await user.click(screen.getByRole('tab', { name: '风格' }));
-    await act(() => void router.navigate('/projects/demo/episodes/4?stage=cast&char=8'));
-    await waitFor(() => expect(screen.getByRole('tab', { name: /角色/ }).getAttribute('aria-selected')).toBe('true'));
-    expect(screen.getByTestId('character-8').closest('[hidden]')).toBeNull();
+    await user.click(await screen.findByRole('button', { name: '按剧本推荐角色' }));
+    const rec = await screen.findByTestId('recommend-前台小李');
+    expect(screen.queryByTestId('recommend-林夏')).toBeNull(); // 已有的不再列
+    // 任务号记在地址里：刷新或离开再回来还能看到结果
+    expect(where()).toBe('/projects/demo/episodes/4?stage=cast&recommend=90');
+    await user.click(within(rec).getByRole('button', { name: '添加角色' }));
+    await waitFor(() => expect(writes(calls)).toHaveLength(2));
+    expect(writes(calls)[0]).toMatchObject({ url: '/api/episodes/4/characters/recommend', body: { count: 3 } });
+    expect(writes(calls)[1]).toMatchObject({
+      url: '/api/projects/demo/characters',
+      body: { name: '前台小李', description: '修车厂前台', visual_prompt: 'young clerk', core_features: '工牌' },
+    });
   });
 
-  it('下一步是抽定妆照：第一个缺定妆照的出场角色的「抽卡」打上 data-next-action（不是主按钮）；收到下一步事件切回角色页签', async () => {
-    const LAO = { ...LIN, id: 9, name: '老周', portrait_url: null };
+  it('地址里带 ?recommend=<任务号>：直接显示那次推荐的结果', async () => {
     installFetch({
       ...ROUTES,
-      'GET /api/episodes/4': makeEpisode({
-        id: 4,
-        title: '提词器',
-        scene_blocks: [{ id: 1, order: 0, location_id: null, text: 'a' }],
-        shots: [makeShot({ id: 1, cast: [{ character_id: 8, variation_id: null }, { character_id: 9, variation_id: null }] })],
+      'GET /api/jobs/90': makeJob({
+        id: 90, type: 'character.recommend', status: 'done',
+        result: { characters: [{ name: '前台小李', description: '', visual_prompt: 'young clerk', core_features: '' }] },
       }),
-      'GET /api/projects/demo/characters': [{ ...LIN, portrait_url: '/media/p.png' }, LAO],
     });
-    const { container } = renderAt(<CastStage />, AT);
-    const user = userEvent.setup();
-    const lao = await screen.findByTestId('character-9');
-    const draw = within(lao).getByRole('button', { name: '抽卡' });
-    await waitFor(() => expect(draw.hasAttribute('data-next-action')).toBe(true));
-    expect(within(screen.getByTestId('character-8')).getByRole('button', { name: '抽卡' }).hasAttribute('data-next-action')).toBe(false);
-    expect(container.querySelectorAll('[data-next-action]')).toHaveLength(1);
-    expect(container.querySelectorAll('.primary')).toHaveLength(0);
-    await user.click(screen.getByRole('tab', { name: '风格' }));
-    // 下一步在别的阶段：不理
-    act(() => {
-      window.dispatchEvent(new CustomEvent(NEXT_ACTION_EVENT, { detail: { panel: 'script' } }));
-    });
-    expect(screen.getByRole('tab', { name: '风格' }).getAttribute('aria-selected')).toBe('true');
-    act(() => {
-      window.dispatchEvent(new CustomEvent(NEXT_ACTION_EVENT, { detail: { panel: 'cast' } }));
-    });
-    expect(screen.getByRole('tab', { name: /角色/ }).getAttribute('aria-selected')).toBe('true');
+    renderAt(<CastStage />, { ...AT, route: '/projects/demo/episodes/4?stage=cast&recommend=90' });
+    expect(await screen.findByTestId('recommend-前台小李')).toBeTruthy();
   });
 });

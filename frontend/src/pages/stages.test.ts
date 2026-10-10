@@ -62,13 +62,13 @@ describe('episodeStages', () => {
     expect(s.script).toMatchObject({ state: 'done', detail: '2 段 · 1 镜' });
     // 角色 3 没出场，不算
     expect(s.cast).toMatchObject({ state: 'active', detail: '1/2' });
-    expect(r.next).toEqual({ label: '抽定妆照（1 个角色缺定妆照）', stage: 'cast', action: 'run', count: 1, stale: false });
+    expect(r.next).toEqual({ label: '抽定妆照（1 个角色缺）', stage: 'cast', action: 'run', count: 1, stale: false });
   });
 
-  it('剧本完成但项目里没有角色：下一步添加角色', () => {
+  it('剧本完成但项目里没有角色：下一步按剧本推荐角色', () => {
     const ep = makeEpisode({ id: 4, scene_blocks: BLOCKS, shots: [shot(1, 'none', 'none', [])] });
     const r = episodeStages(ep, [], []);
-    expect(r.next).toEqual({ label: '添加角色', stage: 'cast', action: 'run', count: 0, stale: false });
+    expect(r.next).toEqual({ label: '按剧本推荐角色', stage: 'cast', action: 'run', count: 0, stale: false });
   });
 
   it('有镜头没首帧：下一步在首帧阶段生成缺的首帧', () => {

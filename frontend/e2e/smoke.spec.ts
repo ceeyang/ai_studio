@@ -50,10 +50,15 @@ test('新建项目 → 单集工作台：剧本 → 分镜 → 首帧阶段（ma
   await expect(page.getByRole('heading', { name: '第 1 集 提词器', level: 2 })).toBeVisible();
   const next = page.getByRole('button', { name: '下一步：生成分镜' });
   await expect(next).toBeVisible();
-  // 剧本跑完后角色在左栏：点了切到角色阶段
+  // 剧本跑完后角色在左栏：点了切到角色阶段、打开角色抽屉；关掉抽屉回到角色卡网格
   await page.getByRole('complementary', { name: '剧本大纲与角色' }).getByRole('button', { name: /^林夏/ }).click();
   await expect(page).toHaveURL(/\?stage=cast&char=\d+$/);
-  await expect(page.getByRole('heading', { name: '林夏', level: 4 })).toBeVisible();
+  const charDrawer = page.getByRole('dialog', { name: '角色 林夏' });
+  await expect(charDrawer).toBeVisible();
+  await charDrawer.getByRole('button', { name: '关闭' }).click();
+  await expect(charDrawer).toBeHidden();
+  await expect(page).toHaveURL(/\?stage=cast$/);
+  await expect(page.getByRole('button', { name: /^打开 林夏/ })).toBeVisible();
   // 阶段条切回剧本，「下一步」就在本阶段：点它直接触发生成分镜
   await stage(page, /剧本/).click();
   await next.click();

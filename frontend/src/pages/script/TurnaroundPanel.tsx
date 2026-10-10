@@ -1,7 +1,7 @@
 // 角色三视图：按通行的角色设定图做——全身 4 视角（正面 / 3/4 / 侧面 / 背面）一张图一起出，
 // 头像 3 视角（正脸 / 3/4 / 侧脸）一张图；默认 H3 + 定妆照锁脸。选定的设定图自动切成单个视角，
 // 出场镜头的首帧和视频按景别 / 机位带上最匹配的一格。
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { errorText } from '../../api/client';
 import {
@@ -150,7 +150,16 @@ function SheetBlock({
   );
 }
 
-export function TurnaroundPanel({ c, slug }: { c: Character; slug: string }) {
+export function TurnaroundPanel({
+  c,
+  slug,
+  onDirtyChange,
+}: {
+  c: Character;
+  slug: string;
+  /** 全身描述有没保存的修改变化时通知（角色抽屉关闭前要问） */
+  onDirtyChange?: (dirty: boolean) => void;
+}) {
   const lookJob = useTurnaroundLook(slug);
   const patchLook = usePatchTurnaroundLook(slug);
   const gen = useGenerateTurnaround(slug);
@@ -163,7 +172,13 @@ export function TurnaroundPanel({ c, slug }: { c: Character; slug: string }) {
   const [engine, setEngine] = useState('');
   const job = useJob(lookJobId);
   // 全身描述改了没保存：换页面先问（和其他编辑框一样走全局拦截）
-  useUnsavedGuard(!!t && look.trim() !== t.look.trim());
+  const lookDirty = !!t && look.trim() !== t.look.trim();
+  useUnsavedGuard(lookDirty);
+  const dirtyCb = useRef(onDirtyChange);
+  dirtyCb.current = onDirtyChange;
+  useEffect(() => {
+    dirtyCb.current?.(lookDirty);
+  }, [lookDirty]);
   if (!t) return null;
   const eng = engine || undefined;
 

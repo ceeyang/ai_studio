@@ -15,7 +15,7 @@ export function RecommendPanel({
   slug: string;
   episodeId: number;
   existing: Character[];
-  /** 还没有角色、页头的下一步是「添加角色」：推荐按钮是本页唯一的主按钮 */
+  /** 还没有角色、阶段条的下一步是「按剧本推荐角色」：推荐按钮打上 data-next-action（样式仍是次要按钮） */
   isNext?: boolean;
 }) {
   const recommend = useRecommendCharacters(episodeId);
@@ -44,6 +44,7 @@ export function RecommendPanel({
       <div className="row">
         <button
           type="button"
+          className="soft"
           {...nextActionProps(isNext)}
           disabled={running}
           onClick={() => recommend.mutate(3, { onSuccess: (r) => setJobId(r.job_ids[0]) })}
