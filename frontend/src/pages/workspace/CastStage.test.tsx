@@ -163,8 +163,13 @@ describe('CastStage', () => {
     expect(container.querySelectorAll('[data-next-action]')).toHaveLength(1);
     expect(container.querySelectorAll('.primary')).toHaveLength(0);
     await user.click(screen.getByRole('tab', { name: '风格' }));
+    // 下一步在别的阶段：不理
     act(() => {
-      window.dispatchEvent(new Event(NEXT_ACTION_EVENT));
+      window.dispatchEvent(new CustomEvent(NEXT_ACTION_EVENT, { detail: { panel: 'script' } }));
+    });
+    expect(screen.getByRole('tab', { name: '风格' }).getAttribute('aria-selected')).toBe('true');
+    act(() => {
+      window.dispatchEvent(new CustomEvent(NEXT_ACTION_EVENT, { detail: { panel: 'cast' } }));
     });
     expect(screen.getByRole('tab', { name: /角色/ }).getAttribute('aria-selected')).toBe('true');
   });

@@ -28,7 +28,12 @@ const PANEL_OF: Record<StageKey, PanelKey> = {
   export: 'export',
 };
 
-const PANELS: { key: PanelKey; label: string; Component: ComponentType }[] = [
+/** 阶段内容：active = 当前显示的是它（藏起来时不要留抽屉之类的浮层） */
+export interface StagePanelProps {
+  active: boolean;
+}
+
+const PANELS: { key: PanelKey; label: string; Component: ComponentType<StagePanelProps> }[] = [
   { key: 'script', label: '剧本', Component: ScriptStage },
   { key: 'cast', label: '角色', Component: CastStage },
   { key: 'director', label: '首帧与视频', Component: DirectorStage },
@@ -85,9 +90,11 @@ function Workspace({ slug, id }: { slug: string; id: number }) {
   if (ep.isLoading) return <p className="loading">加载中…</p>;
   if (ep.error || !ep.data || !progress) return <EpisodeLoadError slug={slug} error={ep.error} />;
 
-  // 切阶段（可以顺带设别的参数）；地址没变就不再记一条历史
+  // 切阶段（可以顺带设别的参数）；离开首帧 / 视频去掉 shot（抽屉关掉），离开角色去掉 char；地址没变就不再记一条历史
   const select = (s: StageKey, extra?: Record<string, string>) => {
     const next = new URLSearchParams(stageSearch(params.toString(), s));
+    if (PANEL_OF[s] !== 'director') next.delete('shot');
+    if (s !== 'cast') next.delete('char');
     for (const [k, v] of Object.entries(extra ?? {})) next.set(k, v);
     if (next.toString() !== params.toString()) setParams(next);
   };
@@ -122,7 +129,7 @@ function Workspace({ slug, id }: { slug: string; id: number }) {
         <div className="ws-main">
           {PANELS.filter((p) => mounted.has(p.key)).map(({ key, label, Component }) => (
             <section key={key} className="ws-panel" data-stage-panel={key} aria-label={label} hidden={key !== panel}>
-              <Component />
+              <Component active={key === panel} />
             </section>
           ))}
         </div>

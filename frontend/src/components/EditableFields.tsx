@@ -200,7 +200,7 @@ export function EditableFields({
         ];
       })}
       <div className="row">
-        <button type="submit" className={dirty && valid ? 'primary' : undefined} disabled={!dirty || !valid || saving}>
+        <button type="submit" className={dirty && valid ? 'soft' : undefined} disabled={!dirty || !valid || saving}>
           {saving ? '保存中…' : saveLabel}
         </button>
         {dirty && <span className="muted">有未保存的修改</span>}

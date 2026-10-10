@@ -5,7 +5,7 @@ import { useParams, useSearchParams } from 'react-router-dom';
 import { errorText } from '../../api/client';
 import { useCharacters, useEpisode, useLocations, usePatchLocation, usePutStyle, useStyle } from '../../api/queries';
 import type { LocationPatch, Style } from '../../api/types';
-import { EpisodeLoadError, NEXT_ACTION_EVENT, useNextAction } from '../../components/EpisodeHeader';
+import { EpisodeLoadError, NEXT_ACTION_EVENT, isNextActionFor, useNextAction } from '../../components/EpisodeHeader';
 import { castOf, hasPortrait } from '../stages';
 import { EditableFields, type FieldSpec, type FieldValues, useUnsavedGuard } from '../../components/EditableFields';
 import { CharacterCard } from '../script/CharacterCard';
@@ -64,7 +64,10 @@ export function CastStage() {
   // 下一步是抽定妆照 / 添加角色时：点阶段条的「下一步」先切回角色页签，好让它触发那个按钮
   const nextAct = useNextAction(slug, ep.data, ['cast']);
   useEffect(() => {
-    const onNext = () => setTab('chars');
+    // 只理发给角色阶段的（下一步在别的阶段时不切页签）
+    const onNext = (ev: Event) => {
+      if (isNextActionFor(ev, 'cast')) setTab('chars');
+    };
     window.addEventListener(NEXT_ACTION_EVENT, onNext);
     return () => window.removeEventListener(NEXT_ACTION_EVENT, onNext);
   }, []);

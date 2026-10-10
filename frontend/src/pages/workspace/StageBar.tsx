@@ -1,5 +1,5 @@
 // 单集工作台的阶段条：五段（剧本 / 角色 / 首帧 / 视频 / 成片）每段可点切换主区，右边是全页唯一的主按钮「下一步」。
-import { NEXT_ACTION_EVENT } from '../../components/EpisodeHeader';
+import { NEXT_ACTION_EVENT, type NextActionDetail } from '../../components/EpisodeHeader';
 import { type NextStep, STAGE_STATE_TEXT, type Stage, type StageKey } from '../stages';
 
 const STATE_MARK: Record<Stage['state'], string> = { done: '✓', active: '', todo: '', stale: '!' };
@@ -18,7 +18,7 @@ interface StageBarProps {
  * 下一帧滚过去、聚焦；按钮可用就点它，禁用就只聚焦（旁边的提示会说为什么）。
  */
 export function triggerNextAction(panel: string) {
-  window.dispatchEvent(new Event(NEXT_ACTION_EVENT));
+  window.dispatchEvent(new CustomEvent<NextActionDetail>(NEXT_ACTION_EVENT, { detail: { panel } }));
   window.setTimeout(() => {
     const el = document.querySelector<HTMLElement>(`[data-stage-panel="${panel}"] [data-next-action]`);
     if (!el) return;

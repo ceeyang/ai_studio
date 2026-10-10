@@ -72,7 +72,7 @@ export function RecommendPanel({
                 <strong>{r.name}</strong>
                 <button
                   type="button"
-                  className="primary"
+                  className="soft"
                   disabled={create.isPending}
                   onClick={() =>
                     create.mutate({

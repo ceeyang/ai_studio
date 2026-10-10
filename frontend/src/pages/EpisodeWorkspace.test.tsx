@@ -178,6 +178,74 @@ describe('EpisodeWorkspace', () => {
     await waitFor(() => expect(where()).toBe(`/projects/demo/episodes/4?stage=${stage}`));
   });
 
+  it('离开首帧 / 视频阶段时去掉 ?shot=，镜头抽屉随之关掉（藏起来的阶段里不留抽屉和它的 Esc 监听）；离开角色阶段去掉 ?char=', async () => {
+    installFetch(routes());
+    renderRoute('/projects/demo/episodes/4?stage=keyframes&shot=12');
+    const user = userEvent.setup();
+    expect(await screen.findByRole('dialog', { name: '镜头 S02 详情' })).toBeTruthy();
+    // 首帧 → 视频：同一块内容，抽屉保留
+    await user.click(within(stageBar()).getByRole('button', { name: /视频/ }));
+    expect(where()).toBe('/projects/demo/episodes/4?stage=videos&shot=12');
+    expect(screen.getByRole('dialog', { name: '镜头 S02 详情' })).toBeTruthy();
+    await user.click(within(stageBar()).getByRole('button', { name: /剧本/ }));
+    expect(where()).toBe('/projects/demo/episodes/4?stage=script');
+    expect(document.querySelector('[role="dialog"]')).toBeNull();
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('dialog')).toBeNull();
+    // 角色
+    const rail = screen.getByRole('complementary', { name: '剧本大纲与角色' });
+    await user.click(await within(rail).findByRole('button', { name: /^老周/ }));
+    expect(where()).toBe('/projects/demo/episodes/4?stage=cast&char=9');
+    await user.click(within(stageBar()).getByRole('button', { name: /成片/ }));
+    expect(where()).toBe('/projects/demo/episodes/4?stage=export');
+  });
+
+  it('下一步事件只发给当前阶段那块内容：下一步在剧本阶段时，藏着的角色阶段不切页签', async () => {
+    const noShots = { ...EP, shots: [] };
+    installFetch(
+      routes({ 'GET /api/episodes/4': noShots, 'POST /api/episodes/4/run': { job_ids: [9] }, 'GET /api/jobs/9': { id: 9, status: 'running' } }),
+    );
+    renderRoute('/projects/demo/episodes/4?stage=cast');
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('tab', { name: '风格' }));
+    await user.click(within(stageBar()).getByRole('button', { name: /剧本/ }));
+    await user.click(await screen.findByRole('button', { name: '下一步：生成分镜' }));
+    await waitFor(() => expect(document.querySelector('[data-stage-panel="cast"] [role="tab"][aria-selected="true"]')?.textContent).toBe('风格'));
+  });
+
+  it('角色阶段（三视图、推荐角色、造型方案都在）和成片阶段（片尾卡改了没保存）里，看得见的主按钮都只有阶段条的「下一步」', async () => {
+    const visiblePrimaries = () =>
+      Array.from(document.querySelectorAll('.primary')).filter((el) => !el.closest('[hidden]'));
+    const turnaround = { look: 'full body', default_engine: 'h3_image', sheets: [], cells: [] };
+    const opts = [{ label: '老练款', visual_prompt: 'buzz cut', core_features: '寸头' }];
+    installFetch(
+      routes({
+        'GET /api/projects/demo/characters': [
+          { ...CHARS[0], turnaround, design_options: opts, portraits: [], active_jobs: [] },
+          { ...CHARS[1], turnaround, design_options: opts, portraits: [], active_jobs: [] },
+        ],
+        'GET /api/jobs/90': {
+          id: 90, type: 'character.recommend', status: 'done',
+          result: { characters: [{ name: '前台小李', description: '', visual_prompt: 'young clerk', core_features: '' }] },
+        },
+        'GET /api/projects/demo/end-card': { seconds: 3, background: '#000000', lines: [{ text: '片尾', font: 'Khmer UI', size: 60, bold: false }] },
+      }),
+    );
+    renderRoute('/projects/demo/episodes/4?stage=cast&recommend=90');
+    const user = userEvent.setup();
+    expect(await screen.findByTestId('recommend-前台小李')).toBeTruthy();
+    await waitFor(() => expect(screen.getAllByRole('region', { name: /的三视图/ })).toHaveLength(2));
+    expect(screen.getAllByRole('button', { name: '用这个提示词抽卡' }).length).toBeGreaterThan(0);
+    await waitFor(() => expect(visiblePrimaries().map((el) => el.textContent)).toEqual(['下一步：抽定妆照（1 个角色缺定妆照）']));
+
+    await user.click(within(stageBar()).getByRole('button', { name: /成片/ }));
+    await user.click(await screen.findByLabelText('片尾卡'));
+    const line = await screen.findByLabelText('第 1 行文字');
+    await user.type(line, '！');
+    expect(visiblePrimaries()).toHaveLength(1);
+    expect(visiblePrimaries()[0].classList.contains('stage-next')).toBe(true);
+  });
+
   it('只有 ?shot= 没有 stage：停在首帧阶段', async () => {
     installFetch(routes());
     renderRoute('/projects/demo/episodes/4?shot=11');

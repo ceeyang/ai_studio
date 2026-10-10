@@ -5,7 +5,7 @@ import { api } from '../api/client';
 import { keys } from '../api/queries';
 import type { Job } from '../api/types';
 import { jobTypeLabel } from '../format';
-import { toWorkspaceUrl } from '../pages/workspace/urls';
+import { isSameTarget, jobUrl } from '../pages/workspace/urls';
 import { subscribeJobSettled } from '../ws/events';
 
 interface Toast {
@@ -26,8 +26,8 @@ const TOAST_MS = 8000;
 export function Toasts() {
   const qc = useQueryClient();
   const loc = useLocation();
-  const here = useRef('');
-  here.current = loc.pathname + loc.search;
+  const here = useRef({ pathname: '', search: '' });
+  here.current = { pathname: loc.pathname, search: loc.search };
   const [toasts, setToasts] = useState<Toast[]>([]);
   const seen = useRef(new Set<string>());
   const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
@@ -53,10 +53,11 @@ export function Toasts() {
         .then((job) => {
           if (!alive) return;
           const ctx = job.context ?? null;
-          // 后端给的是旧的剧集页面地址（/director?shot= 等）：换成单集工作台的地址再比、再链
-          const url = ctx?.url ? toWorkspaceUrl(ctx.url) : null;
+          // 后端给的是旧的剧集页面地址：按任务类型换成单集工作台对应阶段（带 shot / char）再链；
+          // 已经在那一处（路径 + 阶段 + 镜头 / 角色一致）就不弹
+          const url = jobUrl(job);
           const to = url ?? `/jobs?job=${ev.id}`;
-          if (url && url === here.current) return;
+          if (url && isSameTarget(url, here.current.pathname, here.current.search)) return;
           const ok = ev.status === 'done';
           const text = `${ctx?.label ? `${ctx.label} ` : ''}${jobTypeLabel(ev.type)}${ok ? '完成' : '失败'}`;
           setToasts((list) => [...list, { key, ok, text, to }].slice(-MAX_TOASTS));

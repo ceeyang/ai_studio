@@ -38,13 +38,33 @@ describe('Toasts', () => {
       'GET /api/jobs/4': { ...makeJob({ id: 4, type: 'video.shot', status: 'failed' }), context: CTX(4, '/projects/demo/episodes/1/director') },
       'GET /api/jobs/5': { ...makeJob({ id: 5, type: 'video.shot', status: 'failed' }), context: CTX(5, '/elsewhere') },
     });
-    renderAt(<Toasts />, { route: '/projects/demo/episodes/1?stage=keyframes' });
+    // 参数顺序不同也算同一处
+    renderAt(<Toasts />, { route: '/projects/demo/episodes/1?shot=4&stage=videos' });
     act(() => {
       emitJobSettled(makeJob({ id: 4, type: 'video.shot', status: 'failed' }));
       emitJobSettled(makeJob({ id: 5, type: 'video.shot', status: 'failed' }));
     });
     expect(await screen.findByText(/S05 视频失败/)).toBeTruthy();
     expect(screen.queryByText(/S04/)).toBeNull();
+  });
+
+  it('按任务类型选阶段：在首帧阶段看着这一镜时，它的视频任务照样提示并链到视频阶段；角色任务链到角色阶段并带 char', async () => {
+    installFetch({
+      'GET /api/jobs/6': { ...makeJob({ id: 6, type: 'video.shot', status: 'done' }), context: CTX(6, '/projects/demo/episodes/1/director?shot=6') },
+      'GET /api/jobs/7': {
+        ...makeJob({ id: 7, type: 'image.portrait', status: 'done' }),
+        context: { label: '林夏', url: '/projects/demo/episodes/1/cast', project_slug: 'demo', episode_id: 1, shot_id: null, character_id: 8 },
+      },
+    });
+    renderAt(<Toasts />, { route: '/projects/demo/episodes/1?stage=keyframes&shot=6' });
+    act(() => {
+      emitJobSettled(makeJob({ id: 6, type: 'video.shot', status: 'done' }));
+      emitJobSettled(makeJob({ id: 7, type: 'image.portrait', status: 'done' }));
+    });
+    const vid = (await screen.findByText(/S06 视频完成/)).closest('[data-testid="toast"]') as HTMLElement;
+    expect(within(vid).getByRole('link', { name: '查看' }).getAttribute('href')).toBe('/projects/demo/episodes/1?stage=videos&shot=6');
+    const por = (await screen.findByText(/林夏 定妆照完成/)).closest('[data-testid="toast"]') as HTMLElement;
+    expect(within(por).getByRole('link', { name: '查看' }).getAttribute('href')).toBe('/projects/demo/episodes/1?stage=cast&char=8');
   });
 
   it('最多同时显示 3 条，新的挤掉旧的', async () => {

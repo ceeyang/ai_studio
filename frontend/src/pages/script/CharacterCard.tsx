@@ -179,7 +179,7 @@ function OptionCard({
       {opt.core_features && <p className="option-features">{opt.core_features}</p>}
       <textarea rows={7} aria-label={`${opt.label} 提示词`} value={text} onChange={(e) => setText(e.target.value)} />
       <div className="row">
-        <button type="button" className="primary" disabled={busy || !text.trim()} onClick={() => onDraw(text.trim())}>
+        <button type="button" className="soft" disabled={busy || !text.trim()} onClick={() => onDraw(text.trim())}>
           用这个提示词抽卡
         </button>
         <button type="button" disabled={busy || !text.trim()} onClick={() => onSetPrompt(text.trim())}>

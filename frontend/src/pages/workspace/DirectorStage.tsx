@@ -61,7 +61,7 @@ function mergeParts(list: EstimatePart[]): EstimatePart[] {
   return out;
 }
 
-export function DirectorStage() {
+export function DirectorStage({ active = true }: { active?: boolean }) {
   const { slug = '', episodeId = '' } = useParams();
   const id = Number(episodeId);
   const [params, setParams] = useSearchParams();
@@ -287,7 +287,7 @@ export function DirectorStage() {
           去成片（{withVideo}/{shots.length} 镜有视频）
         </Link>
       </div>
-      {!openShot && notice.view}
+      {!(openShot && active) && notice.view}
 
       <div className="director-body">
         {shots.length === 0 ? (
@@ -316,7 +316,7 @@ export function DirectorStage() {
         )}
       </div>
 
-      {openShot && (
+      {openShot && active && (
         <ShotDrawer
           key={openShot.id}
           shot={openShot}

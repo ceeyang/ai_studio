@@ -92,7 +92,7 @@ export function EndCardPanel({ slug }: { slug: string }) {
         <button type="button" className="ghost" onClick={() => setCard((c) => ({ ...c, lines: [...c.lines, { ...NEW_LINE }] }))}>
           加一行
         </button>
-        <button type="submit" className={dirty ? 'primary' : undefined} disabled={!dirty || put.isPending}>
+        <button type="submit" className={dirty ? 'soft' : undefined} disabled={!dirty || put.isPending}>
           {put.isPending ? '保存中…' : '保存片尾卡'}
         </button>
         {dirty && <span className="muted">有未保存的修改</span>}

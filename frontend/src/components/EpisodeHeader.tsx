@@ -18,10 +18,19 @@ interface EpisodeHeaderProps {
 }
 
 /**
- * 阶段条的「下一步」就在当前阶段时，点它会先发这个事件（阶段内容可以先切到对应页签），
- * 再触发当前阶段里标了 data-next-action 的动作按钮。
+ * 阶段条的「下一步」就在当前阶段时，点它会先发这个事件（CustomEvent，detail.panel 是要触发的那块阶段内容），
+ * 对应的阶段内容可以先切到对应页签；然后再触发它里面标了 data-next-action 的动作按钮。
  */
 export const NEXT_ACTION_EVENT = 'studio:next-action';
+
+export interface NextActionDetail {
+  panel: string;
+}
+
+/** 这个下一步事件是不是发给这块阶段内容的 */
+export function isNextActionFor(ev: Event, panel: string): boolean {
+  return (ev as CustomEvent<NextActionDetail>).detail?.panel === panel;
+}
 
 /** 一集的五段进度和下一步（阶段条和各阶段共用缓存）。ep 还没加载时为空。 */
 export function useEpisodeProgress(slug: string, ep: EpisodeDetail | undefined): { stages: Stage[]; next: NextStep | null } {

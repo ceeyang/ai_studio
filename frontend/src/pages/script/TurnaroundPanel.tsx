@@ -215,7 +215,7 @@ export function TurnaroundPanel({ c, slug }: { c: Character; slug: string }) {
           <ImageEngineSelect value={engine} onChange={setEngine} defaultLabel={`默认（${t.default_engine}）`} ariaLabel="三视图引擎" />
           <button
             type="button"
-            className="primary"
+            className="soft"
             disabled={busy || !canGenerate || allRunning}
             onClick={() => generate(running > 0 ? idleSheets : undefined)}
           >
