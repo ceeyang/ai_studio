@@ -1,14 +1,27 @@
 """触发阶段：把"跑某个阶段"拆成任务。"""
 from __future__ import annotations
 
+from typing import Literal
+
 from fastapi import APIRouter, Request
 
 from backend.app.deps import get_or_404, manager, services
-from backend.app.schemas import FitKhmerIn, RunIn, RunOut, TranslateIn
+from backend.app.schemas import FitKhmerIn, RerunImpact, RunIn, RunOut, TranslateIn
 from backend.domain.models import Episode
+from backend.pipeline.impact import rerun_impact
 from backend.pipeline.runs import FIT_STAGE, STAGES, RunOptions, submit_chain
 
 router = APIRouter(prefix="/api", tags=["runs"])
+
+
+@router.get("/episodes/{episode_id}/rerun-impact", response_model=RerunImpact)
+def get_rerun_impact(episode_id: int, stage: Literal["script", "storyboard"], request: Request,
+                     force: bool = False):
+    """现在跑这个阶段会不会动、会删什么——给前端跑之前弹确认用，不调用 LLM。"""
+    sv = services(request)
+    with sv.db.session() as s:
+        get_or_404(s, Episode, episode_id, "剧集")
+        return rerun_impact(s, sv, episode_id, stage, force)
 
 
 @router.post("/episodes/{episode_id}/run", response_model=RunOut)

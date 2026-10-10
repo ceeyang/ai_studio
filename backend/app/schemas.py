@@ -376,6 +376,17 @@ class RunOut(BaseModel):
     job_ids: list[int]
 
 
+class RerunImpact(BaseModel):
+    stage: str                 # script / storyboard
+    will_run: bool             # False = 输入没变、没勾强制，会整体跳过
+    blocks: list[int]          # 会重跑的段落序号（从 1 开始）
+    shots_deleted: int         # 会被删掉的镜头数（只算 origin=llm）
+    selected_first_frames: int  # 其中有选定首帧的
+    selected_videos: int       # 其中有选定视频的
+    manual_kept: int           # 手工镜头数（保留）
+    overwrites: list[str]      # script 阶段会覆盖的东西，如 ["角色描述", "场景氛围"]
+
+
 class CandidatePatch(BaseModel):
     note: str | None = None
     rating: int | None = Field(None, ge=0, le=5)

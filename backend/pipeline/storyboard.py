@@ -40,6 +40,18 @@ def _last_action(db, block_id: int) -> str:
         return sh.action if sh else ""
 
 
+def storyboard_prompt_fp(prompts, anchor, characters, location, text, count, shot_seconds,
+                         max_seconds, prev_action) -> tuple[str, str, str]:
+    """某段落这次会用到的分镜提示词及其输入指纹（不调用 LLM）。
+
+    分镜阶段决定跳过还是重跑、重跑影响预估决定会不会动这一段，都走这一个函数，避免两边判断走偏。
+    """
+    system, user = prompts.render(
+        "storyboard", anchor=anchor, characters=characters, location=location, text=text,
+        count=count, shot_seconds=shot_seconds, max_seconds=max_seconds, prev_action=prev_action)
+    return system, user, input_hash("storyboard", system, user)
+
+
 @HANDLERS.register("storyboard")
 def run_storyboard(ctx, payload: dict) -> dict:
     sv = ctx.services
@@ -77,11 +89,9 @@ def run_storyboard(ctx, payload: dict) -> dict:
             continue
         ctx.check_canceled()
         n = blk["count"]
-        system, user = prompts.render(
-            "storyboard", anchor=anchor, characters=characters, location=blk["location"],
-            text=blk["text"], count=n, shot_seconds=shot_seconds, max_seconds=max_seconds,
-            prev_action=prev_action)
-        fp = input_hash("storyboard", system, user)
+        system, user, fp = storyboard_prompt_fp(prompts, anchor, characters, blk["location"],
+                                               blk["text"], n, shot_seconds, max_seconds,
+                                               prev_action)
         key = f"storyboard:{blk['id']}"
         with sv.db.session() as s:
             ep = s.get(Episode, episode_id)
@@ -104,9 +114,10 @@ def run_storyboard(ctx, payload: dict) -> dict:
         out = sv.llm.generate("storyboard", system, user, StoryboardOut, check=check,
                               log=ctx.log, manual=manual, key=key)
         with sv.db.session() as s:
-            gone = s.scalars(select(Shot.id).where(Shot.scene_block_id == blk["id"])).all()
+            gone = s.scalars(select(Shot.id).where(Shot.scene_block_id == blk["id"],
+                                                   Shot.origin == "llm")).all()
             delete_slots(s, "shot", gone)
-            s.execute(delete(Shot).where(Shot.scene_block_id == blk["id"]))
+            s.execute(delete(Shot).where(Shot.scene_block_id == blk["id"], Shot.origin == "llm"))
             trimmed = 0
             for j, sh in enumerate(out.shots):
                 dur = min(sh.duration, max_seconds)
@@ -138,7 +149,8 @@ def run_storyboard(ctx, payload: dict) -> dict:
         ep = s.get(Episode, episode_id)
         if done:
             if not only:
-                orphan = (Shot.episode_id == episode_id, Shot.scene_block_id.is_(None))
+                orphan = (Shot.episode_id == episode_id, Shot.scene_block_id.is_(None),
+                         Shot.origin == "llm")
                 delete_slots(s, "shot", s.scalars(select(Shot.id).where(*orphan)).all())
                 s.execute(delete(Shot).where(*orphan))
             block_order = {b.id: b.order for b in ep.scene_blocks}

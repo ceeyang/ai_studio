@@ -51,6 +51,18 @@ def test_delete_and_reorder(api):
     assert api.post(f"/api/episodes/{ep_id}/shots/reorder", json={"shot_ids": [ids[2]]}).status_code == 400
 
 
+def test_create_shot_is_manual_origin_and_split_copies_it(api):
+    ep_id, ids = seed(api)
+    manual = api.post(f"/api/episodes/{ep_id}/shots", json={"action": "手工加的"}).json()
+    with api.app.state.services.db.session() as s:
+        assert s.get(Shot, manual["id"]).origin == "manual"
+        assert s.get(Shot, ids[0]).origin == "llm"  # 分镜产的镜头默认是 llm
+    a, b = api.post(f"/api/shots/{manual['id']}/split").json()
+    with api.app.state.services.db.session() as s:
+        assert s.get(Shot, a["id"]).origin == "manual"
+        assert s.get(Shot, b["id"]).origin == "manual"
+
+
 def test_split_moves_later_dialogue(api):
     ep_id, ids = seed(api)
     a, b = api.post(f"/api/shots/{ids[0]}/split").json()

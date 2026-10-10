@@ -1,7 +1,7 @@
 import pytest
 from sqlalchemy import select
 
-from backend.domain.models import Character, Episode, Location, Project, SceneBlock, StyleBible
+from backend.domain.models import Character, Episode, Location, Project, SceneBlock, Shot, StyleBible
 from backend.llm.base import LLMError
 from backend.pipeline.storyboard import allocate_shots, run_storyboard, shot_budget
 from backend.queue.errors import JobError
@@ -170,3 +170,23 @@ def test_restoryboard_drops_slots_of_removed_shots(tmp_path, db):
         assert all(slots_for(s, "shot", i) == [] for i in ids)
         assert s.scalar(select(func.count()).select_from(Slot)) == 0
         assert s.scalar(select(func.count()).select_from(Candidate)) == 0
+
+
+def test_manual_shot_survives_full_rerun(tmp_path, db):
+    """手工加的镜头没有 scene_block_id，分镜孤儿清理不能把它当成废弹误删。"""
+    ctx, ep_id, _ = setup(tmp_path, db, [shots_json(2), shots_json(2),
+                                         shots_json(2), shots_json(2)])
+    run_storyboard(ctx, {"episode_id": ep_id})
+    with db.session() as s:
+        manual = Shot(episode_id=ep_id, order=999, action="手工加的", origin="manual")
+        s.add(manual)
+        s.flush()
+        manual_id = manual.id
+    run_storyboard(ctx, {"episode_id": ep_id, "force": True})
+    with db.session() as s:
+        shots = s.get(Episode, ep_id).shots
+        ids = [x.id for x in shots]
+        assert manual_id in ids
+        kept = next(x for x in shots if x.id == manual_id)
+        assert kept.action == "手工加的" and kept.scene_block_id is None
+        assert sum(1 for x in shots if x.origin == "llm") == 4

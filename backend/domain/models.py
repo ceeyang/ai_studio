@@ -157,6 +157,8 @@ class Shot(Base):
     use_end_frame: Mapped[bool] = mapped_column(Boolean, default=False)
     continue_from_prev: Mapped[bool] = mapped_column(Boolean, default=False)
     transition_out: Mapped[str] = mapped_column(String(32), default="hard_cut")
+    # llm：分镜生成的，重跑会被替换/清理；manual：用户手工加的，重跑分镜时要保留
+    origin: Mapped[str] = mapped_column(String(16), default="llm")
 
 
 class Slot(Base):

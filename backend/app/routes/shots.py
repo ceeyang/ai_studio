@@ -14,7 +14,7 @@ router = APIRouter(prefix="/api", tags=["shots"])
 
 COPY_FIELDS = ("scene_block_id", "shot_size", "camera_move", "action", "cast", "props",
                "image_prompt", "motion_prompt", "audio_prompt", "image_engine", "video_engine",
-               "use_end_frame", "continue_from_prev")
+               "use_end_frame", "continue_from_prev", "origin")
 
 
 def _detail(s, sv, shot: Shot) -> ShotDetail:
@@ -43,7 +43,7 @@ def create_shot(episode_id: int, body: ShotIn, request: Request):
         ids = _order_ids(s, episode_id)
         if body.after_shot_id is not None and body.after_shot_id not in ids:
             raise LookupError(f"这一集没有镜头 {body.after_shot_id}")
-        shot = Shot(episode_id=episode_id, order=len(ids), **fields)
+        shot = Shot(episode_id=episode_id, order=len(ids), origin="manual", **fields)
         s.add(shot)
         s.flush()
         pos = ids.index(body.after_shot_id) + 1 if body.after_shot_id is not None else len(ids)
