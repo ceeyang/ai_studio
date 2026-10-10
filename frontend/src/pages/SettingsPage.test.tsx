@@ -78,6 +78,10 @@ describe('SettingsPage', () => {
     expect(steps.textContent).toContain('加载已解压的扩展程序');
     expect(steps.textContent).toContain('chrome://extensions');
     expect(screen.getByTestId('extension-dir').textContent).toBe('D:\works\ai_studio\browser-extension');
+    // 扩展连的是这个页面所在的地址（不写死 8700）
+    expect(steps.textContent).toContain(`studio（${window.location.host}）`);
+    // 引擎 id 不当主文案
+    expect(screen.getByTestId('extension-status').textContent).toContain('ChatGPT 网页 / Gemini 网页出图会失败');
     expect(screen.queryByRole('button', { name: '在浏览器里打开 ChatGPT / Gemini' })).toBeNull();
     expect(screen.queryByRole('button', { name: '打开浏览器登录' })).toBeNull();
   });
@@ -132,5 +136,18 @@ describe('SettingsPage', () => {
     });
     renderAt(<SettingsPage />, { route: '/settings', path: '/settings' });
     expect(await screen.findByText('读不到配置文件（HTTP 500）')).toBeTruthy();
+  });
+
+  it('页头「05 · 设置」；环境检查标题不带 doctor；引擎表主文案是中文名，id 小字', async () => {
+    installFetch({ 'GET /api/doctor': [DOCTOR[0]], 'GET /api/engines': ENGINES, 'GET /api/config': {} });
+    renderAt(<SettingsPage />, { route: '/settings', path: '/settings' });
+    expect(screen.getByText('05 · 设置')).toBeTruthy();
+    expect(screen.getByRole('heading', { level: 2, name: '设置' })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: '环境检查' })).toBeTruthy();
+    expect(screen.queryByText(/doctor/)).toBeNull();
+    const table = (await screen.findByText('Z-Image 快速')).closest('table')!;
+    const cell = screen.getByText('Z-Image 快速').closest('td')!;
+    expect(cell.querySelector('.engine-id')?.textContent).toBe('zimage');
+    expect(table.textContent).toContain('H3 视频（有声）');
   });
 });

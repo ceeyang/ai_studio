@@ -23,6 +23,7 @@ import type {
   Project,
   ProjectIn,
   ProjectOverview,
+  ProjectPatch,
   QueueState,
   RerunImpact,
   RunIn,
@@ -42,6 +43,8 @@ import type {
 
 export const keys = {
   projects: ['projects'] as const,
+  // 挂在 ['projects'] 前缀下：让项目列表失效时连带归档的一起刷新
+  projectsAll: ['projects', 'all'] as const,
   project: (slug: string) => ['project', slug] as const,
   engines: ['engines'] as const,
   episodes: (slug: string) => ['episodes', slug] as const,
@@ -68,8 +71,12 @@ function invalidate(qc: QueryClient, ...list: QueryKey[]): Promise<void[]> {
 
 // ------------------------------------------------------------ 查询
 
-export function useProjects() {
-  return useQuery({ queryKey: keys.projects, queryFn: () => api.get<Project[]>('/api/projects') });
+/** includeArchived：连归档了的一起拿（项目中心要数「已归档（N）」）；默认后端不返回归档的 */
+export function useProjects(includeArchived = false) {
+  return useQuery({
+    queryKey: includeArchived ? keys.projectsAll : keys.projects,
+    queryFn: () => api.get<Project[]>(includeArchived ? '/api/projects?archived=1' : '/api/projects'),
+  });
 }
 
 export function useProject(slug: string) {
@@ -148,8 +155,11 @@ export function useExports(episodeId: number) {
   });
 }
 
-/** status 为 '' 表示全部；WebSocket 断开时靠 5 秒轮询兜底。 */
-export function useJobs(status: string, limit = 100) {
+/**
+ * status 为 '' 表示全部；WebSocket 断开时靠 5 秒轮询兜底。
+ * keepPrevious：换条数（加载更多）时先留着上一批，别让列表闪空。
+ */
+export function useJobs(status: string, limit = 100, keepPrevious = false) {
   const qs = new URLSearchParams();
   if (status) qs.set('status', status);
   qs.set('limit', String(limit));
@@ -157,6 +167,7 @@ export function useJobs(status: string, limit = 100) {
     queryKey: keys.jobs(status, limit),
     queryFn: () => api.get<Job[]>(`/api/jobs?${qs.toString()}`),
     refetchInterval: 5000,
+    placeholderData: keepPrevious ? (prev, prevQuery) => (prevQuery?.queryKey[1] === status ? prev : undefined) : undefined,
   });
 }
 
@@ -218,6 +229,24 @@ export function useCreateProject() {
   return useMutation({
     mutationFn: (body: ProjectIn) => api.post<Project>('/api/projects', body),
     onSuccess: () => invalidate(qc, keys.projects),
+  });
+}
+
+/** 项目改名、归档 / 取消归档 */
+export function usePatchProject(slug: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: ProjectPatch) => api.patch<Project>(`/api/projects/${enc(slug)}`, body),
+    onSuccess: () => invalidate(qc, keys.projects, keys.project(slug)),
+  });
+}
+
+/** 删除一集（连镜头、候选、成片记录）。有排队 / 执行中的任务时后端 409。 */
+export function useDeleteEpisode(slug: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (episodeId: number) => api.del(`/api/episodes/${episodeId}`),
+    onSuccess: () => invalidate(qc, keys.episodes(slug), keys.projectOverview(slug)),
   });
 }
 

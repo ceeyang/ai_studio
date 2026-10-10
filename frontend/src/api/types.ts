@@ -13,7 +13,15 @@ export interface Project {
   seed: number;
   negative: string;
   style_bible_id: number | null;
+  /** 归档了的项目默认不在项目中心显示（GET /api/projects?archived=1 才带上） */
+  archived: boolean;
   created_at: string;
+}
+
+/** PATCH /api/projects/{slug}：改名、归档 / 取消归档 */
+export interface ProjectPatch {
+  title?: string;
+  archived?: boolean;
 }
 
 export interface ProjectIn {

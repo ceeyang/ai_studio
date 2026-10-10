@@ -1182,6 +1182,7 @@ pre.error { background: rgba(255, 90, 95, 0.06); border-color: rgba(255, 90, 95,
 .text-cell { max-width: none; }
 
 /* 设置页 */
+.settings-layout { display: flex; flex-direction: column; gap: var(--s-4); }
 .settings-layout > .panel { margin: 0; }
 .browser-conn { display: flex; align-items: center; gap: var(--s-2); margin: 0 0 var(--s-2); }
 .browser-sites { margin: var(--s-2) 0; }
@@ -1334,7 +1335,7 @@ div.error.banner.job-notice a { color: #ffd0d1; text-decoration: underline; }
 .btn.is-disabled { opacity: 0.42; cursor: not-allowed; pointer-events: none; }
 
 /* 剧集页头：面包屑 + 标题行（切集、下一步）+ 六段进度 */
-.ep-head { flex-direction: column; align-items: stretch; gap: var(--s-3); }
+.episode-header { flex-direction: column; align-items: stretch; gap: var(--s-3); }
 .crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 12.5px; color: var(--muted); min-width: 0; }
 .crumbs a { color: var(--text-2); }
 .crumbs a:hover { color: var(--text); }
@@ -1385,3 +1386,22 @@ div.error.banner.job-notice a { color: #ffd0d1; text-decoration: underline; }
 .nav .pipe-stages { display: flex; flex-direction: column; gap: 2px; padding-left: var(--s-2); }
 .nav .nav-disabled:focus-visible { outline: none; box-shadow: var(--ring); }
 .nav-hint { margin: 2px var(--s-2) 0; font-size: 11.5px; color: var(--muted); line-height: 1.5; }
+
+/* 任务页 */
+.jobs-head select { margin-left: auto; }
+.jobs-table .job-id { font: inherit; color: inherit; padding: 0; }
+.jobs-more { justify-content: center; margin-top: var(--s-3); }
+.debug-list { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px var(--s-3); margin: var(--s-2) 0; font-size: 12px; }
+.debug-list dt { color: var(--muted); }
+.debug-list dd { margin: 0; font-family: var(--mono); overflow-wrap: anywhere; }
+.engine-table .engine-id { display: block; margin-top: 2px; font: 11px/1.3 var(--mono); color: var(--faint); }
+
+/* 项目中心：标题行带「⋯」菜单、已归档、目录名收进「高级」 */
+.project-title-row { display: flex; align-items: center; gap: var(--s-2); min-width: 0; }
+.project-title-row h3 { flex: 1; }
+.ep-head .menu-wrap { margin-left: auto; }
+.archived-toggle { display: flex; justify-content: center; }
+.project-grid.is-archived .project-card { opacity: 0.75; }
+.meta .advanced { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+.meta .advanced summary { cursor: pointer; }
+.meta .advanced[open] { flex-basis: 100%; }

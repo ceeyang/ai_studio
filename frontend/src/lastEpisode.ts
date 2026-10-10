@@ -17,6 +17,15 @@ export function readLastEpisode(): EpisodeRef | null {
   }
 }
 
+/** 删掉了的那一集：导航别再指向它 */
+export function forgetEpisode(episodeId: number): void {
+  try {
+    if (readLastEpisode()?.episodeId === episodeId) localStorage.removeItem(KEY);
+  } catch {
+    // 同上
+  }
+}
+
 export function rememberEpisode(ref: EpisodeRef): void {
   try {
     localStorage.setItem(KEY, JSON.stringify(ref));

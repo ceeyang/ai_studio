@@ -1,4 +1,4 @@
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { installFetch } from '../test/fetch';
@@ -30,9 +30,10 @@ describe('ProjectsPage', () => {
     });
     renderAt(<ProjectsPage />, { route: '/', path: '/' });
     const user = userEvent.setup();
-    expect(await screen.findByText(/还没有项目/)).toBeTruthy();
+    const empty = (await screen.findByText(/还没有项目/)).closest('section')!;
     expect(screen.queryByLabelText('项目标题')).toBeNull();
-    await user.click(screen.getByRole('button', { name: '新建项目' }));
+    // 空状态里就有新建按钮
+    await user.click(within(empty).getByRole('button', { name: '新建项目' }));
     const dialog = screen.getByRole('dialog', { name: '新建项目' });
     await screen.findByRole('option', { name: 'Z-Image 快速' });
     expect((screen.getByLabelText('图像引擎') as HTMLSelectElement).value).toBe('zimage');
@@ -59,7 +60,7 @@ describe('ProjectsPage', () => {
     });
     renderAt(<ProjectsPage />, { route: '/', path: '/' });
     const user = userEvent.setup();
-    await user.click(await screen.findByRole('button', { name: '新建项目' }));
+    await user.click((await screen.findAllByRole('button', { name: '新建项目' }))[0]);
     await screen.findByRole('option', { name: 'Z-Image 快速' });
     await user.type(screen.getByLabelText('项目标题'), 'demo');
     await user.click(screen.getByRole('button', { name: '创建项目' }));
@@ -160,9 +161,92 @@ describe('ProjectsPage', () => {
     installFetch({ 'GET /api/projects': [], 'GET /api/engines': ENGINES });
     renderAt(<ProjectsPage />, { route: '/', path: '/' });
     const user = userEvent.setup();
-    await user.click(await screen.findByRole('button', { name: '新建项目' }));
+    await user.click((await screen.findAllByRole('button', { name: '新建项目' }))[0]);
     expect(screen.getByRole('dialog')).toBeTruthy();
     await user.keyboard('{Escape}');
     expect(screen.queryByRole('dialog')).toBeNull();
+  });
+
+  it('项目卡：引擎写中文名；默认不显示已归档，底部可以展开「显示已归档（N）」', async () => {
+    const calls = installFetch({
+      'GET /api/projects?archived=1': [makeProject(), makeProject({ id: 2, slug: 'old', title: '旧剧', archived: true })],
+      'GET /api/projects/demo/overview': { episode_count: 0, cover_url: null, episodes: [] },
+      'GET /api/projects/old/overview': { episode_count: 0, cover_url: null, episodes: [] },
+    });
+    renderAt(<ProjectsPage />, { route: '/', path: '/' });
+    const user = userEvent.setup();
+    const card = await screen.findByTestId('project-demo');
+    expect(card.textContent).toContain('Z-Image 快速');
+    expect(card.textContent).toContain('H3 视频（有声）');
+    expect(screen.queryByTestId('project-old')).toBeNull();
+    expect(calls.some((c) => c.url === '/api/projects?archived=1')).toBe(true);
+    await user.click(screen.getByRole('button', { name: '显示已归档（1）' }));
+    expect((await screen.findByTestId('project-old')).textContent).toContain('已归档');
+    await user.click(screen.getByRole('button', { name: '收起已归档' }));
+    expect(screen.queryByTestId('project-old')).toBeNull();
+  });
+
+  it('项目卡「⋯」：改名提交新标题；归档先确认再提交', async () => {
+    const calls = installFetch({
+      'GET /api/projects?archived=1': [makeProject()],
+      'GET /api/projects/demo/overview': { episode_count: 0, cover_url: null, episodes: [] },
+      'PATCH /api/projects/demo': (c: { body: unknown }) => makeProject({ ...(c.body as object) }),
+    });
+    renderAt(<ProjectsPage />, { route: '/', path: '/' });
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: '更多操作 demo' }));
+    await user.click(screen.getByRole('menuitem', { name: '改名' }));
+    const dlg = screen.getByRole('dialog', { name: '项目改名' });
+    const input = within(dlg).getByLabelText('项目标题');
+    await user.clear(input);
+    await user.type(input, '深夜直播');
+    await user.click(within(dlg).getByRole('button', { name: '保存' }));
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '项目改名' })).toBeNull());
+    expect(calls.filter((c) => c.method === 'PATCH').map((c) => c.body)).toEqual([{ title: '深夜直播' }]);
+
+    await user.click(screen.getByRole('button', { name: '更多操作 demo' }));
+    await user.click(screen.getByRole('menuitem', { name: '归档' }));
+    const confirmDlg = screen.getByRole('dialog', { name: '归档项目「demo」？' });
+    await user.click(within(confirmDlg).getByRole('button', { name: '归档' }));
+    await waitFor(() => expect(calls.filter((c) => c.method === 'PATCH')).toHaveLength(2));
+    expect(calls.filter((c) => c.method === 'PATCH')[1].body).toEqual({ archived: true });
+  });
+
+  it('项目详情：「⋯」菜单、目录名收进「高级」；剧集卡可以删除（写明镜头数），后端拒绝时说原因', async () => {
+    const calls = installFetch({
+      'GET /api/projects/demo': makeProject({ archived: true }),
+      'GET /api/projects/demo/episodes': [
+        { id: 3, project_id: 1, number: 1, title: '旧的一集', source_text: 'x', target_seconds: 60, status: 'storyboarded' },
+      ],
+      'GET /api/projects/demo/overview': {
+        episode_count: 1, cover_url: null,
+        episodes: [{ id: 3, number: 1, title: '旧的一集', status: 'storyboarded', shot_count: 4, export_count: 2, cover_url: null }],
+      },
+      'GET /api/projects/demo/characters': [],
+      'GET /api/projects/demo/locations': [],
+      'GET /api/projects/demo/style': null,
+      'PATCH /api/projects/demo': makeProject({ archived: false }),
+      'DELETE /api/episodes/3': () => new Response(JSON.stringify({ detail: '这一集还有排队或执行中的任务，先取消任务再删除' }), { status: 409 }),
+    });
+    renderAt(<ProjectsPage />, { route: '/projects/demo', path: '/projects/:slug' });
+    const user = userEvent.setup();
+    await screen.findByText(/旧的一集/);
+    const adv = screen.getByText('高级').closest('details')!;
+    expect(adv.textContent).toContain('demo');
+    expect(screen.getByText('已归档')).toBeTruthy();
+    expect(screen.getByText('Z-Image 快速')).toBeTruthy();
+    // 归档了的项目：菜单里是「取消归档」
+    await user.click(screen.getByRole('button', { name: '更多操作 demo' }));
+    await user.click(screen.getByRole('menuitem', { name: '取消归档' }));
+    await waitFor(() => expect(calls.some((c) => c.method === 'PATCH')).toBe(true));
+    expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({ archived: false });
+
+    await user.click(screen.getByRole('button', { name: '更多操作 第 1 集' }));
+    await user.click(screen.getByRole('menuitem', { name: '删除这一集' }));
+    const dlg = screen.getByRole('dialog', { name: '删除第 1 集「旧的一集」？' });
+    expect(dlg.textContent).toContain('4 个镜头');
+    await user.click(within(dlg).getByRole('button', { name: '删除' }));
+    expect(await screen.findByText('这一集还有排队或执行中的任务，先取消任务再删除（HTTP 409）')).toBeTruthy();
+    expect(calls.some((c) => c.method === 'DELETE' && c.url === '/api/episodes/3')).toBe(true);
   });
 });

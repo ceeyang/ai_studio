@@ -6,8 +6,10 @@ import {
   useCreateEpisode,
   useCharacters,
   useCreateProject,
+  useDeleteEpisode,
   useEngines,
   useLocations,
+  usePatchProject,
   useStyle,
   useEpisodes,
   useProject,
@@ -15,14 +17,22 @@ import {
   useProjects,
   keys,
 } from '../api/queries';
-import type { Aspect, EngineRow, EpisodeStats, Project, ProjectOverview } from '../api/types';
+import type { Aspect, EngineRow, Episode, EpisodeStats, Project, ProjectOverview } from '../api/types';
+import { useConfirm } from '../components/ConfirmDialog';
 import { Dialog } from '../components/Dialog';
+import { Menu, type MenuItem } from '../components/Menu';
 import { EPISODE_STATUS_LABEL, engineLabel } from '../format';
-import { readLastEpisode } from '../lastEpisode';
+import { forgetEpisode, readLastEpisode } from '../lastEpisode';
 
 function pickDefault(rows: EngineRow[] | undefined, preferred: string): string {
   if (!rows || rows.length === 0) return '';
   return rows.some((r) => r.name === preferred) ? preferred : rows[0].name;
+}
+
+/** 视频引擎的名字：中文名里没写有声 / 无声时补上 */
+function videoEngineText(r: EngineRow): string {
+  const label = engineLabel(r);
+  return label.includes('声') ? label : `${label}${r.caps.has_audio ? '（有声）' : '（无声）'}`;
 }
 
 function statusLabel(s: string): string {
@@ -107,8 +117,7 @@ function NewProjectDialog({ onClose }: { onClose: () => void }) {
             <select value={video} onChange={(e) => setVideoEngine(e.target.value)}>
               {(engines.data?.video ?? []).map((r) => (
                 <option key={r.name} value={r.name}>
-                  {r.name}
-                  {r.caps.has_audio ? '（有声）' : '（无声）'}
+                  {videoEngineText(r)}
                 </option>
               ))}
             </select>
@@ -126,6 +135,65 @@ function NewProjectDialog({ onClose }: { onClose: () => void }) {
         </div>
       </form>
     </Dialog>
+  );
+}
+
+// ------------------------------------------------------------ 改名、归档
+
+function RenameProjectDialog({ project, onClose }: { project: Project; onClose: () => void }) {
+  const patch = usePatchProject(project.slug);
+  const [title, setTitle] = useState(project.title);
+  const changed = title.trim() !== '' && title.trim() !== project.title;
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (changed) patch.mutate({ title: title.trim() }, { onSuccess: onClose });
+  };
+  return (
+    <Dialog title="项目改名" subtitle="只改显示的名字，目录名不变。" onClose={onClose} guard={() => changed} busy={patch.isPending}>
+      <form className="fields" onSubmit={submit}>
+        <label className="field">
+          <span>项目标题</span>
+          <input value={title} onChange={(e) => setTitle(e.target.value)} />
+        </label>
+        {patch.error && <p className="error">{errorText(patch.error)}</p>}
+        <div className="modal-foot">
+          <button type="button" className="ghost" disabled={patch.isPending} onClick={onClose}>
+            取消
+          </button>
+          <button type="submit" className="primary" disabled={!changed || patch.isPending}>
+            {patch.isPending ? '保存中…' : '保存'}
+          </button>
+        </div>
+      </form>
+    </Dialog>
+  );
+}
+
+/** 项目的「⋯」菜单：改名、归档 / 取消归档。归档先确认（数据都在，可以找回）。 */
+function ProjectMenu({ p }: { p: Project }) {
+  const patch = usePatchProject(p.slug);
+  const confirm = useConfirm();
+  const [renaming, setRenaming] = useState(false);
+  const archive = async () => {
+    const ok = await confirm({
+      title: `归档项目「${p.title}」？`,
+      body: '归档后它不在项目中心显示，数据和文件都还在；项目中心底部「显示已归档」里能找回来、取消归档。',
+      confirmText: '归档',
+    });
+    if (ok) patch.mutate({ archived: true });
+  };
+  const items: MenuItem[] = [
+    { label: '改名', onSelect: () => setRenaming(true) },
+    p.archived
+      ? { label: '取消归档', onSelect: () => patch.mutate({ archived: false }) }
+      : { label: '归档', onSelect: () => void archive() },
+  ];
+  return (
+    <>
+      <Menu label={`更多操作 ${p.title}`} items={items} disabled={patch.isPending} />
+      {patch.error && <span className="error">{errorText(patch.error)}</span>}
+      {renaming && <RenameProjectDialog project={p} onClose={() => setRenaming(false)} />}
+    </>
   );
 }
 
@@ -149,9 +217,13 @@ function ProjectCard({ p }: { p: Project }) {
         )}
       </Link>
       <div className="project-body">
-        <h3>
-          <Link to={to}>{p.title}</Link>
-        </h3>
+        <div className="project-title-row">
+          <h3>
+            <Link to={to}>{p.title}</Link>
+          </h3>
+          {p.archived && <span className="chip">已归档</span>}
+          <ProjectMenu p={p} />
+        </div>
         <p className="project-stats">
           {o ? (
             <>
@@ -164,10 +236,10 @@ function ProjectCard({ p }: { p: Project }) {
         </p>
         <div className="engine-chips">
           <span className="chip" title="图像引擎">
-            <b>图</b> {p.image_engine}
+            <b>图</b> {engineLabel(p.image_engine)}
           </span>
           <span className="chip" title="视频引擎">
-            <b>视</b> {p.video_engine}
+            <b>视</b> {engineLabel(p.video_engine)}
           </span>
         </div>
         <div className="project-actions">
@@ -262,9 +334,12 @@ function StatTiles({ rows, overviews }: { rows: Project[]; overviews: (ProjectOv
 }
 
 function ProjectsOverview() {
-  const projects = useProjects();
+  const projects = useProjects(true);
   const [creating, setCreating] = useState(false);
-  const rows = projects.data ?? [];
+  const [showArchived, setShowArchived] = useState(false);
+  const all = projects.data ?? [];
+  const rows = all.filter((p) => !p.archived);
+  const archived = all.filter((p) => p.archived);
   const overviews = useQueries({
     queries: rows.map((p) => ({
       queryKey: keys.projectOverview(p.slug),
@@ -289,7 +364,10 @@ function ProjectsOverview() {
       {projects.error && <p className="error">{errorText(projects.error)}</p>}
       {projects.data && rows.length === 0 && (
         <section className="panel empty">
-          <p>还没有项目。新建一个，把第一集的梗概贴进去就能开工。</p>
+          <p>{archived.length > 0 ? '没有进行中的项目。' : '还没有项目。'}新建一个，把第一集的梗概贴进去就能开工。</p>
+          <button type="button" className="primary" onClick={() => setCreating(true)}>
+            新建项目
+          </button>
         </section>
       )}
       {rows.length > 0 && (
@@ -307,6 +385,20 @@ function ProjectsOverview() {
             <span className="new-tile-plus" aria-hidden="true" />
             新建一个项目
           </button>
+        </div>
+      )}
+      {archived.length > 0 && (
+        <div className="archived-toggle">
+          <button type="button" className="ghost" aria-expanded={showArchived} onClick={() => setShowArchived((v) => !v)}>
+            {showArchived ? '收起已归档' : `显示已归档（${archived.length}）`}
+          </button>
+        </div>
+      )}
+      {showArchived && archived.length > 0 && (
+        <div className="project-grid is-archived" aria-label="已归档的项目">
+          {archived.map((p) => (
+            <ProjectCard key={p.id} p={p} />
+          ))}
         </div>
       )}
       {creating && <NewProjectDialog onClose={() => setCreating(false)} />}
@@ -454,6 +546,8 @@ function ProjectDetail({ slug }: { slug: string }) {
   const episodes = useEpisodes(slug);
   const overview = useProjectOverview(slug);
   const [creating, setCreating] = useState(false);
+  const del = useDeleteEpisode(slug);
+  const confirm = useConfirm();
 
   if (project.error) {
     return (
@@ -475,6 +569,18 @@ function ProjectDetail({ slug }: { slug: string }) {
   const title = p?.title ?? slug;
   const base = `/projects/${enc(slug)}/episodes`;
 
+  const removeEpisode = async (ep: Episode) => {
+    const shots = stats.get(ep.id)?.shot_count;
+    const ok = await confirm({
+      title: `删除第 ${ep.number} 集「${ep.title || '（未命名）'}」？`,
+      body: `它的${shots === undefined ? '全部' : ` ${shots} 个`}镜头、所有首帧和视频候选、成片记录会一起删掉（媒体文件留在磁盘上），删了不能恢复。`,
+      confirmText: '删除',
+      danger: true,
+    });
+    if (!ok) return;
+    del.mutate(ep.id, { onSuccess: () => forgetEpisode(ep.id) });
+  };
+
   return (
     <div className="page">
       <Link className="back-link" to="/">
@@ -489,18 +595,22 @@ function ProjectDetail({ slug }: { slug: string }) {
               <h2>{title}</h2>
               {p && (
                 <div className="meta">
-                  <span className="chip">
-                    <b>目录</b> {p.slug}
-                  </span>
+                  {p.archived && <span className="chip">已归档</span>}
                   <span className="chip">
                     <b>画幅</b> {p.aspect}
                   </span>
                   <span className="chip">
-                    <b>图像</b> {p.image_engine}
+                    <b>图像</b> {engineLabel(p.image_engine)}
                   </span>
                   <span className="chip">
-                    <b>视频</b> {p.video_engine}
+                    <b>视频</b> {engineLabel(p.video_engine)}
                   </span>
+                  <details className="advanced">
+                    <summary>高级</summary>
+                    <span className="chip">
+                      <b>目录</b> {p.slug}
+                    </span>
+                  </details>
                 </div>
               )}
               <dl className="hero-stats">
@@ -519,6 +629,7 @@ function ProjectDetail({ slug }: { slug: string }) {
               </dl>
             </div>
             <div className="hero-actions">
+              {p && <ProjectMenu p={p} />}
               <button type="button" className="primary lg" onClick={() => setCreating(true)}>
                 <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
                   <path d="M7 2v10M2 7h10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
@@ -533,6 +644,7 @@ function ProjectDetail({ slug }: { slug: string }) {
               <span className="muted">{eps.length} 集</span>
             </div>
             {episodes.error && <p className="error">{errorText(episodes.error)}</p>}
+            {del.error && <p className="error">{errorText(del.error)}</p>}
             {episodes.data && eps.length === 0 && (
               <div className="panel empty">
                 <p>还没有剧集。点右上角“新建剧集”，粘贴梗概开始第一集。</p>
@@ -548,6 +660,11 @@ function ProjectDetail({ slug }: { slug: string }) {
                       <div className="ep-head">
                         <span className="ep-num">第 {ep.number} 集</span>
                         <StatusPill status={ep.status} />
+                        <Menu
+                          label={`更多操作 第 ${ep.number} 集`}
+                          disabled={del.isPending}
+                          items={[{ label: '删除这一集', danger: true, onSelect: () => void removeEpisode(ep) }]}
+                        />
                       </div>
                       <h4 className="ep-title">{ep.title || '（未命名）'}</h4>
                       <p className="ep-synopsis">{ep.source_text || '（还没有原文）'}</p>

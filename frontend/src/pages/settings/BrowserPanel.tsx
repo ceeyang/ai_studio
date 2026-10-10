@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { errorText } from '../../api/client';
 import { useBrowserStatus, useOpenBrowserLogin } from '../../api/queries';
 import type { BrowserSiteStatus, BrowserStatus } from '../../api/types';
+import { engineLabel } from '../../format';
 
 const PAGE_TEXT: Record<string, string> = {
   login_wall: '页面上有登录按钮',
@@ -37,7 +38,7 @@ function InstallSteps({ dir }: { dir: string }) {
         </button>
       </li>
       <li>在这个浏览器里登录 ChatGPT（chatgpt.com）和 Gemini（gemini.google.com），只需一次。</li>
-      <li>保持浏览器开着。扩展会自动连上 studio（127.0.0.1:8700），这里会显示「扩展已连上」。</li>
+      <li>保持浏览器开着。扩展会自动连上 studio（{window.location.host}），这里会显示「扩展已连上」。</li>
     </ol>
   );
 }
@@ -87,7 +88,7 @@ function ExtensionBody({ st }: { st: BrowserStatus }) {
         <StatusIcon status={connected ? 'ok' : 'warn'} />{' '}
         {connected
           ? `扩展已连上 · v${ext?.version ?? '?'} · ${ext?.browser ?? '浏览器'}`
-          : '扩展没有连上：gpt_image / gemini_image 出图会失败'}
+          : `扩展没有连上：${engineLabel('gpt_image')} / ${engineLabel('gemini_image')}出图会失败`}
       </p>
       <p className="muted">
         出图在你平时用的浏览器里进行：扩展在已登录的 ChatGPT / Gemini 标签页里开新对话、传参考图、输提示词，出完把原图传回来。studio

@@ -47,7 +47,7 @@ export function EpisodeHeader({ slug, ep, page, title, children }: EpisodeHeader
   };
 
   return (
-    <header className="page-head ep-head">
+    <header className="page-head episode-header">
       <nav className="crumbs" aria-label="面包屑">
         <Link to={projectBase}>{project.data?.title ?? slug}</Link>
         <span className="crumb-sep" aria-hidden="true">
