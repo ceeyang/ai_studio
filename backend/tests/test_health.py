@@ -1,4 +1,4 @@
-"""GET /api/system/health：ComfyUI 和浏览器扩展连没连上；ComfyUI 检查 1 秒超时、缓存 15 秒。"""
+"""GET /api/system/health：ComfyUI 和浏览器扩展连没连上；ComfyUI 检查 1 秒超时、连上缓存 15 秒、连不上缓存 2 秒。"""
 from backend.engines.comfyui import health
 from backend.engines.comfyui.errors import ComfyError
 
@@ -47,4 +47,18 @@ def test_check_comfy_timeout_and_cache():
     h = health.check_comfy(c, clock=lambda: now[0])
     assert not h.ok and "127.0.0.1:8188" in h.message and len(c.calls) == 2
     assert not health.check_comfy(None).ok
+    health.reset_cache()
+
+
+def test_check_comfy_failure_cached_briefly():
+    """连不上只缓存 2 秒：用户刚启动 ComfyUI 就能提交，不用等 15 秒。"""
+    health.reset_cache()
+    now = [200.0]
+    c = Client(fail=True)
+    assert not health.check_comfy(c, clock=lambda: now[0]).ok
+    now[0] += 1
+    assert not health.check_comfy(c, clock=lambda: now[0]).ok and len(c.calls) == 1   # 2 秒内用缓存
+    now[0] += 1.5
+    c.fail = False
+    assert health.check_comfy(c, clock=lambda: now[0]).ok and len(c.calls) == 2
     health.reset_cache()

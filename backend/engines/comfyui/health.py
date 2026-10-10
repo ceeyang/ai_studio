@@ -1,4 +1,5 @@
-"""ComfyUI 连没连上：GET /system_stats，1 秒超时，结果缓存 15 秒。
+"""ComfyUI 连没连上：GET /system_stats，1 秒超时；连上的结果缓存 15 秒，连不上的只缓存 2 秒
+（用户刚把 ComfyUI 开起来，马上就能提交）。
 
 提交任务前的校验和 /api/system/health 都用它。测试里 monkeypatch check_comfy。
 """
@@ -11,6 +12,7 @@ from dataclasses import dataclass
 
 TIMEOUT = 1.0
 TTL = 15.0
+FAIL_TTL = 2.0
 
 
 @dataclass(frozen=True)
@@ -39,7 +41,7 @@ def check_comfy(client, *, clock: Callable[[], float] = time.monotonic) -> Comfy
     now = clock()
     with _lock:
         hit = _cache.get(url)
-        if hit is not None and now - hit[0] < TTL:
+        if hit is not None and now - hit[0] < (TTL if hit[1].ok else FAIL_TTL):
             return hit[1]
     try:
         client.system_stats(tries=1, timeout=TIMEOUT)
