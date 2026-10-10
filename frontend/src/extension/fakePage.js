@@ -4,7 +4,7 @@
 const PNG_HEAD = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
 
 export class FakePage {
-  constructor(spec, { loggedIn = true, hasFileInput = true, promptBox = true, pasteWorks = false } = {}) {
+  constructor(spec, { loggedIn = true, hasFileInput = true, promptBox = true, pasteWorks = false, fileInputWorks = true } = {}) {
     this.spec = spec;
     this.t = 0;
     this.calls = [];
@@ -14,6 +14,7 @@ export class FakePage {
     if (!loggedIn) this.shown.add(spec.login_wall);
     this.hasFileInput = hasFileInput;
     this.pasteWorks = pasteWorks;
+    this.fileInputWorks = fileInputWorks; // false：塞进去了但网站没认（缩略图不出来）
     this.attachments = 0;
     this.reply = '';
     this.alert = '';
@@ -76,9 +77,11 @@ export class FakePage {
     return true;
   }
   async press(_sel, key) { this.calls.push(['press', key]); return false; }
-  async setFiles(_sel, files) {
+  async setFiles(_sel, files, near) {
     if (!this.hasFileInput) return false;
     this.calls.push(['setFiles', files.map((f) => f.name)]);
+    this.setFilesNear = near;
+    if (!this.fileInputWorks) return true;
     this.attachments += files.length;
     this.mine.push(...files.map((_f, i) => ({ src: `blob:ref${i}`, w: 512, h: 512, complete: true })));
     return true;
@@ -92,6 +95,8 @@ export class FakePage {
     this.calls.push(['dropFiles', files.map((f) => f.name)]);
     return false;
   }
+  async fileInputs() { return { total: this.hasFileInput ? 2 : 0, near: this.hasFileInput ? 1 : 0 }; }
+  async composerImages() { return 0; }
   async text(sel) {
     if (sel === this.spec.assistant_turn) return this.reply;
     if (sel === this.spec.alert) return this.alert;

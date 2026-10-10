@@ -263,10 +263,12 @@ class TabDriver {
   async click(sel) { return !!(await this.op('click', sel)); }
   async typeText(sel, text) { return !!(await this.op('typeText', sel, text)); }
   async press(sel, key) { return !!(await this.op('press', sel, key)); }
-  async setFiles(sel, files) { return !!(await this.op('setFiles', sel, files)); }
+  async setFiles(sel, files, near) { return !!(await this.op('setFiles', sel, files, near)); }
+  async fileInputs(sel, near) { return (await this.op('fileInputs', sel, near)) || { total: 0, near: 0 }; }
+  async composerImages(near) { return Number(await this.op('composerImages', near)) || 0; }
   async pasteFiles(sel, files) { return !!(await this.op('pasteFiles', sel, files)); }
   async dropFiles(sel, files) { return !!(await this.op('dropFiles', sel, files)); }
-  async text(sel) { const t = await this.op('text', sel); return typeof t === 'string' ? t : ''; }
+  async text(sel, exclude) { const t = await this.op('text', sel, exclude); return typeof t === 'string' ? t : ''; }
   async images(sel) { const r = await this.op('images', sel); return Array.isArray(r) ? r : []; }
   async cookieNames(url) {
     try {

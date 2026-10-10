@@ -36,6 +36,7 @@ class SiteSpec:
     result_images: str        # 回复里生成的图片
     user_images: str          # 用户自己那条消息里的图（参考图），从结果里排除
     busy_marker: str = ""     # 看得见就说明这一轮还在生成（停止按钮之外的第二个判断，可空）
+    reply_exclude: str = ""   # 取回复文字前先去掉这些子元素（新界面一轮里连着用户那条消息）
     download_buttons: tuple[str, ...] = ()   # 图上的「下载原图」按钮（先悬停图片再点）
     prefer_download_button: bool = False     # True：先点下载按钮，失败再直接取 src
     dismiss_buttons: str = ""                # 偶尔弹出的同意/知道了对话框按钮，看见就点掉

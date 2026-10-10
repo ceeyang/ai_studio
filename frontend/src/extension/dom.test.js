@@ -33,6 +33,23 @@ describe('content/dom.js', () => {
     expect(D.visible(CHATGPT.busy_marker)).toBe(false);
   });
 
+  it('上传框挑输入框旁边的（侧栏的不要）；数输入框那一块里的缩略图；回复文字去掉用户那条消息', () => {
+    document.body.innerHTML = `
+      <nav><input id="side" type="file" accept="image/*"></nav>
+      <main>
+        <div data-talvt-turn-state="complete"><div data-user-message-bubble="">画一张三视图 rate limit</div>
+          <p>Please upload the reference image again</p></div>
+        <div id="composer"><div id="thumbs"><img src="blob:x"></div>
+          <div id="prompt-textarea" contenteditable="true"></div>
+          <input id="near" type="file" accept="image/*" multiple></div>
+      </main>`;
+    expect(D.pickFileInput(CHATGPT.file_input, CHATGPT.prompt_box).id).toBe('near');
+    expect(D.pickFileInput(CHATGPT.file_input).id).toBe('side');
+    expect(D.fileInputs(CHATGPT.file_input, CHATGPT.prompt_box)).toEqual({ total: 2, near: 1 });
+    expect(D.composerImages(CHATGPT.prompt_box)).toBe(1);
+    expect(D.text(CHATGPT.assistant_turn, CHATGPT.reply_exclude)).toBe('Please upload the reference image again');
+  });
+
   it('按顶层逗号拆选择器，引号和括号里的逗号不拆', () => {
     expect(D.splitList('a, b[x="1,2"], c:has-text("a, b"), d:not(.x, .y)')).toEqual([
       'a', 'b[x="1,2"]', 'c:has-text("a, b")', 'd:not(.x, .y)',

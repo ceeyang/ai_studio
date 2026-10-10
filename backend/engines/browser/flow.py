@@ -166,7 +166,7 @@ class _Flow:
                     self.d.click(s.stop_button)
                 raise BrowserError("timeout", f"{s.label} 超过 {timeout:.0f} 秒还没出完图，已放弃"
                                    "（浏览器里那条对话还在，可以去看看卡在哪，再重试）")
-            reply = self.d.text(s.assistant_turn)
+            reply = self.d.text(s.assistant_turn, s.reply_exclude)
             alert = self.d.text(s.alert) if s.alert else ""
             for t in (alert, reply):
                 if _match(s.quota_patterns, t):

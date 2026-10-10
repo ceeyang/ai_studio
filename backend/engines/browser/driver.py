@@ -33,7 +33,7 @@ class PageDriver(Protocol):
     def set_files(self, selector: str, paths: list[Path]) -> bool: ...
     def choose_files(self, click_selectors: tuple[str, ...], paths: list[Path]) -> bool: ...
     def paste_files(self, selector: str, paths: list[Path]) -> bool: ...
-    def text(self, selector: str) -> str: ...
+    def text(self, selector: str, exclude: str = "") -> str: ...
     def images(self, selector: str) -> list[ImageInfo]: ...
     def fetch(self, src: str) -> bytes: ...
     def download(self, image_src: str, button_selector: str) -> bytes | None: ...
@@ -53,6 +53,12 @@ _FETCH_JS = """async (src) => {
 # 不按布局判断显不显示（后台标签页里正图也会量出 0×0）；同一张图的副本在 flow 里按 alt+尺寸去重
 _IMAGES_JS = """els => els.map(e => ({src: e.currentSrc || e.src || '', w: e.naturalWidth || 0,
                                    h: e.naturalHeight || 0, complete: !!e.complete, alt: e.alt || ''}))"""
+
+_TEXT_WITHOUT_JS = r"""(el, ex) => {
+  const copy = el.cloneNode(true);
+  for (const x of copy.querySelectorAll(ex)) x.remove();
+  return (copy.textContent || '').replace(/\s+/g, ' ').trim();
+}"""
 
 _PASTE_JS = """([sel, files]) => {
   const el = document.querySelector(sel);
@@ -190,11 +196,15 @@ class PlaywrightDriver:
             return False
 
     # ------------------------------------------------------------ 读取
-    def text(self, selector: str) -> str:
+    def text(self, selector: str, exclude: str = "") -> str:
         try:
             loc = self.page.locator(selector)
             n = loc.count()
-            return loc.nth(n - 1).inner_text(timeout=2_000) if n else ""
+            if not n:
+                return ""
+            if exclude:   # 先去掉这些子元素再取文字（和扩展的 content/dom.js 一致）
+                return str(loc.nth(n - 1).evaluate(_TEXT_WITHOUT_JS, exclude) or "")
+            return loc.nth(n - 1).inner_text(timeout=2_000)
         except Exception:
             return ""
 

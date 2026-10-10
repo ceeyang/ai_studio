@@ -73,6 +73,24 @@ describe('extension flow', () => {
     expect(out.map((o) => o.src)).toEqual([A]);
   });
 
+  it('参考图塞进上传框但网站没认、粘贴拖放也不行：报「参考图没传上去」且不提交', async () => {
+    const page = new FakePage(CHATGPT, { fileInputWorks: false }).afterSubmit(gptScript());
+    const e = await fails(run(page, { refs: [REF] }));
+    expect(e).toBeInstanceOf(FlowError);
+    expect(e.kind).toBe('page');
+    expect(e.message).toContain('参考图没传上去');
+    expect(e.message).toContain('试过：上传框、粘贴；');
+    expect(page.calls).not.toContainEqual(['type', 'PROMPT']);
+    expect(page.setFilesNear).toBe(CHATGPT.prompt_box); // 优先输入框旁边的上传框
+  });
+
+  it('上传框没认、粘贴认了：用粘贴的，正常出图', async () => {
+    const page = new FakePage(CHATGPT, { fileInputWorks: false, pasteWorks: true }).afterSubmit(gptScript());
+    const { out, logs } = await run(page, { refs: [REF] });
+    expect(out.map((o) => o.src)).toEqual([GPT_FINAL]);
+    expect(logs.some((m) => m.includes('参考图已传上（粘贴）'))).toBe(true);
+  });
+
   it('上传参考图走 file input，网站回显的参考图不算结果（5 秒回显规则）', async () => {
     const page = new FakePage(CHATGPT).afterSubmit([
       [1, (p) => p.show(CHATGPT.stop_button)],

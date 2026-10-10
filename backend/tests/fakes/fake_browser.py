@@ -144,7 +144,7 @@ class FakePage:
         self.calls.append(("paste_files", [Path(p).name for p in paths]))
         return False
 
-    def text(self, selector):
+    def text(self, selector, exclude=""):
         if selector == self.spec.assistant_turn:
             return self.reply
         if selector == self.spec.alert:

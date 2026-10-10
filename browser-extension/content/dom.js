@@ -114,6 +114,23 @@
     return r.width > 0 && r.height > 0;
   }
 
+  /** 输入框所在的那一块（往上找，第一个里面有 <input type=file> 的祖先）：参考图的上传框和缩略图都在这里。 */
+  function composerRoot(nearSel) {
+    if (!nearSel) return null;
+    let el = firstVisible(nearSel) || queryAll(nearSel)[0];
+    for (let k = 0; el && k < 12; k++, el = el.parentElement) {
+      if (el.querySelector && el.querySelector('input[type="file"]')) return el;
+    }
+    return null;
+  }
+
+  /** 挑上传框：优先输入框那一块里的（页面别处——侧栏、项目区——也可能有收图片的上传框），没有再取第一个。 */
+  function pickFileInput(sel, nearSel) {
+    const all = queryAll(sel).filter((e) => e.tagName === 'INPUT' && e.type === 'file');
+    const near = composerRoot(nearSel);
+    return (near && all.find((e) => near.contains(e))) || all[0] || null;
+  }
+
   function firstVisible(sel) {
     const els = queryAll(sel);
     for (let i = 0; i < Math.min(els.length, 20); i++) {
@@ -255,8 +272,8 @@
 
     /** 把参考图塞进隐藏的 <input type=file>（不弹文件选择框）：DataTransfer 造 FileList，再发 change。
      *  不支持多选的输入框一张一张塞，中间等 1.5 秒。 */
-    async setFiles(sel, files) {
-      const input = queryAll(sel).find((e) => e.tagName === 'INPUT' && e.type === 'file');
+    async setFiles(sel, files, nearSel) {
+      const input = pickFileInput(sel, nearSel);
       if (!input || !files || !files.length) return false;
       const batches = files.length === 1 || input.multiple ? [files] : files.map((f) => [f]);
       for (let i = 0; i < batches.length; i++) {
@@ -284,11 +301,29 @@
       return true;
     },
 
-    /** 最后一个命中元素的文字（网站回复取最后一条）。 */
-    text(sel) {
+    /** 上传框的数量（诊断用）：页面上一共几个、输入框那一块里几个。 */
+    fileInputs(sel, nearSel) {
+      const all = queryAll(sel).filter((e) => e.tagName === 'INPUT' && e.type === 'file');
+      const near = composerRoot(nearSel);
+      return { total: all.length, near: near ? all.filter((e) => near.contains(e)).length : 0 };
+    },
+    /** 输入框那一块里的图片数（参考图缩略图）：不靠缩略图选择器，网站改版也数得出来。 */
+    composerImages(nearSel) {
+      const near = composerRoot(nearSel);
+      return near ? near.querySelectorAll('img').length : 0;
+    },
+    pickFileInput,
+
+    /** 最后一个命中元素的文字（网站回复取最后一条）。exclude：先去掉这些子元素（如用户自己那条消息）。 */
+    text(sel, exclude) {
       const els = queryAll(sel);
       if (!els.length) return '';
       const el = els[els.length - 1];
+      if (exclude) {
+        const copy = el.cloneNode(true);
+        for (const x of copy.querySelectorAll(exclude)) x.remove();
+        return String(copy.textContent || '').replace(/\s+/g, ' ').trim();
+      }
       return String(typeof el.innerText === 'string' ? el.innerText : el.textContent || '');
     },
     images(sel) {

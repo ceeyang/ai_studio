@@ -119,64 +119,71 @@ class Flow {
     }
   }
 
-  async waitAttachments(before, n) {
+  /** 输入框里的参考图缩略图数：缩略图选择器和「输入框那一块里的图片数」取大的，网站改版也数得出来。 */
+  async attachCount() {
+    const s = this.spec;
+    return Math.max(await this.d.count(s.attachment), await this.d.composerImages(s.prompt_box));
+  }
+
+  /** 等参考图出现在输入框里：secs 秒内一点动静都没有（没缩略图也没在上传）就算这种方式没用。 */
+  async attached(before, n, secs) {
     const s = this.spec;
     const start = this.clock();
     for (;;) {
       await this.checkCancel();
       await this.dismiss();
-      const got = (await this.d.count(s.attachment)) - before;
+      const got = (await this.attachCount()) - before;
       const busy = await this.d.visible(s.attachment_busy);
       if (got >= n && !busy) return true;
       const waited = this.clock() - start;
-      if (!busy && waited > 15) {
-        this.log(`${s.label}：输入框里只看到 ${Math.max(got, 0)}/${n} 张参考图缩略图（也可能是缩略图选择器过时），继续提交`);
-        return false;
-      }
+      if (!busy && got <= 0 && waited > secs) return false;
       if (waited > s.upload_timeout) {
+        if (got > 0) {
+          this.log(`${s.label}：只看到 ${got}/${n} 张参考图缩略图，按已传上的继续`);
+          return true;
+        }
         throw new FlowError('timeout', `${s.label} 参考图 ${Math.round(s.upload_timeout)} 秒还没传完，已放弃`);
       }
       await this.d.sleep(this.poll);
     }
   }
 
+  /** 传参考图：依次试 上传框 → 粘贴 → 拖放，每种都确认输入框里真出现了缩略图；都不行就报错、不提交
+   *  （不带参考图发出去，网站要么出一张不像的图，要么回一句「请上传参考图」，白等一场）。 */
   async upload(refs) {
     const s = this.spec;
     if (!refs || !refs.length) return;
     this.nRefs = refs.length;
-    this.log(`${s.label}：上传 ${refs.length} 张参考图`);
-    const before = await this.d.count(s.attachment);
-    let ok = await this.d.setFiles(s.file_input, refs);
+    const n = refs.length;
+    this.log(`${s.label}：上传 ${n} 张参考图`);
+    const before = await this.attachCount();
+    const tried = [];
+    const done = (how) => this.log(`${s.label}：参考图已传上（${how}）`);
+    let ok = await this.d.setFiles(s.file_input, refs, s.prompt_box);
     if (!ok && s.upload_buttons.length > 1) {
       // 点开「+」之类的菜单（最后一个按钮会弹文件选择框，扩展替不了用户选文件，不点）
       for (const sel of s.upload_buttons.slice(0, -1)) {
         if (await this.d.click(sel)) await this.d.sleep(0.6);
       }
-      ok = await this.d.setFiles(s.file_input, refs);
+      ok = await this.d.setFiles(s.file_input, refs, s.prompt_box);
     }
     if (ok) {
-      await this.waitAttachments(before, refs.length);
-      return;
+      tried.push('上传框');
+      if (await this.attached(before, n, 15)) return done('上传框');
     }
-    // 没有 file input：粘贴图片，几秒内没出缩略图再试拖放
     if (await this.d.pasteFiles(s.prompt_box, refs)) {
-      const start = this.clock();
-      while (this.clock() - start < 6) {
-        await this.checkCancel();
-        if ((await this.d.count(s.attachment)) > before || (await this.d.visible(s.attachment_busy))) {
-          await this.waitAttachments(before, refs.length);
-          return;
-        }
-        await this.d.sleep(this.poll);
-      }
-      if (await this.d.dropFiles(s.prompt_box, refs)) {
-        await this.waitAttachments(before, refs.length);
-        return;
-      }
+      tried.push('粘贴');
+      if (await this.attached(before, n, 8)) return done('粘贴');
     }
+    if (await this.d.dropFiles(s.prompt_box, refs)) {
+      tried.push('拖放');
+      if (await this.attached(before, n, 8)) return done('拖放');
+    }
+    const fi = await this.d.fileInputs(s.file_input, s.prompt_box);
     throw new FlowError(
       'page',
-      `${s.label} 上传参考图失败：没找到上传入口，粘贴也没反应。网站改版了，要更新 ${siteFile(s)} 里的 file_input / upload_buttons`,
+      `${s.label} 参考图没传上去（试过：${tried.join('、') || '没找到可用的方式'}；页面上有 ${fi.total} 个图片上传框，` +
+        `输入框旁边 ${fi.near} 个），这次没有提交。网站可能改版了，要更新 ${siteFile(s)} 里的 file_input / attachment`,
     );
   }
 
@@ -245,7 +252,7 @@ class Flow {
           `${s.label} 超过 ${Math.round(timeout)} 秒还没出完图，已放弃（浏览器里那条对话还在，可以去看看卡在哪，再重试）`,
         );
       }
-      const reply = await this.d.text(s.assistant_turn);
+      const reply = await this.d.text(s.assistant_turn, s.reply_exclude);
       const alert = s.alert ? await this.d.text(s.alert) : '';
       for (const t of [alert, reply]) {
         if (match(s.quota_patterns, t)) {

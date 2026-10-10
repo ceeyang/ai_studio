@@ -56,7 +56,9 @@ export const CHATGPT = {
   ],
   attachment: 'form img',
   attachment_busy: 'form [role="progressbar"], form .animate-spin',
-  assistant_turn: 'article[data-turn="assistant"], [data-message-author-role="assistant"]',
+  // 新界面（2026-10）没有 article / data-message-author-role 了：取最后一轮（data-talvt-turn-state），去掉用户那条消息
+  assistant_turn: 'article[data-turn="assistant"], [data-message-author-role="assistant"], [data-talvt-turn-state]',
+  reply_exclude: '[data-user-message-bubble]',
   result_images:
     // 2026-10 实测的新界面：结果图在 generated-image-gallery 里，alt 是「Generated image 1」，地址是 blob:
     '[data-testid="generated-image-gallery"] img, img[alt^="Generated image"], ' +
