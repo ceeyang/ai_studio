@@ -5,90 +5,29 @@ import {
   useCreateShot,
   useDeleteShot,
   useEpisode,
-  useExports,
-  useFitKhmer,
   useReorderShots,
   useRunStage,
   useSplitShot,
-  useTranslateSubtitles,
 } from '../api/queries';
-import type { ExportOptions, ExportRow, RunIn } from '../api/types';
-import { fmtTime } from '../format';
-import { EndCardPanel } from './director/EndCardPanel';
+import type { RunIn } from '../api/types';
 import { ShotDrawer } from './director/ShotDrawer';
 import { type GenStage, ShotTable } from './director/ShotTable';
-import { moveId } from './director/slots';
-
-const SUBTITLE_TAG: Record<string, string> = { zh: '中文字幕', 'zh+km': '中高字幕' };
-
-/** 成片的变体标签：字幕、配音、片尾卡、时长；高棉语是 AI 译稿时提醒校对。 */
-export function exportTags(settings: Record<string, unknown>): string[] {
-  const tags: string[] = [];
-  const subs = SUBTITLE_TAG[String(settings.subtitles ?? '')];
-  if (subs) tags.push(subs);
-  if (settings.dub === 'km') tags.push('高棉语配音');
-  if (settings.bed === false) tags.push('无原声底');
-  if (settings.align === 'detected') tags.push('配音对齐说话');
-  if (settings.end_card === true) tags.push('片尾卡');
-  if (typeof settings.duration === 'number') tags.push(`${settings.duration.toFixed(1)} 秒`);
-  return tags;
-}
-
-function ExportsPanel({ rows, slug }: { rows: ExportRow[]; slug: string }) {
-  return (
-    <section className="panel">
-      <h3>成片</h3>
-      {rows.length === 0 ? (
-        <p className="muted">还没有导出。所有镜头都有选定视频后点"合成导出"。</p>
-      ) : (
-        <div className="export-body">
-          <video className="export-preview" src={rows[0].url} controls preload="metadata" />
-          <ul className="list export-list">
-            {rows.map((x) => (
-              <li key={x.id}>
-                <a data-testid="export-link" href={x.url} download>
-                  {x.file_path.split('/').pop()}
-                </a>{' '}
-                <span className="muted">
-                  {[x.variant, `${String(x.settings.clips ?? '?')} 镜`, ...exportTags(x.settings), fmtTime(x.created_at)].join(' · ')}
-                </span>
-                {x.settings.km_review === 'ai_draft' && <span className="badge stale">高棉语待母语校对</span>}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-      <details className="end-card-box">
-        <summary>片尾卡设置</summary>
-        <EndCardPanel slug={slug} />
-      </details>
-    </section>
-  );
-}
+import { moveId, selectedOf, slotOf } from './director/slots';
 
 export function DirectorPage() {
   const { slug = '', episodeId = '' } = useParams();
   const id = Number(episodeId);
   const [params, setParams] = useSearchParams();
   const ep = useEpisode(id);
-  const exportsQ = useExports(id);
   const run = useRunStage(id);
   const reorder = useReorderShots(id);
   const split = useSplitShot(id);
   const del = useDeleteShot(id);
   const create = useCreateShot(id);
-  const translate = useTranslateSubtitles(id);
-  const fit = useFitKhmer(id);
   const [selected, setSelected] = useState<Set<number>>(() => new Set());
   const [count, setCount] = useState(1);
   const [force, setForce] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
-  const [subZh, setSubZh] = useState(false);
-  const [subKm, setSubKm] = useState(false);
-  const [dubKm, setDubKm] = useState(false);
-  const [endCard, setEndCard] = useState(false);
-  const [bed, setBed] = useState(true);
-  const [alignDetected, setAlignDetected] = useState(false);
 
   if (ep.isLoading) return <p className="loading">加载中…</p>;
   if (ep.error || !ep.data) return <p className="error">{ep.error ? errorText(ep.error) : '找不到这一集'}</p>;
@@ -100,6 +39,7 @@ export function DirectorPage() {
   const selIds = shots.filter((s) => selected.has(s.id)).map((s) => s.id);
   const scope = selIds.length > 0 ? `选中 ${selIds.length} 镜` : '全部';
   const total = shots.reduce((a, s) => a + s.duration, 0);
+  const withVideo = shots.filter((s) => selectedOf(slotOf(s, 'video'))).length;
 
   const report = (p: Promise<unknown>, ok: string) => {
     p.then(
@@ -109,27 +49,9 @@ export function DirectorPage() {
   };
 
   // 镜头用 id 而不是 S01 这类编号：编号在排序、拆分、删除后会变
-  const exportOptions: ExportOptions = {
-    subtitles: subKm ? 'zh+km' : subZh ? 'zh' : 'none',
-    dub: dubKm ? 'km' : 'off',
-    end_card: endCard,
-    bed,
-    align: dubKm && alignDetected ? 'detected' : 'timeline',
-  };
-
-  const fitKhmer = () =>
-    fit.mutate(selIds.length > 0 ? { shot_ids: selIds } : {}, {
-      onSuccess: (r) =>
-        setNotice(
-          `已提交改写任务 #${r.job_ids.join(', #')}（${scope}）：中文会改成和高棉语配音一样长，原句留在镜头抽屉里；改完要重新生成这些镜头的视频`,
-        ),
-      onError: (err) => setNotice(errorText(err)),
-    });
-
-  const generate = (stage: GenStage | 'export', ids: number[] = []) => {
+  const generate = (stage: GenStage, ids: number[] = []) => {
     const body: RunIn = { stage, candidates: count, force };
     if (ids.length > 0) body.shots = ids.map(String);
-    if (stage === 'export') body.export = exportOptions;
     run.mutate(body, {
       onSuccess: (r) => setNotice(`已提交 ${r.job_ids.length} 个任务（#${r.job_ids.join(', #')}），进度见顶部任务条`),
       onError: (err) => setNotice(errorText(err)),
@@ -205,81 +127,9 @@ export function DirectorPage() {
         <button type="button" className="ghost" disabled={busy} onClick={() => report(create.mutateAsync({}), '已在末尾新增镜头')}>
           新增镜头
         </button>
-        <button type="button" disabled={shots.length === 0 || run.isPending} onClick={() => generate('export')}>
-          合成导出
-        </button>
-      </div>
-      <div className="toolbar export-options" role="group" aria-label="导出选项">
-        <span className="muted">导出选项</span>
-        <label>
-          <input
-            type="checkbox"
-            aria-label="中文字幕"
-            checked={subZh}
-            onChange={(ev) => {
-              setSubZh(ev.target.checked);
-              if (!ev.target.checked) setSubKm(false);
-            }}
-          />{' '}
-          中文字幕
-        </label>
-        <label>
-          <input
-            type="checkbox"
-            aria-label="高棉语字幕"
-            checked={subKm}
-            onChange={(ev) => {
-              setSubKm(ev.target.checked);
-              if (ev.target.checked) setSubZh(true);
-            }}
-          />{' '}
-          高棉语字幕（在中文下面）
-        </label>
-        <label>
-          <input type="checkbox" aria-label="高棉语配音" checked={dubKm} onChange={(ev) => setDubKm(ev.target.checked)} /> 高棉语配音（Edge TTS，原声压低当底）
-        </label>
-        <label>
-          <input type="checkbox" aria-label="片尾卡" checked={endCard} onChange={(ev) => setEndCard(ev.target.checked)} /> 片尾卡
-        </label>
-        <label title="取消后 H3 原音轨（含普通话）整条静音，成片里只有高棉语配音">
-          <input type="checkbox" aria-label="保留原声底" checked={bed} onChange={(ev) => setBed(ev.target.checked)} /> 保留原声底
-        </label>
-        <label title="配音放到 H3 音轨里实际开口的位置（检测不到就用台词时间）">
-          <input
-            type="checkbox"
-            aria-label="配音对齐实际说话"
-            checked={dubKm && alignDetected}
-            disabled={!dubKm}
-            onChange={(ev) => setAlignDetected(ev.target.checked)}
-          />{' '}
-          配音对齐实际说话
-        </label>
-        <span className="grow" aria-hidden="true" />
-        <button
-          type="button"
-          className="ghost"
-          disabled={shots.length === 0 || fit.isPending}
-          title={`把中文台词改写成和高棉语配音一样长（${scope}），之后重新生成视频，嘴型就跟着高棉语的时长走`}
-          onClick={fitKhmer}
-        >
-          按高棉语时长改写中文
-        </button>
-        <button
-          type="button"
-          className="ghost"
-          disabled={shots.length === 0 || translate.isPending}
-          onClick={() =>
-            translate.mutate(
-              { force: false },
-              {
-                onSuccess: (r) => setNotice(`已提交翻译任务 #${r.job_ids.join(', #')}：只补缺的句子，译文是 AI 草稿，发布前请母语者校对`),
-                onError: (err) => setNotice(errorText(err)),
-              },
-            )
-          }
-        >
-          翻译高棉语字幕
-        </button>
+        <Link className="btn" to={`/projects/${enc(slug)}/episodes/${id}/export`}>
+          去导出（{withVideo}/{shots.length} 镜有视频）
+        </Link>
       </div>
       {notice && (
         <p className="notice" role="status">
@@ -308,7 +158,6 @@ export function DirectorPage() {
             onGenerate={(shotId, stage) => generate(stage, [shotId])}
           />
         )}
-        <ExportsPanel rows={exportsQ.data ?? []} slug={slug} />
       </div>
 
       {openShot && <div className="drawer-scrim" aria-hidden="true" />}

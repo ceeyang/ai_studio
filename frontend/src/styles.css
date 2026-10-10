@@ -554,6 +554,38 @@ a.pill:hover { text-decoration: none; filter: brightness(1.15); }
 .export-list a { font-family: var(--mono); font-size: 13px; }
 .export-list .muted { font-size: 12px; font-variant-numeric: tabular-nums; }
 
+/* 导出页 */
+.export-page .panel { margin: 0; }
+.export-page .panel > .notice, .export-page .panel > .error, .export-page .panel > p.warn { margin-top: var(--s-3); }
+.export-ready { font-variant-numeric: tabular-nums; }
+.export-ready .grow { flex: 1; }
+.export-groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: var(--s-3); align-items: start; }
+.export-group {
+  margin: 0; padding: var(--s-3); min-width: 0;
+  display: flex; flex-direction: column; gap: var(--s-2);
+  border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface-0);
+}
+.export-group > legend { padding: 0 6px; font-size: 12px; letter-spacing: 0.06em; color: var(--muted); }
+.export-group > label { display: inline-flex; align-items: center; gap: 6px; color: var(--text-2); font-size: 13px; }
+.export-group-card { grid-column: 1 / -1; }
+.export-group > .muted { margin: 0; font-size: 12px; }
+.export-side { display: flex; flex-direction: column; gap: var(--s-3); min-width: 0; }
+.export-review { display: flex; flex-wrap: wrap; gap: var(--s-2); align-items: center; margin: 0; font-size: 12px; }
+.export-review .badge { margin: 0; }
+.export-list li { padding: var(--s-2); border-radius: var(--r-md); border: 1px solid transparent; }
+.export-list li.is-playing { border-color: var(--accent-line); background: var(--accent-soft); }
+.export-pick {
+  display: flex; flex-direction: column; align-items: flex-start; justify-content: flex-start; gap: 2px; width: 100%;
+  height: auto; padding: 0; background: none; border: 0; text-align: left; color: var(--text);
+  font-weight: 400; line-height: 1.5; white-space: normal;
+}
+.export-pick:hover:not(:disabled) { background: none; border: 0; color: var(--accent-hover); }
+.export-pick:active:not(:disabled) { transform: none; }
+.export-label { font-size: 13.5px; overflow-wrap: anywhere; }
+.export-meta { display: flex; flex-wrap: wrap; gap: var(--s-2); align-items: center; margin-top: 4px; }
+.export-meta .badge { margin: 0; }
+.export-list a.export-file { font-size: 11.5px; color: var(--muted); overflow-wrap: anywhere; }
+
 /* =========================================================================
    抽屉
    ========================================================================= */
@@ -1097,10 +1129,6 @@ pre.error { background: rgba(255, 90, 95, 0.06); border-color: rgba(255, 90, 95,
   .pcard, .pcard-img, .pcard-empty { width: 150px; }
   .turn-sheet, .turn-look { max-width: 1120px; }
   .turn-cells { max-width: 680px; }
-  .director-body { display: grid; grid-template-columns: minmax(0, 1fr) 380px; align-items: start; }
-  .director-body > .panel:last-child { position: sticky; top: calc(var(--taskbar-h) + var(--s-4)); }
-  .director-body .export-body { grid-template-columns: minmax(0, 1fr); }
-  .director-body .export-preview { width: 100%; max-width: 300px; }
   .thumb, .media-none { width: 112px; height: 199px; }
   .settings-layout {
     display: grid; gap: var(--s-4); align-items: start;
@@ -1146,10 +1174,7 @@ pre.error { background: rgba(255, 90, 95, 0.06); border-color: rgba(255, 90, 95,
 .dialogue-editor legend .t { font-family: var(--mono); font-size: 12px; color: var(--muted); margin-right: 8px; }
 .dialogue-editor textarea[lang="km"] { font-family: "Khmer UI", "Leelawadee UI", var(--font); font-size: 15px; line-height: 1.7; }
 .check { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text-2); }
-.toolbar.export-options { margin-top: calc(var(--s-2) * -1); }
 .export-list .badge { align-self: flex-start; margin-left: 0; }
-.end-card-box { margin-top: var(--s-4); border-top: 1px solid var(--divider); padding-top: var(--s-3); }
-.end-card-box > summary { cursor: pointer; color: var(--text-2); font-size: 13px; margin-bottom: var(--s-3); }
 .end-card-line { flex-wrap: nowrap; }
 .end-card-line .grow { flex: 1; min-width: 0; }
 .end-card-line input[type="number"] { width: 72px; }

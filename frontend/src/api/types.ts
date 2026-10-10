@@ -153,6 +153,10 @@ export interface Slot {
   kind: string;
   selected_candidate_id: number | null;
   stale: boolean;
+  /** 过期原因：「陈师傅 定妆照换了」「提示词改了」……；不过期时为 null */
+  stale_reason?: string | null;
+  /** 比选定的那张更新、还没选的候选数 */
+  new_candidates?: number;
   candidates: Candidate[];
 }
 
@@ -214,6 +218,10 @@ export interface Shot {
 
 export interface ShotDetail extends Shot {
   slots: Slot[];
+  /** 排队 / 运行 / 等输入的首帧（image.keyframe）、视频（video.shot）任务 */
+  active_jobs?: JobBrief[];
+  /** 首帧、视频各自最近一次失败（之后没出过新的才给），每种最多一条 */
+  failures?: JobBrief[];
 }
 
 export interface EpisodeDetail extends Episode {
@@ -524,6 +532,10 @@ export interface ExportRow {
   file_path: string;
   url: string;
   settings: Record<string, unknown>;
+  /** 后端拼好的可读标签：「9:16 · 中高字幕 · 高棉语配音 · 37.1 秒」 */
+  label?: string;
+  /** 定稿：同一集最多一个 */
+  is_final?: boolean;
   created_at: string;
 }
 

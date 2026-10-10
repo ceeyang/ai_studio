@@ -2,7 +2,7 @@ import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { installFetch } from '../test/fetch';
-import { makeEpisode, makeShot } from '../test/factories';
+import { makeCandidate, makeEpisode, makeShot, makeSlot } from '../test/factories';
 import { renderAt } from '../test/render';
 import { DirectorPage } from './DirectorPage';
 
@@ -63,24 +63,25 @@ describe('DirectorPage', () => {
     expect(confirm.mock.calls[0][0]).toContain('S01');
   });
 
-  it('成片列表给出下载链接；没有分镜时引导去剧本页', async () => {
-    installFetch(
-      routes({
-        'GET /api/episodes/4': makeEpisode({ id: 4, shots: [] }),
-        'GET /api/episodes/4/exports': [
-          {
-            id: 1, episode_id: 4, variant: '9x16', file_path: 'demo/exports/ep01_9x16_x.mp4',
-            url: '/media/demo/exports/ep01_9x16_x.mp4', settings: { clips: 2 }, created_at: '2026-10-08T11:36:09',
-          },
-        ],
-      }),
-    );
+  it('没有分镜时引导去剧本页', async () => {
+    installFetch(routes({ 'GET /api/episodes/4': makeEpisode({ id: 4, shots: [] }) }));
     renderAt(<DirectorPage />, AT);
-    const link = await screen.findByTestId('export-link');
-    expect(link.getAttribute('href')).toBe('/media/demo/exports/ep01_9x16_x.mp4');
-    expect(link.textContent).toBe('ep01_9x16_x.mp4');
-    expect(link.hasAttribute('download')).toBe(true);
-    expect(screen.getByRole('link', { name: '去剧本页运行分镜' }).getAttribute('href')).toBe('/projects/demo/episodes/4/script');
+    expect((await screen.findByRole('link', { name: '去剧本页运行分镜' })).getAttribute('href')).toBe('/projects/demo/episodes/4/script');
+  });
+
+  it('导出在导出页：导演台只给「去导出」链接并写明几镜有视频', async () => {
+    const withVideo = makeShot({
+      id: 11, code: 'S01', duration: 5,
+      slots: [makeSlot({ id: 1, kind: 'video', selected_candidate_id: 7, candidates: [makeCandidate({ id: 7 })] })],
+    });
+    installFetch(routes({ 'GET /api/episodes/4': makeEpisode({ id: 4, shots: [withVideo, EP.shots[1]] }) }));
+    renderAt(<DirectorPage />, AT);
+    const link = await screen.findByRole('link', { name: '去导出（1/2 镜有视频）' });
+    expect(link.getAttribute('href')).toBe('/projects/demo/episodes/4/export');
+    expect(screen.queryByRole('button', { name: '合成导出' })).toBeNull();
+    expect(screen.queryByLabelText('高棉语字幕')).toBeNull();
+    expect(screen.queryByRole('button', { name: '翻译高棉语字幕' })).toBeNull();
+    expect(screen.queryByText('片尾卡设置')).toBeNull();
   });
 
   it('点编号在地址栏记下镜头并打开详情抽屉', async () => {
@@ -92,102 +93,5 @@ describe('DirectorPage', () => {
     expect(await screen.findByRole('dialog', { name: '镜头 S02 详情' })).toBeTruthy();
     await user.click(screen.getByRole('button', { name: '关闭' }));
     expect(screen.queryByRole('dialog')).toBeNull();
-  });
-
-  it('合成导出带上字幕、配音、片尾卡选项；勾高棉语字幕会连带勾中文字幕', async () => {
-    const calls = installFetch(routes({ 'POST /api/episodes/4/run': { job_ids: [41, 42, 43] } }));
-    renderAt(<DirectorPage />, AT);
-    const user = userEvent.setup();
-    await screen.findByTestId('shot-S01');
-    await user.click(screen.getByRole('button', { name: '合成导出' }));
-    await user.click(screen.getByLabelText('高棉语字幕'));
-    expect((screen.getByLabelText('中文字幕') as HTMLInputElement).checked).toBe(true);
-    await user.click(screen.getByLabelText('高棉语配音'));
-    await user.click(screen.getByLabelText('片尾卡'));
-    await user.click(screen.getByRole('button', { name: '合成导出' }));
-    await waitFor(() => expect(calls.filter((c) => c.method === 'POST')).toHaveLength(2));
-    const runs = calls.filter((c) => c.method === 'POST');
-    expect(runs[0].body).toEqual({
-      stage: 'export', candidates: 1, force: false,
-      export: { subtitles: 'none', dub: 'off', end_card: false, bed: true, align: 'timeline' },
-    });
-    expect(runs[1].body).toEqual({
-      stage: 'export', candidates: 1, force: false,
-      export: { subtitles: 'zh+km', dub: 'km', end_card: true, bed: true, align: 'timeline' },
-    });
-    await user.click(screen.getByLabelText('中文字幕'));
-    expect((screen.getByLabelText('高棉语字幕') as HTMLInputElement).checked).toBe(false);
-  });
-
-  it('不保留原声底、配音对齐实际说话；对齐只在勾了配音时可选', async () => {
-    const calls = installFetch(routes({ 'POST /api/episodes/4/run': { job_ids: [44] } }));
-    renderAt(<DirectorPage />, AT);
-    const user = userEvent.setup();
-    await screen.findByTestId('shot-S01');
-    const bed = screen.getByLabelText('保留原声底') as HTMLInputElement;
-    const align = screen.getByLabelText('配音对齐实际说话') as HTMLInputElement;
-    expect(bed.checked).toBe(true);
-    expect(align.disabled).toBe(true);
-    await user.click(screen.getByLabelText('高棉语配音'));
-    expect(align.disabled).toBe(false);
-    await user.click(align);
-    await user.click(bed);
-    await user.click(screen.getByRole('button', { name: '合成导出' }));
-    await waitFor(() => expect(calls.some((c) => c.method === 'POST')).toBe(true));
-    expect(calls.find((c) => c.method === 'POST')?.body).toEqual({
-      stage: 'export', candidates: 1, force: false,
-      export: { subtitles: 'none', dub: 'km', end_card: false, bed: false, align: 'detected' },
-    });
-  });
-
-  it('按高棉语时长改写中文：没勾选时整集，勾选后只提交选中镜头', async () => {
-    const calls = installFetch(routes({ 'POST /api/episodes/4/dialogue/fit-khmer': { job_ids: [60] } }));
-    renderAt(<DirectorPage />, AT);
-    const user = userEvent.setup();
-    await user.click(await screen.findByRole('button', { name: '按高棉语时长改写中文' }));
-    expect((await screen.findByRole('status')).textContent).toContain('#60');
-    await user.click(screen.getByLabelText('选择 S02'));
-    await user.click(screen.getByRole('button', { name: '按高棉语时长改写中文' }));
-    await waitFor(() => expect(calls.filter((c) => c.method === 'POST')).toHaveLength(2));
-    const posts = calls.filter((c) => c.method === 'POST');
-    expect(posts[0].url).toBe('/api/episodes/4/dialogue/fit-khmer');
-    expect(posts[0].body).toEqual({});
-    expect(posts[1].body).toEqual({ shot_ids: [12] });
-  });
-
-  it('翻译高棉语字幕提交翻译任务', async () => {
-    const calls = installFetch(routes({ 'POST /api/episodes/4/subtitles/translate': { job_ids: [50] } }));
-    renderAt(<DirectorPage />, AT);
-    const user = userEvent.setup();
-    await user.click(await screen.findByRole('button', { name: '翻译高棉语字幕' }));
-    expect((await screen.findByRole('status')).textContent).toContain('#50');
-    expect(calls.find((c) => c.method === 'POST')?.body).toEqual({ force: false });
-  });
-
-  it('成片列表标出字幕、配音、片尾卡和待校对', async () => {
-    installFetch(
-      routes({
-        'GET /api/episodes/4/exports': [
-          {
-            id: 2, episode_id: 4, variant: '9x16', file_path: 'demo/exports/ep01_9x16_zhkm_dubkm_card_x.mp4',
-            url: '/media/demo/exports/ep01_9x16_zhkm_dubkm_card_x.mp4',
-            settings: {
-              clips: 6, subtitles: 'zh+km', dub: 'km', end_card: true, duration: 33.6, km_review: 'ai_draft',
-              bed: false, align: 'detected',
-            },
-            created_at: '2026-10-09T12:00:00',
-          },
-        ],
-      }),
-    );
-    renderAt(<DirectorPage />, AT);
-    const row = (await screen.findByTestId('export-link')).closest('li') as HTMLElement;
-    expect(row.textContent).toContain('中高字幕');
-    expect(row.textContent).toContain('高棉语配音');
-    expect(row.textContent).toContain('片尾卡');
-    expect(row.textContent).toContain('33.6 秒');
-    expect(row.textContent).toContain('高棉语待母语校对');
-    expect(row.textContent).toContain('无原声底');
-    expect(row.textContent).toContain('配音对齐说话');
   });
 });

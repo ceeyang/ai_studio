@@ -110,6 +110,10 @@ for (const width of WIDTHS) {
     await page.locator('.drawer').evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
     await expectNoOverflow(page, `${width} 镜头抽屉`);
 
+    await page.goto(`${ep}/export`);
+    await expect(page.getByTestId('readiness')).toBeVisible();
+    await expectNoOverflow(page, `${width} 导出`);
+
     await page.goto(`/jobs?job=${failedJob}`);
     await expect(page.getByTestId('job-status')).toHaveText('失败');
     await expectNoOverflow(page, `${width} 任务`);

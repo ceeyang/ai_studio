@@ -443,6 +443,16 @@ export function usePutEndCard(slug: string) {
   });
 }
 
+/** 设为定稿 / 取消定稿（同一集只留一个定稿，后端会自动取消别的）。 */
+export function usePatchExport(episodeId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, is_final }: { id: number; is_final: boolean }) =>
+      api.patch<ExportRow>(`/api/exports/${id}`, { is_final }),
+    onSuccess: () => invalidate(qc, keys.exports(episodeId), ['episode']),
+  });
+}
+
 export function useFitKhmer(episodeId: number) {
   const qc = useQueryClient();
   return useMutation({
