@@ -1,4 +1,4 @@
-"""引擎接口。build() 只负责把请求拼成调用（ComfyUI 工作流），执行交给 runner。"""
+"""引擎接口。build() 只负责把请求拼成调用（ComfyUI 工作流或网页出图请求），执行交给 runner。"""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -68,6 +68,8 @@ class EngineCall:
     model_family: str
     meta: dict = field(default_factory=dict)
     dropped_refs: list[str] = field(default_factory=list)
+    # 谁来执行：comfyui（workflow 是 API 格式工作流）或 browser（workflow 是网页出图请求，见 engines/browser）
+    runner: Literal["comfyui", "browser"] = "comfyui"
 
 
 class ImageEngine(Protocol):

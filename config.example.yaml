@@ -38,6 +38,19 @@ engines:
   h3_image: {enabled: true, params: {turbo: false}}
   h3_video: {enabled: true, params: {turbo: true}}
   wan22_i2v: {enabled: true, params: {}}
+  # 网页出图：驱动下面 browser 里那个已经登录的浏览器，在 chatgpt.com / gemini.google.com 上出图，
+  # 不用 API key、不占显卡。timeout 是等出图的最长秒数；fit_aspect 把出来的图居中裁成要求的画幅。
+  gpt_image: {enabled: true, params: {timeout: 420, fit_aspect: true}}
+  gemini_image: {enabled: true, params: {timeout: 300, fit_aspect: true}}
+
+# 网页出图用的浏览器。studio 用单独的配置目录带调试端口启动 Chrome（找不到就用 Edge），
+# 第一次在设置页点「打开浏览器登录」，在弹出的窗口里登录 ChatGPT 和 Gemini，之后登录态一直留着。
+# Chrome 136 起默认配置目录不许开远程调试，所以不能用你平时的浏览器配置。
+browser:
+  executable: null            # 不写就自动找 Chrome，再找 Edge
+  user_data_dir: browser-profile   # 相对本文件；里面有登录 cookie，不进 git
+  cdp_port: 9333
+  headless: false
 
 ffmpeg:
   ffmpeg: ffmpeg

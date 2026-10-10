@@ -110,6 +110,17 @@ class DubCfg(BaseModel):
     align_max_shift: float = 1.5       # 只在台词计划起点前后这么多秒内找说话段
 
 
+class BrowserCfg(BaseModel):
+    """网页图像引擎（gpt_image / gemini_image）用的浏览器：studio 自己管一个独立的 Chrome/Edge 配置目录，
+    带远程调试端口启动，Playwright 走 CDP 连上去。Chrome 136 起默认配置目录不许开远程调试，
+    所以必须用单独的 user_data_dir；在那个窗口里登录一次 ChatGPT / Gemini，登录态就留在这个目录里。"""
+    executable: Path | None = None     # 不写就先找 Chrome，再找 Edge
+    user_data_dir: Path = ROOT / "browser-profile"   # 不进 git
+    cdp_port: int = 9333
+    headless: bool = False             # 要能看到窗口、手动登录，默认有界面
+    launch_timeout: float = 30.0       # 启动后等调试端口响应的秒数
+
+
 class Config(BaseModel):
     server: ServerCfg = Field(default_factory=ServerCfg)
     comfyui: ComfyCfg = Field(default_factory=ComfyCfg)
@@ -118,6 +129,7 @@ class Config(BaseModel):
     ffmpeg: FfmpegCfg = Field(default_factory=FfmpegCfg)
     subtitles: SubtitlesCfg = Field(default_factory=SubtitlesCfg)
     dub: DubCfg = Field(default_factory=DubCfg)
+    browser: BrowserCfg = Field(default_factory=BrowserCfg)
     workflows_dir: Path = ROOT / "workflows"
     log_dir: Path = ROOT / "logs"
     # 生产态由后端托管的前端构建目录（cd frontend; npm run build 生成）；不存在就只提供 API
@@ -143,6 +155,8 @@ def _absolutize(cfg: Config, base: Path) -> Config:
     cfg.log_dir = fix(cfg.log_dir)
     cfg.frontend_dist = fix(cfg.frontend_dist)
     cfg.subtitles.fonts_dir = fix(cfg.subtitles.fonts_dir)
+    cfg.browser.executable = fix(cfg.browser.executable)
+    cfg.browser.user_data_dir = fix(cfg.browser.user_data_dir)
     return cfg
 
 
