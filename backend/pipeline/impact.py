@@ -58,7 +58,7 @@ def _storyboard_impact(s: Session, sv, episode_id: int, force: bool) -> RerunImp
                                         plan_data.shot_seconds, plan_data.max_seconds, prev_action)
         key = f"storyboard:{blk['id']}"
         existing = s.scalar(select(func.count()).select_from(Shot)
-                            .where(Shot.scene_block_id == blk["id"]))
+                            .where(Shot.scene_block_id == blk["id"], Shot.origin == "llm"))
         unchanged = stage_hashes.get(key) == fp and existing > 0
         if force or not unchanged:
             rerun_block_ids.append(blk["id"])

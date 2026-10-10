@@ -127,7 +127,7 @@ def run_storyboard(ctx, payload: dict) -> dict:
         with sv.db.session() as s:
             ep = s.get(Episode, episode_id)
             existing = s.scalar(select(func.count()).select_from(Shot)
-                                .where(Shot.scene_block_id == blk["id"]))
+                                .where(Shot.scene_block_id == blk["id"], Shot.origin == "llm"))
             unchanged = (ep.stage_hashes or {}).get(key) == fp and existing > 0
         if unchanged and not force:
             ctx.log(f"段落 {blk['order'] + 1}：输入没变，跳过")

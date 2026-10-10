@@ -190,3 +190,17 @@ def test_manual_shot_survives_full_rerun(tmp_path, db):
         kept = next(x for x in shots if x.id == manual_id)
         assert kept.action == "手工加的" and kept.scene_block_id is None
         assert sum(1 for x in shots if x.origin == "llm") == 4
+
+
+def test_block_with_only_manual_shots_is_not_skipped(tmp_path, db):
+    """段落里只剩手工镜头（llm 镜头都删了）时，指纹没变也要重跑，不能当成「已有镜头」跳过。"""
+    ctx, ep_id, prov = setup(tmp_path, db, [shots_json(2), shots_json(2), shots_json(2)])
+    run_storyboard(ctx, {"episode_id": ep_id})
+    with db.session() as s:
+        b1 = s.get(Episode, ep_id).scene_blocks[0].id
+        for sh in s.scalars(select(Shot).where(Shot.scene_block_id == b1)):
+            s.delete(sh)
+        # 动作和原来段末镜头一样，第二段的「上一镜结束时」不变，只看第一段
+        s.add(Shot(episode_id=ep_id, scene_block_id=b1, order=5, action="动作1", origin="manual"))
+    assert run_storyboard(ctx, {"episode_id": ep_id}) == {"blocks_done": 1, "blocks_skipped": 1}
+    assert len(prov.calls) == 3

@@ -159,3 +159,17 @@ def test_api_rerun_impact_endpoint(api):
     assert api.get(f"/api/episodes/{ep_id}/rerun-impact",
                    params={"stage": "bogus"}).status_code == 422
     assert api.get("/api/episodes/999/rerun-impact", params={"stage": "script"}).status_code == 404
+
+
+def test_rerun_impact_block_with_only_manual_shots_will_run(tmp_path, db):
+    ctx, ep_id, _ = seed_one_block(tmp_path, db, [shots_json(2)])
+    run_storyboard(ctx, {"episode_id": ep_id})
+    with db.session() as s:
+        b1 = s.get(Episode, ep_id).scene_blocks[0].id
+        for sh in s.scalars(select(Shot).where(Shot.scene_block_id == b1)):
+            s.delete(sh)
+        s.add(Shot(episode_id=ep_id, scene_block_id=b1, order=5, action="手工", origin="manual"))
+    with db.session() as s:
+        impact = rerun_impact(s, ctx.services, ep_id, "storyboard", False)
+    assert impact.will_run is True and impact.blocks == [1]
+    assert impact.shots_deleted == 0 and impact.manual_kept == 1
