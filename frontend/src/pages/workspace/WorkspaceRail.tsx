@@ -1,4 +1,5 @@
 // 单集工作台的左栏：剧本大纲（原文一行摘要 + 段落列表）和本集角色（头像 / 名字 / 定妆状态）。可收起，记在本机浏览器里。
+// 用户还没自己收起 / 展开过时：首帧、视频阶段默认收起（镜头卡片网格要宽），其他阶段默认展开。
 import { useState } from 'react';
 import { useCharacters, useLocations } from '../../api/queries';
 import type { EpisodeDetail } from '../../api/types';
@@ -6,18 +7,19 @@ import { castOf, hasPortrait } from '../stages';
 
 const KEY = 'studio.workspaceRail';
 
-function readCollapsed(): boolean {
+/** 用户自己选过的：true 收起、false 展开；没选过为 null（按阶段给默认） */
+function readChoice(): boolean | null {
   try {
-    return localStorage.getItem(KEY) === 'collapsed';
+    const v = localStorage.getItem(KEY);
+    return v === 'collapsed' ? true : v === 'expanded' ? false : null;
   } catch {
-    return false;
+    return null;
   }
 }
 
-function saveCollapsed(collapsed: boolean) {
+function saveChoice(collapsed: boolean) {
   try {
-    if (collapsed) localStorage.setItem(KEY, 'collapsed');
-    else localStorage.removeItem(KEY);
+    localStorage.setItem(KEY, collapsed ? 'collapsed' : 'expanded');
   } catch {
     // 存不了就只在这次打开里有效
   }
@@ -33,17 +35,20 @@ interface WorkspaceRailProps {
   ep: EpisodeDetail;
   /** 当前打开的角色（?char=） */
   activeChar: number | null;
+  /** 当前阶段：没选过收起 / 展开时，首帧、视频阶段默认收起 */
+  stage?: string | null;
   onBlock: (blockId: number) => void;
   onChar: (charId: number) => void;
 }
 
-export function WorkspaceRail({ slug, ep, activeChar, onBlock, onChar }: WorkspaceRailProps) {
-  const [collapsed, setCollapsed] = useState(readCollapsed);
+export function WorkspaceRail({ slug, ep, activeChar, stage = null, onBlock, onChar }: WorkspaceRailProps) {
+  const [choice, setChoice] = useState(readChoice);
+  const collapsed = choice ?? (stage === 'keyframes' || stage === 'videos');
   const characters = useCharacters(slug);
   const locations = useLocations(slug);
   const toggle = () => {
-    setCollapsed(!collapsed);
-    saveCollapsed(!collapsed);
+    setChoice(!collapsed);
+    saveChoice(!collapsed);
   };
 
   const toggleBtn = (

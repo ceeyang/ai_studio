@@ -43,7 +43,7 @@ describe('ShotCard', () => {
     expect(within(card).getByText('S01')).toBeTruthy();
     expect(within(card).getByText('5.5 秒')).toBeTruthy();
     expect(within(card).getByText('林夏念稿')).toBeTruthy();
-    expect(within(card).getByText('2 句台词')).toBeTruthy();
+    expect(within(card).getByTitle('2 句台词').textContent).toBe('2 句台词');
     expect(within(card).getByRole('img', { name: '林夏' }).getAttribute('src')).toBe('/media/p8.png');
     expect(within(card).getByRole('img', { name: '老周' }).textContent).toBe('老');
   });

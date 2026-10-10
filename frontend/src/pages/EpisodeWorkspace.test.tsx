@@ -404,7 +404,7 @@ describe('EpisodeWorkspace', () => {
 
   it('左栏：原文一行摘要和段落列表，点段落切到剧本阶段', async () => {
     installFetch(routes());
-    renderRoute('/projects/demo/episodes/4?stage=keyframes');
+    renderRoute('/projects/demo/episodes/4?stage=export');
     const rail = await screen.findByRole('complementary', { name: '剧本大纲与角色' });
     expect(within(rail).getByTestId('rail-source').textContent).toContain('深夜的直播间');
     expect(within(rail).getByTestId('rail-source').textContent).not.toContain('第二行');
@@ -417,7 +417,7 @@ describe('EpisodeWorkspace', () => {
 
   it('左栏角色：头像或首字、名字、定妆状态；点角色切到角色阶段并带上 ?char=', async () => {
     installFetch(routes());
-    renderRoute('/projects/demo/episodes/4?stage=keyframes');
+    renderRoute('/projects/demo/episodes/4?stage=export');
     const rail = await screen.findByRole('complementary', { name: '剧本大纲与角色' });
     const lin = await within(rail).findByRole('button', { name: /^林夏/ });
     expect(lin.textContent).toContain('已定妆');
@@ -440,6 +440,20 @@ describe('EpisodeWorkspace', () => {
     first.unmount();
     renderRoute('/projects/demo/episodes/4?stage=script');
     expect(await screen.findByRole('button', { name: '展开左栏' })).toBeTruthy();
+  });
+
+  it('左栏没收起 / 展开过时：首帧、视频阶段默认收起，剧本阶段展开；自己展开过以后记住，首帧阶段也展开', async () => {
+    installFetch(routes());
+    const first = renderRoute('/projects/demo/episodes/4?stage=keyframes');
+    const user = userEvent.setup();
+    expect(await screen.findByRole('button', { name: '展开左栏' })).toBeTruthy();
+    await user.click(within(stageBar()).getByRole('button', { name: /剧本/ }));
+    expect(await screen.findByRole('heading', { name: '剧本大纲' })).toBeTruthy();
+    await user.click(within(stageBar()).getByRole('button', { name: /视频/ }));
+    await user.click(await screen.findByRole('button', { name: '展开左栏' }));
+    first.unmount();
+    renderRoute('/projects/demo/episodes/4?stage=keyframes');
+    expect(await screen.findByRole('heading', { name: '剧本大纲' })).toBeTruthy();
   });
 
   describe('首帧确认门（首帧 / 视频阶段的下一步）', () => {

@@ -1,4 +1,4 @@
-// 镜头卡片（首帧 / 视频阶段）：9:16 缩略 + 镜号、时长、动作、台词数、出场角色 + 状态角标；
+// 镜头卡片（首帧 / 视频阶段）：9:16 缩略 + 一行（镜号、时长、台词数、出场角色）+ 一行动作 + 状态角标；
 // 一个随状态变的按钮（普通样式，全页唯一的主按钮在阶段条）和「⋯」菜单；点卡片打开镜头抽屉，左上角勾选多选。
 import { useId } from 'react';
 import type { Character, ShotDetail } from '../../api/types';
@@ -111,23 +111,29 @@ export function ShotCard(props: ShotCardProps) {
           </span>
         </span>
         <span className="shot-meta">
+          {/* 紧凑：镜号、时长、台词数、出场角色头像一行；动作一行截断（全文在悬停提示和抽屉里） */}
           <span className="shot-head">
             <span id={ids.code} className="shot-code">
               {code}
             </span>
             <span className="shot-dur">{shot.duration.toFixed(1)} 秒</span>
-          </span>
-          <span className="shot-action">{shot.action || <span className="muted">（没有动作描述）</span>}</span>
-          {(shot.dialogue.length > 0 || cast.length > 0) && (
-            <span className="shot-foot">
-              {shot.dialogue.length > 0 && <span className="shot-lines">{shot.dialogue.length} 句台词</span>}
+            {shot.dialogue.length > 0 && (
+              <span className="shot-lines" title={`${shot.dialogue.length} 句台词`}>
+                {shot.dialogue.length} 句
+                <span className="visually-hidden">台词</span>
+              </span>
+            )}
+            {cast.length > 0 && (
               <span className="shot-cast">
                 {cast.map((c) => (
                   <Avatar key={c.id} c={c} />
                 ))}
               </span>
-            </span>
-          )}
+            )}
+          </span>
+          <span className="shot-action" title={shot.action || undefined}>
+            {shot.action || <span className="muted">（没有动作描述）</span>}
+          </span>
         </span>
       </button>
       {st.mark === 'stale' && (

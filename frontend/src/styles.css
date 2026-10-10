@@ -1349,21 +1349,26 @@ img.rail-avatar { border: 0; }
    ========================================================================= */
 .shot-stage { display: flex; flex-direction: column; gap: var(--s-4); }
 .shot-stage > .panel { margin: 0; }
-.shot-grid-wrap { display: flex; flex-direction: column; gap: var(--s-5); }
-.shot-group { display: flex; flex-direction: column; gap: var(--s-3); min-width: 0; }
-.shot-group-head { display: flex; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
-.shot-group-head h3 { margin: 0; font-size: 14px; font-weight: 600; color: var(--text); }
+.shot-grid-wrap { display: flex; flex-direction: column; gap: var(--s-4); }
+.shot-group { display: flex; flex-direction: column; gap: var(--s-2); min-width: 0; }
+/* 组头是一条细分隔行：勾选 + 「第 N 段 · 场景 · M 镜」+ 右边「重写本段分镜…」，下边一条细线 */
+.shot-group-head {
+  display: flex; align-items: center; gap: var(--s-2); flex-wrap: wrap; min-height: 28px;
+  padding-bottom: 4px; border-bottom: 1px solid var(--border);
+}
+.shot-group-head h3 { margin: 0; font-size: 12.5px; font-weight: 500; color: var(--muted); letter-spacing: 0.01em; }
 .shot-group-empty { margin: 0; }
-.shot-grid { display: grid; gap: var(--s-3); grid-template-columns: repeat(auto-fill, minmax(168px, 1fr)); }
+/* 卡片固定在 128–156px 宽、不拉伸：1600 宽一行 6–7 张，1280 宽（左栏展开）5 张，一屏能看完一段的首帧 */
+.shot-grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(128px, 156px)); }
 .shot-card {
-  position: relative; display: flex; flex-direction: column; gap: 8px; min-width: 0; padding: 8px;
+  position: relative; display: flex; flex-direction: column; gap: 6px; min-width: 0; padding: 6px;
   background: var(--surface-1); border: 1px solid var(--border); border-radius: var(--r-md);
 }
 .shot-card:hover { border-color: var(--border-strong); }
 .shot-card.is-selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); background: var(--accent-soft); }
-.shot-check { position: absolute; left: 14px; top: 14px; z-index: 2; width: 18px; height: 18px; margin: 0; cursor: pointer; }
+.shot-check { position: absolute; left: 11px; top: 11px; z-index: 2; width: 16px; height: 16px; margin: 0; cursor: pointer; }
 .shot-open {
-  display: flex; flex-direction: column; align-items: stretch; gap: 6px; height: auto; padding: 0;
+  display: flex; flex-direction: column; align-items: stretch; gap: 5px; height: auto; padding: 0;
   border: 0; background: none; color: inherit; text-align: left; font-weight: 400; min-width: 0;
   white-space: normal; /* 按钮默认不换行：动作要能折到第二行再截断，不然一行被硬切掉 */
 }
@@ -1407,35 +1412,34 @@ img.rail-avatar { border: 0; }
   background: var(--accent); color: var(--accent-ink); border-color: var(--accent);
 }
 .shot-card.is-busy .new-cands { bottom: 32px; }
-.shot-meta { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.shot-head { display: flex; align-items: baseline; justify-content: space-between; gap: 6px; }
-.shot-code { font-family: var(--mono); font-size: 13px; letter-spacing: 0.02em; color: var(--text); }
-.shot-dur { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.shot-meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.shot-head { display: flex; align-items: center; gap: 5px; min-width: 0; height: 20px; }
+.shot-code { font-family: var(--mono); font-size: 12.5px; letter-spacing: 0.02em; color: var(--text); }
+.shot-dur, .shot-lines { font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .shot-action {
-  font-size: 12.5px; line-height: 1.5; color: var(--text-2); overflow-wrap: anywhere;
-  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden;
+  font-size: 12px; line-height: 1.45; color: var(--text-2);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
-.shot-foot { display: flex; align-items: center; justify-content: space-between; gap: 6px; min-width: 0; }
-.shot-lines { font-size: 12px; color: var(--muted); white-space: nowrap; }
-.shot-cast { display: flex; margin-left: auto; }
+.shot-cast { display: flex; margin-left: auto; min-width: 0; overflow: hidden; }
 .shot-avatar {
-  width: 22px; height: 22px; border-radius: 50%; object-fit: cover; margin-left: -6px;
-  display: inline-flex; align-items: center; justify-content: center; font-size: 11px;
-  background: var(--surface-3); color: var(--text-2); border: 2px solid var(--surface-1);
+  width: 18px; height: 18px; border-radius: 50%; object-fit: cover; margin-left: -5px; flex: none;
+  display: inline-flex; align-items: center; justify-content: center; font-size: 10px;
+  background: var(--surface-3); color: var(--text-2); border: 1.5px solid var(--surface-1);
 }
 .shot-avatar:first-child { margin-left: 0; }
 .shot-stale {
-  margin: 0; font-size: 11.5px; line-height: 1.35; color: var(--warn);
+  margin: 0; font-size: 11px; line-height: 1.35; color: var(--warn);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .shot-fail {
-  margin: 0; font-size: 11.5px; line-height: 1.35; color: #ff9a9d; overflow-wrap: anywhere;
-  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden;
+  margin: 0; font-size: 11px; line-height: 1.35; color: #ff9a9d;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; /* 全文在悬停提示和抽屉里 */
 }
 .shot-actions { display: flex; align-items: center; gap: 4px; }
 /* 同一行的卡片高度不同（有无台词/角色、过期/失败说明）：按钮贴底对齐 */
 .shot-card > .shot-actions { margin-top: auto; }
-.shot-actions > button:first-child { flex: 1; min-width: 0; }
+.shot-actions > button:first-child { flex: 1; min-width: 0; height: 26px; }
+.shot-actions .menu-trigger { height: 26px; }
 
 /* =========================================================================
    角色阶段：角色卡网格 + 下方「设定」折叠（pages/workspace/CastStage、CastCard、CharacterDrawer）
@@ -1452,7 +1456,7 @@ img.rail-avatar { border: 0; }
 }
 .cast-card:hover { border-color: var(--border-strong); }
 .cast-open {
-  display: flex; flex-direction: column; align-items: stretch; gap: 6px; height: auto; padding: 0;
+  display: flex; flex-direction: column; align-items: stretch; gap: 5px; height: auto; padding: 0;
   border: 0; background: none; color: inherit; text-align: left; font-weight: 400; min-width: 0;
 }
 .cast-open:hover:not(:disabled) { background: none; border: 0; }

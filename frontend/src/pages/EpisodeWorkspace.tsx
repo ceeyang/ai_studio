@@ -189,6 +189,7 @@ function Workspace({ slug, id }: { slug: string; id: number }) {
           slug={slug}
           ep={ep.data}
           activeChar={Number(params.get('char')) || null}
+          stage={stage}
           onBlock={(blockId) => {
             setScrollBlock(blockId);
             void select('script');
