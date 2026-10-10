@@ -201,6 +201,7 @@ class Flow {
     const s = this.spec;
     const mine = new Set((await this.d.images(s.user_images)).map((i) => i.src));
     const out = new Map();
+    const seen = new Set();
     // why（可选数组）：记下每张候选图被排除的原因，等图久了写进任务日志，方便排查选择器
     const skip = (i, reason) => {
       if (why) why.push(`${reason} ${i.w}x${i.h} ${String(i.src).slice(0, 80)}`);
@@ -213,6 +214,10 @@ class Flow {
       if (!i.complete) { skip(i, '还没加载完'); continue; }
       if (Math.max(i.w, i.h) < s.min_image_px) { skip(i, '太小'); continue; }
       if (s.image_src_hint.length && !s.image_src_hint.some((h) => i.src.includes(h))) { skip(i, '地址不像出图结果'); continue; }
+      // 同一张图网站会再放一个副本（地址不同）：alt+尺寸相同只留第一张
+      const key = i.alt ? `${i.alt}|${i.w}x${i.h}` : '';
+      if (key && seen.has(key)) continue;
+      if (key) seen.add(key);
       out.set(i.src, i);
     }
     return [...out.values()];

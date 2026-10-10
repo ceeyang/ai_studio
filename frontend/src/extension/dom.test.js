@@ -25,8 +25,8 @@ describe('content/dom.js', () => {
       </div></div></main>`;
     expect(D.queryAll(CHATGPT.result_images).map((e) => e.id)).toContain('out');
     expect(D.queryAll(CHATGPT.user_images).map((e) => e.id)).toEqual(['ref']);
-    // 同一张图网站还放了一个不显示的副本（地址不同）：不显示的不算，免得一张图存成两个候选
-    expect(D.images(CHATGPT.result_images).map((i) => i.src)).toEqual(['blob:https://chatgpt.com/ff6e435f-41f9']);
+    // 后台标签页里正图量不出尺寸，所以不按显不显示筛；带上 alt 供 Flow 按 alt+尺寸去重副本
+    expect(D.images(CHATGPT.result_images).map((i) => i.alt)).toEqual(['Generated image 1', 'Generated image 1']);
     expect(CHATGPT.image_src_hint.some((h) => 'blob:https://chatgpt.com/ff6e435f-41f9'.includes(h))).toBe(true);
     expect(D.visible(CHATGPT.busy_marker)).toBe(true);
     document.querySelector('[data-talvt-turn-state]').setAttribute('data-talvt-turn-state', 'complete');

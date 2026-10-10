@@ -137,13 +137,18 @@ class _Flow:
         s = self.spec
         mine = {i.src for i in self.d.images(s.user_images)}
         out: dict[str, ImageInfo] = {}
+        seen: set[tuple[str, int, int]] = set()   # 同一张图网站会再放一个副本（地址不同）：alt+尺寸相同只留第一张
         for i in self.d.images(s.result_images):
             if not i.src or i.src in mine or i.src in self.echo or i.src in out or not i.complete:
+                continue
+            if i.alt and (i.alt, i.width, i.height) in seen:
                 continue
             if max(i.width, i.height) < s.min_image_px:
                 continue
             if s.image_src_hint and not any(h in i.src for h in s.image_src_hint):
                 continue
+            if i.alt:
+                seen.add((i.alt, i.width, i.height))
             out[i.src] = i
         return list(out.values())
 

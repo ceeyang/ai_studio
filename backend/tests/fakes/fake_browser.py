@@ -60,8 +60,8 @@ class FakePage:
     def hide(self, sel):
         self.shown.discard(sel)
 
-    def add_result(self, src: str, w: int = 1024, h: int = 1536, data: bytes | None = None):
-        self.results.append(ImageInfo(src, w, h, True))
+    def add_result(self, src: str, w: int = 1024, h: int = 1536, data: bytes | None = None, alt: str = ""):
+        self.results.append(ImageInfo(src, w, h, True, alt))
         self.blobs[src] = data if data is not None else png(w, h)
 
     def finish(self, src: str, w: int = 1024, h: int = 1536):

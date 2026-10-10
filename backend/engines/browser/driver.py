@@ -18,6 +18,7 @@ class ImageInfo:
     width: int          # naturalWidth
     height: int         # naturalHeight
     complete: bool      # 加载完成
+    alt: str = ""       # 网站给的说明（如「Generated image 1」），同一张图的副本按它和尺寸去重
 
 
 class PageDriver(Protocol):
@@ -49,10 +50,9 @@ _FETCH_JS = """async (src) => {
   return btoa(s);
 }"""
 
-# 不显示的图不算（和扩展的 content/dom.js 一致）：网站会给同一张图再放一个不显示的副本
-_IMAGES_JS = """els => els.filter(e => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; })
-                .map(e => ({src: e.currentSrc || e.src || '', w: e.naturalWidth || 0,
-                            h: e.naturalHeight || 0, complete: !!e.complete}))"""
+# 不按布局判断显不显示（后台标签页里正图也会量出 0×0）；同一张图的副本在 flow 里按 alt+尺寸去重
+_IMAGES_JS = """els => els.map(e => ({src: e.currentSrc || e.src || '', w: e.naturalWidth || 0,
+                                   h: e.naturalHeight || 0, complete: !!e.complete, alt: e.alt || ''}))"""
 
 _PASTE_JS = """([sel, files]) => {
   const el = document.querySelector(sel);
@@ -203,7 +203,7 @@ class PlaywrightDriver:
             rows = self.page.locator(selector).evaluate_all(_IMAGES_JS)
         except Exception:
             return []
-        return [ImageInfo(r["src"], int(r["w"]), int(r["h"]), bool(r["complete"])) for r in rows]
+        return [ImageInfo(r["src"], int(r["w"]), int(r["h"]), bool(r["complete"]), str(r.get("alt") or "")) for r in rows]
 
     def fetch(self, src: str) -> bytes:
         """在页面里 fetch（同源带 cookie、blob: 也能取）；跨域被 CORS 挡住时用浏览器上下文的请求再取一次。"""

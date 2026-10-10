@@ -31,8 +31,8 @@ export class FakePage {
   }
   show(sel) { this.shown.add(sel); }
   hide(sel) { this.shown.delete(sel); }
-  addResult(src, w = 1024, h = 1536, b64 = PNG_HEAD) {
-    this.results.push({ src, w, h, complete: true });
+  addResult(src, w = 1024, h = 1536, b64 = PNG_HEAD, alt = '') {
+    this.results.push({ src, w, h, complete: true, alt });
     this.blobs.set(src, b64);
   }
   finish(src, w = 1024, h = 1536) {

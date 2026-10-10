@@ -42,6 +42,20 @@ def test_chatgpt_generates_and_fetches_full_image():
     assert any("已提交" in m for m in logs) and any("1024×1536" in m for m in logs)
 
 
+def test_duplicate_img_of_same_image_is_taken_once():
+    """同一张图网站放了两个 img（地址不同、alt 和尺寸相同）：只取一张，免得存成两个候选。"""
+    a, b = "blob:https://chatgpt.com/a", "blob:https://chatgpt.com/b"
+
+    def done(p):
+        p.hide(CHATGPT.stop_button)
+        p.add_result(a, 941, 1672, alt="Generated image 1")
+        p.add_result(b, 941, 1672, alt="Generated image 1")
+
+    page = FakePage(CHATGPT).after_submit([(1, lambda p: p.show(CHATGPT.stop_button)), (40, done)])
+    out, _, _ = run(page)
+    assert [o.src for o in out] == [a]
+
+
 def test_uploads_refs_via_file_input_and_excludes_them_from_results(tmp_path):
     refs = [tmp_path / "chen.png", tmp_path / "yu.png"]
     for r in refs:

@@ -58,6 +58,21 @@ describe('extension flow', () => {
     expect(logs.some((m) => m.startsWith('等了 30 秒：停止按钮还在'))).toBe(true);
   });
 
+  it('同一张图网站放了两个 img（地址不同、alt 和尺寸相同）：只取一张，免得存成两个候选', async () => {
+    const A = 'blob:https://chatgpt.com/a';
+    const B = 'blob:https://chatgpt.com/b';
+    const page = new FakePage(CHATGPT).afterSubmit([
+      [1, (p) => p.show(CHATGPT.stop_button)],
+      [40, (p) => {
+        p.hide(CHATGPT.stop_button);
+        p.addResult(A, 941, 1672, PNG_B64, 'Generated image 1');
+        p.addResult(B, 941, 1672, PNG_B64, 'Generated image 1');
+      }],
+    ]);
+    const { out } = await run(page);
+    expect(out.map((o) => o.src)).toEqual([A]);
+  });
+
   it('上传参考图走 file input，网站回显的参考图不算结果（5 秒回显规则）', async () => {
     const page = new FakePage(CHATGPT).afterSubmit([
       [1, (p) => p.show(CHATGPT.stop_button)],

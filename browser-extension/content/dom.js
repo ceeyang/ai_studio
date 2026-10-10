@@ -293,9 +293,9 @@
     },
     images(sel) {
       return queryAll(sel)
-        // 不显示的不算：网站会给同一张图再放一个不显示的副本（地址还不一样）
-        .filter((e) => e.tagName === 'IMG' && isVisible(e))
-        .map((e) => ({ src: e.currentSrc || e.src || '', w: e.naturalWidth || 0, h: e.naturalHeight || 0, complete: !!e.complete }));
+        // 不按布局判断显不显示：后台标签页里内容懒渲染，正图也量出 0×0。同一张图的副本在 Flow 里按 alt+尺寸去重
+        .filter((e) => e.tagName === 'IMG')
+        .map((e) => ({ alt: e.alt || '', src: e.currentSrc || e.src || '', w: e.naturalWidth || 0, h: e.naturalHeight || 0, complete: !!e.complete }));
     },
     /** 在页面里取图（同源请求自动带登录 cookie，blob: 也能取），返回 base64。 */
     async fetchB64(src) {
