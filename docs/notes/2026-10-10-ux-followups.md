@@ -33,3 +33,20 @@
 - [任务 9] no skip-to-content link
 - [总审] 重跑某段后手工镜头在段内的位置不保留，剧本重跑后手工镜头排到集末
 - [总审] 「保存并运行分镜」先保存再弹确认，取消确认时段落已保存
+
+## 单集工作台 v2（2026-10-11）遗留
+
+- [v2 任务 1] run_storyboard doesn't re-validate scene_block_ids at execution (deleted block → silent 0 done)
+- [v2 任务 2] confirm title 批量生成 vs 重拍 verb; impactText shows only video OR frame count; char counter code points vs maxLength; beforeRun failure shown twice
+- [v2 任务 3] untitled episode h2「第 N 集 」; legacy redirect NaN id; re-click same rail character doesn't rescroll
+- [v2 任务 4] 先补齐首帧 count includes in-progress; switch-before-submit failure untested
+- [v2 任务 4] ShotDrawer video button not gated by stale first frame (pre-existing)
+- [v2 任务 5] 三视图 N/7 ignores stale cells; toolbar portrait count vs stage label scope
+- [v2 任务 5] pending discard confirm uses click-time params; Lightbox dirty hint lacks 去「资料」 button; 覆盖外貌描述 confirm wording
+- [v2 任务 6] .tab-body > .turnaround nesting override
+- [v2 终审] 段落里镜头被手工删光时，下一步一直指向「重新生成分镜（剧本改过）」；只有孤儿镜头时计数为 0
+- [v2 终审] 镜头抽屉「先出首帧」按钮没受 generating/saving 禁用；「保存并生成视频」路径的测试被改成首帧路径
+- [v2 终审] ComfyUI 4xx 健康原因显示为笼统的「连接出错」；左栏在加载中先展开再收起（闪一下）
+- [v2 终审] 改之前存的含修改意见的指纹，会让下一次不强制运行多跑一次（无迁移）
+- [v2 终审] 引擎中文名里仍有「H3 图像 / H3 视频」；一段 ≤5 镜时 1600 宽右侧留空
+- [v2 后续] @ 引用写进提示词、单镜 LLM 重写、动态分镜预览、导出剪映草稿/FCPXML、夜间批跑
