@@ -1,4 +1,4 @@
-// 角色抽屉的「资料」页签：名字、人物描述、核心特征、配音音色；英文外貌提示词收在「高级」里。
+// 角色抽屉的「资料」页签：名字、人物描述、核心特征、配音音色；英文外观提示词收在「高级」里。
 import { errorText } from '../../api/client';
 import { usePatchCharacter } from '../../api/queries';
 import type { Character, CharacterPatch } from '../../api/types';
@@ -17,7 +17,7 @@ const CHARACTER_FIELDS: FieldSpec[] = [
     customLabel: '其他（手填）',
     placeholder: 'Edge TTS 音色，如 km-KH-PisethNeural',
   },
-  { name: 'visual_prompt', label: '外貌提示词（英文，会原样写进每个出场镜头）', kind: 'textarea', rows: 5, advanced: true },
+  { name: 'visual_prompt', label: '外观提示词（英文，会原样写进每个出场镜头）', kind: 'textarea', rows: 5, advanced: true },
 ];
 
 /** 角色资料改动转 PATCH 体：音色留空表示不配音（null）。 */
@@ -30,10 +30,13 @@ export function toCharacterPatch(changed: FieldValues): CharacterPatch {
 export function CharacterProfile({
   c,
   slug,
+  advancedOpen = false,
   onDirtyChange,
 }: {
   c: Character;
   slug: string;
+  /** 一打开就展开「高级」（去补外观提示词时） */
+  advancedOpen?: boolean;
   onDirtyChange: (dirty: boolean) => void;
 }) {
   const patch = usePatchCharacter(slug);
@@ -48,6 +51,7 @@ export function CharacterProfile({
           core_features: c.core_features,
           voice: c.voice ?? '',
         }}
+        advancedOpen={advancedOpen}
         saving={patch.isPending}
         error={patch.error ? errorText(patch.error) : null}
         onDirtyChange={onDirtyChange}

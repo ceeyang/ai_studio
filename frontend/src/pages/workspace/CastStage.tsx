@@ -1,12 +1,13 @@
 // 单集工作台的角色阶段：顶部「按剧本推荐角色」，中间角色卡网格（深度编辑在角色抽屉，?char=<id> 打开），
 // 下方可折叠的「设定」放场景和风格编辑器（折叠用 hidden、保持挂载，收起不丢正在编辑的内容）。
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { errorText } from '../../api/client';
 import { useCharacters, useEpisode, useLocations, usePatchLocation, usePutStyle, useStyle } from '../../api/queries';
 import type { LocationPatch, Style } from '../../api/types';
+import { useConfirm } from '../../components/ConfirmDialog';
 import { EpisodeLoadError, useNextAction } from '../../components/EpisodeHeader';
-import { castOf, hasPortrait } from '../stages';
+import { castTarget, hasPortrait } from '../stages';
 import { EditableFields, type FieldSpec, type FieldValues, useUnsavedGuard } from '../../components/EditableFields';
 import { RecommendPanel } from '../script/RecommendPanel';
 import { CastCard } from './CastCard';
@@ -60,6 +61,12 @@ export function CastStage({ active = true }: { active?: boolean }) {
   const patchLoc = usePatchLocation(slug);
   const putStyle = usePutStyle(slug);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const confirm = useConfirm();
+  // 抽屉里显示的角色：跟着地址的 ?char= 走；抽屉有没保存的修改时（左栏 / 提示 / 后退换了 ?char=）先问一句
+  const [shownId, setShownId] = useState<number | null>(charId);
+  const drawerDirty = useRef(false);
+  // 从卡片的「补外观提示词」打开：抽屉直接到资料页签、聚焦提示词
+  const [promptFor, setPromptFor] = useState<number | null>(null);
   // 下一步是抽定妆照 / 按剧本推荐角色时：对应的按钮打上 data-next-action，阶段条的「下一步」会触发它
   const nextAct = useNextAction(slug, ep.data, ['cast']);
   // 改过没保存的场景（按 id）和风格：换页面前问一句（角色抽屉自己挂了）
@@ -75,17 +82,6 @@ export function CastStage({ active = true }: { active?: boolean }) {
       return next;
     });
 
-  if (ep.isLoading) return <p className="loading">加载中…</p>;
-  if (ep.error || !ep.data) return <EpisodeLoadError slug={slug} error={ep.error} />;
-  const e = ep.data;
-  const chars = characters.data ?? [];
-  const locs = locations.data ?? [];
-  const st = style.data ?? EMPTY_STYLE;
-  const withPortrait = chars.filter(hasPortrait).length;
-  // 轮到的角色：出场角色里第一个还没定妆照的（和进度条的算法一致）
-  const nextCharId = nextAct ? castOf(e.shots, chars).find((c) => !hasPortrait(c))?.id : undefined;
-  const openChar = chars.find((c) => c.id === charId) ?? null;
-
   // 只动 char 参数（开关抽屉不记历史），stage 等其他参数保留
   const setChar = (cid: number | null) =>
     setParams(
@@ -97,6 +93,57 @@ export function CastStage({ active = true }: { active?: boolean }) {
       },
       { replace: true },
     );
+  const setCharRef = useRef(setChar);
+  setCharRef.current = setChar;
+
+  useEffect(() => {
+    if (charId === shownId) return;
+    // 阶段藏起来时抽屉本来就不在（离开阶段由阶段条处理），没修改时直接换
+    if (!active || shownId == null || !drawerDirty.current) {
+      setShownId(charId);
+      return;
+    }
+    let stale = false;
+    void confirm({
+      title: '放弃没保存的修改？',
+      body: '这个角色有改过但没保存的内容，换走就没了。',
+      confirmText: '放弃修改',
+      cancelText: '继续编辑',
+      danger: true,
+    }).then((ok) => {
+      if (stale) return;
+      if (ok) {
+        drawerDirty.current = false;
+        setShownId(charId);
+      } else setCharRef.current(shownId);
+    });
+    return () => {
+      stale = true;
+    };
+  }, [charId, shownId, active, confirm]);
+
+  if (ep.isLoading) return <p className="loading">加载中…</p>;
+  if (ep.error || !ep.data) return <EpisodeLoadError slug={slug} error={ep.error} />;
+  const e = ep.data;
+  const chars = characters.data ?? [];
+  const locs = locations.data ?? [];
+  const st = style.data ?? EMPTY_STYLE;
+  const withPortrait = chars.filter(hasPortrait).length;
+  // 轮到的角色：和阶段条下一步的算法一致（缺定妆照、没在抽卡；有提示词的优先）
+  const target = nextAct ? castTarget(e.shots, chars) : null;
+  const nextCharId = target?.id ?? undefined;
+  const openChar = chars.find((c) => c.id === shownId) ?? null;
+  const open = (cid: number, prompt = false) => {
+    setPromptFor(prompt ? cid : null);
+    setChar(cid);
+  };
+  /** 抽屉自己确认过（或没修改）后关闭：先把显示的角色清掉，免得地址变化再问一次 */
+  const closeDrawer = () => {
+    drawerDirty.current = false;
+    setShownId(null);
+    setPromptFor(null);
+    setChar(null);
+  };
 
   return (
     <div className="stage-body cast-stage">
@@ -115,7 +162,7 @@ export function CastStage({ active = true }: { active?: boolean }) {
         <div className="cast-grid" role="list" aria-label="角色">
           {chars.map((c) => (
             <div key={c.id} role="listitem" className="cast-cell">
-              <CastCard c={c} slug={slug} isNext={c.id === nextCharId} onOpen={() => setChar(c.id)} />
+              <CastCard c={c} slug={slug} isNext={c.id === nextCharId} onOpen={(prompt) => open(c.id, prompt)} />
             </div>
           ))}
         </div>
@@ -176,7 +223,17 @@ export function CastStage({ active = true }: { active?: boolean }) {
       </section>
 
       {openChar && active && (
-        <CharacterDrawer key={openChar.id} c={openChar} slug={slug} episodeId={id} onClose={() => setChar(null)} />
+        <CharacterDrawer
+          key={openChar.id}
+          c={openChar}
+          slug={slug}
+          episodeId={id}
+          focusPrompt={promptFor === openChar.id}
+          onDirtyChange={(d) => {
+            drawerDirty.current = d;
+          }}
+          onClose={closeDrawer}
+        />
       )}
     </div>
   );

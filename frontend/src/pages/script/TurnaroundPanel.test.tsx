@@ -260,10 +260,10 @@ describe('三视图', () => {
     expect(screen.getByText('两张设定图都在生成')).toBeTruthy();
   });
 
-  it('能不能出图看已保存的描述：没外貌提示词也没保存的描述时禁用并写明原因', () => {
+  it('能不能出图看已保存的描述：没外观提示词也没保存的描述时禁用并写明原因', () => {
     setup({ ...CHEN, visual_prompt: '' });
     expect((screen.getByRole('button', { name: '全部生成' }) as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByText('先写全身描述或外貌提示词')).toBeTruthy();
+    expect(screen.getByText('先写全身描述或外观提示词')).toBeTruthy();
   });
 
   it('全身描述改了没保存时换页面先问', async () => {

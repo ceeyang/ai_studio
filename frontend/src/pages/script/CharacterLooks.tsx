@@ -19,7 +19,7 @@ import { Lightbox } from '../../components/Lightbox';
 import { useEvents } from '../../ws/EventsContext';
 import { isDecoding } from '../../ws/events';
 
-const DIRTY_HINT = '先保存或放弃修改';
+const DIRTY_HINT = '先保存或放弃『资料』里的修改';
 
 function promptOf(c: Candidate): string {
   const vp = c.params?.visual_prompt;
@@ -169,12 +169,15 @@ export function CharacterLooks({
   slug,
   episodeId,
   profileDirty,
+  onGoProfile,
 }: {
   c: Character;
   slug: string;
   episodeId: number;
   /** 「资料」页签有没保存的修改：设为当前造型 / 设为角色提示词会覆盖外貌描述，先让用户保存或放弃 */
   profileDirty: boolean;
+  /** 切到「资料」页签 */
+  onGoProfile?: () => void;
 }) {
   const patch = usePatchCharacter(slug);
   const upload = useUploadPortrait(slug);
@@ -243,7 +246,16 @@ export function CharacterLooks({
         onUse={usePortrait}
         onRetry={drawAgain}
       />
-      {hint && <p className="notice small">{hint}</p>}
+      {hint && (
+        <p className="notice small">
+          {hint}
+          {onGoProfile && (
+            <button type="button" className="sm ghost" onClick={onGoProfile}>
+              去「资料」
+            </button>
+          )}
+        </p>
+      )}
       <p className="muted small">
         单击看大图；点「设为当前造型」才会换（提示词跟着换）。出场镜头的首帧和视频会带上选定的这张锁脸（H3 引擎）。
       </p>
@@ -262,7 +274,7 @@ export function CharacterLooks({
         <button
           type="button"
           disabled={draw.isPending || !c.visual_prompt.trim()}
-          title={c.visual_prompt.trim() ? '用角色当前的外貌提示词出正面半身定妆照（本机 ComfyUI，或选浏览器引擎走 ChatGPT / Gemini 网页）' : '先写外貌提示词或用 AI 推荐造型'}
+          title={c.visual_prompt.trim() ? '用角色当前的外观提示词出正面半身定妆照（本机 ComfyUI，或选浏览器引擎走 ChatGPT / Gemini 网页）' : '先写外观提示词或用 AI 推荐造型'}
           onClick={drawAgain}
         >
           {drawingCount > 0 ? `抽卡（${drawingCount} 张进行中）` : '抽卡'}

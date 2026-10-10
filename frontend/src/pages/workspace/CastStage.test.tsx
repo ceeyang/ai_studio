@@ -93,12 +93,70 @@ describe('CastStage', () => {
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 
-  it('缺定妆照又没有外貌提示词：「抽定妆照」禁用并说明', async () => {
+  it('缺定妆照又没有外观提示词：卡上是「补外观提示词」（下一步的目标），点了打开抽屉的资料页签、展开高级并聚焦提示词', async () => {
     installFetch({ ...ROUTES, 'GET /api/projects/demo/characters': [LIN, { ...LAO, visual_prompt: '' }] });
-    renderAt(<CastStage />, AT);
+    const { container } = renderAt(<CastStage />, AT);
+    const user = userEvent.setup();
     const lao = await screen.findByTestId('character-9');
-    expect((within(lao).getByRole('button', { name: '抽定妆照' }) as HTMLButtonElement).disabled).toBe(true);
-    expect(lao.textContent).toContain('先写外貌提示词');
+    expect(within(lao).queryByRole('button', { name: '抽定妆照' })).toBeNull();
+    const fill = within(lao).getByRole('button', { name: '补外观提示词' });
+    await waitFor(() => expect(fill.hasAttribute('data-next-action')).toBe(true));
+    expect(container.querySelectorAll('[data-next-action]')).toHaveLength(1);
+    await user.click(fill);
+    const d = await screen.findByRole('dialog', { name: '角色 老周' });
+    expect(within(d).getByRole('tab', { name: '资料' }).getAttribute('aria-selected')).toBe('true');
+    const vp = within(d).getByLabelText(/外观提示词/);
+    expect((vp.closest('details') as HTMLDetailsElement).open).toBe(true);
+    await waitFor(() => expect(document.activeElement).toBe(vp));
+  });
+
+  it('前一个缺定妆照的角色已经在抽卡：下一步指向下一个能抽的角色', async () => {
+    const XIAO: Character = { ...LAO, id: 10, name: '小李' };
+    installFetch({
+      ...ROUTES,
+      'GET /api/episodes/4': makeEpisode({
+        ...EP,
+        shots: [makeShot({ id: 1, cast: [8, 9, 10].map((character_id) => ({ character_id, variation_id: null })) })],
+      }),
+      'GET /api/projects/demo/characters': [LIN, { ...LAO, active_jobs: [{ id: 5, type: 'image.portrait', status: 'running' }] }, XIAO],
+    });
+    const { container } = renderAt(<CastStage />, AT);
+    const xiao = await screen.findByTestId('character-10');
+    await waitFor(() => expect(within(xiao).getByRole('button', { name: '抽定妆照' }).hasAttribute('data-next-action')).toBe(true));
+    expect(container.querySelectorAll('[data-next-action]')).toHaveLength(1);
+    expect((within(screen.getByTestId('character-9')).getByRole('button', { name: '抽定妆照' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('抽屉有没保存的修改时地址换成别的角色（左栏 / 提示 / 后退）：先问，继续编辑就留在原角色', async () => {
+    installFetch(ROUTES);
+    const { router } = renderAt(<CastStage />, { ...AT, route: '/projects/demo/episodes/4?stage=cast&char=8' });
+    const user = userEvent.setup();
+    const d = await screen.findByRole('dialog', { name: '角色 林夏' });
+    await user.click(within(d).getByRole('tab', { name: '资料' }));
+    await user.type(within(d).getByLabelText('人物描述'), '（改）');
+    await act(() => void router.navigate('/projects/demo/episodes/4?stage=cast&char=9'));
+    const ask = await screen.findByRole('dialog', { name: '放弃没保存的修改？' });
+    await user.click(within(ask).getByRole('button', { name: '继续编辑' }));
+    await waitFor(() => expect(where()).toBe('/projects/demo/episodes/4?stage=cast&char=8'));
+    expect((within(screen.getByRole('dialog', { name: '角色 林夏' })).getByLabelText('人物描述') as HTMLTextAreaElement).value).toBe('女主播（改）');
+    // 去掉 ?char= 同样要问；放弃修改才换
+    await act(() => void router.navigate('/projects/demo/episodes/4?stage=cast'));
+    await user.click(within(await screen.findByRole('dialog', { name: '放弃没保存的修改？' })).getByRole('button', { name: '继续编辑' }));
+    await waitFor(() => expect(where()).toBe('/projects/demo/episodes/4?stage=cast&char=8'));
+    await act(() => void router.navigate('/projects/demo/episodes/4?stage=cast&char=9'));
+    await user.click(within(await screen.findByRole('dialog', { name: '放弃没保存的修改？' })).getByRole('button', { name: '放弃修改' }));
+    expect(await screen.findByRole('dialog', { name: '角色 老周' })).toBeTruthy();
+    expect(screen.queryByRole('dialog', { name: '角色 林夏' })).toBeNull();
+    expect(where()).toBe('/projects/demo/episodes/4?stage=cast&char=9');
+  });
+
+  it('抽屉没有修改时地址换角色：直接换', async () => {
+    installFetch(ROUTES);
+    const { router } = renderAt(<CastStage />, { ...AT, route: '/projects/demo/episodes/4?stage=cast&char=8' });
+    await screen.findByRole('dialog', { name: '角色 林夏' });
+    await act(() => void router.navigate('/projects/demo/episodes/4?stage=cast&char=9'));
+    expect(await screen.findByRole('dialog', { name: '角色 老周' })).toBeTruthy();
+    expect(screen.queryByRole('dialog', { name: '放弃没保存的修改？' })).toBeNull();
   });
 
   it('还没有角色：「按剧本推荐角色」是下一步要触发的那个（次要按钮）', async () => {

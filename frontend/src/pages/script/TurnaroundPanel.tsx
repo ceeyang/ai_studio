@@ -197,7 +197,7 @@ export function TurnaroundPanel({
   const blockedReason = !hasPortrait
     ? '先选定定妆照：三视图用它锁脸'
     : !hasLook
-      ? '先写全身描述或外貌提示词'
+      ? '先写全身描述或外观提示词'
       : allRunning
         ? '两张设定图都在生成'
         : null;
@@ -245,7 +245,7 @@ export function TurnaroundPanel({
         <textarea
           id={`turn-look-${c.id}`}
           rows={3}
-          placeholder="从头到脚的英文描述（含下装和鞋）；空着就用外貌提示词"
+          placeholder="从头到脚的英文描述（含下装和鞋）；空着就用外观提示词"
           value={look}
           onChange={(e) => setLook(e.target.value)}
         />
@@ -259,7 +259,7 @@ export function TurnaroundPanel({
             type="button"
             className="sm"
             disabled={lookJob.isPending || writing || !c.visual_prompt.trim()}
-            title={c.visual_prompt.trim() ? '让 LLM 按外貌提示词整理（会覆盖现在的描述）' : '先写外貌提示词'}
+            title={c.visual_prompt.trim() ? '让 LLM 按外观提示词整理（会覆盖现在的描述）' : '先写外观提示词'}
             onClick={() => lookJob.mutate(c.id, { onSuccess: (r) => setLookJobId(r.job_ids[0]) })}
           >
             {writing ? '整理中…' : t.look.trim() ? '重写全身描述' : 'AI 整理全身描述'}

@@ -61,11 +61,11 @@ describe('角色抽屉', () => {
     expect((within(d).getByLabelText('人物描述') as HTMLTextAreaElement).value).toBe('汽修师傅（夜班）');
   });
 
-  it('资料：外貌提示词收在「高级」里；音色是下拉，「其他（手填）」切成输入框', async () => {
+  it('资料：外观提示词收在「高级」里；音色是下拉，「其他（手填）」切成输入框', async () => {
     const { calls, user } = setup(CHEN, { 'PATCH /api/characters/6': CHEN });
     const d = await drawer();
     await user.click(within(d).getByRole('tab', { name: '资料' }));
-    const vp = within(d).getByLabelText(/外貌提示词/);
+    const vp = within(d).getByLabelText(/外观提示词/);
     expect(vp.closest('details')?.querySelector('summary')?.textContent).toBe('高级');
     expect(within(d).getByLabelText('人物描述').closest('details')).toBeNull();
     const voice = within(d).getByLabelText(/配音音色/) as HTMLSelectElement;
@@ -197,9 +197,12 @@ describe('角色抽屉', () => {
     await user.type(within(d).getByLabelText('人物描述'), '（改）');
     await user.click(within(d).getByRole('tab', { name: '造型' }));
     await user.click(within(d).getByRole('button', { name: '把定妆照 #46 设为当前造型' }));
-    expect(within(d).getByText('先保存或放弃修改')).toBeTruthy();
+    expect(within(d).getByText('先保存或放弃『资料』里的修改')).toBeTruthy();
     expect(screen.queryByRole('dialog', { name: '设为当前造型？' })).toBeNull();
     expect(posts(calls)).toHaveLength(0);
+    // 提示旁的按钮切到资料页签
+    await user.click(within(d).getByRole('button', { name: '去「资料」' }));
+    expect(within(d).getByRole('tab', { name: '资料' }).getAttribute('aria-selected')).toBe('true');
   });
 
   it('最近一次抽卡失败：定妆照条末尾显示失败卡，可重试（同张数和引擎）和查看任务', async () => {

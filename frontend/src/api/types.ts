@@ -397,7 +397,7 @@ export interface TurnaroundCell {
 }
 
 export interface Turnaround {
-  /** 出设定图用的全身描述（英文），空表示用外貌提示词 */
+  /** 出设定图用的全身描述（英文），空表示用外观提示词 */
   look: string;
   default_engine: string;
   sheets: TurnaroundSheet[];

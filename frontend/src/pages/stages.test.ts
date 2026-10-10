@@ -1,14 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import type { Character, ExportRow } from '../api/types';
 import { makeCandidate, makeEpisode, makeShot, makeSlot } from '../test/factories';
-import { STAGE_KEYS, episodeStages, isStageKey } from './stages';
+import { STAGE_KEYS, castTarget, episodeStages, isStageKey } from './stages';
 
-function char(id: number, portrait: boolean): Character {
+function char(id: number, portrait: boolean, over: Partial<Character> = {}): Character {
   return {
-    id, project_id: 1, name: `角色${id}`, description: '', visual_prompt: '', core_features: '', voice: null,
-    portrait_candidate_id: portrait ? id * 10 : null, portrait_url: portrait ? `/media/p${id}.png` : null,
+    id, project_id: 1, name: `角色${id}`, description: '', visual_prompt: 'look', core_features: '', voice: null,
+    portrait_candidate_id: portrait ? id * 10 : null, portrait_url: portrait ? `/media/p${id}.png` : null, ...over,
   };
 }
+const drawing = { active_jobs: [{ id: 1, type: 'image.portrait', status: 'running' as const }] };
 
 /** 一个镜头：首帧、视频各自 'none'（没选定）/ 'ok' / 'stale' */
 function shot(id: number, ff: 'none' | 'ok' | 'stale', video: 'none' | 'ok' | 'stale', castIds: number[] = [1]) {
@@ -69,6 +70,27 @@ describe('episodeStages', () => {
     const ep = makeEpisode({ id: 4, scene_blocks: BLOCKS, shots: [shot(1, 'none', 'none', [])] });
     const r = episodeStages(ep, [], []);
     expect(r.next).toEqual({ label: '按剧本推荐角色', stage: 'cast', action: 'run', count: 0, stale: false });
+  });
+
+  it('缺定妆照的角色在抽卡中：下一步指向下一个能抽的角色（抽卡中的不算目标）', () => {
+    const ep = makeEpisode({ id: 4, scene_blocks: BLOCKS, shots: [shot(1, 'none', 'none', [1, 2, 3])] });
+    const chars = [char(1, true), char(2, false, drawing), char(3, false)];
+    expect(episodeStages(ep, chars, []).next).toEqual({ label: '抽定妆照（2 个角色缺）', stage: 'cast', action: 'run', count: 2, stale: false });
+    expect(castTarget(ep.shots, chars)).toEqual({ kind: 'draw', id: 3, missing: 2 });
+  });
+
+  it('剩下缺定妆照的角色没有外观提示词：下一步是补外观提示词（角色名）', () => {
+    const ep = makeEpisode({ id: 4, scene_blocks: BLOCKS, shots: [shot(1, 'none', 'none', [1, 2, 3])] });
+    const chars = [char(1, true), char(2, false, drawing), char(3, false, { visual_prompt: '  ' })];
+    expect(episodeStages(ep, chars, []).next).toEqual({ label: '补外观提示词（角色3）', stage: 'cast', action: 'run', count: 2, stale: false });
+    expect(castTarget(ep.shots, chars)).toEqual({ kind: 'prompt', id: 3, missing: 2 });
+  });
+
+  it('缺定妆照的角色都在抽卡中：下一步显示抽定妆照中并标为忙', () => {
+    const ep = makeEpisode({ id: 4, scene_blocks: BLOCKS, shots: [shot(1, 'none', 'none', [1, 2, 3])] });
+    const chars = [char(1, true), char(2, false, drawing), char(3, false, drawing)];
+    expect(episodeStages(ep, chars, []).next).toEqual({ label: '抽定妆照中（2 个）', stage: 'cast', action: 'run', count: 2, stale: false, busy: true });
+    expect(castTarget(ep.shots, chars)).toEqual({ kind: 'busy', id: null, missing: 2 });
   });
 
   it('有镜头没首帧：下一步在首帧阶段生成缺的首帧', () => {

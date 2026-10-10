@@ -56,6 +56,8 @@ export interface EditableFieldsProps {
   onDirtyChange?: (dirty: boolean) => void;
   /** 每次内容变化时把当前状态报给父组件（例如「保存并运行」要拿到没保存的改动） */
   onValuesChange?: (state: FieldsState) => void;
+  /** 「高级」折叠一开始就展开 */
+  advancedOpen?: boolean;
 }
 
 const CUSTOM = '__custom__';
@@ -89,6 +91,7 @@ export function EditableFields({
   saveLabel = '保存',
   onDirtyChange,
   onValuesChange,
+  advancedOpen = false,
 }: EditableFieldsProps) {
   // 用内容做比较，而不是对象身份：WebSocket 触发的重新拉取若内容没变，不会冲掉正在编辑的内容
   const initialKey = JSON.stringify(initial);
@@ -149,9 +152,10 @@ export function EditableFields({
     <label key={f.name} className="field">
       <span>{f.label}</span>
       {f.kind === 'textarea' ? (
-        <textarea rows={f.rows ?? 4} value={values[f.name] ?? ''} onChange={(e) => set(f.name, e.target.value)} />
+        <textarea name={f.name} rows={f.rows ?? 4} value={values[f.name] ?? ''} onChange={(e) => set(f.name, e.target.value)} />
       ) : f.kind === 'select' ? (
         <select
+          name={f.name}
           value={f.customLabel && isCustom(f) ? CUSTOM : (values[f.name] ?? '')}
           onChange={(e) => {
             const v = e.target.value;
@@ -173,6 +177,7 @@ export function EditableFields({
         </select>
       ) : (
         <input
+          name={f.name}
           type={f.kind === 'number' ? 'number' : 'text'}
           step={f.step}
           min={f.min}
@@ -205,7 +210,7 @@ export function EditableFields({
     <form className="fields" onSubmit={submit}>
       {basic.flatMap(renderField)}
       {advanced.length > 0 && (
-        <details className="fields-advanced">
+        <details className="fields-advanced" open={advancedOpen || undefined}>
           <summary>高级</summary>
           {advanced.flatMap(renderField)}
         </details>

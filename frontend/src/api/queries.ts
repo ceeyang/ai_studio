@@ -349,7 +349,7 @@ export function useSuggestDesigns(slug: string) {
   });
 }
 
-/** 三视图：LLM 把外貌提示词整理成从头到脚的全身描述。 */
+/** 三视图：LLM 把外观提示词整理成从头到脚的全身描述。 */
 export function useTurnaroundLook(slug: string) {
   const qc = useQueryClient();
   return useMutation({

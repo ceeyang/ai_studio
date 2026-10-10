@@ -30,6 +30,8 @@ export interface NextStep {
   action: 'goto' | 'run';
   count: number;
   stale: boolean;
+  /** 这一步正在进行（如缺定妆照的角色都在抽卡）：阶段条的按钮禁用，字照样显示 */
+  busy?: boolean;
 }
 
 export const STAGE_STATE_TEXT: Record<Stage['state'], string> = {
@@ -48,6 +50,25 @@ export function castOf(shots: ShotDetail[], chars: Character[]): Character[] {
 
 export const hasPortrait = (c: Character) => !!(c.portrait_url || c.portrait_candidate_id);
 
+const isDrawing = (c: Character) => (c.active_jobs ?? []).some((j) => j.type === 'image.portrait');
+
+/**
+ * 角色阶段的下一步落在哪个角色（出场角色里缺定妆照的，missing 是缺几个）：
+ * draw = 第一个没在抽卡、有外观提示词的（点它的「抽定妆照」）；prompt = 剩下的都没提示词，第一个没在抽的（去补提示词）；
+ * busy = 缺的都在抽卡中；都不缺时为 null。
+ */
+export type CastTarget = { kind: 'draw' | 'prompt'; id: number; missing: number } | { kind: 'busy'; id: null; missing: number };
+
+export function castTarget(shots: ShotDetail[], chars: Character[]): CastTarget | null {
+  const missing = castOf(shots, chars).filter((c) => !hasPortrait(c));
+  if (missing.length === 0) return null;
+  const idle = missing.filter((c) => !isDrawing(c));
+  const draw = idle.find((c) => c.visual_prompt.trim());
+  if (draw) return { kind: 'draw', id: draw.id, missing: missing.length };
+  if (idle.length > 0) return { kind: 'prompt', id: idle[0].id, missing: missing.length };
+  return { kind: 'busy', id: null, missing: missing.length };
+}
+
 /** 首帧 / 视频这一格：几镜有选定的、几镜过期、几镜缺 */
 function slotStats(shots: ShotDetail[], kind: string) {
   const marks = shots.map((s) => slotMark(slotOf(s, kind)));
@@ -56,7 +77,7 @@ function slotStats(shots: ShotDetail[], kind: string) {
   return { total: shots.length, selected: shots.length - missing, missing, stale };
 }
 
-type Draft = Omit<Stage, 'state'> & { state: 'done' | 'todo' | 'stale'; next: string; count: number };
+type Draft = Omit<Stage, 'state'> & { state: 'done' | 'todo' | 'stale'; next: string; count: number; busy?: boolean };
 
 function slotStage(key: 'keyframes' | 'videos', label: string, shots: ShotDetail[]): Draft {
   const st = slotStats(shots, key === 'keyframes' ? 'first_frame' : 'video');
@@ -79,6 +100,15 @@ export function episodeStages(
   const cast = castOf(shots, chars);
   const withPortrait = cast.filter(hasPortrait).length;
   const finalCut = exports.some((x) => x.is_final);
+  const target = castTarget(shots, chars);
+  const castNext =
+    cast.length === 0
+      ? '按剧本推荐角色'
+      : target?.kind === 'prompt'
+        ? `补外观提示词（${chars.find((c) => c.id === target.id)?.name ?? ''}）`
+        : target?.kind === 'busy'
+          ? `抽定妆照中（${target.missing} 个）`
+          : `抽定妆照（${cast.length - withPortrait} 个角色缺）`;
 
   const drafts: Draft[] = [
     {
@@ -95,8 +125,9 @@ export function episodeStages(
       label: '角色',
       state: cast.length > 0 && withPortrait === cast.length ? 'done' : 'todo',
       detail: cast.length === 0 ? '还没有角色' : `${withPortrait}/${cast.length}`,
-      next: cast.length === 0 ? '按剧本推荐角色' : `抽定妆照（${cast.length - withPortrait} 个角色缺）`,
+      next: castNext,
       count: cast.length - withPortrait,
+      busy: target?.kind === 'busy',
     },
     slotStage('keyframes', '首帧', shots),
     slotStage('videos', '视频', shots),
@@ -111,13 +142,13 @@ export function episodeStages(
   ];
 
   const first = drafts.findIndex((d) => d.state !== 'done');
-  const stages: Stage[] = drafts.map(({ next: _next, count: _count, ...d }, i) => ({
+  const stages: Stage[] = drafts.map(({ next: _next, count: _count, busy: _busy, ...d }, i) => ({
     ...d,
     state: i === first && d.state === 'todo' ? 'active' : d.state,
   }));
   const d = first >= 0 ? drafts[first] : null;
   const next: NextStep | null = d
-    ? { label: d.next, stage: d.key, action: 'run', count: d.count, stale: d.state === 'stale' }
+    ? { label: d.next, stage: d.key, action: 'run', count: d.count, stale: d.state === 'stale', ...(d.busy ? { busy: true } : {}) }
     : null;
   return { stages, next };
 }

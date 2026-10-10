@@ -20,19 +20,31 @@ export interface CharacterDrawerProps {
   c: Character;
   slug: string;
   episodeId: number;
+  /** 打开就到资料页签、展开「高级」并聚焦外观提示词（卡片上的「补外观提示词」） */
+  focusPrompt?: boolean;
+  /** 资料或全身描述有没保存的修改变化时通知（地址换了角色时 CastStage 要先问） */
+  onDirtyChange?(dirty: boolean): void;
   onClose(): void;
 }
 
-export function CharacterDrawer({ c, slug, episodeId, onClose }: CharacterDrawerProps) {
+export function CharacterDrawer({ c, slug, episodeId, focusPrompt = false, onDirtyChange, onClose }: CharacterDrawerProps) {
   const confirm = useConfirm();
-  const [tab, setTab] = useState<Tab>('looks');
+  const [tab, setTab] = useState<Tab>(focusPrompt ? 'profile' : 'looks');
   const [profileDirty, setProfileDirty] = useState(false);
   const [lookDirty, setLookDirty] = useState(false);
   // 换到别的页面由全站的离开拦截问（三视图的全身描述自己登记了）；关抽屉另有确认
   useUnsavedGuard(profileDirty);
   const box = useRef<HTMLElement>(null);
+  const focusPromptRef = useRef(focusPrompt);
   const latest = useRef({ dirty: false, onClose });
   latest.current = { dirty: profileDirty || lookDirty, onClose };
+  const dirtyCb = useRef(onDirtyChange);
+  dirtyCb.current = onDirtyChange;
+  const dirty = profileDirty || lookDirty;
+  useEffect(() => {
+    dirtyCb.current?.(dirty);
+  }, [dirty]);
+  useEffect(() => () => dirtyCb.current?.(false), []);
 
   /** 想关抽屉：有没保存的修改先问一句。 */
   const requestClose = useRef(async () => {
@@ -52,7 +64,8 @@ export function CharacterDrawer({ c, slug, episodeId, onClose }: CharacterDrawer
   // 打开时把焦点放进抽屉，关掉后还给原来的元素；Esc 关闭（上面叠着确认框或大图预览时归它们管）
   useEffect(() => {
     const prev = document.activeElement as HTMLElement | null;
-    box.current?.focus();
+    const field = focusPromptRef.current ? box.current?.querySelector<HTMLElement>('[name="visual_prompt"]') : null;
+    (field ?? box.current)?.focus();
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || e.defaultPrevented || document.querySelector('.modal-scrim')) return;
       e.preventDefault();
@@ -96,7 +109,13 @@ export function CharacterDrawer({ c, slug, episodeId, onClose }: CharacterDrawer
           ))}
         </div>
         <div role="tabpanel" id={panelId('looks')} aria-labelledby={tabId('looks')} className="tab-body" hidden={tab !== 'looks'}>
-          <CharacterLooks c={c} slug={slug} episodeId={episodeId} profileDirty={profileDirty} />
+          <CharacterLooks
+            c={c}
+            slug={slug}
+            episodeId={episodeId}
+            profileDirty={profileDirty}
+            onGoProfile={() => setTab('profile')}
+          />
         </div>
         <div
           role="tabpanel"
@@ -108,7 +127,7 @@ export function CharacterDrawer({ c, slug, episodeId, onClose }: CharacterDrawer
           <TurnaroundPanel c={c} slug={slug} onDirtyChange={setLookDirty} />
         </div>
         <div role="tabpanel" id={panelId('profile')} aria-labelledby={tabId('profile')} className="tab-body" hidden={tab !== 'profile'}>
-          <CharacterProfile c={c} slug={slug} onDirtyChange={setProfileDirty} />
+          <CharacterProfile c={c} slug={slug} advancedOpen={focusPrompt} onDirtyChange={setProfileDirty} />
         </div>
       </aside>
     </>

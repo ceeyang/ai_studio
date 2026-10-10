@@ -33,11 +33,12 @@ function renderRoute(route: string) {
     ],
     { initialEntries: [route] },
   );
-  return render(
+  const r = render(
     <QueryClientProvider client={newQueryClient()}>
       <RouterProvider router={router} />
     </QueryClientProvider>,
   );
+  return { ...r, router };
 }
 
 function char(id: number, name: string, portrait: boolean): Character {
@@ -250,6 +251,27 @@ describe('EpisodeWorkspace', () => {
     await user.type(line, '！');
     expect(visiblePrimaries()).toHaveLength(1);
     expect(visiblePrimaries()[0].classList.contains('stage-next')).toBe(true);
+  });
+
+  it('缺定妆照的角色都在抽卡中：下一步显示「抽定妆照中」并禁用', async () => {
+    installFetch(routes({ 'GET /api/projects/demo/characters': [CHARS[0], { ...CHARS[1], active_jobs: [{ id: 3, type: 'image.portrait', status: 'running' }] }] }));
+    renderRoute('/projects/demo/episodes/4?stage=cast');
+    const next = await screen.findByRole('button', { name: '下一步：抽定妆照中（1 个）' });
+    expect((next as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it('在角色阶段只换 ?char=（左栏点另一个角色）不记历史；切阶段照常记', async () => {
+    installFetch(routes());
+    const { router } = renderRoute('/projects/demo/episodes/4?stage=cast&char=8');
+    const user = userEvent.setup();
+    await screen.findByRole('dialog', { name: '角色 林夏' });
+    const rail = screen.getByRole('complementary', { name: '剧本大纲与角色' });
+    await user.click(within(rail).getByRole('button', { name: /^老周/ }));
+    expect(where()).toBe('/projects/demo/episodes/4?stage=cast&char=9');
+    expect(router.state.historyAction).toBe('REPLACE');
+    expect(await screen.findByRole('dialog', { name: '角色 老周' })).toBeTruthy();
+    await user.click(within(stageBar()).getByRole('button', { name: /剧本/ }));
+    expect(router.state.historyAction).toBe('PUSH');
   });
 
   it('只有 ?shot= 没有 stage：停在首帧阶段', async () => {
