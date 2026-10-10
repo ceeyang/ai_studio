@@ -4,7 +4,7 @@ import { Link, useParams } from 'react-router-dom';
 import { errorText } from '../../api/client';
 import { useEpisode, useExports, useFitKhmer, usePatchExport, useRunStage, useTranslateSubtitles } from '../../api/queries';
 import type { ExportOptions, ExportRow, ShotDetail } from '../../api/types';
-import { EpisodeLoadError, nextActionProps, useNextAction } from '../../components/EpisodeHeader';
+import { EpisodeLoadError, nextActionProps } from '../../components/EpisodeHeader';
 import { useJobNotice } from '../../components/JobNotice';
 import { fmtTime } from '../../format';
 import { EndCardPanel } from '../director/EndCardPanel';
@@ -163,7 +163,6 @@ function ExportBody({ slug, id }: { slug: string; id: number }) {
   const [choice, setChoice] = useState<Choice>(() => loadChoice(id));
   useEffect(() => saveChoice(id, choice), [id, choice]);
   const set = (patch: Partial<Choice>) => setChoice((c) => ({ ...c, ...patch }));
-  const nextAct = useNextAction(slug, ep.data, ['export']);
 
   if (ep.isLoading) return <p className="loading">加载中…</p>;
   if (ep.error || !ep.data) return <EpisodeLoadError slug={slug} error={ep.error} />;
@@ -213,10 +212,10 @@ function ExportBody({ slug, id }: { slug: string; id: number }) {
             {r.stale.length > 0 && ` · ${r.stale.length} 镜视频已过期（${r.stale.join('、')}）`}
           </span>
           <span className="grow" aria-hidden="true" />
-          {/* 下一步是合成导出时打上 data-next-action：阶段条的「下一步」触发它 */}
+          {/* 视频齐了：成片阶段的下一步就是合成导出（或再导出一版），打上 data-next-action，阶段条的「下一步」触发它 */}
           <button
             type="button"
-            {...nextActionProps(!!nextAct)}
+            {...nextActionProps(canExport)}
             disabled={!canExport || run.isPending}
             title={canExport ? undefined : '每个镜头都要有选定的视频才能合成'}
             onClick={doExport}

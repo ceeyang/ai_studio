@@ -6,7 +6,7 @@ import { Navigate, type RouteObject, useLocation, useParams, useSearchParams } f
 import { useCharacters, useEpisode, useExports, useRecentDoneJobs } from '../api/queries';
 import type { LeaveCheck } from '../components/confirmDiscard';
 import { EpisodeHeader, EpisodeLoadError } from '../components/EpisodeHeader';
-import { type NextStep, type StageKey, episodeStages, isStageKey } from './stages';
+import { type NextStep, type StageKey, episodeStages, exportStep, isStageKey } from './stages';
 import { CastStage } from './workspace/CastStage';
 import { ExportStage } from './workspace/ExportStage';
 import { ScriptStage } from './workspace/ScriptStage';
@@ -153,6 +153,9 @@ function Workspace({ slug, id }: { slug: string; id: number }) {
   if (panel) mounted.add(panel);
   // 首帧 / 视频阶段的下一步是首帧确认门（没有镜头时还是原来的下一步：去剧本生成分镜）
   const gate = shotStage ? shotGate(ep.data.shots, shotStage, selected, count, doneJobs.data ?? []) : null;
+  // 成片阶段：下一步看视频齐没齐、导出过没有（不指回前面没做完的阶段）
+  const exportNext = stage === 'export' ? exportStep(ep.data.shots, exports.data ?? [], !progress.next) : null;
+  const next = gate ? gateStep(gate, stage ?? 'keyframes') : exportNext === 'done' ? null : (exportNext ?? progress.next);
   const work: ShotWork = {
     stage: shotStage ?? 'keyframes',
     gate,
@@ -173,8 +176,8 @@ function Workspace({ slug, id }: { slug: string; id: number }) {
         <StageBar
           stages={progress.stages}
           current={stage}
-          next={gate ? gateStep(gate, stage) : progress.next}
-          nextDisabled={gate ? gate.kind === 'busy' || submitting : !!progress.next?.busy}
+          next={next}
+          nextDisabled={gate ? gate.kind === 'busy' || submitting : exportNext ? false : !!progress.next?.busy}
           onSelect={(s) => void select(s)}
           onRun={() => triggerNextAction(PANEL_OF[stage])}
         />

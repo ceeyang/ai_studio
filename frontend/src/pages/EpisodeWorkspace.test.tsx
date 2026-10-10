@@ -377,6 +377,25 @@ describe('EpisodeWorkspace', () => {
     expect(w[1].body).toEqual({ stage: 'storyboard', force: true, scene_block_ids: [22] });
   });
 
+  it('成片阶段的下一步不指回抽定妆照：缺视频时「补齐视频（N 镜缺）」切到视频阶段；视频齐了是「合成导出」，点它提交导出', async () => {
+    installFetch(routes());
+    const { unmount } = renderRoute('/projects/demo/episodes/4?stage=export');
+    const user = userEvent.setup();
+    const next = await screen.findByRole('button', { name: '下一步：补齐视频（2 镜缺）' });
+    await user.click(next);
+    await waitFor(() => expect(where()).toBe('/projects/demo/episodes/4?stage=videos'));
+    unmount();
+
+    const videos = { ...EP, shots: EP.shots.map((s, i) => ({ ...s, slots: [chosen(i * 2 + 1, 'first_frame'), chosen(i * 2 + 2, 'video')] })) };
+    const calls = installFetch(routes({ 'GET /api/episodes/4': videos, 'POST /api/episodes/4/run': { job_ids: [5] } }));
+    renderRoute('/projects/demo/episodes/4?stage=export');
+    // 老周还缺定妆照，但人在成片阶段、视频都齐了：下一步就是合成导出
+    const run = await screen.findByRole('button', { name: '下一步：合成导出' });
+    await user.click(run);
+    await waitFor(() => expect(calls.filter((c) => c.method === 'POST').map((c) => c.url)).toEqual(['/api/episodes/4/run']));
+    expect(calls.find((c) => c.method === 'POST')?.body).toMatchObject({ stage: 'export' });
+  });
+
   it('只有 ?shot= 没有 stage：停在首帧阶段', async () => {
     installFetch(routes());
     renderRoute('/projects/demo/episodes/4?shot=11');

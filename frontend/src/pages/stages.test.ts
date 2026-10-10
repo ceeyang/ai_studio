@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Character, ExportRow } from '../api/types';
 import { makeCandidate, makeEpisode, makeShot, makeSlot } from '../test/factories';
-import { STAGE_KEYS, castTarget, episodeStages, isStageKey } from './stages';
+import { STAGE_KEYS, castTarget, episodeStages, exportStep, isStageKey } from './stages';
 
 function char(id: number, portrait: boolean, over: Partial<Character> = {}): Character {
   return {
@@ -149,6 +149,16 @@ describe('episodeStages', () => {
     const manual = makeShot({ id: 9, code: 'S09', scene_block_id: null, origin: 'manual' });
     const ep = makeEpisode({ id: 4, scene_blocks: ONE_BLOCK, shots: [shot(1, 'none', 'none'), manual] });
     expect(byKey(episodeStages(ep, [char(1, true)], [])).script.state).toBe('done');
+  });
+
+  it('exportStep（成片阶段自己的下一步）：缺视频去视频阶段补齐；齐了合成导出；有成片再导出一版；全完成是 done；没镜头 null', () => {
+    const some = [shot(1, 'ok', 'ok'), shot(2, 'ok', 'none'), shot(3, 'none', 'none')];
+    expect(exportStep(some, [], false)).toEqual({ label: '补齐视频（2 镜缺）', stage: 'videos', action: 'goto', count: 2, stale: false });
+    const all = [shot(1, 'ok', 'ok'), shot(2, 'ok', 'stale')];
+    expect(exportStep(all, [], false)).toEqual({ label: '合成导出', stage: 'export', action: 'run', count: 2, stale: false });
+    expect(exportStep(all, [exp(1)], false)).toEqual({ label: '再导出一版', stage: 'export', action: 'run', count: 2, stale: false });
+    expect(exportStep(all, [exp(1)], true)).toBe('done');
+    expect(exportStep([], [], false)).toBeNull();
   });
 
   it('isStageKey：只认五段的名字', () => {

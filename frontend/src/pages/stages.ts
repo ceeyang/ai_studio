@@ -172,3 +172,17 @@ export function episodeStages(
     : null;
   return { stages, next };
 }
+
+/**
+ * 成片阶段自己的下一步（人已经在成片阶段，不再指回前面没做完的角色等）：
+ * 还有镜头缺视频 → 去视频阶段补齐；视频齐了还没成片 → 合成导出；已经有成片 → 再导出一版（五段都完成了时
+ * 返回 'done'，阶段条显示「五段都完成了」）。还没有镜头时返回 null（沿用整集的下一步：去剧本生成分镜）。
+ */
+export function exportStep(shots: ShotDetail[], exports: ExportRow[], allDone: boolean): NextStep | 'done' | null {
+  if (shots.length === 0) return null;
+  const missing = shots.filter((s) => slotMark(slotOf(s, 'video')) === 'none').length;
+  if (missing > 0) return { label: `补齐视频（${missing} 镜缺）`, stage: 'videos', action: 'goto', count: missing, stale: false };
+  if (exports.length > 0 && allDone) return 'done';
+  const label = exports.length > 0 ? '再导出一版' : '合成导出';
+  return { label, stage: 'export', action: 'run', count: shots.length, stale: false };
+}
