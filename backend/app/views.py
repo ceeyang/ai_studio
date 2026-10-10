@@ -16,6 +16,7 @@ from backend.domain.refs import shot_refs
 from backend.domain.slots import slots_for
 from backend.pipeline.prompting import (keyframe_input_hash, keyframe_inputs, stale_reason,
                                         video_input_hash, video_inputs)
+from backend.post.options import export_label
 from backend.queue.manager import ACTIVE
 
 # 镜头任务类型 → 它出的是哪个槽位
@@ -27,7 +28,9 @@ def candidate_out(c) -> CandidateOut:
 
 
 def export_out(e) -> ExportOut:
-    return ExportOut.model_validate(e).model_copy(update={"url": "/media/" + quote(e.file_path)})
+    return ExportOut.model_validate(e).model_copy(update={
+        "url": "/media/" + quote(e.file_path),
+        "label": export_label(e.variant, e.settings)})
 
 
 def _max_refs(sv, kind: str, engine_name: str) -> int:

@@ -1,17 +1,21 @@
 """剧集与剧本段落。"""
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, HTTPException, Request, Response
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 
 from backend.app.deps import get_or_404, manager, project_by_slug, services
 from backend.app.schemas import (EpisodeDetail, EpisodeIn, EpisodeOut, EpisodePatch, ExportOut,
-                                 SceneBlockOut, SceneBlockPatch)
+                                 ExportPatch, SceneBlockOut, SceneBlockPatch)
 from backend.app.views import episode_detail, export_out
-from backend.domain.models import Episode, Export, SceneBlock, Shot
+from backend.domain.models import Episode, Export, Job, SceneBlock, Shot
 from backend.domain.slots import delete_slots
+from backend.queue.manager import ACTIVE
 
 router = APIRouter(prefix="/api", tags=["episodes"])
+log = logging.getLogger(__name__)
 
 
 @router.get("/projects/{slug}/episodes", response_model=list[EpisodeOut])
@@ -69,8 +73,19 @@ def patch_episode(episode_id: int, body: EpisodePatch, request: Request):
 def delete_episode(episode_id: int, request: Request):
     with services(request).db.session() as s:
         ep = get_or_404(s, Episode, episode_id, "剧集")
-        delete_slots(s, "shot", s.scalars(select(Shot.id).where(Shot.episode_id == ep.id)).all())
+        shot_ids = s.scalars(select(Shot.id).where(Shot.episode_id == ep.id)).all()
+        active = s.scalar(select(func.count()).select_from(Job).where(
+            Job.status.in_(ACTIVE),
+            ((Job.owner_type == "episode") & (Job.owner_id == ep.id))
+            | ((Job.owner_type == "shot") & (Job.owner_id.in_(shot_ids)))))
+        if active:
+            raise HTTPException(409, "这一集还有排队或执行中的任务，先取消任务再删除")
+        number, project_id = ep.number, ep.project_id
+        delete_slots(s, "shot", shot_ids)
+        # exports 表对 episode_id 有外键 ON DELETE CASCADE，删集时自动一并删掉，成片文件留在磁盘上
         s.delete(ep)
+    log.info("删除第 %s 集（项目 %s，episode_id=%s），连带 %d 个镜头",
+             number, project_id, episode_id, len(shot_ids))
     return Response(status_code=204)
 
 
@@ -79,8 +94,21 @@ def list_exports(episode_id: int, request: Request):
     with services(request).db.session() as s:
         get_or_404(s, Episode, episode_id, "剧集")
         rows = s.scalars(select(Export).where(Export.episode_id == episode_id)
-                         .order_by(Export.id.desc()))
+                         .order_by(Export.is_final.desc(), Export.id.desc()))
         return [export_out(e) for e in rows]
+
+
+@router.patch("/exports/{export_id}", response_model=ExportOut)
+def patch_export(export_id: int, body: ExportPatch, request: Request):
+    """定稿：同一集只允许一个成片是 is_final，定下一个会自动取消同集其它定稿。"""
+    with services(request).db.session() as s:
+        exp = get_or_404(s, Export, export_id, "成片")
+        if body.is_final:
+            s.execute(update(Export).where(Export.episode_id == exp.episode_id,
+                                           Export.id != exp.id).values(is_final=False))
+        exp.is_final = body.is_final
+        s.flush()
+        return export_out(exp)
 
 
 @router.patch("/scene-blocks/{block_id}", response_model=SceneBlockOut)

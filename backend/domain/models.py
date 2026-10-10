@@ -42,6 +42,7 @@ class Project(Base):
         ForeignKey("style_bibles.id", ondelete="SET NULL"), nullable=True)
     # 片尾卡：{"seconds": 3, "background": "#0b1a33", "lines": [{text, font, size, bold}]}
     end_card: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    archived: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
     style_bible: Mapped[StyleBible | None] = relationship()
@@ -227,4 +228,5 @@ class Export(Base):
     variant: Mapped[str] = mapped_column(String(16))
     file_path: Mapped[str] = mapped_column(String(500))
     settings: Mapped[dict] = mapped_column(JSON, default=dict)
+    is_final: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)

@@ -35,9 +35,13 @@ def make_slug(title: str) -> str:
 
 
 @router.get("/projects", response_model=list[ProjectOut])
-def list_projects(request: Request):
+def list_projects(request: Request, archived: bool = False):
+    """默认不含已归档的项目；?archived=1 连归档的一起全部返回。"""
     with services(request).db.session() as s:
-        return [ProjectOut.model_validate(p) for p in s.scalars(select(Project).order_by(Project.id))]
+        q = select(Project).order_by(Project.id)
+        if not archived:
+            q = q.where(Project.archived.is_(False))
+        return [ProjectOut.model_validate(p) for p in s.scalars(q)]
 
 
 @router.post("/projects", status_code=201, response_model=ProjectOut)

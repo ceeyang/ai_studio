@@ -28,6 +28,29 @@ def test_patch_and_delete_project(api):
     assert api.get("/api/projects/demo").status_code == 404
 
 
+def test_patch_project_rename_and_archive(api):
+    api.post("/api/projects", json={"title": "demo"})
+    r = api.patch("/api/projects/demo", json={"title": "改名了"})
+    assert r.status_code == 200 and r.json()["title"] == "改名了" and r.json()["archived"] is False
+    r = api.patch("/api/projects/demo", json={"archived": True})
+    assert r.status_code == 200 and r.json()["archived"] is True
+    r = api.patch("/api/projects/demo", json={"archived": False})
+    assert r.status_code == 200 and r.json()["archived"] is False
+
+
+def test_archived_projects_hidden_by_default(api):
+    api.post("/api/projects", json={"title": "在用"})
+    api.post("/api/projects", json={"title": "封存"})
+    api.patch("/api/projects/封存", json={"archived": True})
+
+    r = api.get("/api/projects")
+    assert [x["slug"] for x in r.json()] == ["在用"]
+
+    r = api.get("/api/projects", params={"archived": 1})
+    assert sorted(x["slug"] for x in r.json()) == ["在用", "封存"]
+    assert next(x for x in r.json() if x["slug"] == "封存")["archived"] is True
+
+
 def test_episodes_crud(api):
     api.post("/api/projects", json={"title": "demo"})
     e1 = api.post("/api/projects/demo/episodes", json={"source_text": "梗概", "target_seconds": 30}).json()
@@ -41,6 +64,63 @@ def test_episodes_crud(api):
     assert [e["number"] for e in api.get("/api/projects/demo/episodes").json()] == [1, 2]
     assert api.delete(f"/api/episodes/{e2['id']}").status_code == 204
     assert api.get(f"/api/episodes/{e2['id']}").status_code == 404
+
+
+def test_delete_episode_removes_shots_slots_and_exports(api):
+    from sqlalchemy import select
+
+    from backend.domain.models import Candidate, Export, Shot, Slot
+    from backend.domain.slots import add_candidate, get_or_create_slot
+
+    api.post("/api/projects", json={"title": "demo"})
+    ep = api.post("/api/projects/demo/episodes", json={"source_text": "x"}).json()
+    sv = api.app.state.services
+    with sv.db.session() as s:
+        shot = Shot(episode_id=ep["id"], order=0, image_prompt="p")
+        s.add(shot)
+        s.flush()
+        shot_id = shot.id
+        slot = get_or_create_slot(s, "shot", shot_id, "first_frame")
+        add_candidate(s, slot, file_path="x.png", engine="e", params={}, input_hash="h",
+                      job_id=None)
+        s.add(Export(episode_id=ep["id"], variant="9x16", file_path="demo/exports/x.mp4",
+                     settings={}))
+        s.flush()
+
+    assert api.delete(f"/api/episodes/{ep['id']}").status_code == 204
+    assert api.get(f"/api/episodes/{ep['id']}").status_code == 404
+
+    with sv.db.session() as s:
+        assert s.get(Shot, shot_id) is None
+        assert list(s.scalars(select(Slot).where(Slot.owner_type == "shot",
+                                                 Slot.owner_id == shot_id))) == []
+        assert list(s.scalars(select(Candidate))) == []
+        assert list(s.scalars(select(Export).where(Export.episode_id == ep["id"]))) == []
+
+
+def test_delete_episode_refused_while_job_active(api):
+    from sqlalchemy import select
+
+    from backend.domain.models import Job
+
+    api.post("/api/projects", json={"title": "demo"})
+    ep = api.post("/api/projects/demo/episodes", json={"source_text": "x"}).json()
+    sv = api.app.state.services
+    with sv.db.session() as s:
+        s.add(Job(type="export.episode", status="queued", owner_type="episode",
+                  owner_id=ep["id"], project_id=None))
+        s.flush()
+
+    r = api.delete(f"/api/episodes/{ep['id']}")
+    assert r.status_code == 409
+    assert "任务" in r.json()["detail"]
+    assert api.get(f"/api/episodes/{ep['id']}").status_code == 200
+
+    with sv.db.session() as s:
+        job = s.scalar(select(Job).where(Job.owner_type == "episode", Job.owner_id == ep["id"]))
+        job.status = "done"
+        s.flush()
+    assert api.delete(f"/api/episodes/{ep['id']}").status_code == 204
 
 
 def test_assets_and_style(api):

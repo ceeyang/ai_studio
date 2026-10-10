@@ -35,6 +35,7 @@ class ProjectPatch(BaseModel):
     video_engine: str | None = None
     seed: int | None = None
     negative: str | None = None
+    archived: bool | None = None
 
 
 class ProjectOut(ORM):
@@ -47,6 +48,7 @@ class ProjectOut(ORM):
     seed: int
     negative: str
     style_bible_id: int | None
+    archived: bool
     created_at: datetime
 
 
@@ -285,7 +287,13 @@ class ExportOut(ORM):
     file_path: str
     url: str = ""
     settings: dict
+    label: str = ""           # 可读标签，拼法照抄前端：画幅 · 字幕 · 配音 · 原声底 · 对齐 · 片尾卡 · 时长
+    is_final: bool = False
     created_at: datetime
+
+
+class ExportPatch(BaseModel):
+    is_final: bool
 
 
 class SlotOut(BaseModel):
