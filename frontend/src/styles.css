@@ -185,7 +185,7 @@ code { font-family: var(--mono); font-size: 12.5px; background: var(--surface-3)
 .taskbar .current button { height: 24px; padding: 0 10px; font-size: 12px; border-radius: var(--r-pill); }
 .taskbar .taskbar-all { margin-left: auto; color: var(--text-2); font-size: 13px; }
 .taskbar .taskbar-all:hover { color: var(--text); }
-.taskbar .pill { height: 26px; }
+.taskbar .pill { height: 26px; font-variant-numeric: tabular-nums; }
 .taskbar > button { height: 28px; font-size: 12.5px; }
 .taskbar .taskbar-all { height: 28px; display: inline-flex; align-items: center; padding: 0 12px; border: 1px solid var(--border); border-radius: var(--r-pill); }
 .taskbar .taskbar-all:hover { text-decoration: none; background: var(--surface-1); }
@@ -370,6 +370,12 @@ button.link:hover:not(:disabled) { background: none; color: var(--accent-hover);
 button.lg, .btn.lg { height: 38px; padding: 0 16px; font-size: 14px; border-radius: var(--r-md); gap: 8px; }
 button.sm, .btn.sm { height: 26px; padding: 0 8px; font-size: 12px; border-radius: 5px; }
 button.icon { width: 26px; padding: 0; }
+/* 小按钮看着 24–26px，点击区向外扩到 38–40px 高；横向只扩 2px，相邻按钮间距 4px 不会重叠 */
+button.sm, .btn.sm, .taskbar .current button { position: relative; }
+button.sm::after, .btn.sm::after { content: ''; position: absolute; inset: -6px -2px; }
+.taskbar .current button::after { content: ''; position: absolute; inset: -8px -2px; }
+/* 大块可点的卡片按下只缩 1%，按钮那套 0.97 放在 120px 以上的图上晃得厉害 */
+.new-tile:active:not(:disabled), .pcard:active:not(:disabled), .turn-cand:active:not(:disabled) { transform: scale(0.99); }
 
 /* =========================================================================
    表单
@@ -470,13 +476,15 @@ a.pill:hover { text-decoration: none; filter: brightness(1.15); }
 .table td.num, .table .num { font-variant-numeric: tabular-nums; font-family: var(--mono); font-size: 12.5px; color: var(--text-2); }
 
 /* 任务列表 */
-.jobs-table tr.clickable td:first-child { position: relative; color: var(--muted); font-family: var(--mono); font-size: 12px; }
+.jobs-table tr.clickable td:first-child { position: relative; color: var(--muted); font-family: var(--mono); font-size: 12px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .jobs-table tr.selected td:first-child::before {
   content: ''; position: absolute; left: 0; top: 8px; bottom: 8px; width: 3px; border-radius: 0 3px 3px 0; background: var(--accent);
 }
-.jobs-table td { vertical-align: middle; padding: 8px 10px; overflow-wrap: anywhere; }
-/* 报错里常有不带空格的长路径：允许任意处断行，否则整列被撑宽、耗时列被挤出面板 */
-.jobs-table td .error { font-size: 12px; margin-top: 4px; white-space: normal; color: #ff9a9d; }
+/* 编号、类型不许任意断行（之前 134 被拆成竖排三位、image.turnaround 断在词中间）；
+   只有报错允许任意处断行——里面常有不带空格的长路径，否则整列被撑宽、耗时列被挤出面板 */
+.jobs-table td { vertical-align: middle; padding: 8px 10px; }
+.jobs-table td:nth-child(2) { overflow-wrap: break-word; }
+.jobs-table td .error { font-size: 12px; margin-top: 4px; white-space: normal; color: #ff9a9d; overflow-wrap: anywhere; text-wrap: pretty; }
 .jobs-table td:last-child { font-variant-numeric: tabular-nums; color: var(--text-2); white-space: nowrap; }
 
 /* =========================================================================
@@ -501,7 +509,7 @@ a.pill:hover { text-decoration: none; filter: brightness(1.15); }
   padding: 3px 8px; border-radius: var(--r-xs); background: var(--surface-3); color: var(--text);
 }
 .table.shots .code-cell button.link:hover:not(:disabled) { background: var(--accent); color: var(--accent-ink); text-decoration: none; }
-.table.shots .dur { margin-top: 8px; display: block; }
+.table.shots .dur { margin-top: 8px; display: block; font-variant-numeric: tabular-nums; }
 
 .thumb {
   width: 90px; height: 160px; object-fit: cover; display: block;
@@ -525,6 +533,9 @@ a.pill:hover { text-decoration: none; filter: brightness(1.15); }
 
 .text-cell { max-width: 520px; min-width: 260px; }
 .text-cell .action-text { color: var(--text); line-height: 1.65; text-wrap: pretty; }
+/* 短到中等长度的说明文字：避免最后一行只剩一两个字 */
+.dialogue-line, .ep-synopsis, .char-desc, .bible-list p, .option-prompt, .option-features,
+.notice, .empty, .modal-head p, .small { text-wrap: pretty; }
 .dialogue { margin-top: 10px; display: flex; flex-direction: column; gap: 4px; }
 .dialogue-line {
   position: relative; padding: 4px 10px 4px 12px; font-size: 12.5px; color: var(--text-2);
@@ -541,7 +552,7 @@ a.pill:hover { text-decoration: none; filter: brightness(1.15); }
 .export-preview { width: 220px; aspect-ratio: 9 / 16; border-radius: var(--r-md); background: #000; display: block; outline: 1px solid rgba(255, 255, 255, 0.08); outline-offset: -1px; }
 .export-list li { display: flex; flex-direction: column; gap: 2px; }
 .export-list a { font-family: var(--mono); font-size: 13px; }
-.export-list .muted { font-size: 12px; }
+.export-list .muted { font-size: 12px; font-variant-numeric: tabular-nums; }
 
 /* =========================================================================
    抽屉
@@ -847,6 +858,8 @@ pre.error { background: rgba(255, 90, 95, 0.06); border-color: rgba(255, 90, 95,
   box-shadow: var(--shadow-1);
 }
 .continue-cover { width: 64px; border-radius: var(--r-sm); }
+/* 单独放在面板上的封面：加一圈中性内描边，暗图边缘不糊进底色 */
+.continue-cover img, .hero-cover img, .ep-cover img { outline: 1px solid rgba(255, 255, 255, 0.08); outline-offset: -1px; border-radius: inherit; }
 .continue-cover.cover-gen span { font-size: 26px; }
 .continue-main { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .continue-main .eyebrow { color: var(--accent); }
@@ -997,7 +1010,8 @@ pre.error { background: rgba(255, 90, 95, 0.06); border-color: rgba(255, 90, 95,
 .pcard-pending .spinner { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--border-strong); border-top-color: var(--accent); animation: spin 0.8s linear infinite; }
 .draw-bar { gap: var(--s-2); }
 .inline-field { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
-.inline-field select { height: 32px; width: 56px; }
+/* 宽度按内容走：写死 56px 时引擎下拉把「默认（h3_image）」截成一个「项」字 */
+.inline-field select { height: 32px; width: auto; min-width: 56px; max-width: 220px; }
 .draw-bar .btn { cursor: pointer; }
 .draw-bar .btn.is-disabled { opacity: 0.42; cursor: not-allowed; }
 .options, .recommend-list { display: grid; gap: var(--s-3); grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); }
