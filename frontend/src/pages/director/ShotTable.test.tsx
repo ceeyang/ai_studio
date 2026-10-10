@@ -146,4 +146,22 @@ describe('ShotTable', () => {
     expect(onRetry).toHaveBeenCalledWith(11, 'videos');
     expect(onGenerate).not.toHaveBeenCalled();
   });
+
+  it('提交运行中时，失败格子的「重试」也禁用', async () => {
+    const onRetry = vi.fn();
+    const shots = [
+      makeShot({
+        id: 11, code: 'S01',
+        failures: [{ id: 80, type: 'video.shot', status: 'failed', error: '显存不足' }],
+      }),
+    ];
+    render(
+      <ShotTable shots={shots} selected={new Set()} generating onToggle={vi.fn()} onToggleAll={vi.fn()} onOpen={vi.fn()} onMove={vi.fn()}
+        onSplit={vi.fn()} onInsertAfter={vi.fn()} onDelete={vi.fn()} onGenerate={vi.fn()} onRetry={onRetry} />,
+    );
+    const retry = screen.getByRole('button', { name: '重试视频 S01' }) as HTMLButtonElement;
+    expect(retry.disabled).toBe(true);
+    await userEvent.setup().click(retry);
+    expect(onRetry).not.toHaveBeenCalled();
+  });
 });

@@ -56,11 +56,14 @@ function MediaCell({
   kind,
   onOpen,
   onRetry,
+  generating,
 }: {
   shot: ShotDetail;
   kind: CellKind;
   onOpen(): void;
   onRetry(): void;
+  /** 生成请求还没拿到响应：重试也禁用，防止重复提交 */
+  generating: boolean;
 }) {
   const { stage, label } = CELL[kind];
   const slot = slotOf(shot, kind);
@@ -79,7 +82,7 @@ function MediaCell({
       <span className="media-fail-msg" title={failed.error ?? undefined}>
         {failed.error || '没有错误信息'}
       </span>
-      <button type="button" className="sm ghost" aria-label={`重试${label} ${shot.code}`} onClick={onRetry}>
+      <button type="button" className="sm ghost" aria-label={`重试${label} ${shot.code}`} disabled={generating} onClick={onRetry}>
         重试
       </button>
     </div>
@@ -175,6 +178,7 @@ export function ShotTable(props: ShotTableProps) {
                     kind="first_frame"
                     onOpen={() => props.onOpen(s.id)}
                     onRetry={() => retry(s.id, 'keyframes')}
+                    generating={generating}
                   />
                 </td>
                 <td>
@@ -183,6 +187,7 @@ export function ShotTable(props: ShotTableProps) {
                     kind="video"
                     onOpen={() => props.onOpen(s.id)}
                     onRetry={() => retry(s.id, 'videos')}
+                    generating={generating}
                   />
                 </td>
                 <td className="text-cell">

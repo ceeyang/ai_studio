@@ -30,6 +30,8 @@ type State =
 interface Outcome {
   tone: 'pending' | 'ok' | 'error';
   text: string;
+  /** 悬停提示：失败时放完整的错误（text 里只有第一行） */
+  title?: string;
   action?: NoticeAction;
   autoHide: boolean;
 }
@@ -39,6 +41,11 @@ const SUCCESS_MS = 6000;
 
 function jobLink(id: number): string {
   return `/jobs?job=${id}`;
+}
+
+/** 错误可能是多行的堆栈：提示条里只放第一行非空的 */
+function firstLine(s: string | null | undefined): string {
+  return (s ?? '').split(/\r?\n/).map((l) => l.trim()).find(Boolean) ?? '';
 }
 
 export function summarize(jobs: (Job | undefined)[], text: string): Outcome {
@@ -52,7 +59,8 @@ export function summarize(jobs: (Job | undefined)[], text: string): Outcome {
   if (failed) {
     return {
       tone: 'error',
-      text: `失败：${failed.error || '没有错误信息'}`,
+      text: `失败：${firstLine(failed.error) || '没有错误信息'}`,
+      title: failed.error || undefined,
       action: { label: '查看任务', to: jobLink(failed.id) },
       autoHide: false,
     };
@@ -130,7 +138,7 @@ export function useJobNotice(): JobNotice {
     view =
       outcome.tone === 'error' ? (
         <div className="error banner job-notice" role="alert">
-          <span>{outcome.text}</span>
+          <span title={outcome.title}>{outcome.text}</span>
           {action && <span aria-hidden="true">·</span>}
           {action}
           <button type="button" className="ghost icon-btn" aria-label="关闭提示" onClick={clear}>

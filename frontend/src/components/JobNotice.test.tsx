@@ -50,6 +50,16 @@ describe('useJobNotice', () => {
     expect(screen.queryByText(/失败：/)).toBeNull();
   });
 
+  it('失败原因是多行（例如报错堆栈）：只显示第一行，完整内容放在悬停提示里', async () => {
+    const full = 'ComfyUI 出错\nTraceback (most recent call last):\n  File "x.py", line 1';
+    installFetch({ 'GET /api/jobs/6': makeJob({ id: 6, type: 'image.keyframe', status: 'failed', error: full }) });
+    renderAt(<Probe ids={[6]} />);
+    await userEvent.setup().click(screen.getByRole('button', { name: '提交' }));
+    const msg = await screen.findByText('失败：ComfyUI 出错');
+    expect(msg.textContent).not.toContain('Traceback');
+    expect(msg.getAttribute('title')).toBe(full);
+  });
+
   it('全部完成但都因输入没变被跳过：提示可以强制重跑', async () => {
     installFetch({
       'GET /api/jobs/5': makeJob({ id: 5, type: 'image.keyframe', status: 'done', result: { skipped: true } }),
