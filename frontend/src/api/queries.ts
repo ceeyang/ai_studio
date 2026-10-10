@@ -173,6 +173,16 @@ export function useJobs(status: string, limit = 100, keepPrevious = false) {
   });
 }
 
+/** 最近完成的任务（批量生成前估耗时用，和任务页共用缓存）；30 秒内不重拉，不轮询 */
+export function useRecentDoneJobs(enabled = true) {
+  return useQuery({
+    queryKey: keys.jobs('done', 100),
+    queryFn: () => api.get<Job[]>('/api/jobs?status=done&limit=100'),
+    staleTime: 30_000,
+    enabled,
+  });
+}
+
 export function useJob(id: number | null) {
   return useQuery({
     queryKey: keys.job(id ?? 0),

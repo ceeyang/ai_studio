@@ -22,6 +22,13 @@ async function waitQueueIdle(page: Page, slug: string) {
   expect(failed, JSON.stringify(failed.map((j: { id: number; error: string }) => [j.id, j.error]))).toHaveLength(0);
 }
 
+/** 点阶段条的下一步；弹了预估确认就继续 */
+async function clickNext(page: Page, name: RegExp) {
+  await page.getByRole('button', { name }).click();
+  const ok = page.getByRole('button', { name: '继续提交' });
+  if (await ok.isVisible({ timeout: 3000 }).catch(() => false)) await ok.click();
+}
+
 test('真实环境：梗概 → 带 H3 原生声音的成片', async ({ page }) => {
   const slug = `网页验收${Date.now() % 100000}`;
   await page.goto('/');
@@ -45,9 +52,11 @@ test('真实环境：梗概 → 带 H3 原生声音的成片', async ({ page }) 
   const stages = page.getByRole('list', { name: '制作阶段' });
   await stages.getByRole('button', { name: /首帧/ }).click();
   await expect(page.getByTestId('shot-S01')).toBeVisible();
-  await page.getByRole('button', { name: '生成首帧（全部）' }).click();
+  // 首帧确认门：先补首帧，确认后再生成全部视频（超过 3 个任务会先弹预估确认）
+  await clickNext(page, /^下一步：生成缺少\/过期的首帧/);
   await waitQueueIdle(page, slug);
-  await page.getByRole('button', { name: '生成视频（全部）' }).click();
+  await page.reload();
+  await clickNext(page, /^下一步：确认首帧，生成全部视频/);
   await waitQueueIdle(page, slug);
   await stages.getByRole('button', { name: /成片/ }).click();
   await page.getByRole('button', { name: '合成导出' }).click();

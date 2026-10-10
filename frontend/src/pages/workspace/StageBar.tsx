@@ -11,6 +11,8 @@ interface StageBarProps {
   onSelect: (stage: StageKey) => void;
   /** 下一步就在当前阶段、要「运行」时：触发当前阶段里的动作按钮 */
   onRun: () => void;
+  /** 下一步暂时做不了（如首帧都在生成中）：按钮禁用，字照样显示 */
+  nextDisabled?: boolean;
 }
 
 /**
@@ -28,7 +30,7 @@ export function triggerNextAction(panel: string) {
   }, 0);
 }
 
-export function StageBar({ stages, current, next, onSelect, onRun }: StageBarProps) {
+export function StageBar({ stages, current, next, onSelect, onRun, nextDisabled = false }: StageBarProps) {
   const runHere = !!next && next.stage === current && next.action === 'run';
   const target = next ? stages.find((s) => s.key === next.stage) : undefined;
   return (
@@ -56,6 +58,7 @@ export function StageBar({ stages, current, next, onSelect, onRun }: StageBarPro
         <button
           type="button"
           className="primary stage-next"
+          disabled={nextDisabled}
           title={runHere || !target ? undefined : `切到「${target.label}」阶段`}
           onClick={() => (runHere ? onRun() : onSelect(next.stage))}
         >

@@ -291,4 +291,94 @@ describe('EpisodeWorkspace', () => {
     renderRoute('/projects/demo/episodes/4?stage=script');
     expect(await screen.findByRole('button', { name: '展开左栏' })).toBeTruthy();
   });
+
+  describe('首帧确认门（首帧 / 视频阶段的下一步）', () => {
+    const posts = <T extends { method: string }>(calls: T[]) => calls.filter((c) => c.method === 'POST');
+    const staleKf = (id: number): Slot =>
+      makeSlot({ id, kind: 'first_frame', selected_candidate_id: id * 10, stale: true, candidates: [makeCandidate({ id: id * 10 })] });
+
+    it('有缺少 / 过期的首帧：下一步只补这些（缺的不强制、过期的强制），不会去出视频；卡片用普通按钮', async () => {
+      const ep = { ...EP, shots: [EP.shots[0], { ...EP.shots[1], slots: [staleKf(3)] }] };
+      const calls = installFetch(routes({ 'GET /api/episodes/4': ep, 'POST /api/episodes/4/run': { job_ids: [51] }, 'GET /api/jobs/51': { id: 51, status: 'queued' } }));
+      const { container } = renderRoute('/projects/demo/episodes/4?stage=keyframes');
+      const next = await screen.findByRole('button', { name: '下一步：生成缺少/过期的首帧（2 张，耗时未知）' });
+      await screen.findByTestId('shot-S01');
+      expect(Array.from(container.querySelectorAll('.primary')).filter((el) => !el.closest('[hidden]'))).toEqual([next]);
+      await userEvent.setup().click(next);
+      await waitFor(() => expect(posts(calls)).toHaveLength(2));
+      expect(posts(calls).map((c) => c.body)).toEqual([
+        { stage: 'keyframes', candidates: 1, force: false, shots: ['11'] },
+        { stage: 'keyframes', candidates: 1, force: true, shots: ['12'] },
+      ]);
+      expect(where()).toBe('/projects/demo/episodes/4?stage=keyframes');
+    });
+
+    it('首帧全部就绪：下一步「确认首帧，生成全部视频」，点了切到视频阶段并提交视频', async () => {
+      const ep = { ...EP, shots: EP.shots.map((s, i) => ({ ...s, slots: [chosen(i + 1, 'first_frame')] })) };
+      const calls = installFetch(routes({ 'GET /api/episodes/4': ep, 'POST /api/episodes/4/run': { job_ids: [52] }, 'GET /api/jobs/52': { id: 52, status: 'queued' } }));
+      renderRoute('/projects/demo/episodes/4?stage=keyframes');
+      await userEvent.setup().click(await screen.findByRole('button', { name: '下一步：确认首帧，生成全部视频（2 镜，耗时未知）' }));
+      await waitFor(() => expect(posts(calls)).toHaveLength(1));
+      expect(posts(calls)[0].body).toEqual({ stage: 'videos', candidates: 1, force: false, shots: ['11', '12'] });
+      expect(where()).toBe('/projects/demo/episodes/4?stage=videos');
+      expect(within(stageBar()).getByRole('button', { name: /视频/ }).getAttribute('aria-current')).toBe('step');
+    });
+
+    it('视频也都就绪：下一步「去成片」', async () => {
+      const ep = { ...EP, shots: EP.shots.map((s, i) => ({ ...s, slots: [chosen(i * 2 + 1, 'first_frame'), chosen(i * 2 + 2, 'video')] })) };
+      installFetch(routes({ 'GET /api/episodes/4': ep }));
+      renderRoute('/projects/demo/episodes/4?stage=videos');
+      await userEvent.setup().click(await screen.findByRole('button', { name: '下一步：去成片' }));
+      expect(where()).toBe('/projects/demo/episodes/4?stage=export');
+    });
+
+    it('勾选了镜头：下一步变「对选中的 N 镜生成…」；有的已有首帧时缺的生成、有的重拍（强制），确认里写清楚，提交后清掉勾选', async () => {
+      const ep = { ...EP, shots: [{ ...EP.shots[0], slots: [chosen(1, 'first_frame')] }, EP.shots[1]] };
+      const calls = installFetch(routes({ 'GET /api/episodes/4': ep, 'POST /api/episodes/4/run': { job_ids: [53] }, 'GET /api/jobs/53': { id: 53, status: 'queued' } }));
+      renderRoute('/projects/demo/episodes/4?stage=keyframes');
+      const user = userEvent.setup();
+      await user.click(await screen.findByRole('checkbox', { name: '选择 S01' }));
+      await user.click(screen.getByRole('checkbox', { name: '选择 S02' }));
+      await user.click(screen.getByRole('button', { name: '下一步：对选中的 2 镜生成…' }));
+      const dlg = await screen.findByRole('dialog', { name: '对选中的 2 镜生成 / 重拍首帧？' });
+      expect(dlg.textContent).toContain('1 镜还没有首帧，生成；1 镜已有首帧，重拍');
+      await user.click(within(dlg).getByRole('button', { name: '继续提交' }));
+      await waitFor(() => expect(posts(calls)).toHaveLength(2));
+      expect(posts(calls).map((c) => c.body)).toEqual([
+        { stage: 'keyframes', candidates: 1, force: false, shots: ['12'] },
+        { stage: 'keyframes', candidates: 1, force: true, shots: ['11'] },
+      ]);
+      await waitFor(() => expect((screen.getByRole('checkbox', { name: '选择 S01' }) as HTMLInputElement).checked).toBe(false));
+      expect(screen.getByRole('button', { name: /^下一步：生成缺少\/过期的首帧/ })).toBeTruthy();
+    });
+
+    it('勾选的都已有首帧：下一步「对选中的 N 镜重拍…」，强制', async () => {
+      const ep = { ...EP, shots: EP.shots.map((s, i) => ({ ...s, slots: [chosen(i + 1, 'first_frame')] })) };
+      const calls = installFetch(routes({ 'GET /api/episodes/4': ep, 'POST /api/episodes/4/run': { job_ids: [54] }, 'GET /api/jobs/54': { id: 54, status: 'queued' } }));
+      renderRoute('/projects/demo/episodes/4?stage=keyframes');
+      const user = userEvent.setup();
+      await user.click(await screen.findByRole('checkbox', { name: '选择第 1 段的全部镜头' }));
+      await user.click(screen.getByRole('button', { name: '下一步：对选中的 1 镜重拍…' }));
+      await user.click(within(await screen.findByRole('dialog', { name: '对选中的 1 镜重拍首帧？' })).getByRole('button', { name: '继续提交' }));
+      await waitFor(() => expect(posts(calls)).toHaveLength(1));
+      expect(posts(calls)[0].body).toEqual({ stage: 'keyframes', candidates: 1, force: true, shots: ['11'] });
+    });
+
+    it('视频阶段卡片「先出首帧」：切回首帧阶段并打开这个镜头', async () => {
+      installFetch(routes());
+      renderRoute('/projects/demo/episodes/4?stage=videos');
+      await userEvent.setup().click(await screen.findByRole('button', { name: '先出首帧 S02' }));
+      expect(where()).toBe('/projects/demo/episodes/4?stage=keyframes&shot=12');
+      expect(await screen.findByRole('dialog', { name: '镜头 S02 详情' })).toBeTruthy();
+    });
+
+    it('首帧都在生成中：下一步禁用，写明在等', async () => {
+      const busy = { active_jobs: [{ id: 70, type: 'image.keyframe', status: 'running' as const }] };
+      const ep = { ...EP, shots: EP.shots.map((s) => ({ ...s, ...busy })) };
+      installFetch(routes({ 'GET /api/episodes/4': ep }));
+      renderRoute('/projects/demo/episodes/4?stage=keyframes');
+      const next = await screen.findByRole('button', { name: '下一步：等首帧生成完（2 镜生成中）' });
+      expect((next as HTMLButtonElement).disabled).toBe(true);
+    });
+  });
 });

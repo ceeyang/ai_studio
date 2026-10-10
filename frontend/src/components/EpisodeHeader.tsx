@@ -42,7 +42,7 @@ export function useEpisodeProgress(slug: string, ep: EpisodeDetail | undefined):
 
 /**
  * 下一步要在这些阶段里「运行」时返回它（阶段内容给对应的动作按钮加 data-next-action），否则 null。
- * 一个阶段内容可能服务几个阶段（导演台暂时同时是首帧和视频阶段）。
+ * 一个阶段内容可能服务几个阶段。
  */
 export function useNextAction(slug: string, ep: EpisodeDetail | undefined, stages: StageKey[]): NextStep | null {
   const { next } = useEpisodeProgress(slug, ep);

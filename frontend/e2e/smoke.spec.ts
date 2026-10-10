@@ -77,8 +77,11 @@ test('新建项目 → 单集工作台：剧本 → 分镜 → 首帧阶段（ma
   await expect(page).toHaveURL(/\?stage=keyframes$/);
   await expect(page.getByTestId('shot-S01')).toBeVisible();
   await expect(page.getByTestId('shot-S02')).toBeVisible();
-  await expect(page.getByTestId('shot-S01')).toContainText('林夏：欢迎回到直播间');
+  await expect(page.getByTestId('shot-S01')).toContainText('1 句台词');
   await expect(page.getByTestId('shot-S01')).toContainText('未生成');
+  // 镜头按段落分组；下一步是首帧确认门：先补缺少的首帧
+  await expect(page.getByRole('region', { name: /^第 1 段 · / })).toBeVisible();
+  await expect(page.getByRole('button', { name: /^下一步：生成缺少\/过期的首帧（2 张，/ })).toBeVisible();
 
   // 生产态深链接刷新仍然是这个页面（后端 SPA 回落）
   await page.reload();
@@ -100,7 +103,7 @@ test('ComfyUI 不通时点生成首帧：提交被拒，页面说明原因并给
   await page.goto(`/projects/${slug}/episodes/${ep.id}/director`);
   await expect(page).toHaveURL(/\?stage=keyframes$/);
   await expect(page.getByTestId('shot-S01')).toContainText('未生成');
-  await page.getByRole('button', { name: '生成首帧（全部）' }).click();
+  await page.getByRole('button', { name: /^下一步：生成缺少\/过期的首帧/ }).click();
 
   // 提交前就被拒：就地提示写明原因，不排进队列
   await expect(page.locator('.job-notice')).toContainText('ComfyUI 连不上');

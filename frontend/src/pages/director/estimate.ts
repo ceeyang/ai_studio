@@ -47,3 +47,11 @@ export function estimateText(parts: EstimatePart[], jobs: Job[]): string {
   if (list.length === 1) return `将提交 ${what}，按最近同类任务平均 ${fmtAvg(avgs[0] as number)}，${fmtTotal(total)}，会占用显卡`;
   return `将提交 ${what}，按最近同类任务平均算${fmtTotal(total)}，会占用显卡`;
 }
+
+/** 阶段条上的一句预计耗时：「约 12 分钟」「不到 1 分钟」「约 2.5 小时」；有一类没有样本就是「耗时未知」 */
+export function etaText(parts: EstimatePart[], jobs: Job[]): string {
+  const list = parts.filter((p) => p.n > 0);
+  const avgs = list.map((p) => avgSeconds(jobs, p.type));
+  if (avgs.some((a) => a === null)) return '耗时未知';
+  return fmtTotal(list.reduce((a, p, i) => a + p.n * (avgs[i] as number), 0));
+}

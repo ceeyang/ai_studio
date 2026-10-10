@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { makeJob } from '../../test/factories';
-import { avgSeconds, estimateText } from './estimate';
+import { avgSeconds, estimateText, etaText } from './estimate';
 
 function done(id: number, type: string, seconds: number, finished = `2026-10-10T10:${String(id).padStart(2, '0')}:00Z`) {
   const end = new Date(finished).getTime();
@@ -58,5 +58,14 @@ describe('estimate', () => {
         [done(1, 'image.keyframe', 60)],
       ),
     ).toBe('将提交 3 个首帧任务、2 个视频任务，耗时未知，会占用显卡');
+  });
+
+  it('etaText：阶段条上的一句预计耗时；没有样本写「耗时未知」', () => {
+    const jobs = [done(1, 'image.keyframe', 50), done(2, 'image.keyframe', 66), done(3, 'video.shot', 300)];
+    expect(etaText([{ type: 'image.keyframe', n: 4 }], jobs)).toBe('约 4 分钟');
+    expect(etaText([{ type: 'image.keyframe', n: 1 }], jobs)).toBe('不到 1 分钟');
+    expect(etaText([{ type: 'video.shot', n: 30 }], jobs)).toBe('约 2.5 小时');
+    expect(etaText([{ type: 'image.keyframe', n: 2 }, { type: 'video.shot', n: 2 }], jobs)).toBe('约 12 分钟');
+    expect(etaText([{ type: 'export.episode', n: 1 }], jobs)).toBe('耗时未知');
   });
 });

@@ -7,7 +7,7 @@ import { EditableFields, type FieldSpec, type FieldValues, type FieldsState, use
 import { engineLabel } from '../../format';
 import { CandidateGrid } from './CandidateGrid';
 import { DialogueEditor } from './DialogueEditor';
-import { type GenStage, CELL, activeJob, activeText, failedJob, genLabel } from './ShotTable';
+import { type GenStage, CELL, activeJob, activeText, failedJob, genLabel } from './shotStatus';
 import { SLOT_LABEL } from './slots';
 
 const TRANSITION_LABEL: Record<Transition, string> = {

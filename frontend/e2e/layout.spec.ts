@@ -45,7 +45,7 @@ async function expectNoOverflow(page: Page, label: string) {
   const r = await page.evaluate(() => {
     const iw = window.innerWidth;
     const bad: string[] = [];
-    const sel = '.content, .panel, .toolbar, .stage-bar, .ws-rail, .ws-main, .shots-wrap, .drawer, .char-card, .turn-sheet, .turn-cell, .turn-look, .option-card, .project-card, .episode-card, .bible, .modal';
+    const sel = '.content, .panel, .toolbar, .stage-bar, .ws-rail, .ws-main, .shot-grid-wrap, .shot-group, .shot-card, .drawer, .char-card, .turn-sheet, .turn-cell, .turn-look, .option-card, .project-card, .episode-card, .bible, .modal';
     for (const el of Array.from(document.querySelectorAll<HTMLElement>(sel))) {
       const rc = el.getBoundingClientRect();
       if (rc.width === 0) continue;
@@ -85,7 +85,7 @@ for (const width of WIDTHS) {
     await page.goto(`${ep}?stage=keyframes`);
     await expect(page.getByTestId('shot-S02')).toBeVisible();
     await expectNoOverflow(page, `${width} 首帧`);
-    await page.getByTestId('shot-S01').locator('.code-cell button').click();
+    await page.getByRole('button', { name: '打开 S01' }).click();
     await expect(page.locator('.drawer')).toBeVisible();
     // 抽屉滑入动画（translateX 40px）中途量会多出 40px：等动画放完
     await page.locator('.drawer').evaluate((el) => Promise.all(el.getAnimations().map((a) => a.finished)));
