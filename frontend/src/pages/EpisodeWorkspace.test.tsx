@@ -522,6 +522,16 @@ describe('EpisodeWorkspace', () => {
       expect(await screen.findByRole('dialog', { name: '镜头 S02 详情' })).toBeTruthy();
     });
 
+    it('视频阶段的镜头抽屉：首帧缺少时视频那一格是「先出首帧」，点了切回首帧阶段、抽屉留着', async () => {
+      installFetch(routes());
+      renderRoute('/projects/demo/episodes/4?stage=videos&shot=12');
+      const user = userEvent.setup();
+      const d = await screen.findByRole('dialog', { name: '镜头 S02 详情' });
+      await user.click(within(d).getByRole('button', { name: '先出首帧' }));
+      await waitFor(() => expect(where()).toBe('/projects/demo/episodes/4?stage=keyframes&shot=12'));
+      expect(screen.getByRole('dialog', { name: '镜头 S02 详情' })).toBeTruthy();
+    });
+
     it('首帧都在生成中：下一步禁用，写明在等', async () => {
       const busy = { active_jobs: [{ id: 70, type: 'image.keyframe', status: 'running' as const }] };
       const ep = { ...EP, shots: EP.shots.map((s) => ({ ...s, ...busy })) };

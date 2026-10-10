@@ -23,6 +23,8 @@ const SHOT = makeShot({
     }),
   ],
 });
+/** 首帧选定且没过期：视频那一格可以直接生成 */
+const READY = { ...SHOT, slots: [{ ...SHOT.slots[0], stale: false }] };
 
 describe('ShotDrawer', () => {
   it('改提示词只提交改动的字段', async () => {
@@ -73,7 +75,7 @@ describe('ShotDrawer', () => {
     installFetch({ 'GET /api/engines': ENGINES });
     const onClose = vi.fn();
     const onGenerate = vi.fn();
-    renderAt(<ShotDrawer shot={SHOT} episodeId={1} onClose={onClose} onGenerate={onGenerate} />);
+    renderAt(<ShotDrawer shot={READY} episodeId={1} onClose={onClose} onGenerate={onGenerate} />);
     const user = userEvent.setup();
     expect(screen.getByRole('button', { name: '重拍首帧' })).toBeTruthy();
     await user.click(screen.getByRole('button', { name: '生成视频' }));
@@ -82,10 +84,29 @@ describe('ShotDrawer', () => {
     expect(onClose).toHaveBeenCalled();
   });
 
+  it('首帧缺少或过期时，视频那一格是「先出首帧」/「先重拍首帧」（和卡片一致）：点了交给父组件切到首帧阶段，不出视频', async () => {
+    installFetch({ 'GET /api/engines': ENGINES });
+    const onGenerate = vi.fn();
+    const onNeed = vi.fn();
+    const { unmount } = renderAt(
+      <ShotDrawer shot={SHOT} episodeId={1} onClose={() => {}} onGenerate={onGenerate} onNeedFirstFrame={onNeed} />,
+    );
+    const user = userEvent.setup();
+    expect(screen.queryByRole('button', { name: /生成视频/ })).toBeNull();
+    await user.click(screen.getByRole('button', { name: '先重拍首帧' }));
+    expect(onNeed).toHaveBeenCalledTimes(1);
+    expect(onGenerate).not.toHaveBeenCalled();
+    // 焦点落到首帧那一格的按钮上
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: '重拍首帧' }));
+    unmount();
+    renderAt(<ShotDrawer shot={makeShot({ id: 7, code: 'S04' })} episodeId={1} onClose={() => {}} onGenerate={onGenerate} onNeedFirstFrame={onNeed} />);
+    expect(screen.getByRole('button', { name: '先出首帧' })).toBeTruthy();
+  });
+
   it('提交运行中时，生成按钮禁用，点击不触发回调', async () => {
     installFetch({ 'GET /api/engines': ENGINES });
     const onGenerate = vi.fn();
-    renderAt(<ShotDrawer shot={SHOT} episodeId={1} onClose={() => {}} onGenerate={onGenerate} generating />);
+    renderAt(<ShotDrawer shot={READY} episodeId={1} onClose={() => {}} onGenerate={onGenerate} generating />);
     const user = userEvent.setup();
     const genFrame = screen.getByRole('button', { name: '重拍首帧' }) as HTMLButtonElement;
     const genVideo = screen.getByRole('button', { name: '生成视频' }) as HTMLButtonElement;
@@ -214,8 +235,8 @@ describe('ShotDrawer', () => {
     const zh = screen.getByLabelText('第 1 句中文');
     await user.clear(zh);
     await user.type(zh, '换什么？');
-    await user.click(screen.getByRole('button', { name: '保存并生成视频' }));
-    await waitFor(() => expect(onGenerate).toHaveBeenCalledWith('videos', true));
+    await user.click(screen.getByRole('button', { name: '保存并生成首帧' }));
+    await waitFor(() => expect(onGenerate).toHaveBeenCalledWith('keyframes', true));
     const patches = calls.filter((c) => c.method === 'PATCH');
     expect(patches).toHaveLength(1);
     expect(patches[0].body).toEqual({ dialogue: [{ speaker: '陈师傅', zh: '换什么？', start: 2, end: 2.6 }] });
@@ -231,7 +252,7 @@ describe('ShotDrawer', () => {
     renderAt(<ShotDrawer shot={shot} episodeId={1} onClose={() => {}} onGenerate={onGenerate} />);
     const user = userEvent.setup();
     await user.type(screen.getByLabelText('第 1 句中文'), '吗');
-    await user.click(screen.getByRole('button', { name: '保存并生成视频' }));
+    await user.click(screen.getByRole('button', { name: '保存并生成首帧' }));
     expect(await screen.findByText(/时长不对/)).toBeTruthy();
     expect(onGenerate).not.toHaveBeenCalled();
   });

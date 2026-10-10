@@ -8,7 +8,7 @@ import { EditableFields, type FieldSpec, type FieldValues, type FieldsState, use
 import { engineLabel } from '../../format';
 import { CandidateGrid } from './CandidateGrid';
 import { DialogueEditor } from './DialogueEditor';
-import { type GenStage, CELL, activeJob, activeText, failedJob, genLabel } from './shotStatus';
+import { type GenStage, CELL, activeJob, activeText, failedJob, firstFrameReady, genLabel, hasSelected } from './shotStatus';
 import { SLOT_LABEL } from './slots';
 
 const TRANSITION_LABEL: Record<Transition, string> = {
@@ -73,6 +73,8 @@ export interface ShotDrawerProps {
   notice?: ReactNode;
   /** 提示词或对白有没保存的修改变化时通知（切阶段前工作台要先问） */
   onDirtyChange?(dirty: boolean): void;
+  /** 首帧缺少或过期时点了视频那一格的「先出首帧 / 先重拍首帧」：切到首帧阶段（抽屉留着） */
+  onNeedFirstFrame?(): void;
 }
 
 const STAGES: GenStage[] = ['keyframes', 'videos'];
@@ -87,6 +89,7 @@ export function ShotDrawer({
   onCountChange,
   notice,
   onDirtyChange,
+  onNeedFirstFrame,
 }: ShotDrawerProps) {
   const engines = useEngines();
   const patch = usePatchShot(episodeId);
@@ -98,6 +101,7 @@ export function ShotDrawer({
   const [dialogueDraft, setDialogueDraft] = useState<DialogueLine[] | null>(null);
   const [saving, setSaving] = useState(false);
   const box = useRef<HTMLElement>(null);
+  const frameBtn = useRef<HTMLButtonElement>(null);
   const fieldsDirty = !!fields?.dirty;
   // 提示词或对白有没保存的修改：生成按钮先保存（生成按旧内容跑就白跑了）
   const unsaved = fieldsDirty || dialogueDirty;
@@ -197,9 +201,28 @@ export function ShotDrawer({
               const label = CELL[st === 'keyframes' ? 'first_frame' : 'video'].label;
               const what = genLabel(shot, st);
               const active = activeJob(shot, st);
+              // 和镜头卡片一致：首帧缺少或过期时不拿它出视频，视频这一格先去出 / 重拍首帧
+              if (st === 'videos' && !active && !firstFrameReady(shot)) {
+                const need = hasSelected(shot, 'keyframes') ? '先重拍首帧' : '先出首帧';
+                return (
+                  <button
+                    key={st}
+                    type="button"
+                    className="soft"
+                    title="首帧缺少或已过期，出视频前先在首帧阶段把它出好"
+                    onClick={() => {
+                      onNeedFirstFrame?.();
+                      frameBtn.current?.focus();
+                    }}
+                  >
+                    {need}
+                  </button>
+                );
+              }
               return (
                 <button
                   key={st}
+                  ref={st === 'keyframes' ? frameBtn : undefined}
                   type="button"
                   className={unsaved ? 'primary' : 'soft'}
                   disabled={generating || saving || !!active || (fieldsDirty && !fields?.valid)}

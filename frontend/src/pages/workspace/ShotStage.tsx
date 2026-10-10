@@ -327,6 +327,9 @@ export function ShotStage({
             setShot(null);
           }}
           onGenerate={(st) => void generateOne(openShot, st, hasSelected(openShot, st) ? '重拍' : '生成')}
+          onNeedFirstFrame={() => {
+            if (stage !== 'keyframes') work.goStage('keyframes', { shot: String(openShot.id) });
+          }}
         />
       )}
     </div>
