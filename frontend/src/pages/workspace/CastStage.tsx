@@ -6,6 +6,7 @@ import { errorText } from '../../api/client';
 import { useCharacters, useEpisode, useLocations, usePatchLocation, usePutStyle, useStyle } from '../../api/queries';
 import type { LocationPatch, Style } from '../../api/types';
 import { useConfirm } from '../../components/ConfirmDialog';
+import { type LeaveCheck, confirmDiscard } from '../../components/confirmDiscard';
 import { EpisodeLoadError, useNextAction } from '../../components/EpisodeHeader';
 import { castTarget, hasPortrait } from '../stages';
 import { EditableFields, type FieldSpec, type FieldValues, useUnsavedGuard } from '../../components/EditableFields';
@@ -49,7 +50,14 @@ function toStyle(v: FieldValues): Style {
   };
 }
 
-export function CastStage({ active = true }: { active?: boolean }) {
+export function CastStage({
+  active = true,
+  setLeaveCheck,
+}: {
+  active?: boolean;
+  /** 工作台切走本阶段前调用：角色抽屉有没保存的修改时先问 */
+  setLeaveCheck?: (check: LeaveCheck | null) => void;
+}) {
   const { slug = '', episodeId = '' } = useParams();
   const [params, setParams] = useSearchParams();
   const charId = Number(params.get('char')) || null;
@@ -96,6 +104,13 @@ export function CastStage({ active = true }: { active?: boolean }) {
   const setCharRef = useRef(setChar);
   setCharRef.current = setChar;
 
+  // 切阶段前：抽屉有没保存的修改先问（抽屉卸载时会把脏标记清掉）
+  useEffect(() => {
+    if (!setLeaveCheck) return;
+    setLeaveCheck(async () => !drawerDirty.current || confirmDiscard(confirm, '这个角色', '切换阶段'));
+    return () => setLeaveCheck(null);
+  }, [setLeaveCheck, confirm]);
+
   useEffect(() => {
     if (charId === shownId) return;
     // 阶段藏起来时抽屉本来就不在（离开阶段由阶段条处理），没修改时直接换
@@ -104,13 +119,7 @@ export function CastStage({ active = true }: { active?: boolean }) {
       return;
     }
     let stale = false;
-    void confirm({
-      title: '放弃没保存的修改？',
-      body: '这个角色有改过但没保存的内容，换走就没了。',
-      confirmText: '放弃修改',
-      cancelText: '继续编辑',
-      danger: true,
-    }).then((ok) => {
+    void confirmDiscard(confirm, '这个角色', '换走').then((ok) => {
       if (stale) return;
       if (ok) {
         drawerDirty.current = false;

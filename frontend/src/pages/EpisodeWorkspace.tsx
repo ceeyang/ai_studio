@@ -1,9 +1,10 @@
 // 单集工作台：一集一个主工作面。页头（面包屑、切集）+ 阶段条（五段 + 唯一的主按钮「下一步」）+ 左栏（剧本大纲、角色）+ 主区。
 // 地址：/projects/:slug/episodes/:episodeId?stage=script|cast|keyframes|videos|export&shot=<id>&char=<id>
 // 切阶段只改 ?stage=：访问过的阶段内容用 hidden 藏起来、保持挂载，没保存的编辑不丢，也不用问。
-import { type ComponentType, useEffect, useState } from 'react';
+import { type ComponentType, useEffect, useRef, useState } from 'react';
 import { Navigate, type RouteObject, useLocation, useParams, useSearchParams } from 'react-router-dom';
 import { useCharacters, useEpisode, useExports, useRecentDoneJobs } from '../api/queries';
+import type { LeaveCheck } from '../components/confirmDiscard';
 import { EpisodeHeader, EpisodeLoadError } from '../components/EpisodeHeader';
 import { type NextStep, type StageKey, episodeStages, isStageKey } from './stages';
 import { CastStage } from './workspace/CastStage';
@@ -33,6 +34,8 @@ const PANEL_OF: Record<StageKey, PanelKey> = {
 export interface StagePanelProps {
   active: boolean;
   work: ShotWork;
+  /** 登记「切走本阶段前」的检查（抽屉有没保存的修改时问一句）；卸载时登记 null */
+  setLeaveCheck: (check: LeaveCheck | null) => void;
 }
 
 const PANELS: { key: PanelKey; label: string; Component: ComponentType<StagePanelProps> }[] = [
@@ -60,6 +63,20 @@ function Workspace({ slug, id }: { slug: string; id: number }) {
   const [selected, setSelected] = useState<Set<number>>(() => new Set());
   const [count, setCount] = useState(1);
   const [submitting, setSubmitting] = useState(false);
+  // 各阶段内容登记的「能不能切走」检查，按内容块存；每块的登记函数保持不变
+  const leaveChecks = useRef(new Map<PanelKey, LeaveCheck>());
+  const leaveSetters = useRef(new Map<PanelKey, (check: LeaveCheck | null) => void>());
+  const leaveSetter = (key: PanelKey) => {
+    let f = leaveSetters.current.get(key);
+    if (!f) {
+      f = (check) => {
+        if (check) leaveChecks.current.set(key, check);
+        else leaveChecks.current.delete(key);
+      };
+      leaveSetters.current.set(key, f);
+    }
+    return f;
+  };
 
   const progress = ep.data ? episodeStages(ep.data, characters.data ?? [], exports.data ?? []) : null;
   // 角色和成片也读到了（或读失败了）才算得准默认阶段
@@ -105,13 +122,15 @@ function Workspace({ slug, id }: { slug: string; id: number }) {
   if (ep.error || !ep.data || !progress) return <EpisodeLoadError slug={slug} error={ep.error} />;
 
   // 切阶段（可以顺带设别的参数）；离开首帧 / 视频去掉 shot（抽屉关掉），离开角色去掉 char；地址没变就不再记一条历史，
-  // 只换了抽屉（shot / char）也不记（和抽屉自己开关一致）
-  const select = (s: StageKey, extra?: Record<string, string>) => {
+  // 只换了抽屉（shot / char）也不记（和抽屉自己开关一致）。换到别的内容块前先问当前这块（抽屉里有没保存的修改）
+  const select = async (s: StageKey, extra?: Record<string, string>) => {
     const next = new URLSearchParams(stageSearch(params.toString(), s));
     if (PANEL_OF[s] !== SHOTS_PANEL) next.delete('shot');
     if (s !== 'cast') next.delete('char');
     for (const [k, v] of Object.entries(extra ?? {})) next.set(k, v);
     if (next.toString() === params.toString()) return;
+    const check = panel && PANEL_OF[s] !== panel ? leaveChecks.current.get(panel) : undefined;
+    if (check && !(await check())) return;
     const withoutDrawers = (p: URLSearchParams) => {
       const q = new URLSearchParams(p);
       q.delete('shot');
@@ -145,7 +164,7 @@ function Workspace({ slug, id }: { slug: string; id: number }) {
           current={stage}
           next={gate ? gateStep(gate, stage) : progress.next}
           nextDisabled={gate ? gate.kind === 'busy' || submitting : !!progress.next?.busy}
-          onSelect={(s) => select(s)}
+          onSelect={(s) => void select(s)}
           onRun={() => triggerNextAction(PANEL_OF[stage])}
         />
       ) : (
@@ -158,14 +177,14 @@ function Workspace({ slug, id }: { slug: string; id: number }) {
           activeChar={Number(params.get('char')) || null}
           onBlock={(blockId) => {
             setScrollBlock(blockId);
-            select('script');
+            void select('script');
           }}
-          onChar={(charId) => select('cast', { char: String(charId) })}
+          onChar={(charId) => void select('cast', { char: String(charId) })}
         />
         <div className="ws-main">
           {PANELS.filter((p) => mounted.has(p.key)).map(({ key, label, Component }) => (
             <section key={key} className="ws-panel" data-stage-panel={key} aria-label={label} hidden={key !== panel}>
-              <Component active={key === panel} work={work} />
+              <Component active={key === panel} work={work} setLeaveCheck={leaveSetter(key)} />
             </section>
           ))}
         </div>

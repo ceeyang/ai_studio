@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Character } from '../../api/types';
 import { useConfirm } from '../../components/ConfirmDialog';
+import { confirmDiscard } from '../../components/confirmDiscard';
 import { useUnsavedGuard } from '../../components/EditableFields';
 import { CharacterLooks } from '../script/CharacterLooks';
 import { CharacterProfile } from '../script/CharacterProfile';
@@ -49,14 +50,7 @@ export function CharacterDrawer({ c, slug, episodeId, focusPrompt = false, onDir
   /** 想关抽屉：有没保存的修改先问一句。 */
   const requestClose = useRef(async () => {
     if (latest.current.dirty) {
-      const ok = await confirm({
-        title: '放弃没保存的修改？',
-        body: '这个角色有改过但没保存的内容，关掉抽屉就没了。',
-        confirmText: '放弃修改',
-        cancelText: '继续编辑',
-        danger: true,
-      });
-      if (!ok) return;
+      if (!(await confirmDiscard(confirm, '这个角色', '关掉抽屉'))) return;
     }
     latest.current.onClose();
   }).current;

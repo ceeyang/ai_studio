@@ -17,6 +17,7 @@ import {
 } from '../../api/queries';
 import type { Job, RunIn, ShotDetail } from '../../api/types';
 import { useConfirm } from '../../components/ConfirmDialog';
+import { type LeaveCheck, confirmDiscard } from '../../components/confirmDiscard';
 import { EpisodeLoadError, NEXT_ACTION_EVENT, isNextActionFor } from '../../components/EpisodeHeader';
 import { useJobNotice } from '../../components/JobNotice';
 import { type EstimatePart, estimateText } from '../director/estimate';
@@ -47,12 +48,28 @@ export interface ShotWork {
   goStage(stage: StageKey, extra?: Record<string, string>): void;
 }
 
-export function ShotStage({ active = true, work }: { active?: boolean; work: ShotWork }) {
+export function ShotStage({
+  active = true,
+  work,
+  setLeaveCheck,
+}: {
+  active?: boolean;
+  work: ShotWork;
+  /** 工作台切走本阶段前调用：镜头抽屉有没保存的修改时先问 */
+  setLeaveCheck?: (check: LeaveCheck | null) => void;
+}) {
   const { slug = '', episodeId = '' } = useParams();
   const id = Number(episodeId);
   const [params, setParams] = useSearchParams();
   const qc = useQueryClient();
   const confirm = useConfirm();
+  // 镜头抽屉里有没保存的提示词 / 对白：切阶段前先问（抽屉卸载时清掉）
+  const drawerDirty = useRef(false);
+  useEffect(() => {
+    if (!setLeaveCheck) return;
+    setLeaveCheck(async () => !drawerDirty.current || confirmDiscard(confirm, '这个镜头', '切换阶段'));
+    return () => setLeaveCheck(null);
+  }, [setLeaveCheck, confirm]);
   const notice = useJobNotice();
   const ep = useEpisode(id);
   const locations = useLocations(slug);
@@ -284,6 +301,9 @@ export function ShotStage({ active = true, work }: { active?: boolean; work: Sho
           count={count}
           onCountChange={setCount}
           notice={notice.view}
+          onDirtyChange={(d) => {
+            drawerDirty.current = d;
+          }}
           onClose={() => setShot(null)}
           onGenerate={(st) => void generateOne(openShot, st, hasSelected(openShot, st) ? '重拍' : '生成')}
         />

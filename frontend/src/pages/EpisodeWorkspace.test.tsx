@@ -274,6 +274,44 @@ describe('EpisodeWorkspace', () => {
     expect(router.state.historyAction).toBe('PUSH');
   });
 
+  it('角色抽屉有没保存的修改时切阶段：先问，继续编辑留在角色阶段、内容还在；放弃修改才切', async () => {
+    installFetch(routes());
+    renderRoute('/projects/demo/episodes/4?stage=cast&char=8');
+    const user = userEvent.setup();
+    const d = await screen.findByRole('dialog', { name: '角色 林夏' });
+    await user.click(within(d).getByRole('tab', { name: '资料' }));
+    await user.type(within(d).getByLabelText('人物描述'), '（改）');
+    await user.click(within(stageBar()).getByRole('button', { name: /剧本/ }));
+    const ask = await screen.findByRole('dialog', { name: '放弃没保存的修改？' });
+    await user.click(within(ask).getByRole('button', { name: '继续编辑' }));
+    expect(where()).toBe('/projects/demo/episodes/4?stage=cast&char=8');
+    expect((within(screen.getByRole('dialog', { name: '角色 林夏' })).getByLabelText('人物描述') as HTMLTextAreaElement).value).toBe('（改）');
+    // 换到另一个阶段同样要问
+    await user.click(within(stageBar()).getByRole('button', { name: /首帧/ }));
+    await user.click(within(await screen.findByRole('dialog', { name: '放弃没保存的修改？' })).getByRole('button', { name: '放弃修改' }));
+    await waitFor(() => expect(where()).toBe('/projects/demo/episodes/4?stage=keyframes'));
+    expect(screen.queryByRole('dialog', { name: '角色 林夏' })).toBeNull();
+  });
+
+  it('镜头抽屉有没保存的修改时切阶段：先问，继续编辑留下；放弃修改才切；首帧↔视频不问', async () => {
+    installFetch(routes());
+    renderRoute('/projects/demo/episodes/4?stage=keyframes&shot=12');
+    const user = userEvent.setup();
+    const d = await screen.findByRole('dialog', { name: '镜头 S02 详情' });
+    await user.type(within(d).getByLabelText('景别'), '近');
+    await user.click(within(stageBar()).getByRole('button', { name: /视频/ }));
+    expect(where()).toBe('/projects/demo/episodes/4?stage=videos&shot=12');
+    expect(screen.queryByRole('dialog', { name: '放弃没保存的修改？' })).toBeNull();
+    await user.click(within(stageBar()).getByRole('button', { name: /成片/ }));
+    const ask = await screen.findByRole('dialog', { name: '放弃没保存的修改？' });
+    await user.click(within(ask).getByRole('button', { name: '继续编辑' }));
+    expect(where()).toBe('/projects/demo/episodes/4?stage=videos&shot=12');
+    expect((within(screen.getByRole('dialog', { name: '镜头 S02 详情' })).getByLabelText('景别') as HTMLInputElement).value).toContain('近');
+    await user.click(within(stageBar()).getByRole('button', { name: /成片/ }));
+    await user.click(within(await screen.findByRole('dialog', { name: '放弃没保存的修改？' })).getByRole('button', { name: '放弃修改' }));
+    await waitFor(() => expect(where()).toBe('/projects/demo/episodes/4?stage=export'));
+  });
+
   it('只有 ?shot= 没有 stage：停在首帧阶段', async () => {
     installFetch(routes());
     renderRoute('/projects/demo/episodes/4?shot=11');

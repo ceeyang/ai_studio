@@ -3,6 +3,7 @@ import { errorText } from '../../api/client';
 import { useEngines, usePatchShot, useSelectCandidate } from '../../api/queries';
 import { type DialogueLine, type EngineRow, type ShotDetail, type ShotPatch, TRANSITIONS, type Transition } from '../../api/types';
 import { useConfirm } from '../../components/ConfirmDialog';
+import { confirmDiscard } from '../../components/confirmDiscard';
 import { EditableFields, type FieldSpec, type FieldValues, type FieldsState, useUnsavedGuard } from '../../components/EditableFields';
 import { engineLabel } from '../../format';
 import { CandidateGrid } from './CandidateGrid';
@@ -70,6 +71,8 @@ export interface ShotDrawerProps {
   onCountChange?(n: number): void;
   /** 导演台的提示条：抽屉开着时显示在抽屉里，免得被遮罩挡住 */
   notice?: ReactNode;
+  /** 提示词或对白有没保存的修改变化时通知（切阶段前工作台要先问） */
+  onDirtyChange?(dirty: boolean): void;
 }
 
 const STAGES: GenStage[] = ['keyframes', 'videos'];
@@ -83,6 +86,7 @@ export function ShotDrawer({
   count = 1,
   onCountChange,
   notice,
+  onDirtyChange,
 }: ShotDrawerProps) {
   const engines = useEngines();
   const patch = usePatchShot(episodeId);
@@ -101,18 +105,17 @@ export function ShotDrawer({
   useUnsavedGuard(unsaved);
   const latest = useRef({ dirty: false, onClose });
   latest.current = { dirty: fieldsDirty || dialogueDirty, onClose };
+  const dirtyCb = useRef(onDirtyChange);
+  dirtyCb.current = onDirtyChange;
+  useEffect(() => {
+    dirtyCb.current?.(unsaved);
+  }, [unsaved]);
+  useEffect(() => () => dirtyCb.current?.(false), []);
 
   /** 想关抽屉：有没保存的修改先问一句。 */
   const requestClose = useRef(async () => {
     if (latest.current.dirty) {
-      const ok = await confirm({
-        title: '放弃没保存的修改？',
-        body: '这个镜头有改过但没保存的内容，关掉抽屉就没了。',
-        confirmText: '放弃修改',
-        cancelText: '继续编辑',
-        danger: true,
-      });
-      if (!ok) return;
+      if (!(await confirmDiscard(confirm, '这个镜头', '关掉抽屉'))) return;
     }
     latest.current.onClose();
   }).current;
