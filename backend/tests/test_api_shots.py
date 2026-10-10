@@ -61,6 +61,11 @@ def test_create_shot_is_manual_origin_and_split_copies_it(api):
     with api.app.state.services.db.session() as s:
         assert s.get(Shot, a["id"]).origin == "manual"
         assert s.get(Shot, b["id"]).origin == "manual"
+    # 拆一个 llm 来源的镜头，两半也还是 llm（不会被拆分误标成手工）
+    la, lb = api.post(f"/api/shots/{ids[0]}/split").json()
+    with api.app.state.services.db.session() as s:
+        assert s.get(Shot, la["id"]).origin == "llm"
+        assert s.get(Shot, lb["id"]).origin == "llm"
 
 
 def test_split_moves_later_dialogue(api):

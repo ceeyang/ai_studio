@@ -1,7 +1,10 @@
 """分镜阶段：按目标时长和引擎甜区算镜头预算，按剧本段落分配，逐段让 LLM 出镜头。"""
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from sqlalchemy import delete, func, select
+from sqlalchemy.orm import Session
 
 from backend.domain.hashing import input_hash
 from backend.domain.models import Episode, Shot
@@ -40,6 +43,49 @@ def _last_action(db, block_id: int) -> str:
         return sh.action if sh else ""
 
 
+@dataclass
+class StoryboardPlan:
+    """跑分镜要用到的输入：预算分好的每段镜头数、风格锚、角色表、场景表。"""
+    ep: Episode
+    shot_seconds: float
+    max_seconds: float
+    anchor: str
+    characters: list[dict]
+    char_ids: dict[str, int]
+    blocks: list[dict]   # [{"id", "order", "text", "location", "count"}]，按段落顺序
+    prompts: object       # PromptLibrary
+
+
+def build_storyboard_plan(s: Session, sv, episode_id: int) -> StoryboardPlan:
+    """算出这一集跑分镜要用的段落计划（预算、风格锚、角色表、场景表），不调用 LLM。
+
+    run_storyboard 真正跑的时候、重跑影响预估估算的时候都走这一个函数拿输入，
+    避免两边各自拼一遍 anchor/characters/locs/counts 而慢慢对不上。
+    """
+    ep, proj = load_episode(s, episode_id)
+    blocks = list(ep.scene_blocks)
+    if not blocks:
+        raise JobError("这一集还没有剧本段落，先跑 script")
+    try:
+        caps = sv.engines.video(proj.video_engine).caps
+    except KeyError as e:
+        raise JobError(str(e)) from None
+    shot_seconds, max_seconds = caps.default_seconds, caps.max_seconds
+    counts = allocate_shots(shot_budget(ep.target_seconds, shot_seconds),
+                            [len(b.text) for b in blocks])
+    anchor = proj.style_bible.anchor_text if proj.style_bible else ""
+    characters = [{"name": c.name, "visual_prompt": c.visual_prompt or c.description}
+                 for c in proj.characters]
+    char_ids = {c.name: c.id for c in proj.characters}
+    locs = {l.id: {"name": l.name, "time_of_day": l.time_of_day, "atmosphere": l.atmosphere,
+                   "visual_prompt": l.visual_prompt} for l in proj.locations}
+    plan = [{"id": b.id, "order": b.order, "text": b.text, "location": locs.get(b.location_id),
+             "count": n} for b, n in zip(blocks, counts)]
+    return StoryboardPlan(ep=ep, shot_seconds=shot_seconds, max_seconds=max_seconds, anchor=anchor,
+                          characters=characters, char_ids=char_ids, blocks=plan,
+                          prompts=sv.prompts(proj.slug))
+
+
 def storyboard_prompt_fp(prompts, anchor, characters, location, text, count, shot_seconds,
                          max_seconds, prev_action) -> tuple[str, str, str]:
     """某段落这次会用到的分镜提示词及其输入指纹（不调用 LLM）。
@@ -60,26 +106,11 @@ def run_storyboard(ctx, payload: dict) -> dict:
     manual = payload.get("manual") or {}
     only = set(payload.get("scene_block_ids") or [])
     with sv.db.session() as s:
-        ep, proj = load_episode(s, episode_id)
-        blocks = list(ep.scene_blocks)
-        if not blocks:
-            raise JobError("这一集还没有剧本段落，先跑 script")
-        try:
-            caps = sv.engines.video(proj.video_engine).caps
-        except KeyError as e:
-            raise JobError(str(e)) from None
-        shot_seconds, max_seconds = caps.default_seconds, caps.max_seconds
-        counts = allocate_shots(shot_budget(ep.target_seconds, shot_seconds),
-                                [len(b.text) for b in blocks])
-        anchor = proj.style_bible.anchor_text if proj.style_bible else ""
-        characters = [{"name": c.name, "visual_prompt": c.visual_prompt or c.description}
-                      for c in proj.characters]
-        char_ids = {c.name: c.id for c in proj.characters}
-        locs = {l.id: {"name": l.name, "time_of_day": l.time_of_day, "atmosphere": l.atmosphere,
-                       "visual_prompt": l.visual_prompt} for l in proj.locations}
-        plan = [{"id": b.id, "order": b.order, "text": b.text, "location": locs.get(b.location_id),
-                 "count": n} for b, n in zip(blocks, counts)]
-        prompts = sv.prompts(proj.slug)
+        plan_data = build_storyboard_plan(s, sv, episode_id)
+        shot_seconds, max_seconds = plan_data.shot_seconds, plan_data.max_seconds
+        anchor, characters, char_ids = plan_data.anchor, plan_data.characters, plan_data.char_ids
+        plan = plan_data.blocks
+        prompts = plan_data.prompts
 
     done = skipped = 0
     prev_action = ""

@@ -30,6 +30,17 @@ def visual_prompt_fp(prompts, project_title: str, characters: list[dict], locati
     return system, user, input_hash("visual", system, user)
 
 
+def visual_chars_and_locations(proj) -> tuple[list[dict], list[dict]]:
+    """视觉设定提示词要用的角色表、场景表（当前数据库里的样子）。
+
+    script 阶段和重跑影响预估共用，避免两边各自拼一遍而对不上。
+    """
+    chars = [{"name": c.name, "description": c.description} for c in proj.characters]
+    locs = [{"name": l.name, "time_of_day": l.time_of_day, "atmosphere": l.atmosphere}
+            for l in proj.locations]
+    return chars, locs
+
+
 @HANDLERS.register("script")
 def run_script(ctx, payload: dict) -> dict:
     episode_id = int(payload["episode_id"])
@@ -93,9 +104,7 @@ def _visual(ctx, episode_id: int, force: bool, manual: dict) -> str:
     sv = ctx.services
     with sv.db.session() as s:
         ep, proj = load_episode(s, episode_id)
-        chars = [{"name": c.name, "description": c.description} for c in proj.characters]
-        locs = [{"name": l.name, "time_of_day": l.time_of_day, "atmosphere": l.atmosphere}
-                for l in proj.locations]
+        chars, locs = visual_chars_and_locations(proj)
         system, user, fp = visual_prompt_fp(sv.prompts(proj.slug), proj.title, chars, locs,
                                             ep.source_text[:4000])
         if not force and (ep.stage_hashes or {}).get("visual") == fp and proj.style_bible_id:

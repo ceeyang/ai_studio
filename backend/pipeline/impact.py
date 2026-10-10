@@ -11,8 +11,9 @@ from sqlalchemy.orm import Session
 from backend.app.schemas import RerunImpact
 from backend.domain.models import Shot, Slot
 from backend.pipeline.common import load_episode
-from backend.pipeline.script import structure_prompt_fp, visual_prompt_fp
-from backend.pipeline.storyboard import allocate_shots, shot_budget, storyboard_prompt_fp
+from backend.pipeline.script import (structure_prompt_fp, visual_chars_and_locations,
+                                     visual_prompt_fp)
+from backend.pipeline.storyboard import build_storyboard_plan, storyboard_prompt_fp
 from backend.queue.errors import JobError
 
 
@@ -43,41 +44,28 @@ def _last_action(s: Session, block_id: int) -> str:
 
 
 def _storyboard_impact(s: Session, sv, episode_id: int, force: bool) -> RerunImpact:
-    ep, proj = load_episode(s, episode_id)
-    blocks = list(ep.scene_blocks)
-    if not blocks:
-        raise JobError("这一集还没有剧本段落，先跑 script")
-    try:
-        caps = sv.engines.video(proj.video_engine).caps
-    except KeyError as e:
-        raise JobError(str(e)) from None
-    shot_seconds, max_seconds = caps.default_seconds, caps.max_seconds
-    counts = allocate_shots(shot_budget(ep.target_seconds, shot_seconds),
-                            [len(b.text) for b in blocks])
-    anchor = proj.style_bible.anchor_text if proj.style_bible else ""
-    characters = [{"name": c.name, "visual_prompt": c.visual_prompt or c.description}
-                 for c in proj.characters]
-    locs = {l.id: {"name": l.name, "time_of_day": l.time_of_day, "atmosphere": l.atmosphere,
-                   "visual_prompt": l.visual_prompt} for l in proj.locations}
-    prompts = sv.prompts(proj.slug)
-    stage_hashes = ep.stage_hashes or {}
+    # 预算、风格锚、角色表、场景表都走和 run_storyboard 相同的 build_storyboard_plan，
+    # 避免这里自己拼一遍 anchor/characters/locs/counts 而和真正跑的时候对不上。
+    plan_data = build_storyboard_plan(s, sv, episode_id)
+    stage_hashes = plan_data.ep.stage_hashes or {}
 
     rerun_block_ids: list[int] = []
     rerun_block_numbers: list[int] = []
     prev_action = ""
-    for b, n in zip(blocks, counts):
-        _, _, fp = storyboard_prompt_fp(prompts, anchor, characters, locs.get(b.location_id),
-                                        b.text, n, shot_seconds, max_seconds, prev_action)
-        key = f"storyboard:{b.id}"
+    for blk in plan_data.blocks:
+        _, _, fp = storyboard_prompt_fp(plan_data.prompts, plan_data.anchor, plan_data.characters,
+                                        blk["location"], blk["text"], blk["count"],
+                                        plan_data.shot_seconds, plan_data.max_seconds, prev_action)
+        key = f"storyboard:{blk['id']}"
         existing = s.scalar(select(func.count()).select_from(Shot)
-                            .where(Shot.scene_block_id == b.id))
+                            .where(Shot.scene_block_id == blk["id"]))
         unchanged = stage_hashes.get(key) == fp and existing > 0
         if force or not unchanged:
-            rerun_block_ids.append(b.id)
-            rerun_block_numbers.append(b.order + 1)
+            rerun_block_ids.append(blk["id"])
+            rerun_block_numbers.append(blk["order"] + 1)
         # 这一段不管重不重跑，下一段的"上一镜结束时"都看数据库里现在的样子——
         # 真正重跑时如果上一段也变了，实际衔接语句会不一样，这里只是预估，接受这点误差。
-        prev_action = _last_action(s, b.id) or prev_action
+        prev_action = _last_action(s, blk["id"]) or prev_action
 
     will_run = bool(rerun_block_numbers)
     shot_ids: list[int] = []
@@ -104,9 +92,10 @@ def _script_impact(s: Session, sv, episode_id: int, force: bool) -> RerunImpact:
     structure_unchanged = stage_hashes.get("structure") == structure_fp and bool(ep.scene_blocks)
     structure_will_run = force or not structure_unchanged
 
-    chars = [{"name": c.name, "description": c.description} for c in proj.characters]
-    locations = [{"name": l.name, "time_of_day": l.time_of_day, "atmosphere": l.atmosphere}
-                for l in proj.locations]
+    # 注意：这里的角色表/场景表是数据库里现在的样子。如果上面的结构阶段也会重跑，
+    # 真正跑的时候结构会先把角色描述/场景氛围改掉，视觉阶段用的就是改过的新值——
+    # 预估不调用 LLM，不知道新值会是什么，这里按"现在的值"估算视觉指纹，可能和真正重跑的结果不同。
+    chars, locations = visual_chars_and_locations(proj)
     _, _, visual_fp = visual_prompt_fp(prompts, proj.title, chars, locations,
                                        ep.source_text[:4000])
     visual_unchanged = stage_hashes.get("visual") == visual_fp and bool(proj.style_bible_id)
