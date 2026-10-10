@@ -29,6 +29,9 @@ const IMPACT = {
   selected_videos: 8, manual_kept: 2, overwrites: ['角色描述', '场景氛围'],
 };
 
+// 运行剧本没有可删的、可覆盖的：不弹确认，直接提交
+const NO_IMPACT = { ...IMPACT, stage: 'script', blocks: [], shots_deleted: 0, selected_first_frames: 0, selected_videos: 0, manual_kept: 0, overwrites: [] };
+
 const writes = <T extends { method: string }>(calls: T[]) => calls.filter((c) => c.method !== 'GET');
 
 describe('ScriptPage', () => {
@@ -102,6 +105,7 @@ describe('ScriptPage', () => {
       ...ROUTES,
       'GET /api/episodes/4': makeEpisode({ id: 4, source_text: '' }),
       'PATCH /api/episodes/4': makeEpisode({ id: 4, source_text: '新的梗概' }),
+      'GET /api/episodes/4/rerun-impact': NO_IMPACT,
       'POST /api/episodes/4/run': { job_ids: [9] },
       'GET /api/jobs/9': makeJob({ id: 9, status: 'running' }),
     });
@@ -134,6 +138,7 @@ describe('ScriptPage', () => {
   it('剧本任务完成：提示下一步去角色页', async () => {
     installFetch({
       ...ROUTES,
+      'GET /api/episodes/4/rerun-impact': NO_IMPACT,
       'POST /api/episodes/4/run': { job_ids: [9] },
       'GET /api/jobs/9': makeJob({ id: 9, type: 'script', status: 'done', result: {} }),
     });
@@ -205,6 +210,82 @@ describe('ScriptPage', () => {
     expect(within(block).getByRole('button', { name: /段落 1/ }).getAttribute('aria-expanded')).toBe('false');
     await user.click(within(block).getByRole('button', { name: /段落 1/ }));
     expect((within(block).getByLabelText('段落内容') as HTMLTextAreaElement).value).toBe('直播间里，林夏念稿。（改）');
+  });
+
+  it('还没有镜头但项目已有角色 / 段落时运行剧本：也先查影响，会覆盖的原样列出，取消就不提交', async () => {
+    const calls = installFetch({
+      ...ROUTES,
+      'GET /api/episodes/4/rerun-impact': { ...NO_IMPACT, overwrites: ['角色外观', '场景外观', '风格设定'] },
+    });
+    renderAt(<ScriptPage />, AT);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: '运行剧本' }));
+    const dlg = await screen.findByRole('dialog');
+    expect(dlg.textContent).toContain('会覆盖角色外观、场景外观、风格设定');
+    expect(calls.find((c) => c.url.includes('rerun-impact'))?.url).toBe('/api/episodes/4/rerun-impact?stage=script&force=0');
+    await user.click(within(dlg).getByRole('button', { name: '取消' }));
+    expect(writes(calls)).toHaveLength(0);
+  });
+
+  it('全新的集（没段落、项目里没角色 / 场景 / 风格）运行剧本：不查影响直接提交', async () => {
+    const calls = installFetch({
+      ...ROUTES,
+      'GET /api/episodes/4': makeEpisode({ id: 4, scene_blocks: [] }),
+      'GET /api/projects/demo/characters': [],
+      'GET /api/projects/demo/locations': [],
+      'POST /api/episodes/4/run': { job_ids: [9] },
+      'GET /api/jobs/9': makeJob({ id: 9, status: 'running' }),
+    });
+    renderAt(<ScriptPage />, AT);
+    const user = userEvent.setup();
+    await within(await screen.findByRole('link', { name: /本集角色/ })).findByText('还没有角色');
+    await user.click(screen.getByRole('button', { name: '运行剧本' }));
+    await waitFor(() => expect(writes(calls)).toHaveLength(1));
+    expect(calls.some((c) => c.url.includes('rerun-impact'))).toBe(false);
+  });
+
+  it('段落有未保存修改：按钮变「保存并运行分镜」，先保存段落再运行', async () => {
+    const calls = installFetch({
+      ...ROUTES,
+      'PATCH /api/scene-blocks/21': { id: 21, order: 0, location_id: 3, text: '直播间里，林夏念稿。！' },
+      'POST /api/episodes/4/run': { job_ids: [9] },
+      'GET /api/jobs/9': makeJob({ id: 9, status: 'running' }),
+    });
+    renderAt(<ScriptPage />, AT);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: /段落 1/ }));
+    await user.type(screen.getByLabelText('段落内容'), '！');
+    await user.click(screen.getByRole('button', { name: '保存并运行分镜' }));
+    await waitFor(() => expect(writes(calls)).toHaveLength(2));
+    expect(writes(calls)[0]).toMatchObject({ method: 'PATCH', url: '/api/scene-blocks/21', body: { text: '直播间里，林夏念稿。！', location_id: 3 } });
+    expect(writes(calls)[1]).toMatchObject({ method: 'POST', body: { stage: 'storyboard', force: false } });
+  });
+
+  it('保存并运行分镜时段落保存失败：报错，不提交分镜', async () => {
+    const calls = installFetch({
+      ...ROUTES,
+      'PATCH /api/scene-blocks/21': new Response(JSON.stringify({ detail: '段落不能为空' }), { status: 400, headers: { 'Content-Type': 'application/json' } }),
+    });
+    renderAt(<ScriptPage />, AT);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: /段落 1/ }));
+    await user.type(screen.getByLabelText('段落内容'), '！');
+    await user.click(screen.getByRole('button', { name: '保存并运行分镜' }));
+    expect((await screen.findAllByText(/段落不能为空/)).length).toBeGreaterThan(0);
+    expect(writes(calls).filter((c) => c.method === 'POST')).toHaveLength(0);
+  });
+
+  it('段落有未保存修改时运行剧本：确认框说明这些修改会丢掉，取消就不提交', async () => {
+    const calls = installFetch({ ...ROUTES, 'GET /api/episodes/4/rerun-impact': NO_IMPACT });
+    renderAt(<ScriptPage />, AT);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: /段落 1/ }));
+    await user.type(screen.getByLabelText('段落内容'), '！');
+    await user.click(screen.getByRole('button', { name: '运行剧本' }));
+    const dlg = await screen.findByRole('dialog');
+    expect(dlg.textContent).toContain('有 1 个段落改了还没保存，重新拆段落时这些修改会丢掉');
+    await user.click(within(dlg).getByRole('button', { name: '取消' }));
+    expect(writes(calls)).toHaveLength(0);
   });
 
   it('还没有段落时不能运行分镜', async () => {

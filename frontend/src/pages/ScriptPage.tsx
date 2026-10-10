@@ -1,7 +1,7 @@
 // 剧本页：只管剧本——原文 / 梗概 + 剧本段落（都可折叠，收起时保持挂载不丢编辑）。
 // 角色、场景、风格在角色页（右上「本集角色」条进去）。重跑前先问后端会删什么，确认后才提交。
 import { useQueries } from '@tanstack/react-query';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api, enc, errorText } from '../api/client';
 import {
@@ -13,6 +13,7 @@ import {
   usePatchEpisode,
   usePatchSceneBlock,
   useRunStage,
+  useStyle,
 } from '../api/queries';
 import type { Character, EpisodePatch, Job, RerunImpact, SceneBlock } from '../api/types';
 import { useConfirm } from '../components/ConfirmDialog';
@@ -124,6 +125,7 @@ function BlockRow({
   onToggle,
   onSave,
   onDirtyChange,
+  onValuesChange,
 }: {
   b: SceneBlock;
   locationName: string;
@@ -134,6 +136,7 @@ function BlockRow({
   onToggle: () => void;
   onSave: (v: FieldValues) => void;
   onDirtyChange: (dirty: boolean) => void;
+  onValuesChange: (state: FieldsState) => void;
 }) {
   return (
     <div className={`block${open ? ' is-open' : ''}`} data-testid={`block-${b.id}`}>
@@ -154,6 +157,7 @@ function BlockRow({
           error={error}
           onSave={onSave}
           onDirtyChange={onDirtyChange}
+          onValuesChange={onValuesChange}
         />
       </div>
     </div>
@@ -166,6 +170,7 @@ export function ScriptPage() {
   const ep = useEpisode(id);
   const locations = useLocations(slug);
   const characters = useCharacters(slug);
+  const style = useStyle(slug);
   const patchEp = usePatchEpisode(id);
   const patchBlock = usePatchSceneBlock(id);
   const run = useRunStage(id);
@@ -179,6 +184,8 @@ export function ScriptPage() {
   const [lastRun, setLastRun] = useState<{ stage: Stage; ids: number[] } | null>(null);
   // 改过没保存的段落：和原文一起决定换页面前要不要问一句
   const [dirtyBlocks, setDirtyBlocks] = useState<Set<number>>(() => new Set());
+  // 每个段落编辑框的当前内容：「保存并运行分镜」要先把没保存的改动存上
+  const blockStates = useRef(new Map<number, FieldsState>());
   useUnsavedGuard(!!src?.dirty || dirtyBlocks.size > 0);
   // 下一步是运行剧本 / 运行分镜时，对应按钮是本页唯一的主按钮
   const nextAct = useNextAction(slug, ep.data, 'script');
@@ -211,7 +218,8 @@ export function ScriptPage() {
   const allOpen = e.scene_blocks.length > 0 && e.scene_blocks.every((b) => openBlocks.has(b.id));
   const srcDirty = !!src?.dirty;
   const srcValid = src?.valid ?? true;
-  const busy = run.isPending || patchEp.isPending || checking;
+  const busy = run.isPending || patchEp.isPending || patchBlock.isPending || checking;
+  const dirtyBlockIds = e.scene_blocks.map((b) => b.id).filter((bid) => dirtyBlocks.has(bid));
   const toggleBlock = (bid: number) =>
     setOpenBlocks((prev) => {
       const next = new Set(prev);
@@ -232,8 +240,36 @@ export function ScriptPage() {
         return;
       }
     }
-    // 已经有镜头：先问后端重跑会动什么
-    if (e.shots.length > 0) {
+    // 段落有没保存的修改：分镜先保存再按新段落跑；剧本会重新拆段落，这些修改会丢，下面确认时一起说
+    if (stage === 'storyboard' && dirtyBlockIds.length > 0) {
+      try {
+        for (const bid of dirtyBlockIds) {
+          const v = blockStates.current.get(bid)?.values;
+          if (!v) continue;
+          await patchBlock.mutateAsync({
+            id: bid,
+            text: v.text,
+            location_id: v.location_id === '' ? null : Number(v.location_id),
+          });
+        }
+      } catch (err) {
+        notice.error(errorText(err));
+        return;
+      }
+    }
+    const discardBlocks = stage === 'script' ? dirtyBlockIds.length : 0;
+    // 先问后端重跑会动什么：分镜看已有镜头；剧本的视觉阶段会改整个项目的角色外观、场景外观和风格，
+    // 所以只要本集有段落、或者项目里已经有角色 / 场景 / 风格就要问（还在加载时也问，宁可多问一次）
+    const needImpact =
+      stage === 'storyboard'
+        ? e.shots.length > 0
+        : e.scene_blocks.length > 0 ||
+          !characters.data ||
+          chars.length > 0 ||
+          !locations.data ||
+          locations.data.length > 0 ||
+          style.data !== null;
+    if (needImpact) {
       let im: RerunImpact;
       setChecking(true);
       try {
@@ -248,13 +284,16 @@ export function ScriptPage() {
         notice.info('输入没变，会跳过；要重做请勾强制重跑');
         return;
       }
-      const text = impactText(im);
-      if (text) {
+      const parts = [impactText(im)].filter(Boolean);
+      if (discardBlocks > 0) {
+        parts.push(`有 ${discardBlocks} 个段落改了还没保存，重新拆段落时这些修改会丢掉`);
+      }
+      if (parts.length > 0) {
         const ok = await confirm({
           title: stage === 'script' ? '重新运行剧本？' : '重新运行分镜？',
-          body: text,
+          body: parts.join('；'),
           confirmText: '继续运行',
-          danger: im.shots_deleted > 0,
+          danger: im.shots_deleted > 0 || discardBlocks > 0,
         });
         if (!ok) return;
       }
@@ -294,10 +333,16 @@ export function ScriptPage() {
           type="button"
           {...nextActionProps(nextAct?.key === 'storyboard')}
           disabled={busy || e.scene_blocks.length === 0}
-          title={e.scene_blocks.length === 0 ? '先运行剧本生成段落' : undefined}
+          title={
+            e.scene_blocks.length === 0
+              ? '先运行剧本生成段落'
+              : dirtyBlockIds.length > 0
+                ? '先保存段落的修改，再按新段落运行分镜'
+                : undefined
+          }
           onClick={() => runStage('storyboard')}
         >
-          运行分镜
+          {dirtyBlockIds.length > 0 ? '保存并运行分镜' : '运行分镜'}
         </button>
         <span className="sep" aria-hidden="true" />
         <label>
@@ -364,6 +409,7 @@ export function ScriptPage() {
                     return next;
                   })
                 }
+                onValuesChange={(st) => blockStates.current.set(b.id, st)}
                 onSave={(v) =>
                   patchBlock.mutate({
                     id: b.id,
