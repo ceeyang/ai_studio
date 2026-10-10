@@ -483,7 +483,9 @@ a.pill:hover { text-decoration: none; filter: brightness(1.15); }
 /* 编号、类型不许任意断行（之前 134 被拆成竖排三位、image.turnaround 断在词中间）；
    只有报错允许任意处断行——里面常有不带空格的长路径，否则整列被撑宽、耗时列被挤出面板 */
 .jobs-table td { vertical-align: middle; padding: 8px 10px; }
-.jobs-table td:nth-child(2) { overflow-wrap: break-word; }
+/* 任务名别被挤成两个字一行；耗时不折行 */
+.jobs-table td:nth-child(2) { overflow-wrap: break-word; min-width: 7.5em; }
+.jobs-table td:nth-child(4) { white-space: nowrap; }
 .jobs-table td .error { font-size: 12px; margin-top: 4px; white-space: normal; color: #ff9a9d; overflow-wrap: anywhere; text-wrap: pretty; }
 .jobs-table td:last-child { font-variant-numeric: tabular-nums; color: var(--text-2); white-space: nowrap; }
 
@@ -552,8 +554,12 @@ a.pill:hover { text-decoration: none; filter: brightness(1.15); }
 }
 .media-cell.is-busy .new-cands { bottom: 32px; }
 .media-cell .new-cands:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); color: var(--accent-ink); }
-.media-fail { display: flex; align-items: center; gap: 4px; width: 100%; contain: inline-size; font-size: 11.5px; }
-.media-fail-msg { flex: 1; min-width: 0; color: #ff9a9d; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* 格子只有缩略图那么宽：报错单独占几行（最多 3 行，全文在 title 里），「重试」放在下面，别把原因挤成「Comf…」 */
+.media-fail { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; width: 100%; contain: inline-size; font-size: 11.5px; }
+.media-fail-msg {
+  flex: 1 0 100%; min-width: 0; color: #ff9a9d; line-height: 1.35; overflow-wrap: anywhere;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden;
+}
 @keyframes pulse { 50% { opacity: 0.35; } }
 
 /* 弹出菜单（components/Menu.tsx） */

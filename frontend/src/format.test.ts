@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { VOICES, engineLabel, fmtDuration, fmtTime, jobStatusLabel, jobTypeLabel } from './format';
+import { VOICES, engineLabel, fmtDuration, fmtShortTime, fmtTime, jobStatusLabel, jobTypeLabel } from './format';
 
 /** 后端 HANDLERS.register 登记的全部任务类型（grep -rn "HANDLERS.register" backend）。新增类型时这里也要加。 */
 const BACKEND_JOB_TYPES = [
@@ -67,5 +67,12 @@ describe('format', () => {
   it('时间为空时显示占位符', () => {
     expect(fmtTime(null)).toBe('—');
     expect(fmtTime('2026-10-08T10:00:00Z')).not.toBe('—');
+  });
+
+  it('列表短时间：月/日 时:分，按本地时区', () => {
+    expect(fmtShortTime(null)).toBe('—');
+    const d = new Date(Date.UTC(2026, 9, 8, 10, 5, 30));
+    const p2 = (n: number) => String(n).padStart(2, '0');
+    expect(fmtShortTime('2026-10-08T10:05:30')).toBe(`${d.getMonth() + 1}/${d.getDate()} ${p2(d.getHours())}:${p2(d.getMinutes())}`);
   });
 });

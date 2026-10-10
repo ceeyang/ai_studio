@@ -5,7 +5,7 @@ import { api, errorText } from '../api/client';
 import { keys, useCancelJob, useJob, useJobs, useRetryJob } from '../api/queries';
 import type { Job } from '../api/types';
 import { useConfirm } from '../components/ConfirmDialog';
-import { ACTIVE_STATUSES, fmtDuration, fmtTime, jobStatusLabel, jobTypeLabel } from '../format';
+import { ACTIVE_STATUSES, fmtDuration, fmtShortTime, fmtTime, jobStatusLabel, jobTypeLabel } from '../format';
 import { splitTraceback } from './jobs/log';
 import { ManualInputForm } from './jobs/ManualInputForm';
 
@@ -281,7 +281,7 @@ export function JobsPage() {
                     {j.error && <div className="error">{j.error.split('\n')[0].slice(0, 60)}</div>}
                   </td>
                   <td>{fmtDuration(j.started_at, j.finished_at)}</td>
-                  <td>{fmtTime(j.started_at)}</td>
+                  <td title={fmtTime(j.started_at)}>{fmtShortTime(j.started_at)}</td>
                 </tr>
               ))}
             </tbody>

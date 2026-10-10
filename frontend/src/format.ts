@@ -88,6 +88,15 @@ export function fmtTime(iso: string | null | undefined): string {
   return Number.isNaN(d.getTime()) ? iso : d.toLocaleString('zh-CN', { hour12: false });
 }
 
+/** 列表里用的短时间：「10/10 20:29」，年份和秒在详情里看。 */
+export function fmtShortTime(iso: string | null | undefined): string {
+  if (!iso) return '—';
+  const d = parse(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const p2 = (n: number) => String(n).padStart(2, '0');
+  return `${d.getMonth() + 1}/${d.getDate()} ${p2(d.getHours())}:${p2(d.getMinutes())}`;
+}
+
 export function fmtDuration(
   start: string | null | undefined,
   end: string | null | undefined,
