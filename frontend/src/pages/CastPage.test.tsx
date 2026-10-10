@@ -19,13 +19,16 @@ const AT = { route: '/projects/demo/episodes/4/cast', path: '/projects/:slug/epi
 const writes = <T extends { method: string }>(calls: T[]) => calls.filter((c) => c.method !== 'GET');
 
 describe('CastPage', () => {
-  it('三个页签：角色 / 场景 / 风格；有回剧本和去导演台的入口', async () => {
+  it('三个页签：角色 / 场景 / 风格；页头的进度条能回剧本、去导演台', async () => {
     installFetch(ROUTES);
     renderAt(<CastPage />, AT);
     const user = userEvent.setup();
-    expect(await screen.findByRole('heading', { name: /角色 · 第 1 集 提词器/ })).toBeTruthy();
-    expect(screen.getByRole('link', { name: '回剧本' }).getAttribute('href')).toBe('/projects/demo/episodes/4/script');
-    expect(screen.getByRole('link', { name: '去导演台' }).getAttribute('href')).toBe('/projects/demo/episodes/4/director');
+    expect(await screen.findByRole('heading', { level: 2, name: '角色' })).toBeTruthy();
+    expect(screen.getByRole('navigation', { name: '面包屑' }).textContent).toContain('第 1 集 提词器');
+    const stepper = screen.getByRole('list', { name: '制作进度' });
+    expect(within(stepper).getByRole('link', { name: /剧本/ }).getAttribute('href')).toBe('/projects/demo/episodes/4/script');
+    expect(within(stepper).getByRole('link', { name: /首帧/ }).getAttribute('href')).toBe('/projects/demo/episodes/4/director');
+    expect(within(stepper).getByRole('link', { name: /角色/ }).getAttribute('aria-current')).toBe('step');
     expect(await screen.findByTestId('character-8')).toBeTruthy();
     expect(screen.getByRole('tab', { name: '角色（1）' }).getAttribute('aria-selected')).toBe('true');
     await user.click(screen.getByRole('tab', { name: '场景（1）' }));

@@ -35,7 +35,8 @@ describe('ScriptPage', () => {
   it('只管剧本：没有角色 / 场景 / 风格页签，右上是本集角色条，点了去角色页', async () => {
     installFetch(ROUTES);
     renderAt(<ScriptPage />, AT);
-    expect(await screen.findByRole('heading', { name: /剧本 · 第 1 集/ })).toBeTruthy();
+    expect(await screen.findByRole('heading', { level: 2, name: '剧本' })).toBeTruthy();
+    expect(screen.getByRole('navigation', { name: '面包屑' }).textContent).toContain('第 1 集 提词器');
     expect(screen.queryByRole('tab')).toBeNull();
     expect(screen.queryByTestId('character-8')).toBeNull();
     const strip = await screen.findByRole('link', { name: /本集角色/ });

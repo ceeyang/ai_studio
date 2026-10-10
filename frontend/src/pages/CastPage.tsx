@@ -1,9 +1,10 @@
 // 角色页：角色 / 场景 / 风格三个页签，全宽。页签用 hidden 切换、都保持挂载，切页签不丢正在编辑的内容。
 import { useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
-import { enc, errorText } from '../api/client';
+import { useParams } from 'react-router-dom';
+import { errorText } from '../api/client';
 import { useCharacters, useEpisode, useLocations, usePatchLocation, usePutStyle, useStyle } from '../api/queries';
 import type { LocationPatch, Style } from '../api/types';
+import { EpisodeHeader, EpisodeLoadError } from '../components/EpisodeHeader';
 import { EditableFields, type FieldSpec, type FieldValues, useUnsavedGuard } from '../components/EditableFields';
 import { CharacterCard } from './script/CharacterCard';
 import { RecommendPanel } from './script/RecommendPanel';
@@ -70,12 +71,11 @@ export function CastPage() {
     });
 
   if (ep.isLoading) return <p className="loading">加载中…</p>;
-  if (ep.error || !ep.data) return <p className="error">{ep.error ? errorText(ep.error) : '找不到这一集'}</p>;
+  if (ep.error || !ep.data) return <EpisodeLoadError slug={slug} error={ep.error} />;
   const e = ep.data;
   const chars = characters.data ?? [];
   const locs = locations.data ?? [];
   const st = style.data ?? EMPTY_STYLE;
-  const base = `/projects/${enc(slug)}/episodes/${id}`;
   const withPortrait = chars.filter((c) => c.portrait_url).length;
 
   const tabs: { key: Tab; label: string }[] = [
@@ -86,23 +86,13 @@ export function CastPage() {
 
   return (
     <div className="page cast-page">
-      <header className="page-head">
-        <span className="eyebrow">02 · 角色</span>
-        <h2>
-          角色 · 第 {e.number} 集 {e.title}
-        </h2>
+      <EpisodeHeader slug={slug} ep={e} page="cast" title="角色">
         {chars.length > 0 && (
           <span className="chip">
             {withPortrait}/{chars.length} 个角色有定妆照
           </span>
         )}
-        <Link className="btn" to={`${base}/script`}>
-          回剧本
-        </Link>
-        <Link className="btn" to={`${base}/director`}>
-          去导演台
-        </Link>
-      </header>
+      </EpisodeHeader>
 
       <section className="panel cast-pane" aria-label="角色、场景与风格">
         <div className="tabs" role="tablist" aria-label="设定">

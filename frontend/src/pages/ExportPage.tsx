@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom';
 import { enc, errorText } from '../api/client';
 import { useEpisode, useExports, useFitKhmer, usePatchExport, useRunStage, useTranslateSubtitles } from '../api/queries';
 import type { ExportOptions, ExportRow, ShotDetail } from '../api/types';
+import { EpisodeHeader, EpisodeLoadError } from '../components/EpisodeHeader';
 import { useJobNotice } from '../components/JobNotice';
 import { fmtTime } from '../format';
 import { EndCardPanel } from './director/EndCardPanel';
@@ -152,7 +153,7 @@ function ExportBody({ slug, id }: { slug: string; id: number }) {
   const set = (patch: Partial<Choice>) => setChoice((c) => ({ ...c, ...patch }));
 
   if (ep.isLoading) return <p className="loading">加载中…</p>;
-  if (ep.error || !ep.data) return <p className="error">{ep.error ? errorText(ep.error) : '找不到这一集'}</p>;
+  if (ep.error || !ep.data) return <EpisodeLoadError slug={slug} error={ep.error} />;
   const e = ep.data;
   const r = readiness(e.shots);
   const director = `/projects/${enc(slug)}/episodes/${id}/director`;
@@ -191,15 +192,7 @@ function ExportBody({ slug, id }: { slug: string; id: number }) {
 
   return (
     <div className="page export-page">
-      <header className="page-head">
-        <span className="eyebrow">04 · 导出</span>
-        <h2>
-          导出 · 第 {e.number} 集 {e.title}
-        </h2>
-        <Link className="btn ghost" to={director}>
-          回导演台
-        </Link>
-      </header>
+      <EpisodeHeader slug={slug} ep={e} page="export" title="导出" />
 
       <section className="panel" aria-label="就绪检查">
         <div className="row export-ready">
@@ -208,9 +201,9 @@ function ExportBody({ slug, id }: { slug: string; id: number }) {
             {r.stale.length > 0 && ` · ${r.stale.length} 镜视频已过期（${r.stale.join('、')}）`}
           </span>
           <span className="grow" aria-hidden="true" />
+          {/* 页头的「下一步」是这一页唯一的主按钮 */}
           <button
             type="button"
-            className="primary"
             disabled={!canExport || run.isPending}
             title={canExport ? undefined : '每个镜头都要有选定的视频才能合成'}
             onClick={doExport}

@@ -25,7 +25,8 @@ test('新建项目 → 剧本 → 分镜 → 导演台（manual LLM，不需要�
   await page.getByLabel('原文或梗概').fill(SYNOPSIS);
   await page.getByLabel('目标时长（秒）').fill('10');
   await page.getByRole('button', { name: '创建剧集' }).click();
-  await expect(page.getByRole('heading', { name: /剧本 · 第 1 集/ })).toBeVisible();
+  await expect(page.getByRole('heading', { name: '剧本', exact: true, level: 2 })).toBeVisible();
+  await expect(page.getByRole('navigation', { name: '面包屑' })).toContainText('冒烟');
 
   await page.getByRole('button', { name: '运行剧本' }).click();
   await expect(page.locator('.job-notice')).toContainText('运行剧本：');
@@ -39,11 +40,13 @@ test('新建项目 → 剧本 → 分镜 → 导演台（manual LLM，不需要�
 
   await nav(page, '剧本').click();
   await expect(page.getByRole('heading', { name: '剧本段落（1）' })).toBeVisible();
-  await expect(page.getByRole('heading', { name: /剧本 · 第 1 集 提词器/ })).toBeVisible();
+  await expect(page.getByRole('navigation', { name: '面包屑' })).toContainText('第 1 集 提词器');
+  // 剧本有了、角色还没定妆照：页头的下一步指向角色页
+  await expect(page.getByRole('link', { name: /^下一步：抽定妆照/ })).toBeVisible();
   // 剧本跑完后角色在角色页：右上「本集角色」条进去
   await page.getByRole('link', { name: /本集角色/ }).click();
   await expect(page.getByRole('heading', { name: '林夏', level: 4 })).toBeVisible();
-  await page.getByRole('link', { name: '回剧本' }).click();
+  await nav(page, '剧本').click();
   await page.getByRole('button', { name: '运行分镜' }).click();
   await expect(page.locator('.job-notice')).toContainText('运行分镜：');
 

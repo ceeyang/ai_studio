@@ -189,7 +189,7 @@ describe('ExportPage', () => {
       }),
     );
     renderAt(<ExportPage />, AT);
-    const item = (await screen.findAllByRole('listitem'))[0];
+    const item = within(await screen.findByRole('list', { name: '成片列表' })).getAllByRole('listitem')[0];
     for (const t of ['中高字幕', '高棉语配音', '片尾卡', '33.6 秒', '无原声底', '配音对齐说话']) expect(item.textContent).toContain(t);
   });
 

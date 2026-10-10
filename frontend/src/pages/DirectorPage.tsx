@@ -13,6 +13,7 @@ import {
 } from '../api/queries';
 import type { Job, RunIn, ShotDetail } from '../api/types';
 import { useConfirm } from '../components/ConfirmDialog';
+import { EpisodeHeader, EpisodeLoadError } from '../components/EpisodeHeader';
 import { useJobNotice } from '../components/JobNotice';
 import { type EstimatePart, estimateText } from './director/estimate';
 import { ShotDrawer } from './director/ShotDrawer';
@@ -77,7 +78,7 @@ export function DirectorPage() {
   const [submitting, setSubmitting] = useState(false);
 
   if (ep.isLoading) return <p className="loading">加载中…</p>;
-  if (ep.error || !ep.data) return <p className="error">{ep.error ? errorText(ep.error) : '找不到这一集'}</p>;
+  if (ep.error || !ep.data) return <EpisodeLoadError slug={slug} error={ep.error} />;
   const e = ep.data;
   const shots = e.shots;
   const openId = Number(params.get('shot')) || null;
@@ -217,18 +218,11 @@ export function DirectorPage() {
 
   return (
     <div className="page">
-      <header className="page-head">
-        <span className="eyebrow">03 · 导演台</span>
-        <h2>
-          导演台 · 第 {e.number} 集 {e.title}
-        </h2>
+      <EpisodeHeader slug={slug} ep={e} page="director" title="导演台">
         <span className="chip">
           {shots.length} 个镜头，共 {total.toFixed(1)} 秒
         </span>
-        <Link className="btn ghost" to={`/projects/${enc(slug)}/episodes/${id}/script`}>
-          回剧本页
-        </Link>
-      </header>
+      </EpisodeHeader>
 
       <div className="toolbar">
         <label>
@@ -245,10 +239,11 @@ export function DirectorPage() {
           <input type="checkbox" aria-label="强制重跑" checked={force} onChange={(ev) => setForce(ev.target.checked)} /> 强制重跑
         </label>
         <span className="sep" aria-hidden="true" />
-        <button type="button" className="primary" disabled={shots.length === 0 || generating} onClick={() => void generate('keyframes', selIds, `（${scope}）`)}>
+        {/* 页头的「下一步」是这一页唯一的主按钮，这里都是次要按钮 */}
+        <button type="button" disabled={shots.length === 0 || generating} onClick={() => void generate('keyframes', selIds, `（${scope}）`)}>
           生成首帧（{scope}）
         </button>
-        <button type="button" className="primary" disabled={shots.length === 0 || generating} onClick={() => void generate('videos', selIds, `（${scope}）`)}>
+        <button type="button" disabled={shots.length === 0 || generating} onClick={() => void generate('videos', selIds, `（${scope}）`)}>
           生成视频（{scope}）
         </button>
         <button

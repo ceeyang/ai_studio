@@ -220,4 +220,20 @@ describe('DirectorPage', () => {
     await waitFor(() => expect(calls.some((c) => c.method === 'POST')).toBe(true));
     expect(calls.find((c) => c.method === 'POST')?.body).toEqual({ stage: 'keyframes', candidates: 1, force: false, shots: ['11'] });
   });
+
+  it('用剧集页头：只有一个主按钮（下一步），工具栏的生成按钮是次要的', async () => {
+    installFetch(routes());
+    const { container } = renderAt(<DirectorPage />, AT);
+    await screen.findByRole('heading', { level: 2, name: '导演台' });
+    expect(screen.getByRole('link', { name: '下一步：运行剧本' })).toBeTruthy();
+    expect(container.querySelectorAll('.primary')).toHaveLength(1);
+    expect(screen.getByRole('button', { name: '生成首帧（全部）' }).className).not.toContain('primary');
+  });
+
+  it('剧集加载失败：显示原因和「回到项目」', async () => {
+    installFetch({ 'GET /api/episodes/4': new Response(JSON.stringify({ detail: '剧集 4 不存在' }), { status: 404 }) });
+    renderAt(<DirectorPage />, AT);
+    expect(await screen.findByText(/剧集 4 不存在/)).toBeTruthy();
+    expect(screen.getByRole('link', { name: '回到项目' }).getAttribute('href')).toBe('/projects/demo');
+  });
 });

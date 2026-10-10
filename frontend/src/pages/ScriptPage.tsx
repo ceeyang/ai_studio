@@ -16,6 +16,7 @@ import {
 } from '../api/queries';
 import type { Character, EpisodePatch, Job, RerunImpact, SceneBlock } from '../api/types';
 import { useConfirm } from '../components/ConfirmDialog';
+import { EpisodeHeader, EpisodeLoadError } from '../components/EpisodeHeader';
 import { EditableFields, type FieldSpec, type FieldValues, type FieldsState, useUnsavedGuard } from '../components/EditableFields';
 import { useJobNotice } from '../components/JobNotice';
 import { EPISODE_STATUS_LABEL } from '../format';
@@ -195,7 +196,7 @@ export function ScriptPage() {
   );
 
   if (ep.isLoading) return <p className="loading">加载中…</p>;
-  if (ep.error || !ep.data) return <p className="error">{ep.error ? errorText(ep.error) : '找不到这一集'}</p>;
+  if (ep.error || !ep.data) return <EpisodeLoadError slug={slug} error={ep.error} />;
   const e = ep.data;
   const locationOptions = [
     { value: '', label: '（未指定）' },
@@ -270,24 +271,17 @@ export function ScriptPage() {
 
   return (
     <div className="page script-page">
-      <header className="page-head">
-        <span className="eyebrow">02 · 剧本</span>
-        <h2>
-          剧本 · 第 {e.number} 集 {e.title}
-        </h2>
+      <EpisodeHeader slug={slug} ep={e} page="script" title="剧本">
         <span className="chip">
           {EPISODE_STATUS_LABEL[e.status] ?? e.status} · 已有 {e.shots.length} 个镜头
         </span>
         <CastStrip to={`${base}/cast`} chars={chars} />
-        <Link className="btn" to={`${base}/director`}>
-          去导演台
-        </Link>
-      </header>
+      </EpisodeHeader>
 
       <div className="toolbar">
+        {/* 页头的「下一步」是这一页唯一的主按钮 */}
         <button
           type="button"
-          className="primary"
           disabled={busy || (srcDirty && !srcValid)}
           title={srcDirty ? '先保存原文的修改，再按新原文运行剧本' : undefined}
           onClick={() => runStage('script')}
