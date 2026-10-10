@@ -283,6 +283,10 @@ export interface RunIn {
   export?: ExportOptions;
   /** 本阶段完成后接着跑（同一批提交，后面的任务依赖前面的），如 keyframes → videos */
   then?: NextStage[];
+  /** 只重写这些段落的分镜（只对 storyboard 有效） */
+  scene_block_ids?: number[];
+  /** 修改意见（≤500 字），写进提示词；有内容时按强制算 */
+  note?: string;
 }
 
 /** 按高棉语时长改写中文（POST /api/episodes/{id}/dialogue/fit-khmer）。 */

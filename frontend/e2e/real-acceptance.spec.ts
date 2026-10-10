@@ -36,10 +36,10 @@ test('真实环境：梗概 → 带 H3 原生声音的成片', async ({ page }) 
   await page.getByLabel('目标时长（秒）').fill('15');
   await page.getByRole('button', { name: '创建剧集' }).click();
 
-  await page.getByRole('button', { name: '运行剧本' }).click();
+  await page.getByRole('button', { name: '生成剧本', exact: true }).click();
   await waitQueueIdle(page, slug);
   await page.reload();
-  await page.getByRole('button', { name: '运行分镜' }).click();
+  await page.getByRole('button', { name: '生成分镜', exact: true }).click();
   await waitQueueIdle(page, slug);
 
   await page.getByRole('navigation', { name: '阶段导航' }).getByRole('link', { name: '导演台', exact: true }).click();

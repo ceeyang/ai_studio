@@ -7,7 +7,7 @@ import { EditableFields, type FieldSpec, type FieldValues, type FieldsState, use
 import { engineLabel } from '../../format';
 import { CandidateGrid } from './CandidateGrid';
 import { DialogueEditor } from './DialogueEditor';
-import { type GenStage, CELL, activeJob, activeText, failedJob } from './ShotTable';
+import { type GenStage, CELL, activeJob, activeText, failedJob, genLabel } from './ShotTable';
 import { SLOT_LABEL } from './slots';
 
 const TRANSITION_LABEL: Record<Transition, string> = {
@@ -63,13 +63,11 @@ export interface ShotDrawerProps {
   /** 生成任务（首帧/视频）提交后、还没拿到响应期间为 true：生成按钮禁用，防止重复点击提交两次。 */
   generating?: boolean;
   onClose(): void;
-  /** saved：刚把改过的提示词保存了（本地的镜头数据还没刷新，不能按它判断"已是最新"） */
+  /** 已有选定结果时是「重拍」（父组件强制提交）。saved：先把改过的提示词 / 对白保存了 */
   onGenerate(stage: GenStage, saved?: boolean): void;
-  /** 候选数和强制重跑：和导演台工具栏共用一份 */
+  /** 候选数：和导演台工具栏共用一份 */
   count?: number;
-  force?: boolean;
   onCountChange?(n: number): void;
-  onForceChange?(force: boolean): void;
   /** 导演台的提示条：抽屉开着时显示在抽屉里，免得被遮罩挡住 */
   notice?: ReactNode;
 }
@@ -83,9 +81,7 @@ export function ShotDrawer({
   onGenerate,
   generating = false,
   count = 1,
-  force = false,
   onCountChange,
-  onForceChange,
   notice,
 }: ShotDrawerProps) {
   const engines = useEngines();
@@ -196,6 +192,7 @@ export function ShotDrawer({
           <div className="row">
             {STAGES.map((st) => {
               const label = CELL[st === 'keyframes' ? 'first_frame' : 'video'].label;
+              const what = genLabel(shot, st);
               const active = activeJob(shot, st);
               return (
                 <button
@@ -205,7 +202,7 @@ export function ShotDrawer({
                   disabled={generating || saving || !!active || (fieldsDirty && !fields?.valid)}
                   onClick={() => void generate(st)}
                 >
-                  {active ? `${label}${activeText(active)}` : unsaved ? `保存并生成${label}` : `生成${label}`}
+                  {active ? `${label}${activeText(active)}` : unsaved ? `保存并${what}` : what}
                 </button>
               );
             })}
@@ -220,9 +217,6 @@ export function ShotDrawer({
                   </option>
                 ))}
               </select>
-            </label>
-            <label>
-              <input type="checkbox" aria-label="强制重跑" checked={force} onChange={(ev) => onForceChange?.(ev.target.checked)} /> 强制重跑
             </label>
           </div>
           {failures.map(({ st, job }) => (

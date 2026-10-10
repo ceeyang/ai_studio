@@ -80,10 +80,10 @@ export function summarize(jobs: (Job | undefined)[], text: string): Outcome {
   }
   const skipped = done.filter((j) => j.result?.skipped === true).length;
   if (skipped === done.length) {
-    return { tone: 'ok', text: '已跳过：输入没变，勾选强制重跑可重出', autoHide: true };
+    return { tone: 'ok', text: '已跳过：输入没变，已经是最新的', autoHide: true };
   }
   if (skipped > 0) {
-    return { tone: 'ok', text: `完成：${text}（${skipped} 个输入没变已跳过，勾选强制重跑可重出）`, autoHide: true };
+    return { tone: 'ok', text: `完成：${text}（${skipped} 个输入没变已跳过）`, autoHide: true };
   }
   return { tone: 'ok', text: `完成：${text}`, autoHide: true };
 }

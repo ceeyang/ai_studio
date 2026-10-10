@@ -56,6 +56,8 @@ export const keys = {
   style: (slug: string) => ['style', slug] as const,
   endCard: (slug: string) => ['endCard', slug] as const,
   exports: (episodeId: number) => ['exports', episodeId] as const,
+  rerunImpact: (episodeId: number, stage: string, blockIds: number[] | null, hasNote: boolean) =>
+    ['rerunImpact', episodeId, stage, blockIds, hasNote] as const,
   jobs: (status: string, limit: number) => ['jobs', status, limit] as const,
   job: (id: number) => ['job', id] as const,
   queue: ['queue'] as const,
@@ -499,8 +501,36 @@ export function useTranslateSubtitles(episodeId: number) {
 }
 
 /** 跑之前问一句后端：现在重跑这个阶段会不会动、会删什么（不调用 LLM）。 */
-export function fetchRerunImpact(episodeId: number, stage: 'script' | 'storyboard', force: boolean): Promise<RerunImpact> {
-  return api.get<RerunImpact>(`/api/episodes/${episodeId}/rerun-impact?stage=${stage}&force=${force ? 1 : 0}`);
+/** 现在重跑剧本 / 分镜会删什么、覆盖什么。sceneBlockIds：只算这几段（分镜）；note 有内容时后端按强制算。 */
+export function fetchRerunImpact(
+  episodeId: number,
+  stage: 'script' | 'storyboard',
+  force: boolean,
+  opts: { sceneBlockIds?: number[]; note?: string } = {},
+): Promise<RerunImpact> {
+  let url = `/api/episodes/${episodeId}/rerun-impact?stage=${stage}&force=${force ? 1 : 0}`;
+  if (opts.sceneBlockIds && opts.sceneBlockIds.length > 0) url += `&scene_block_ids=${opts.sceneBlockIds.join(',')}`;
+  if (opts.note) url += `&note=${encodeURIComponent(opts.note)}`;
+  return api.get<RerunImpact>(url);
+}
+
+/**
+ * 重新生成对话框里的影响预估：总是按强制算（对话框提交时一定强制）。
+ * 查询键只看「有没有意见」，不随意见里每个字重新请求（强制时意见不影响预估）。
+ */
+export function useRerunImpact(
+  episodeId: number,
+  stage: 'script' | 'storyboard',
+  blockIds: number[] | undefined,
+  hasNote: boolean,
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: keys.rerunImpact(episodeId, stage, blockIds ?? null, hasNote),
+    queryFn: () => fetchRerunImpact(episodeId, stage, true, { sceneBlockIds: blockIds }),
+    enabled,
+    staleTime: 0,
+  });
 }
 
 export function useRunStage(episodeId: number) {

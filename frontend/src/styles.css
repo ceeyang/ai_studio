@@ -1043,6 +1043,9 @@ pre.error { background: rgba(255, 90, 95, 0.06); border-color: rgba(255, 90, 95,
   width: 100%; height: auto; min-height: 40px; padding: 8px 12px; justify-content: flex-start; gap: 10px;
   background: transparent; border: 0; border-radius: var(--r-md); text-align: left; font-weight: 400;
 }
+.block-line { display: flex; align-items: center; gap: 6px; }
+.block-line > .block-row { flex: 1; min-width: 0; }
+.block-line > .block-act { flex: none; margin-right: 8px; }
 .block-row:hover:not(:disabled) { background: var(--surface-hover); border: 0; }
 .block-row:active:not(:disabled) { transform: none; }
 .block-no { flex: none; font-weight: 600; color: var(--text); font-size: 13px; }

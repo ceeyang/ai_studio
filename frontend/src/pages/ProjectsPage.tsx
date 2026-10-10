@@ -431,7 +431,7 @@ function NewEpisodeDialog({ slug, nextNumber, onClose }: { slug: string; nextNum
   return (
     <Dialog
       title={`新建剧集 · 第 ${nextNumber} 集`}
-      subtitle="贴原文或梗概，创建后到剧本页运行剧本。"
+      subtitle="贴原文或梗概，创建后到剧本页生成剧本。"
       onClose={onClose}
       wide
       guard={() => text.trim() !== ''}
@@ -504,7 +504,7 @@ function ProjectBible({ slug }: { slug: string }) {
           场景 <span className="muted">{locs.length}</span>
         </h4>
         {locs.length === 0 ? (
-          <p className="muted">运行剧本后自动抽取。</p>
+          <p className="muted">生成剧本后自动抽取。</p>
         ) : (
           <ul className="bible-list">
             {locs.map((l) => (

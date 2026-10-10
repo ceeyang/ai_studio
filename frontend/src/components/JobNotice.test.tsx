@@ -60,14 +60,14 @@ describe('useJobNotice', () => {
     expect(msg.getAttribute('title')).toBe(full);
   });
 
-  it('全部完成但都因输入没变被跳过：提示可以强制重跑', async () => {
+  it('全部完成但都因输入没变被跳过：说明已经是最新的', async () => {
     installFetch({
       'GET /api/jobs/5': makeJob({ id: 5, type: 'image.keyframe', status: 'done', result: { skipped: true } }),
     });
     renderAt(<Probe ids={[5]} />);
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: '提交' }));
-    expect(await screen.findByText('已跳过：输入没变，勾选强制重跑可重出')).toBeTruthy();
+    expect(await screen.findByText('已跳过：输入没变，已经是最新的')).toBeTruthy();
   });
 
   it('有任务在等人工输入：提示去填写', async () => {

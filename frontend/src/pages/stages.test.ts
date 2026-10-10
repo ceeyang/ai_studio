@@ -35,7 +35,7 @@ function exp(id: number, isFinal = false): ExportRow {
 const byKey = (r: ReturnType<typeof episodeStages>) => Object.fromEntries(r.stages.map((s) => [s.key, s]));
 
 describe('episodeStages', () => {
-  it('空剧集：第一段是进行中的剧本，其余待做；下一步去运行剧本', () => {
+  it('空剧集：第一段是进行中的剧本，其余待做；下一步去生成剧本', () => {
     const r = episodeStages(makeEpisode({ id: 4 }), [], [], BASE);
     expect(r.stages.map((s) => s.key)).toEqual(['script', 'cast', 'storyboard', 'keyframes', 'videos', 'export']);
     expect(r.stages.map((s) => s.label)).toEqual(['剧本', '角色', '分镜', '首帧', '视频', '导出']);
@@ -51,7 +51,7 @@ describe('episodeStages', () => {
     expect(s.keyframes.to).toBe(`${BASE}/director`);
     expect(s.videos.to).toBe(`${BASE}/director`);
     expect(s.export.to).toBe(`${BASE}/export`);
-    expect(r.next).toEqual({ label: '下一步：运行剧本', to: `${BASE}/script`, key: 'script', stale: false });
+    expect(r.next).toEqual({ label: '下一步：生成剧本', to: `${BASE}/script`, key: 'script', stale: false });
   });
 
   it('只有剧本：角色缺定妆照时下一步去抽定妆照；没有镜头时按项目全部角色算', () => {
@@ -62,10 +62,10 @@ describe('episodeStages', () => {
     expect(s.cast).toMatchObject({ state: 'active', detail: '1/2 有定妆照' });
     expect(s.storyboard.state).toBe('todo');
     expect(r.next).toEqual({ label: '下一步：抽定妆照（1 个角色缺定妆照）', to: `${BASE}/cast`, key: 'cast', stale: false });
-    // 角色都有定妆照了：下一步运行分镜
+    // 角色都有定妆照了：下一步生成分镜
     const r2 = episodeStages(ep, [char(1, true), char(2, true)], [], BASE);
     expect(byKey(r2).cast).toMatchObject({ state: 'done', detail: '2/2 有定妆照' });
-    expect(r2.next).toEqual({ label: '下一步：运行分镜', to: `${BASE}/script`, key: 'storyboard', stale: false });
+    expect(r2.next).toEqual({ label: '下一步：生成分镜', to: `${BASE}/script`, key: 'storyboard', stale: false });
   });
 
   it('有镜头没首帧：只看出场的角色；下一步生成首帧并写缺几镜', () => {

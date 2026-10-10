@@ -59,7 +59,7 @@ describe('ShotTable', () => {
     expect(h.onOpen).toHaveBeenCalledTimes(2);
   });
 
-  it('每行只有生成首帧、生成视频和「⋯」菜单；菜单里首行不能上移、末行不能下移，回调带镜头 id', async () => {
+  it('每行只有生成（重拍）首帧、生成（重拍）视频和「⋯」菜单；菜单里首行不能上移、末行不能下移，回调带镜头 id', async () => {
     const h = setup();
     const user = userEvent.setup();
     expect(screen.queryByRole('button', { name: '上移 S01' })).toBeNull();
@@ -77,10 +77,20 @@ describe('ShotTable', () => {
     await user.click(screen.getByRole('button', { name: '更多操作 S02' }));
     await user.click(screen.getByRole('menuitem', { name: '删除' }));
     expect(h.onDelete).toHaveBeenCalledWith(12);
-    await user.click(screen.getByRole('button', { name: '生成视频 S01' }));
+    await user.click(screen.getByRole('button', { name: '重拍视频 S01' }));
     expect(h.onGenerate).toHaveBeenCalledWith(11, 'videos');
     await user.click(screen.getByRole('button', { name: '打开 S02' }));
     expect(h.onOpen).toHaveBeenCalledWith(12);
+  });
+
+  it('已有选定结果的格子按钮叫「重拍…」，还没出过的叫「生成…」', () => {
+    setup();
+    const r1 = screen.getByTestId('shot-S01');
+    expect(within(r1).getByRole('button', { name: '重拍首帧 S01' }).textContent).toBe('重拍首帧');
+    expect(within(r1).getByRole('button', { name: '重拍视频 S01' }).textContent).toBe('重拍视频');
+    const r2 = screen.getByTestId('shot-S02');
+    expect(within(r2).getByRole('button', { name: '生成首帧 S02' }).textContent).toBe('生成首帧');
+    expect(within(r2).getByRole('button', { name: '生成视频 S02' }).textContent).toBe('生成视频');
   });
 
   it('勾选状态来自 selected，点勾选框回调', async () => {
@@ -94,8 +104,8 @@ describe('ShotTable', () => {
   it('提交运行中时，生成首帧/生成视频按钮禁用，点击不触发回调', async () => {
     const h = setup({ generating: true });
     const user = userEvent.setup();
-    const genFrame = screen.getByRole('button', { name: '生成首帧 S01' }) as HTMLButtonElement;
-    const genVideo = screen.getByRole('button', { name: '生成视频 S01' }) as HTMLButtonElement;
+    const genFrame = screen.getByRole('button', { name: '重拍首帧 S01' }) as HTMLButtonElement;
+    const genVideo = screen.getByRole('button', { name: '重拍视频 S01' }) as HTMLButtonElement;
     expect(genFrame.disabled).toBe(true);
     expect(genVideo.disabled).toBe(true);
     await user.click(genFrame);

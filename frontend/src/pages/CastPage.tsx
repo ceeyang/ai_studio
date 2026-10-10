@@ -124,7 +124,7 @@ export function CastPage() {
 
         <div role="tabpanel" id="tabpanel-chars" aria-labelledby="tab-chars" className="tab-body" hidden={tab !== 'chars'}>
           <RecommendPanel slug={slug} episodeId={id} existing={chars} isNext={nextAct?.key === 'cast' && chars.length === 0} />
-          {chars.length === 0 && <p className="muted">运行剧本后自动抽取，也可以按剧本推荐角色。</p>}
+          {chars.length === 0 && <p className="muted">生成剧本后自动抽取，也可以按剧本推荐角色。</p>}
           <div className="char-list">
             {chars.map((c) => (
               <CharacterCard key={c.id} c={c} slug={slug} episodeId={id} isNext={c.id === nextCharId} />
@@ -133,7 +133,7 @@ export function CastPage() {
         </div>
 
         <div role="tabpanel" id="tabpanel-locs" aria-labelledby="tab-locs" className="tab-body" hidden={tab !== 'locs'}>
-          {locs.length === 0 && <p className="muted">运行剧本后自动抽取。</p>}
+          {locs.length === 0 && <p className="muted">生成剧本后自动抽取。</p>}
           <div className="cards">
             {locs.map((l) => (
               <div key={l.id} className="card" data-testid={`location-${l.id}`}>
@@ -157,7 +157,7 @@ export function CastPage() {
           className="tab-body style-body"
           hidden={tab !== 'style'}
         >
-          {!style.data && <p className="muted">还没有风格设定，运行剧本后自动生成，也可以直接填写保存。</p>}
+          {!style.data && <p className="muted">还没有风格设定，生成剧本后自动生成，也可以直接填写保存。</p>}
           <EditableFields
             fields={STYLE_FIELDS}
             initial={{

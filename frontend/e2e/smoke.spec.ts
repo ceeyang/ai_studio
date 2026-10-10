@@ -28,8 +28,8 @@ test('新建项目 → 剧本 → 分镜 → 导演台（manual LLM，不需要�
   await expect(page.getByRole('heading', { name: '剧本', exact: true, level: 2 })).toBeVisible();
   await expect(page.getByRole('navigation', { name: '面包屑' })).toContainText('冒烟');
 
-  await page.getByRole('button', { name: '运行剧本', exact: true }).click();
-  await expect(page.locator('.job-notice')).toContainText('运行剧本：');
+  await page.getByRole('button', { name: '生成剧本', exact: true }).click();
+  await expect(page.locator('.job-notice')).toContainText('生成剧本：');
 
   // 剧本任务先要结构，再要视觉设定：同一个任务连着两次等待输入
   await answerWaitingJob(page, /^script_structure$/, JSON.stringify(STRUCTURE));
@@ -47,11 +47,21 @@ test('新建项目 → 剧本 → 分镜 → 导演台（manual LLM，不需要�
   await page.getByRole('link', { name: /本集角色/ }).click();
   await expect(page.getByRole('heading', { name: '林夏', level: 4 })).toBeVisible();
   await nav(page, '剧本').click();
-  await page.getByRole('button', { name: '运行分镜', exact: true }).click();
-  await expect(page.locator('.job-notice')).toContainText('运行分镜：');
+  await page.getByRole('button', { name: '生成分镜', exact: true }).click();
+  await expect(page.locator('.job-notice')).toContainText('生成分镜：');
 
   await answerWaitingJob(page, /^storyboard:\d+$/, JSON.stringify(STORYBOARD));
   await expect(page.getByTestId('job-status')).toHaveText('完成');
+
+  // 有镜头了：剧本页是「重新生成分镜…」，对话框里有修改意见和影响预估；取消不提交
+  await nav(page, '剧本').click();
+  await page.getByRole('button', { name: '重新生成分镜…' }).click();
+  const regen = page.getByRole('dialog', { name: '重新生成分镜' });
+  await expect(regen).toContainText('范围：整集');
+  await expect(regen).toContainText('删除 2 个镜头');
+  await expect(regen.getByLabel('修改意见（可选）')).toBeVisible();
+  await regen.getByRole('button', { name: '取消' }).click();
+  await expect(regen).toBeHidden();
 
   await nav(page, '导演台').click();
   await expect(page.getByTestId('shot-S01')).toBeVisible();

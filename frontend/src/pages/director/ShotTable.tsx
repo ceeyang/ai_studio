@@ -17,6 +17,7 @@ export interface ShotTableProps {
   onSplit(id: number): void;
   onInsertAfter(id: number): void;
   onDelete(id: number): void;
+  /** 格子按钮：已有选定结果时是「重拍」（父组件强制提交），否则「生成」 */
   onGenerate(id: number, stage: GenStage): void;
   /** 失败格子上的「重试」；不给时当普通生成 */
   onRetry?(id: number, stage: GenStage): void;
@@ -31,6 +32,17 @@ export const CELL: Record<CellKind, { type: string; stage: GenStage; label: stri
   first_frame: { type: 'image.keyframe', stage: 'keyframes', label: '首帧' },
   video: { type: 'video.shot', stage: 'videos', label: '视频' },
 };
+
+/** 这个镜头这一格已经有选定的结果（不管过没过期）：再出就是「重拍」，要强制提交 */
+export function hasSelected(shot: ShotDetail, stage: GenStage): boolean {
+  return !!selectedOf(slotOf(shot, stage === 'keyframes' ? 'first_frame' : 'video'));
+}
+
+/** 格子按钮的字：已有选定结果「重拍首帧」，没有「生成首帧」 */
+export function genLabel(shot: ShotDetail, stage: GenStage): string {
+  const label = stage === 'keyframes' ? CELL.first_frame.label : CELL.video.label;
+  return `${hasSelected(shot, stage) ? '重拍' : '生成'}${label}`;
+}
 
 /** 这个镜头这一格正在排队/生成的任务 */
 export function activeJob(shot: ShotDetail, stage: GenStage): JobBrief | undefined {
@@ -205,20 +217,20 @@ export function ShotTable(props: ShotTableProps) {
                     <button
                       type="button"
                       className="sm soft"
-                      aria-label={`生成首帧 ${s.code}`}
+                      aria-label={`${genLabel(s, 'keyframes')} ${s.code}`}
                       disabled={generating || kfBusy}
                       onClick={() => props.onGenerate(s.id, 'keyframes')}
                     >
-                      {kfBusy ? '生成中' : '生成首帧'}
+                      {kfBusy ? '生成中' : genLabel(s, 'keyframes')}
                     </button>
                     <button
                       type="button"
                       className="sm soft"
-                      aria-label={`生成视频 ${s.code}`}
+                      aria-label={`${genLabel(s, 'videos')} ${s.code}`}
                       disabled={generating || vidBusy}
                       onClick={() => props.onGenerate(s.id, 'videos')}
                     >
-                      {vidBusy ? '生成中' : '生成视频'}
+                      {vidBusy ? '生成中' : genLabel(s, 'videos')}
                     </button>
                     <Menu
                       label={`更多操作 ${s.code}`}

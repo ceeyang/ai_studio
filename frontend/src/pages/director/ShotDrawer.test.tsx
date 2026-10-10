@@ -57,12 +57,13 @@ describe('ShotDrawer', () => {
     await waitFor(() => expect(calls.some((c) => c.url === '/api/candidates/102/select')).toBe(true));
   });
 
-  it('生成与关闭交给父组件', async () => {
+  it('生成与关闭交给父组件；已有选定首帧的叫「重拍首帧」，没出过视频的叫「生成视频」', async () => {
     installFetch({ 'GET /api/engines': ENGINES });
     const onClose = vi.fn();
     const onGenerate = vi.fn();
     renderAt(<ShotDrawer shot={SHOT} episodeId={1} onClose={onClose} onGenerate={onGenerate} />);
     const user = userEvent.setup();
+    expect(screen.getByRole('button', { name: '重拍首帧' })).toBeTruthy();
     await user.click(screen.getByRole('button', { name: '生成视频' }));
     expect(onGenerate).toHaveBeenCalledWith('videos');
     await user.click(screen.getByRole('button', { name: '关闭' }));
@@ -74,7 +75,7 @@ describe('ShotDrawer', () => {
     const onGenerate = vi.fn();
     renderAt(<ShotDrawer shot={SHOT} episodeId={1} onClose={() => {}} onGenerate={onGenerate} generating />);
     const user = userEvent.setup();
-    const genFrame = screen.getByRole('button', { name: '生成首帧' }) as HTMLButtonElement;
+    const genFrame = screen.getByRole('button', { name: '重拍首帧' }) as HTMLButtonElement;
     const genVideo = screen.getByRole('button', { name: '生成视频' }) as HTMLButtonElement;
     expect(genFrame.disabled).toBe(true);
     expect(genVideo.disabled).toBe(true);
@@ -137,7 +138,7 @@ describe('ShotDrawer', () => {
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(1));
   });
 
-  it('改了提示词没保存时，生成按钮变成「保存并生成」：先保存再生成', async () => {
+  it('改了提示词没保存时，生成按钮变成「保存并…」：先保存再生成', async () => {
     const calls = installFetch({
       'GET /api/engines': ENGINES,
       'PATCH /api/shots/5': (c: { body: unknown }) => ({ ...SHOT, ...(c.body as object) }),
@@ -148,30 +149,29 @@ describe('ShotDrawer', () => {
     });
     renderAt(<ShotDrawer shot={SHOT} episodeId={1} onClose={() => {}} onGenerate={onGenerate} />);
     const user = userEvent.setup();
-    expect(screen.getByRole('button', { name: '生成首帧' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '重拍首帧' })).toBeTruthy();
     const ta = screen.getByLabelText('图像提示词（英文）');
     await user.clear(ta);
     await user.type(ta, 'new prompt');
-    await user.click(screen.getByRole('button', { name: '保存并生成首帧' }));
+    await user.click(screen.getByRole('button', { name: '保存并重拍首帧' }));
     await waitFor(() => expect(onGenerate).toHaveBeenCalledWith('keyframes', true));
     expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({ image_prompt: 'new prompt' });
   });
 
-  it('候选数和强制重跑在抽屉里也能改（和导演台工具栏共用）', async () => {
+  it('候选数在抽屉里也能改（和导演台工具栏共用）；没有强制重跑勾选框', async () => {
     installFetch({ 'GET /api/engines': ENGINES });
     const onCountChange = vi.fn();
-    const onForceChange = vi.fn();
+
     renderAt(
-      <ShotDrawer shot={SHOT} episodeId={1} onClose={() => {}} onGenerate={() => {}} count={2} force={false}
-        onCountChange={onCountChange} onForceChange={onForceChange} />,
+      <ShotDrawer shot={SHOT} episodeId={1} onClose={() => {}} onGenerate={() => {}} count={2}
+        onCountChange={onCountChange} />,
     );
     const user = userEvent.setup();
     const sel = screen.getByLabelText('候选数') as HTMLSelectElement;
     expect(sel.value).toBe('2');
     await user.selectOptions(sel, '3');
     expect(onCountChange).toHaveBeenCalledWith(3);
-    await user.click(screen.getByLabelText('强制重跑'));
-    expect(onForceChange).toHaveBeenCalledWith(true);
+    expect(screen.queryByLabelText('强制重跑')).toBeNull();
     expect(screen.queryByText(/导演台工具栏上的设置/)).toBeNull();
   });
 

@@ -81,7 +81,7 @@ export function episodeStages(
       to: `${base}/script`,
       state: ep.scene_blocks.length > 0 ? 'done' : 'todo',
       detail: ep.scene_blocks.length > 0 ? `${ep.scene_blocks.length} 段` : '还没有段落',
-      next: '运行剧本',
+      next: '生成剧本',
     },
     {
       key: 'cast',
@@ -97,7 +97,7 @@ export function episodeStages(
       to: `${base}/script`,
       state: shots.length > 0 ? 'done' : 'todo',
       detail: shots.length > 0 ? `${shots.length} 镜` : '还没有镜头',
-      next: '运行分镜',
+      next: '生成分镜',
     },
     slotStage('keyframes', '首帧', shots, `${base}/director`),
     slotStage('videos', '视频', shots, `${base}/director`),

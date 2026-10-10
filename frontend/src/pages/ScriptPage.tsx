@@ -1,5 +1,6 @@
 // 剧本页：只管剧本——原文 / 梗概 + 剧本段落（都可折叠，收起时保持挂载不丢编辑）。
-// 角色、场景、风格在角色页（右上「本集角色」条进去）。重跑前先问后端会删什么，确认后才提交。
+// 角色、场景、风格在角色页（右上「本集角色」条进去）。
+// 第一次生成剧本 / 分镜前先问后端会删什么、覆盖什么；已经有了再点是「重新生成…」，打开对话框（可写修改意见、看影响预估、一定强制重出）。
 import { useQueries } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
@@ -17,12 +18,14 @@ import {
 } from '../api/queries';
 import type { Character, EpisodePatch, Job, RerunImpact, SceneBlock } from '../api/types';
 import { useConfirm } from '../components/ConfirmDialog';
+import { RegenerateDialog, impactText } from '../components/RegenerateDialog';
 import { EpisodeHeader, EpisodeLoadError, nextActionProps, useNextAction } from '../components/EpisodeHeader';
 import { EditableFields, type FieldSpec, type FieldValues, type FieldsState, useUnsavedGuard } from '../components/EditableFields';
 import { useJobNotice } from '../components/JobNotice';
 import { EPISODE_STATUS_LABEL } from '../format';
 
 export { toCharacterPatch } from './script/CharacterCard';
+export { impactText };
 
 const EPISODE_FIELDS: FieldSpec[] = [
   { name: 'title', label: '本集标题' },
@@ -31,7 +34,9 @@ const EPISODE_FIELDS: FieldSpec[] = [
 ];
 
 type Stage = 'script' | 'storyboard';
-const STAGE_LABEL: Record<Stage, string> = { script: '运行剧本', storyboard: '运行分镜' };
+const STAGE_LABEL: Record<Stage, string> = { script: '生成剧本', storyboard: '生成分镜' };
+const REGEN_LABEL: Record<Stage, string> = { script: '重新生成剧本', storyboard: '重新生成分镜' };
+const UNSAVED_NOTE = '有未保存的修改，重新生成前会先保存';
 
 function toEpisodePatch(c: FieldValues): EpisodePatch {
   const out: EpisodePatch = {};
@@ -39,21 +44,6 @@ function toEpisodePatch(c: FieldValues): EpisodePatch {
   if (c.source_text !== undefined) out.source_text = c.source_text;
   if (c.target_seconds !== undefined) out.target_seconds = Number(c.target_seconds);
   return out;
-}
-
-/** 重跑影响写成一句话：「将重建段落 3、5 的镜头：删除 12 个镜头（其中 8 个有选定视频），保留 2 个手工镜头；会覆盖角色描述、场景氛围」 */
-export function impactText(im: RerunImpact): string {
-  const parts: string[] = [];
-  if (im.shots_deleted > 0 || im.blocks.length > 0) {
-    const where = im.blocks.length > 0 ? `将重建段落 ${im.blocks.join('、')} 的镜头` : '将重建镜头';
-    let del = `删除 ${im.shots_deleted} 个镜头`;
-    if (im.selected_videos > 0) del += `（其中 ${im.selected_videos} 个有选定视频）`;
-    else if (im.selected_first_frames > 0) del += `（其中 ${im.selected_first_frames} 个有选定首帧）`;
-    if (im.manual_kept > 0) del += `，保留 ${im.manual_kept} 个手工镜头`;
-    parts.push(`${where}：${del}`);
-  }
-  if (im.overwrites.length > 0) parts.push(`会覆盖${im.overwrites.join('、')}`);
-  return parts.join('；');
 }
 
 const ENDED = new Set(['done', 'failed', 'canceled', 'waiting_input']);
@@ -126,6 +116,7 @@ function BlockRow({
   onSave,
   onDirtyChange,
   onValuesChange,
+  onRegen,
 }: {
   b: SceneBlock;
   locationName: string;
@@ -137,15 +128,24 @@ function BlockRow({
   onSave: (v: FieldValues) => void;
   onDirtyChange: (dirty: boolean) => void;
   onValuesChange: (state: FieldsState) => void;
+  /** 这一段有镜头时：「重写本段分镜…」 */
+  onRegen?: () => void;
 }) {
   return (
     <div className={`block${open ? ' is-open' : ''}`} data-testid={`block-${b.id}`}>
-      <button type="button" className="block-row" aria-expanded={open} onClick={onToggle}>
-        <span className="block-no">段落 {b.order + 1}</span>
-        <span className="block-loc">{locationName}</span>
-        <span className="block-sum">{b.text}</span>
-        <span className="chev" aria-hidden="true" />
-      </button>
+      <div className="block-line">
+        <button type="button" className="block-row" aria-expanded={open} onClick={onToggle}>
+          <span className="block-no">段落 {b.order + 1}</span>
+          <span className="block-loc">{locationName}</span>
+          <span className="block-sum">{b.text}</span>
+          <span className="chev" aria-hidden="true" />
+        </button>
+        {onRegen && (
+          <button type="button" className="sm ghost block-act" onClick={onRegen}>
+            重写本段分镜…
+          </button>
+        )}
+      </div>
       <div className="block-edit" hidden={!open}>
         <EditableFields
           fields={[
@@ -176,18 +176,19 @@ export function ScriptPage() {
   const run = useRunStage(id);
   const confirm = useConfirm();
   const notice = useJobNotice();
-  const [force, setForce] = useState(false);
   const [checking, setChecking] = useState(false);
   const [openBlocks, setOpenBlocks] = useState<Set<number>>(new Set());
   const [srcOpen, setSrcOpen] = useState<boolean | null>(null);
   const [src, setSrc] = useState<FieldsState | null>(null);
   const [lastRun, setLastRun] = useState<{ stage: Stage; ids: number[] } | null>(null);
+  // 打开着的「重新生成…」对话框：哪个阶段、哪几段（不给 = 整集）
+  const [regen, setRegen] = useState<{ stage: Stage; blockIds?: number[]; scope: string } | null>(null);
   // 改过没保存的段落：和原文一起决定换页面前要不要问一句
   const [dirtyBlocks, setDirtyBlocks] = useState<Set<number>>(() => new Set());
-  // 每个段落编辑框的当前内容：「保存并运行分镜」要先把没保存的改动存上
+  // 每个段落编辑框的当前内容：「保存并生成分镜」「重新生成分镜…」要先把没保存的改动存上
   const blockStates = useRef(new Map<number, FieldsState>());
   useUnsavedGuard(!!src?.dirty || dirtyBlocks.size > 0);
-  // 下一步是运行剧本 / 运行分镜时，对应按钮是本页唯一的主按钮
+  // 下一步是生成剧本 / 生成分镜时，对应按钮是本页唯一的主按钮
   const nextAct = useNextAction(slug, ep.data, 'script');
   const base = `/projects/${enc(slug)}/episodes/${id}`;
 
@@ -213,7 +214,7 @@ export function ScriptPage() {
   ];
   const chars = characters.data ?? [];
   const locName = new Map((locations.data ?? []).map((l) => [l.id, l.name]));
-  // 还没有段落或原文时默认展开原文：要先写原文才能运行剧本
+  // 还没有段落或原文时默认展开原文：要先写原文才能生成剧本
   const sourceOpen = srcOpen ?? (e.scene_blocks.length === 0 || !e.source_text.trim());
   const allOpen = e.scene_blocks.length > 0 && e.scene_blocks.every((b) => openBlocks.has(b.id));
   const srcDirty = !!src?.dirty;
@@ -228,38 +229,50 @@ export function ScriptPage() {
       return next;
     });
 
+  /** 原文有没保存的修改：先保存（剧本按保存后的原文跑）。保存失败返回 false。 */
+  const saveSource = async (): Promise<boolean> => {
+    if (!src?.dirty) return true;
+    if (!src.valid) return false;
+    try {
+      await patchEp.mutateAsync(toEpisodePatch(src.changed));
+      return true;
+    } catch (err) {
+      notice.error(errorText(err));
+      return false;
+    }
+  };
+
+  /** 段落有没保存的修改：分镜先保存再按新段落跑。保存失败返回 false（错误也显示在那一段里）。 */
+  const saveBlocks = async (): Promise<boolean> => {
+    try {
+      for (const bid of dirtyBlockIds) {
+        const v = blockStates.current.get(bid)?.values;
+        if (!v) continue;
+        await patchBlock.mutateAsync({
+          id: bid,
+          text: v.text,
+          location_id: v.location_id === '' ? null : Number(v.location_id),
+        });
+      }
+      return true;
+    } catch (err) {
+      notice.error(errorText(err));
+      return false;
+    }
+  };
+
+  const track = (stage: Stage, ids: number[], label: string) => {
+    notice.track(ids, label);
+    setLastRun({ stage, ids });
+  };
+
+  /** 第一次生成（还没有段落 / 还没有镜头）：先保存，必要时问后端会覆盖什么，确认后提交（不强制）。 */
   const runStage = async (stage: Stage) => {
     notice.clear();
-    // 原文有没保存的修改：先保存（剧本按保存后的原文跑）
-    if (stage === 'script' && src?.dirty) {
-      if (!src.valid) return;
-      try {
-        await patchEp.mutateAsync(toEpisodePatch(src.changed));
-      } catch (err) {
-        notice.error(errorText(err));
-        return;
-      }
-    }
-    // 段落有没保存的修改：分镜先保存再按新段落跑；剧本会重新拆段落，这些修改会丢，下面确认时一起说
-    if (stage === 'storyboard' && dirtyBlockIds.length > 0) {
-      try {
-        for (const bid of dirtyBlockIds) {
-          const v = blockStates.current.get(bid)?.values;
-          if (!v) continue;
-          await patchBlock.mutateAsync({
-            id: bid,
-            text: v.text,
-            location_id: v.location_id === '' ? null : Number(v.location_id),
-          });
-        }
-      } catch (err) {
-        notice.error(errorText(err));
-        return;
-      }
-    }
-    const discardBlocks = stage === 'script' ? dirtyBlockIds.length : 0;
-    // 先问后端重跑会动什么：分镜看已有镜头；剧本的视觉阶段会改整个项目的角色外观、场景外观和风格，
-    // 所以只要本集有段落、或者项目里已经有角色 / 场景 / 风格就要问（还在加载时也问，宁可多问一次）
+    if (stage === 'script' && !(await saveSource())) return;
+    if (stage === 'storyboard' && !(await saveBlocks())) return;
+    // 先问后端会动什么：分镜看已有镜头；剧本的视觉阶段会改整个项目的角色外观、场景外观和风格，
+    // 所以只要项目里已经有角色 / 场景 / 风格就要问（还在加载时也问，宁可多问一次）
     const needImpact =
       stage === 'storyboard'
         ? e.shots.length > 0
@@ -273,7 +286,7 @@ export function ScriptPage() {
       let im: RerunImpact;
       setChecking(true);
       try {
-        im = await fetchRerunImpact(id, stage, force);
+        im = await fetchRerunImpact(id, stage, false);
       } catch (err) {
         notice.error(errorText(err));
         return;
@@ -281,34 +294,45 @@ export function ScriptPage() {
         setChecking(false);
       }
       if (!im.will_run) {
-        notice.info('输入没变，会跳过；要重做请勾强制重跑');
+        notice.info('输入没变，已经是最新的');
         return;
       }
-      const parts = [impactText(im)].filter(Boolean);
-      if (discardBlocks > 0) {
-        parts.push(`有 ${discardBlocks} 个段落改了还没保存，重新拆段落时这些修改会丢掉`);
-      }
-      if (parts.length > 0) {
+      const body = impactText(im);
+      if (body) {
         const ok = await confirm({
-          title: stage === 'script' ? '重新运行剧本？' : '重新运行分镜？',
-          body: parts.join('；'),
-          confirmText: '继续运行',
-          danger: im.shots_deleted > 0 || discardBlocks > 0,
+          title: stage === 'script' ? '生成剧本？' : '生成分镜？',
+          body,
+          confirmText: '继续生成',
+          danger: im.shots_deleted > 0,
         });
         if (!ok) return;
       }
     }
     run.mutate(
-      { stage, force },
+      { stage, force: false },
       {
-        onSuccess: (r) => {
-          notice.track(r.job_ids, STAGE_LABEL[stage]);
-          setLastRun({ stage, ids: r.job_ids });
-        },
+        onSuccess: (r) => track(stage, r.job_ids, STAGE_LABEL[stage]),
         onError: (err) => notice.error(errorText(err)),
       },
     );
   };
+
+  const openRegen = (stage: Stage, blockIds?: number[], scope = '整集') => {
+    notice.clear();
+    setRegen({ stage, blockIds, scope });
+  };
+
+  // 对话框里的未保存提示：剧本先保存原文，但会重新拆段落，没保存的段落修改会丢；分镜先保存段落
+  const regenNote = (stage: Stage): string | undefined => {
+    if (stage === 'storyboard') return dirtyBlockIds.length > 0 ? UNSAVED_NOTE : undefined;
+    const parts: string[] = [];
+    if (srcDirty) parts.push(UNSAVED_NOTE);
+    if (dirtyBlockIds.length > 0) parts.push(`有 ${dirtyBlockIds.length} 个段落改了还没保存，重新拆段落时这些修改会丢掉`);
+    return parts.length > 0 ? parts.join('；') : undefined;
+  };
+  const shotBlocks = new Set(e.shots.map((sh) => sh.scene_block_id).filter((x): x is number => x != null));
+  const hasBlocks = e.scene_blocks.length > 0;
+  const hasShots = e.shots.length > 0;
 
   return (
     <div className="page script-page">
@@ -320,34 +344,52 @@ export function ScriptPage() {
       </EpisodeHeader>
 
       <div className="toolbar">
-        <button
-          type="button"
-          {...nextActionProps(nextAct?.key === 'script')}
-          disabled={busy || (srcDirty && !srcValid)}
-          title={srcDirty ? '先保存原文的修改，再按新原文运行剧本' : undefined}
-          onClick={() => runStage('script')}
-        >
-          {srcDirty ? '保存并运行剧本' : '运行剧本'}
-        </button>
-        <button
-          type="button"
-          {...nextActionProps(nextAct?.key === 'storyboard')}
-          disabled={busy || e.scene_blocks.length === 0}
-          title={
-            e.scene_blocks.length === 0
-              ? '先运行剧本生成段落'
-              : dirtyBlockIds.length > 0
-                ? '先保存段落的修改，再按新段落运行分镜'
-                : undefined
-          }
-          onClick={() => runStage('storyboard')}
-        >
-          {dirtyBlockIds.length > 0 ? '保存并运行分镜' : '运行分镜'}
-        </button>
-        <span className="sep" aria-hidden="true" />
-        <label>
-          <input type="checkbox" checked={force} onChange={(ev) => setForce(ev.target.checked)} /> 强制重跑（输入没变也重新生成）
-        </label>
+        {hasBlocks ? (
+          <button
+            type="button"
+            disabled={busy || (srcDirty && !srcValid)}
+            title="按原文重新拆段落，可以写修改意见"
+            onClick={() => openRegen('script')}
+          >
+            重新生成剧本…
+          </button>
+        ) : (
+          <button
+            type="button"
+            {...nextActionProps(nextAct?.key === 'script')}
+            disabled={busy || (srcDirty && !srcValid)}
+            title={srcDirty ? '先保存原文的修改，再按新原文生成剧本' : undefined}
+            onClick={() => runStage('script')}
+          >
+            {srcDirty ? '保存并生成剧本' : '生成剧本'}
+          </button>
+        )}
+        {hasShots ? (
+          <button
+            type="button"
+            disabled={busy}
+            title="按段落重新出整集的镜头，可以写修改意见"
+            onClick={() => openRegen('storyboard')}
+          >
+            重新生成分镜…
+          </button>
+        ) : (
+          <button
+            type="button"
+            {...nextActionProps(nextAct?.key === 'storyboard')}
+            disabled={busy || !hasBlocks}
+            title={
+              !hasBlocks
+                ? '先生成剧本拆出段落'
+                : dirtyBlockIds.length > 0
+                  ? '先保存段落的修改，再按新段落生成分镜'
+                  : undefined
+            }
+            onClick={() => runStage('storyboard')}
+          >
+            {dirtyBlockIds.length > 0 ? '保存并生成分镜' : '生成分镜'}
+          </button>
+        )}
       </div>
       {notice.view}
 
@@ -386,7 +428,7 @@ export function ScriptPage() {
             </button>
           )}
         </div>
-        {e.scene_blocks.length === 0 && <p className="muted">还没有段落。点"运行剧本"由模型拆分。</p>}
+        {e.scene_blocks.length === 0 && <p className="muted">还没有段落。点「生成剧本」由模型拆分。</p>}
         <div className="blocks">
           {e.scene_blocks.map((b) => {
             const mine = patchBlock.variables?.id === b.id;
@@ -410,6 +452,7 @@ export function ScriptPage() {
                   })
                 }
                 onValuesChange={(st) => blockStates.current.set(b.id, st)}
+                onRegen={shotBlocks.has(b.id) ? () => openRegen('storyboard', [b.id], `第 ${b.order + 1} 段`) : undefined}
                 onSave={(v) =>
                   patchBlock.mutate({
                     id: b.id,
@@ -422,6 +465,20 @@ export function ScriptPage() {
           })}
         </div>
       </section>
+
+      <RegenerateDialog
+        open={!!regen}
+        onClose={() => setRegen(null)}
+        stage={regen?.stage ?? 'script'}
+        episodeId={id}
+        blockIds={regen?.blockIds}
+        scopeLabel={regen?.scope ?? '整集'}
+        unsavedNote={regen ? regenNote(regen.stage) : undefined}
+        beforeRun={() => (regen?.stage === 'storyboard' ? saveBlocks() : saveSource())}
+        onSubmitted={(ids) => {
+          if (regen) track(regen.stage, ids, REGEN_LABEL[regen.stage]);
+        }}
+      />
     </div>
   );
 }

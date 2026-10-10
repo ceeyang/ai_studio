@@ -17,7 +17,7 @@ import { EpisodeHeader, EpisodeLoadError, nextActionProps, useNextAction } from 
 import { useJobNotice } from '../components/JobNotice';
 import { type EstimatePart, estimateText } from './director/estimate';
 import { ShotDrawer } from './director/ShotDrawer';
-import { CELL, type GenStage, ShotTable } from './director/ShotTable';
+import { CELL, type GenStage, ShotTable, hasSelected } from './director/ShotTable';
 import { moveId, selectedOf, slotMark, slotOf } from './director/slots';
 
 /** 超过这么多个任务才先弹预估确认 */
@@ -74,7 +74,6 @@ export function DirectorPage() {
   const create = useCreateShot(id);
   const [selected, setSelected] = useState<Set<number>>(() => new Set());
   const [count, setCount] = useState(1);
-  const [force, setForce] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   // 下一步在导演台时：缺首帧 / 缺视频 → 对应的生成按钮，有过期 → 只重做过期的，是本页唯一的主按钮
   const nextAct = useNextAction(slug, ep.data, 'director');
@@ -147,22 +146,23 @@ export function DirectorPage() {
   };
 
   /**
-   * skipFresh：不做「都是最新的」判断——抽屉刚保存了改动（手上的镜头数据是保存前的），或者是失败格子的重试。
-   * forceRun：这一次强制重出（重试要强制，不然后端看选定的结果还是最新的会跳过）。
+   * 提交生成。verb：「生成」不强制（后端跳过已是最新的格子）；「重拍」「重试」强制重出
+   * （重拍 = 这一格已有选定结果还要再出；重试 = 失败后再来，不强制的话后端看选定的结果还是最新的会跳过）。
    */
-  const generate = async (stage: GenStage, ids: number[], what: string, opt: { skipFresh?: boolean; forceRun?: boolean } = {}) => {
+  const generate = async (stage: GenStage, ids: number[], what: string, verb: '生成' | '重拍' | '重试' = '生成') => {
     notice.clear();
     const cell = cellOf(stage);
     const targets = ids.length > 0 ? shots.filter((s) => ids.includes(s.id)) : shots;
-    const doForce = force || !!opt.forceRun;
-    // 单候选、不强制时后端会跳过已经是最新的：都是最新的就别提交了
-    if (!opt.skipFresh && count === 1 && !doForce && targets.length > 0 && targets.every((s) => slotMark(slotOf(s, kindOf(stage))) === 'ok')) {
-      notice.info('都是最新的，勾强制重跑才会重出');
-      return;
-    }
-    const batch: Batch = { stage, ids, force: doForce };
+    const batch: Batch = { stage, ids, force: verb !== '生成' };
     if (!(await confirmBatch(`批量生成${cell.label}？`, batchParts({ ...batch, ids: targets.map((s) => s.id) }, count)))) return;
-    await submit([batch], `${opt.forceRun && !force ? '重试' : '生成'}${cell.label}${what}`);
+    await submit([batch], `${verb}${cell.label}${what}`);
+  };
+
+  /** 单个镜头的格子 / 抽屉按钮：已有选定结果就是重拍（强制），否则是生成 */
+  const generateOne = (shotId: number, stage: GenStage) => {
+    const s = shots.find((x) => x.id === shotId);
+    if (!s) return;
+    void generate(stage, [shotId], ` ${s.code}`, hasSelected(s, stage) ? '重拍' : '生成');
   };
 
   const redoStale = async () => {
@@ -237,9 +237,6 @@ export function DirectorPage() {
             ))}
           </select>
         </label>
-        <label>
-          <input type="checkbox" aria-label="强制重跑" checked={force} onChange={(ev) => setForce(ev.target.checked)} /> 强制重跑
-        </label>
         <span className="sep" aria-hidden="true" />
         <button
           type="button"
@@ -279,7 +276,7 @@ export function DirectorPage() {
       <div className="director-body">
         {shots.length === 0 ? (
           <p className="panel empty">
-            这一集还没有分镜。<Link to={`/projects/${enc(slug)}/episodes/${id}/script`}>去剧本页运行分镜</Link>
+            这一集还没有分镜。<Link to={`/projects/${enc(slug)}/episodes/${id}/script`}>去剧本页生成分镜</Link>
           </p>
         ) : (
           <ShotTable
@@ -294,13 +291,10 @@ export function DirectorPage() {
             onSplit={(shotId) => report(split.mutateAsync(shotId), '已拆分')}
             onInsertAfter={(shotId) => report(create.mutateAsync({ after_shot_id: shotId }), '已插入新镜头')}
             onDelete={(shotId) => void remove(shotId)}
-            onGenerate={(shotId, stage) => {
-              const code = shots.find((s) => s.id === shotId)?.code ?? '';
-              void generate(stage, [shotId], ` ${code}`);
-            }}
+            onGenerate={generateOne}
             onRetry={(shotId, stage) => {
               const code = shots.find((s) => s.id === shotId)?.code ?? '';
-              void generate(stage, [shotId], ` ${code}`, { skipFresh: true, forceRun: true });
+              void generate(stage, [shotId], ` ${code}`, '重试');
             }}
           />
         )}
@@ -313,12 +307,10 @@ export function DirectorPage() {
           episodeId={id}
           generating={generating}
           count={count}
-          force={force}
           onCountChange={setCount}
-          onForceChange={setForce}
           notice={notice.view}
           onClose={close}
-          onGenerate={(stage, saved) => void generate(stage, [openShot.id], ` ${openShot.code}`, { skipFresh: saved })}
+          onGenerate={(stage) => generateOne(openShot.id, stage)}
         />
       )}
     </div>

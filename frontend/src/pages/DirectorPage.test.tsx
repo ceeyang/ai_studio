@@ -74,20 +74,25 @@ describe('DirectorPage', () => {
     expect(calls.some((c) => c.method === 'POST')).toBe(false);
   });
 
-  it('单候选、不强制、要出的格子都是最新的：不提交，提示勾强制重跑', async () => {
-    const fresh = makeShot({ id: 11, code: 'S01', slots: [chosen(1, 'first_frame')] });
+  it('格子已有选定结果：按钮是「重拍…」并强制提交；还没出过的是「生成…」不强制；没有强制重跑勾选框', async () => {
+    const shots = [
+      makeShot({ id: 11, code: 'S01', slots: [chosen(1, 'first_frame')] }),
+      makeShot({ id: 12, code: 'S02', order: 1 }),
+    ];
     const calls = installFetch(
-      routes({ 'GET /api/episodes/4': makeEpisode({ id: 4, shots: [fresh] }), 'POST /api/episodes/4/run': { job_ids: [90] } }),
+      routes({ 'GET /api/episodes/4': makeEpisode({ id: 4, shots }), 'POST /api/episodes/4/run': { job_ids: [90] } }),
     );
     renderAt(<DirectorPage />, AT);
     const user = userEvent.setup();
-    await user.click(await screen.findByRole('button', { name: '生成首帧 S01' }));
-    expect((await screen.findByRole('status')).textContent).toContain('都是最新的，勾强制重跑才会重出');
-    expect(calls.some((c) => c.method === 'POST')).toBe(false);
-    await user.click(screen.getByLabelText('强制重跑'));
-    await user.click(screen.getByRole('button', { name: '生成首帧 S01' }));
-    await waitFor(() => expect(calls.some((c) => c.method === 'POST')).toBe(true));
-    expect(calls.find((c) => c.method === 'POST')?.body).toEqual({ stage: 'keyframes', candidates: 1, force: true, shots: ['11'] });
+    await user.click(await screen.findByRole('button', { name: '重拍首帧 S01' }));
+    await waitFor(() => expect(calls.filter((c) => c.method === 'POST')).toHaveLength(1));
+    expect(calls.filter((c) => c.method === 'POST')[0].body).toEqual({ stage: 'keyframes', candidates: 1, force: true, shots: ['11'] });
+    expect((await screen.findByRole('status')).textContent).toContain('重拍首帧 S01');
+    expect(screen.queryByRole('button', { name: '生成首帧 S01' })).toBeNull();
+    await user.click(screen.getByRole('button', { name: '生成首帧 S02' }));
+    await waitFor(() => expect(calls.filter((c) => c.method === 'POST')).toHaveLength(2));
+    expect(calls.filter((c) => c.method === 'POST')[1].body).toEqual({ stage: 'keyframes', candidates: 1, force: false, shots: ['12'] });
+    expect(screen.queryByLabelText(/强制重跑/)).toBeNull();
   });
 
   it('「只重做过期的」：首帧过期的镜头首帧接着视频一起重出，只有视频过期的单独重出视频，都强制', async () => {
@@ -113,7 +118,7 @@ describe('DirectorPage', () => {
     expect(runs[1].body).toEqual({ stage: 'videos', candidates: 1, force: true, shots: ['13'] });
   });
 
-  it('失败格子已有最新的选定结果时，「重试」也要强制提交，不被「都是最新的」吞掉', async () => {
+  it('失败格子已有最新的选定结果时，「重试」强制提交', async () => {
     const shot = makeShot({
       id: 11, code: 'S01', slots: [chosen(1, 'first_frame')],
       failures: [{ id: 80, type: 'image.keyframe', status: 'failed', error: '显存不足' }],
@@ -172,7 +177,7 @@ describe('DirectorPage', () => {
   it('没有分镜时引导去剧本页', async () => {
     installFetch(routes({ 'GET /api/episodes/4': makeEpisode({ id: 4, shots: [] }) }));
     renderAt(<DirectorPage />, AT);
-    expect((await screen.findByRole('link', { name: '去剧本页运行分镜' })).getAttribute('href')).toBe('/projects/demo/episodes/4/script');
+    expect((await screen.findByRole('link', { name: '去剧本页生成分镜' })).getAttribute('href')).toBe('/projects/demo/episodes/4/script');
   });
 
   it('导出在导出页：导演台只给「去导出」链接并写明几镜有视频', async () => {
@@ -201,7 +206,7 @@ describe('DirectorPage', () => {
     expect(screen.getByTestId('location').textContent).toBe('/projects/demo/episodes/4/director');
   });
 
-  it('抽屉里「保存并生成」：刚保存的提示词让格子过期，不能当成最新的跳过', async () => {
+  it('抽屉里「保存并重拍」：已有选定首帧的镜头先保存再强制重拍', async () => {
     const fresh = makeShot({ id: 11, code: 'S01', image_prompt: 'old', slots: [chosen(1, 'first_frame')] });
     const calls = installFetch(
       routes({
@@ -216,16 +221,16 @@ describe('DirectorPage', () => {
     const ta = within(dlg).getByLabelText('图像提示词（英文）');
     await user.clear(ta);
     await user.type(ta, 'new');
-    await user.click(within(dlg).getByRole('button', { name: '保存并生成首帧' }));
+    await user.click(within(dlg).getByRole('button', { name: '保存并重拍首帧' }));
     await waitFor(() => expect(calls.some((c) => c.method === 'POST')).toBe(true));
-    expect(calls.find((c) => c.method === 'POST')?.body).toEqual({ stage: 'keyframes', candidates: 1, force: false, shots: ['11'] });
+    expect(calls.find((c) => c.method === 'POST')?.body).toEqual({ stage: 'keyframes', candidates: 1, force: true, shots: ['11'] });
   });
 
   it('用剧集页头：只有一个主按钮（下一步），工具栏的生成按钮是次要的', async () => {
     installFetch(routes());
     const { container } = renderAt(<DirectorPage />, AT);
     await screen.findByRole('heading', { level: 2, name: '导演台' });
-    expect(screen.getByRole('link', { name: '下一步：运行剧本' })).toBeTruthy();
+    expect(screen.getByRole('link', { name: '下一步：生成剧本' })).toBeTruthy();
     expect(container.querySelectorAll('.primary')).toHaveLength(1);
     expect(screen.getByRole('button', { name: '生成首帧（全部）' }).className).not.toContain('primary');
   });
