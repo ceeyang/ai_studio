@@ -73,6 +73,7 @@ class CharacterOut(ORM):
     portraits: list[CandidateOut] = Field(default_factory=list)   # 全部定妆照候选（上传的 + AI 抽的）
     design_options: list[dict] = Field(default_factory=list)      # AI 推荐造型
     active_jobs: list[JobBrief] = Field(default_factory=list)     # 进行中的抽卡 / 推荐造型 / 三视图任务
+    last_failure: JobBrief | None = None    # 最近失败的抽卡（之后没有成功的抽卡才给）
     turnaround: TurnaroundOut | None = None                       # 三视图设定图和切出来的格子
 
 
@@ -81,6 +82,40 @@ class JobBrief(BaseModel):
     type: str
     status: str
     sheet: str | None = None             # image.turnaround 任务出的是哪种设定图
+    progress: float | None = None        # 0-1，运行中且处理器报过进度才有
+    error: str | None = None             # 失败任务才有：错误第一行，最多 200 字
+    finished_at: datetime | None = None
+
+
+class JobContext(BaseModel):
+    """任务是给谁做的：任务页显示「项目 · 第1集 · S05」，点了跳到对应页面。"""
+    label: str
+    url: str | None = None
+    project_slug: str | None = None
+    episode_id: int | None = None
+    shot_id: int | None = None
+    character_id: int | None = None
+
+
+class JobOut(BaseModel):
+    id: int
+    type: str
+    status: str
+    project_id: int | None
+    owner_type: str | None
+    owner_id: int | None
+    payload: dict
+    gpu: bool
+    model_family: str | None
+    priority: int
+    depends_on: list
+    log: str
+    error: str | None
+    result: dict | None
+    created_at: str | None
+    started_at: str | None
+    finished_at: str | None
+    context: JobContext | None = None
 
 
 class TurnaroundSheetOut(BaseModel):
@@ -258,6 +293,8 @@ class SlotOut(BaseModel):
     kind: str
     selected_candidate_id: int | None
     stale: bool = False
+    stale_reason: str | None = None      # 过期原因：「陈师傅 定妆照换了」「提示词改了」……
+    new_candidates: int = 0              # 比选定的那张更新、还没选的候选数
     candidates: list[CandidateOut] = Field(default_factory=list)
 
 
@@ -325,6 +362,8 @@ class ShotOut(ORM):
 
 class ShotDetail(ShotOut):
     slots: list[SlotOut] = Field(default_factory=list)
+    active_jobs: list[JobBrief] = Field(default_factory=list)   # 排队 / 运行 / 等输入的首帧、视频任务
+    failures: list[JobBrief] = Field(default_factory=list)      # 首帧、视频各自最近一次失败（之后没出过新的才给）
 
 
 class EpisodeDetail(EpisodeOut):

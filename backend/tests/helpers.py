@@ -125,3 +125,14 @@ class FakeFFmpeg:
         durs = [min(5.0, m) if m else 5.0 for m in (max_seconds or [None] * len(clips))]
         _, starts, total = xfade_timeline(durs, transitions, fps)
         return Assembled(Path(out), durs, starts, total)
+
+
+def give_selected(db, shot_id: int, *kinds: str) -> None:
+    """给镜头塞一张选定的首帧 / 视频候选（只为过提交前校验，文件不存在）。"""
+    from backend.domain.slots import add_candidate, get_or_create_slot
+
+    with db.session() as s:
+        for kind in kinds:
+            add_candidate(s, get_or_create_slot(s, "shot", shot_id, kind),
+                          file_path=f"demo/media/{kind}/{shot_id}.bin", engine="zimage",
+                          params={}, input_hash="h", job_id=None)

@@ -8,7 +8,7 @@ from backend.domain.slots import add_candidate, get_or_create_slot, selected_can
 from backend.engines.base import VideoRequest
 from backend.pipeline.keyframes import load_shot, ref_labels, run_comfy
 from backend.pipeline.prompting import (compose_video_prompt, join_negative, shot_seed,
-                                        video_input_hash)
+                                        video_input_hash, video_inputs)
 from backend.queue.errors import JobError
 from backend.queue.handlers import HANDLERS
 
@@ -37,8 +37,10 @@ def run_video(ctx, payload: dict) -> dict:
         packed = shot_refs(s, shot)
         refs = [sv.media.abs(r.file_path) for r in packed]
         labels = ref_labels(packed, refs)
+        used = packed[:engine.caps.max_refs]
         h = video_input_hash(shot, proj, style, ff.id, engine_name, has_audio,
-                             [r.candidate_id for r in packed[:engine.caps.max_refs]])
+                             [r.candidate_id for r in used])
+        inputs = video_inputs(shot, proj, style, ff.id, engine_name, has_audio, used)
         if not payload.get("force"):
             cur = selected_candidate(s, "shot", shot.id, "video")
             if cur is not None and cur.input_hash == h:  # hash 里含首帧候选 id
@@ -65,7 +67,8 @@ def run_video(ctx, payload: dict) -> dict:
         slot = get_or_create_slot(s, "shot", shot_id, "video")
         c = add_candidate(s, slot, file_path=sv.media.rel(dst), engine=engine_name,
                           params={**call.meta, "first_frame_candidate_id": ff.id,
-                                  "workflow": sv.media.rel(run_dir / "workflow.api.json")},
+                                  "workflow": sv.media.rel(run_dir / "workflow.api.json"),
+                                  "inputs": inputs},
                           input_hash=h, job_id=ctx.job_id)
         cid = c.id
     return {"candidate_ids": [cid], "file": sv.media.rel(dst)}

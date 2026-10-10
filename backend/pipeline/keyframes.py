@@ -9,7 +9,7 @@ from backend.domain.slots import add_candidate, get_or_create_slot, selected_can
 from backend.engines.base import ImageRequest
 from backend.pipeline.common import load_episode
 from backend.pipeline.prompting import (compose_image_prompt, join_negative, keyframe_input_hash,
-                                        shot_seed)
+                                        keyframe_inputs, shot_seed)
 from backend.queue.errors import JobError
 from backend.queue.handlers import HANDLERS
 
@@ -66,8 +66,9 @@ def run_keyframe(ctx, payload: dict) -> dict:
         packed = shot_refs(s, shot)
         refs = [sv.media.abs(r.file_path) for r in packed]
         labels = ref_labels(packed, refs)
-        h = keyframe_input_hash(shot, proj, style, engine_name,
-                                [r.candidate_id for r in packed[:engine.caps.max_refs]])
+        used = packed[:engine.caps.max_refs]
+        h = keyframe_input_hash(shot, proj, style, engine_name, [r.candidate_id for r in used])
+        inputs = keyframe_inputs(shot, proj, style, engine_name, used)
         # 只要一个候选、又不强制时，输入没变就不重出（多候选是用户明确要抽卡）
         if not payload.get("force") and int(payload.get("candidates") or 1) == 1:
             cur = selected_candidate(s, "shot", shot.id, "first_frame")
@@ -90,7 +91,8 @@ def run_keyframe(ctx, payload: dict) -> dict:
     with sv.db.session() as s:
         slot = get_or_create_slot(s, "shot", shot_id, "first_frame")
         c = add_candidate(s, slot, file_path=sv.media.rel(dst), engine=engine_name,
-                          params={**call.meta, "workflow": sv.media.rel(run_dir / "workflow.api.json")},
+                          params={**call.meta, "workflow": sv.media.rel(run_dir / "workflow.api.json"),
+                                  "inputs": inputs},
                           input_hash=h, job_id=ctx.job_id)
         cid = c.id
     return {"candidate_ids": [cid], "file": sv.media.rel(dst)}

@@ -14,12 +14,31 @@ def seed(api, n=2):
     return ep["id"]
 
 
+def _cand(s, shot_id, kind, h="h", job_id=None, params=None):
+    return add_candidate(s, get_or_create_slot(s, "shot", shot_id, kind),
+                         file_path=f"demo/media/{kind}/{shot_id}_{h}.bin", engine="zimage",
+                         params=params or {}, input_hash=h, job_id=job_id)
+
+
+def run_next(api, runner):
+    """把下一个排队的 GPU 任务拿出来同步跑一遍（测试里 worker 没启动）。"""
+    sv, m = api.app.state.services, api.app.state.manager
+    sv.comfy = runner
+    jid = m._claim(gpu=True)
+    assert jid is not None
+    m._execute(jid)
+    return jid
+
+
 def test_run_keyframes_and_videos(api):
     ep_id = seed(api)
     r = api.post(f"/api/episodes/{ep_id}/run", json={"stage": "keyframes", "candidates": 2})
     assert r.status_code == 200 and len(r.json()["job_ids"]) == 4
     jobs = api.get("/api/jobs", params={"status": "queued"}).json()
     assert {j["type"] for j in jobs} == {"image.keyframe"} and all(j["gpu"] for j in jobs)
+    shot2 = api.get(f"/api/episodes/{ep_id}").json()["shots"][1]["id"]
+    with api.app.state.services.db.session() as s:
+        _cand(s, shot2, "first_frame")
     r = api.post(f"/api/episodes/{ep_id}/run", json={"stage": "videos", "shots": ["S02"]})
     [vid] = r.json()["job_ids"]
     assert api.get(f"/api/jobs/{vid}").json()["model_family"] == "h3"
@@ -123,3 +142,136 @@ def test_media_rejects_unsafe_paths_without_resolving(api, monkeypatch):
 def test_media_missing_file_is_404(api):
     api.post("/api/projects", json={"title": "demo"})
     assert api.get("/media/demo/media/first_frame/nope.png").status_code == 404
+
+
+# ---------------------------------------------------------------- 提交前置校验
+def test_videos_without_first_frame_rejected_at_submit(api):
+    ep_id = seed(api)
+    r = api.post(f"/api/episodes/{ep_id}/run", json={"stage": "videos"})
+    assert r.status_code == 400 and "S01、S02 还没有选定首帧，先生成首帧" in r.json()["detail"]
+    assert api.get("/api/jobs").json() == []
+    shot1 = api.get(f"/api/episodes/{ep_id}").json()["shots"][0]["id"]
+    with api.app.state.services.db.session() as s:
+        _cand(s, shot1, "first_frame")
+    r = api.post(f"/api/episodes/{ep_id}/run", json={"stage": "videos"})
+    assert r.status_code == 400 and "S02 还没有选定首帧" in r.json()["detail"]
+    assert "S01" not in r.json()["detail"]
+    r = api.post(f"/api/episodes/{ep_id}/run", json={"stage": "videos", "shots": ["S01"]})
+    assert r.status_code == 200
+    r = api.post(f"/api/episodes/{ep_id}/run", json={"stage": "keyframes", "then": ["videos"]})
+    assert r.status_code == 200 and len(r.json()["job_ids"]) == 4
+
+
+def test_export_without_videos_rejected_at_submit(api):
+    ep_id = seed(api)
+    r = api.post(f"/api/episodes/{ep_id}/run", json={"stage": "export"})
+    assert r.status_code == 400 and "以下镜头还没有选定视频：S01, S02" in r.json()["detail"]
+    shot1 = api.get(f"/api/episodes/{ep_id}").json()["shots"][0]["id"]
+    with api.app.state.services.db.session() as s:
+        _cand(s, shot1, "video")
+    r = api.post(f"/api/episodes/{ep_id}/run", json={"stage": "export"})
+    assert r.status_code == 400 and r.json()["detail"].endswith("S02")
+    r = api.post(f"/api/episodes/{ep_id}/run",
+                 json={"stage": "keyframes", "then": ["videos", "export"]})
+    assert r.status_code == 200
+
+
+def test_comfy_down_rejected_at_submit(api, monkeypatch):
+    from backend.engines.comfyui import health
+
+    monkeypatch.setattr(health, "check_comfy",
+                        lambda client: health.ComfyHealth(False, "连不上"))
+    ep_id = seed(api)
+    r = api.post(f"/api/episodes/{ep_id}/run", json={"stage": "keyframes"})
+    assert r.status_code == 400
+    assert r.json()["detail"] == "ComfyUI 连不上（http://127.0.0.1:9），先启动 ComfyUI 或到设置页检查"
+    assert api.get("/api/jobs").json() == []
+    # 网页出图引擎不走 ComfyUI：不拦
+    shots = api.get(f"/api/episodes/{ep_id}").json()["shots"]
+    for sh in shots:
+        assert api.patch(f"/api/shots/{sh['id']}", json={"image_engine": "gpt_image"}).status_code == 200
+    assert api.post(f"/api/episodes/{ep_id}/run", json={"stage": "keyframes"}).status_code == 200
+    # 视频还是 ComfyUI（h3_video）：拦
+    r = api.post(f"/api/episodes/{ep_id}/run", json={"stage": "keyframes", "then": ["videos"]})
+    assert r.status_code == 400 and "ComfyUI 连不上" in r.json()["detail"]
+
+
+# ---------------------------------------------------------------- 镜头带进行中 / 失败任务
+def test_shot_detail_active_and_failure(api):
+    from backend.queue.errors import JobError
+    from backend.tests.helpers import FakeRunner
+
+    ep_id = seed(api, n=1)
+    [jid] = api.post(f"/api/episodes/{ep_id}/run", json={"stage": "keyframes"}).json()["job_ids"]
+    shot = api.get(f"/api/episodes/{ep_id}").json()["shots"][0]
+    assert ([(j["id"], j["type"], j["status"]) for j in shot["active_jobs"]]
+            == [(jid, "image.keyframe", "queued")])
+    assert shot["failures"] == []
+    run_next(api, FakeRunner(fail=JobError("ComfyUI 报错：显存不足\n" + "x" * 500)))
+    shot = api.get(f"/api/shots/{shot['id']}").json()
+    assert shot["active_jobs"] == []
+    [f] = shot["failures"]
+    assert f["id"] == jid and f["type"] == "image.keyframe" and f["status"] == "failed"
+    assert f["error"] == "ComfyUI 报错：显存不足" and f["finished_at"]
+    # 再成功出一张：失败不再显示
+    api.post(f"/api/episodes/{ep_id}/run", json={"stage": "keyframes"})
+    run_next(api, FakeRunner())
+    shot = api.get(f"/api/shots/{shot['id']}").json()
+    assert shot["failures"] == [] and shot["active_jobs"] == []
+    assert shot["slots"][0]["selected_candidate_id"] is not None
+
+
+def test_failure_error_truncated(api):
+    from backend.queue.errors import JobError
+    from backend.tests.helpers import FakeRunner
+
+    ep_id = seed(api, n=1)
+    api.post(f"/api/episodes/{ep_id}/run", json={"stage": "keyframes"})
+    run_next(api, FakeRunner(fail=JobError("长" * 300)))
+    [f] = api.get(f"/api/episodes/{ep_id}").json()["shots"][0]["failures"]
+    assert len(f["error"]) == 200
+
+
+def test_new_candidates_count(api):
+    from backend.tests.helpers import FakeRunner
+
+    ep_id = seed(api, n=1)
+    api.post(f"/api/episodes/{ep_id}/run", json={"stage": "keyframes", "candidates": 2})
+    runner = FakeRunner()
+    run_next(api, runner)
+    run_next(api, runner)
+    [slot] = api.get(f"/api/episodes/{ep_id}").json()["shots"][0]["slots"]
+    assert len(slot["candidates"]) == 2 and slot["new_candidates"] == 1
+    assert slot["stale"] is False and slot["stale_reason"] is None
+    inputs = slot["candidates"][0]["params"]["inputs"]
+    assert inputs["prompt"] == "p" and inputs["engine"] == "zimage" and inputs["aspect"] == "9:16"
+    assert inputs["refs"] == [] and "negative" in inputs
+
+
+# ---------------------------------------------------------------- 任务上下文
+def test_job_context_for_shot_job(api):
+    ep_id = seed(api)
+    [_, jid] = api.post(f"/api/episodes/{ep_id}/run", json={"stage": "keyframes"}).json()["job_ids"]
+    shot2 = api.get(f"/api/episodes/{ep_id}").json()["shots"][1]["id"]
+    ctx = api.get(f"/api/jobs/{jid}").json()["context"]
+    assert ctx["label"] == "demo · 第1集 · S02"
+    assert ctx["url"] == f"/projects/demo/episodes/{ep_id}/director?shot={shot2}"
+    assert ctx["project_slug"] == "demo" and ctx["episode_id"] == ep_id and ctx["shot_id"] == shot2
+    listed = {j["id"]: j for j in api.get("/api/jobs").json()}
+    assert listed[jid]["context"] == ctx and listed[jid]["payload"]["shot_id"] == shot2
+
+
+def test_job_context_for_episode_and_export_jobs(api):
+    ep_id = seed(api)
+    [sjid] = api.post(f"/api/episodes/{ep_id}/run", json={"stage": "script"}).json()["job_ids"]
+    ctx = api.get(f"/api/jobs/{sjid}").json()["context"]
+    assert ctx["label"] == "demo · 第1集" and ctx["url"] == f"/projects/demo/episodes/{ep_id}/script"
+    with api.app.state.services.db.session() as s:
+        for sh in api.get(f"/api/episodes/{ep_id}").json()["shots"]:
+            _cand(s, sh["id"], "video")
+    [ejid] = api.post(f"/api/episodes/{ep_id}/run", json={"stage": "export"}).json()["job_ids"]
+    ctx = api.get(f"/api/jobs/{ejid}").json()["context"]
+    assert ctx["url"] == f"/projects/demo/episodes/{ep_id}/export"
+    # 没有归属的任务：context 为空
+    jid = api.app.state.manager.submit("script", {"episode_id": ep_id})
+    assert api.get(f"/api/jobs/{jid}").json()["context"] is None

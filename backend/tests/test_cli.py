@@ -7,6 +7,7 @@ import cli.studio as studio
 from backend.domain.models import Job, Shot
 from backend.domain.shots import renumber_shots
 from backend.domain.slots import add_candidate, get_or_create_slot
+from backend.tests.helpers import give_selected
 
 runner = CliRunner()
 
@@ -151,9 +152,10 @@ def test_jobs_watch_empty_queue(cli):
 def _post_setup(cli, api):
     cli("project", "create", "demo")
     ep = api.post("/api/projects/demo/episodes", json={"source_text": "x"}).json()
-    api.post(f"/api/episodes/{ep['id']}/shots", json={"dialogue": [
+    sh = api.post(f"/api/episodes/{ep['id']}/shots", json={"dialogue": [
         {"speaker": "陈师傅", "zh": "换？", "start": 2.0, "end": 2.6},
-        {"speaker": "陈师傅", "zh": "先让我看看。", "start": 2.8, "end": 4.6}]})
+        {"speaker": "陈师傅", "zh": "先让我看看。", "start": 2.8, "end": 4.6}]}).json()
+    give_selected(api.app.state.services.db, sh["id"], "first_frame", "video")
     api.post("/api/projects/demo/characters", json={"name": "陈师傅"})
     return ep
 

@@ -4,7 +4,8 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request
 
 from backend.app.deps import manager, project_by_slug, services
-from backend.app.schemas import InputIn, RetryIn
+from backend.app.schemas import InputIn, JobOut, RetryIn
+from backend.app.views import with_context
 
 router = APIRouter(prefix="/api", tags=["jobs"])
 
@@ -14,20 +15,25 @@ def _mem_snapshot(client) -> dict:
             "process_rss_gb": client.process_rss_gb()}
 
 
-@router.get("/jobs")
+@router.get("/jobs", response_model=list[JobOut])
 def list_jobs(request: Request, status: str | None = None, project: str | None = None,
               limit: int = 100):
     project_id = None
+    db = services(request).db
     if project:
-        with services(request).db.session() as s:
+        with db.session() as s:
             project_id = project_by_slug(s, project).id
     statuses = [x.strip() for x in status.split(",") if x.strip()] if status else None
-    return manager(request).list_jobs(statuses=statuses, project_id=project_id, limit=limit)
+    jobs = manager(request).list_jobs(statuses=statuses, project_id=project_id, limit=limit)
+    with db.session() as s:
+        return with_context(s, jobs)
 
 
-@router.get("/jobs/{job_id}")
+@router.get("/jobs/{job_id}", response_model=JobOut)
 def get_job(job_id: int, request: Request):
-    return manager(request).get(job_id)
+    job = manager(request).get(job_id)
+    with services(request).db.session() as s:
+        return with_context(s, [job])[0]
 
 
 @router.post("/jobs/{job_id}/cancel")

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Request, Response
 
-from backend.app.deps import check_engines, get_or_404, services
+from backend.app.deps import check_engines, get_or_404, manager, services
 from backend.app.schemas import ReorderIn, ShotDetail, ShotFields, ShotIn, ShotOut
 from backend.app.views import shot_detail
 from backend.domain.models import Episode, Shot
@@ -17,9 +17,9 @@ COPY_FIELDS = ("scene_block_id", "shot_size", "camera_move", "action", "cast", "
                "use_end_frame", "continue_from_prev", "origin")
 
 
-def _detail(s, sv, shot: Shot) -> ShotDetail:
+def _detail(s, sv, shot: Shot, progress=None) -> ShotDetail:
     ep = s.get(Episode, shot.episode_id)
-    return shot_detail(s, sv, shot, ep.project, ep.project.style_bible)
+    return shot_detail(s, sv, shot, ep.project, ep.project.style_bible, progress=progress)
 
 
 def _order_ids(s, episode_id: int) -> list[int]:
@@ -30,7 +30,7 @@ def _order_ids(s, episode_id: int) -> list[int]:
 def get_shot(shot_id: int, request: Request):
     sv = services(request)
     with sv.db.session() as s:
-        return _detail(s, sv, get_or_404(s, Shot, shot_id, "镜头"))
+        return _detail(s, sv, get_or_404(s, Shot, shot_id, "镜头"), manager(request).progress)
 
 
 @router.post("/episodes/{episode_id}/shots", status_code=201, response_model=ShotDetail)

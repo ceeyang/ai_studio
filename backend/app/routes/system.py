@@ -7,6 +7,7 @@ from fastapi import APIRouter, Request
 
 from backend.app.deps import services
 from backend.doctor import run_doctor
+from backend.engines.comfyui import health as comfy_health
 from backend.queue.errors import JobError
 from backend.engines.registry import runtime_of
 
@@ -17,6 +18,27 @@ VERSION = "0.1.0"
 @router.get("/health")
 def health():
     return {"ok": True, "version": VERSION}
+
+
+def _browser_ext(browser) -> dict:
+    """网页出图的浏览器扩展连没连上（只读扩展最近一次的状态，不开浏览器）。"""
+    if browser is None:
+        return {"ok": False, "message": "网页出图的浏览器没有配置"}
+    if browser.transport != "extension":
+        return {"ok": True, "message": "网页出图用 studio 自己开的浏览器（cdp），不需要扩展"}
+    info = browser.hub.info()
+    if info.get("connected"):
+        return {"ok": True, "message": f"浏览器扩展已连上 · v{info.get('version') or '?'}"
+                                       f" · {info.get('browser') or '浏览器'}"}
+    return {"ok": False, "message": "浏览器扩展没有连上，ChatGPT / Gemini 出图会失败；到设置页看安装步骤"}
+
+
+@router.get("/system/health")
+def system_health(request: Request):
+    """顶栏状态灯用：ComfyUI 连没连上（1 秒超时、缓存 15 秒）、浏览器扩展连没连上。"""
+    sv = services(request)
+    h = comfy_health.check_comfy(sv.comfy_client)
+    return {"comfyui": {"ok": h.ok, "message": h.message}, "browser_ext": _browser_ext(sv.browser)}
 
 
 @router.get("/engines")

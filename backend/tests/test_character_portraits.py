@@ -195,3 +195,59 @@ def test_video_passes_cast_portraits_as_refs(tmp_path, db):
     assert run_video(ctx, {"shot_id": ids["shot"]}).get("skipped") is None
     with db.session() as s:
         assert selected_candidate(s, "shot", ids["shot"], "first_frame").id == ff
+
+
+def stale_reason(sv, shot_id, kind):
+    from backend.pipeline.common import load_episode
+
+    with sv.db.session() as s:
+        sh = s.get(Shot, shot_id)
+        _, proj = load_episode(s, sh.episode_id)
+        d = shot_detail(s, sv, sh, proj, proj.style_bible)
+        return next(x.stale_reason for x in d.slots if x.kind == kind)
+
+
+def test_stale_reason_portrait_changed(tmp_path, db):
+    ctx, runner, ids = setup(tmp_path, db)
+    sv = ctx.services
+    _, chen_cid = put_portrait(sv, ids["chen"], "chen.png")
+    run_keyframe(ctx, {"shot_id": ids["shot"]})
+    with db.session() as s:
+        ff = selected_candidate(s, "shot", ids["shot"], "first_frame")
+        assert ff.params["inputs"]["refs"] == [{"id": chen_cid, "label": "陈师傅 定妆照"}]
+        assert ff.params["inputs"]["engine"] == "h3_image"
+    assert stale_reason(sv, ids["shot"], "first_frame") is None
+    put_portrait(sv, ids["chen"], "chen_v2.png")
+    assert stale(sv, ids["shot"], "first_frame")
+    assert stale_reason(sv, ids["shot"], "first_frame") == "陈师傅 定妆照换了"
+    # 视频：记首帧和时长；换首帧后原因是「首帧换了」
+    run_keyframe(ctx, {"shot_id": ids["shot"]})
+    run_video(ctx, {"shot_id": ids["shot"]})
+    with db.session() as s:
+        v = selected_candidate(s, "shot", ids["shot"], "video")
+        ff_id = selected_candidate(s, "shot", ids["shot"], "first_frame").id
+        assert v.params["inputs"]["first_frame"] == ff_id and "duration" in v.params["inputs"]
+    assert stale_reason(sv, ids["shot"], "video") is None
+    put_portrait(sv, ids["yu"], "yu.png")
+    assert stale_reason(sv, ids["shot"], "video") == "加了 小雨 定妆照"
+
+
+def test_character_last_failure(api):
+    from backend.queue.errors import JobError
+    from backend.tests.helpers import FakeRunner
+
+    ch = make_char(api)
+    sv, m = api.app.state.services, api.app.state.manager
+    [jid] = api.post(f"/api/characters/{ch['id']}/portraits/draw", json={}).json()["job_ids"]
+    got = api.get("/api/projects/demo/characters").json()[0]
+    assert got["last_failure"] is None and [j["id"] for j in got["active_jobs"]] == [jid]
+    sv.comfy = FakeRunner(fail=JobError("出图失败\n第二行"))
+    m._execute(m._claim(gpu=True))
+    got = api.get("/api/projects/demo/characters").json()[0]
+    assert got["active_jobs"] == []
+    lf = got["last_failure"]
+    assert lf["id"] == jid and lf["type"] == "image.portrait" and lf["error"] == "出图失败"
+    api.post(f"/api/characters/{ch['id']}/portraits/draw", json={})
+    sv.comfy = FakeRunner()
+    m._execute(m._claim(gpu=True))
+    assert api.get("/api/projects/demo/characters").json()[0]["last_failure"] is None

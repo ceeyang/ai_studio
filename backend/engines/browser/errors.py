@@ -14,7 +14,7 @@ LOGIN_HINT = "在设置页点“打开浏览器登录”"   # cdp：studio 管�
 EXT_DIR = Path(__file__).resolve().parents[3] / "browser-extension"
 EXT_INSTALL_HINT = ("在你平时用的 Chrome/Edge 里加载 browser-extension（开发者模式→加载已解压的扩展程序）："
                     f"{EXT_DIR}")
-EXT_LOGIN_HINT = "在该浏览器里登录 ChatGPT / Gemini"
+EXT_LOGIN_HINT = "在装了扩展的浏览器里登录 gemini.google.com / chatgpt.com"
 
 
 class BrowserError(JobError):

@@ -1,10 +1,14 @@
 """把"跑某几个阶段"拆成任务并串好依赖。API、CLI 和阶段处理器（then 链）都用它。"""
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 
+from sqlalchemy import select
+
 from backend.domain.db import Database
-from backend.domain.models import Episode
+from backend.domain.models import Episode, Slot
+from backend.engines.registry import runtime_of
 from backend.pipeline.post import lines_missing_km, speakers_without_voice
 from backend.post.options import ExportOptions
 from backend.queue.errors import JobError
@@ -24,6 +28,13 @@ class RunOptions:
     force: bool = False
     priority: int = 0
     export: dict | None = None   # ExportOptions 的字段：subtitles / dub / end_card / trim
+
+
+@dataclass
+class Precheck:
+    """用户从界面 / API 点「跑」时的提交前校验（阶段处理器接着提交后续阶段时不做）。
+    comfy：返回 (ComfyUI 连得上吗, 地址)；None 表示不查 ComfyUI。"""
+    comfy: Callable[[], tuple[bool, str]] | None = None
 
 
 def _pick_shots(shots, wanted: list[str] | None):
@@ -49,8 +60,41 @@ def _family(engines, kind: str, name: str) -> str:
         raise JobError(str(e)) from None
 
 
+def _uses_comfy(engines, kind: str, names) -> bool:
+    for name in set(names):
+        try:
+            eng = engines.image(name) if kind == "image" else engines.video(name)
+        except KeyError:
+            continue  # 引擎不存在由 _family 报更准确的错
+        if runtime_of(eng) == "comfyui":
+            return True
+    return False
+
+
+def _run_precheck(check: Precheck, engines, stages: list[str], picked, codes: dict[int, str],
+                  selected: set[tuple[int, str]]) -> None:
+    """缺首帧就出视频、缺视频就导出、要用的引擎跑在 ComfyUI 上而 ComfyUI 连不上：提交前直接拒绝。"""
+    if "videos" in stages and "keyframes" not in stages:
+        missing = [codes[sid] for sid, _, _ in picked if (sid, "first_frame") not in selected]
+        if missing:
+            raise JobError(f"{'、'.join(missing)} 还没有选定首帧，先生成首帧")
+    if "export" in stages and "videos" not in stages and "keyframes" not in stages:
+        missing = [code for sid, code in codes.items() if (sid, "video") not in selected]
+        if missing:
+            raise JobError(f"以下镜头还没有选定视频：{', '.join(missing)}")
+    if check.comfy is None:
+        return
+    need = (("keyframes" in stages and _uses_comfy(engines, "image", [ie for _, ie, _ in picked]))
+            or ("videos" in stages and _uses_comfy(engines, "video", [ve for _, _, ve in picked])))
+    if need:
+        ok, url = check.comfy()
+        if not ok:
+            raise JobError(f"ComfyUI 连不上（{url}），先启动 ComfyUI 或到设置页检查")
+
+
 def submit_chain(manager, db: Database, engines, episode_id: int, stages: list[str],
-                 opts: RunOptions, depends_on: list[int] | None = None) -> list[int]:
+                 opts: RunOptions, depends_on: list[int] | None = None, *,
+                 precheck: Precheck | None = None) -> list[int]:
     stages = list(stages)
     bad = [x for x in stages if x not in STAGES + EXTRA_STAGES]
     if bad:
@@ -74,6 +118,16 @@ def submit_chain(manager, db: Database, engines, episode_id: int, stages: list[s
         dialogue = [list(sh.dialogue or []) for sh in ep.shots]
         codes = [sh.code for sh in ep.shots]
         voices = {c.name: c.voice for c in proj.characters}
+        shot_codes = {sh.id: sh.code for sh in ep.shots}
+        selected: set[tuple[int, str]] = set()
+        if precheck is not None and stages[0] not in LLM_STAGES and shot_codes:
+            selected = {(oid, kind) for oid, kind in s.execute(
+                select(Slot.owner_id, Slot.kind).where(
+                    Slot.owner_type == "shot", Slot.owner_id.in_(list(shot_codes)),
+                    Slot.selected_candidate_id.is_not(None)))}
+
+    if precheck is not None and stages[0] not in LLM_STAGES:
+        _run_precheck(precheck, engines, stages, picked, shot_codes, selected)
 
     first = stages[0]
     if first == FIT_STAGE:

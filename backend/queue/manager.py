@@ -74,6 +74,8 @@ class JobManager:
         self._paused = threading.Event()
         self._llm_waiting = 0
         self._cancel: dict[int, threading.Event] = {}
+        # 运行中任务最近一次报的进度（0-1），只在内存里；任务结束就删
+        self.progress: dict[int, float] = {}
         self._threads: list[threading.Thread] = []
 
     # ------------------------------------------------------------ 生命周期
@@ -403,6 +405,7 @@ class JobManager:
                 log.exception("任务 %s 记录失败日志时又出错，忽略", jid)
         finally:
             self._cancel.pop(jid, None)
+            self.progress.pop(jid, None)
         try:
             with self.db.session() as s:
                 j = s.get(Job, jid)

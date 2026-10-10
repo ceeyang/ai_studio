@@ -21,6 +21,9 @@ class JobContext:
         self.manager.append_log(self.job_id, msg)
 
     def progress(self, value: int, maximum: int) -> None:
+        store = getattr(self.manager, "progress", None)
+        if maximum and isinstance(store, dict):
+            store[self.job_id] = max(0.0, min(1.0, value / maximum))
         self.manager.bus.publish({"type": "progress", "job_id": self.job_id,
                                   "value": value, "max": maximum})
 

@@ -8,9 +8,9 @@ from urllib.parse import quote
 from fastapi import APIRouter, HTTPException, Request, Response
 from sqlalchemy import func, select
 
-from backend.app.deps import check_engines, get_or_404, project_by_slug, services
+from backend.app.deps import check_engines, get_or_404, manager, project_by_slug, services
 from backend.app.schemas import (CharacterIn, CharacterOut, CharacterPatch, EndCardIO,
-                                 EpisodeStats, JobBrief, LocationOut, LocationPatch, PortraitPathIn, ProjectIn, ProjectOut,
+                                 EpisodeStats, LocationOut, LocationPatch, PortraitPathIn, ProjectIn, ProjectOut,
                                  ProjectOverview, ProjectPatch, StyleIO, TurnaroundCellOut,
                                  TurnaroundOut, TurnaroundSheetOut)
 from backend.domain.characters import portrait_ext, portrait_of, set_portrait
@@ -19,7 +19,7 @@ from backend.domain.turnaround import (DEFAULT_SHEET_ENGINE, SHEETS, VIEW_KEYS, 
                                        sheet_state)
 from backend.domain.models import (Candidate, Character, Episode, Export, Job, Location, Project,
                                    Shot, Slot, StyleBible)
-from backend.app.views import candidate_out
+from backend.app.views import candidate_out, job_brief, owner_jobs
 from backend.domain.slots import delete_slots, slots_for
 from backend.queue.manager import ACTIVE
 from backend.queue.errors import JobError
@@ -146,27 +146,31 @@ def turnaround_out(s, c: Character, slots: dict) -> TurnaroundOut:
                          sheets=sheets, cells=cells)
 
 
-def character_out(s, c: Character) -> CharacterOut:
+def character_out(s, c: Character, progress=None) -> CharacterOut:
     pc = portrait_of(s, c.id)
     slots = {x.kind: x for x in slots_for(s, "character", c.id)}
     slot = slots.get("portrait")
     jobs = s.scalars(select(Job).where(Job.owner_type == "character", Job.owner_id == c.id,
                                        Job.type.in_(CHARACTER_JOB_TYPES),
-                                       Job.status.in_(ACTIVE)).order_by(Job.id))
+                                       Job.status.in_(ACTIVE)).order_by(Job.id)).all()
+    # 最近一次抽卡失败（之后成功过、或又排上了新的抽卡就不提示）
+    portrait_jobs = owner_jobs(s, "character", [c.id], ("image.portrait",))[c.id]
+    failed = portrait_jobs.failure("image.portrait")
     return CharacterOut.model_validate(c).model_copy(update={
         "portrait_candidate_id": pc.id if pc else None,
         "portrait_url": "/media/" + quote(pc.file_path) if pc else None,
         "portraits": [candidate_out(x) for x in slot.candidates] if slot else [],
         "design_options": list(c.design_options or []),
-        "active_jobs": [JobBrief(id=j.id, type=j.type, status=j.status,
-                                 sheet=(j.payload or {}).get("sheet")) for j in jobs],
+        "active_jobs": [job_brief(j, progress) for j in jobs],
+        "last_failure": job_brief(failed, failed=True) if failed else None,
         "turnaround": turnaround_out(s, c, slots)})
 
 
 @router.get("/projects/{slug}/characters", response_model=list[CharacterOut])
 def list_characters(slug: str, request: Request):
     with services(request).db.session() as s:
-        return [character_out(s, c) for c in project_by_slug(s, slug).characters]
+        return [character_out(s, c, manager(request).progress)
+                for c in project_by_slug(s, slug).characters]
 
 
 @router.post("/projects/{slug}/characters", status_code=201, response_model=CharacterOut)

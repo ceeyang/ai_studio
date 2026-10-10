@@ -151,3 +151,35 @@ def test_episode_and_project_delete_drop_slots(api):
         _candidate(s, sh.id, "first_frame", "h")
     assert api.delete("/api/projects/demo").status_code == 204
     assert _slot_count(api) == (0, 0)
+
+
+def test_stale_reason_legacy_candidate(api):
+    ep_id, ids = seed(api)
+    db = api.app.state.services.db
+    with db.session() as s:
+        shot = s.get(Shot, ids[0])
+        proj = s.query(Project).one()
+        _candidate(s, ids[0], "first_frame", keyframe_input_hash(shot, proj, None, "zimage"))
+    api.patch(f"/api/shots/{ids[0]}", json={"image_prompt": "改了"})
+    slot = api.get(f"/api/shots/{ids[0]}").json()["slots"][0]
+    assert slot["stale"] is True and slot["stale_reason"] == "输入已变化（旧记录无法细分）"
+
+
+def test_stale_reason_prompt_then_engine(api):
+    ep_id, ids = seed(api)
+    db = api.app.state.services.db
+    with db.session() as s:
+        shot = s.get(Shot, ids[0])
+        proj = s.query(Project).one()
+        inputs = {"prompt": "prompt 0", "negative": "", "engine": "zimage", "aspect": "9:16",
+                  "refs": []}
+        add_candidate(s, get_or_create_slot(s, "shot", ids[0], "first_frame"),
+                      file_path="demo/media/first_frame/a.png", engine="zimage",
+                      params={"inputs": inputs},
+                      input_hash=keyframe_input_hash(shot, proj, None, "zimage"), job_id=None)
+    slot = api.get(f"/api/shots/{ids[0]}").json()["slots"][0]
+    assert slot["stale"] is False and slot["stale_reason"] is None
+    api.patch(f"/api/shots/{ids[0]}", json={"image_engine": "h3_image"})
+    assert api.get(f"/api/shots/{ids[0]}").json()["slots"][0]["stale_reason"] == "引擎换了"
+    api.patch(f"/api/shots/{ids[0]}", json={"image_prompt": "改了"})
+    assert api.get(f"/api/shots/{ids[0]}").json()["slots"][0]["stale_reason"] == "提示词改了"

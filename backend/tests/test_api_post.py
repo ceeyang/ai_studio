@@ -2,6 +2,7 @@
 from sqlalchemy import select
 
 from backend.domain.models import Job, Shot
+from backend.tests.helpers import give_selected
 
 
 def setup(api, dialogue=None):
@@ -52,7 +53,10 @@ def test_translate_endpoint_submits_cpu_job(api):
 
 
 def test_run_export_with_options_chains_translate_and_dub(api):
-    ep, _ = setup(api)
+    ep, sh = setup(api)
+    r = api.post(f"/api/episodes/{ep['id']}/run", json={"stage": "export"})
+    assert r.status_code == 400 and "还没有选定视频：S01" in r.json()["detail"]
+    give_selected(api.app.state.services.db, sh["id"], "video")
     chars = api.post("/api/projects/demo/characters", json={"name": "陈师傅"}).json()
     body = {"stage": "export", "export": {"subtitles": "zh+km", "dub": "km", "end_card": True}}
     r = api.post(f"/api/episodes/{ep['id']}/run", json=body)

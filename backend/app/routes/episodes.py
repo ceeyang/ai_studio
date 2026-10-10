@@ -4,7 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException, Request, Response
 from sqlalchemy import func, select
 
-from backend.app.deps import get_or_404, project_by_slug, services
+from backend.app.deps import get_or_404, manager, project_by_slug, services
 from backend.app.schemas import (EpisodeDetail, EpisodeIn, EpisodeOut, EpisodePatch, ExportOut,
                                  SceneBlockOut, SceneBlockPatch)
 from backend.app.views import episode_detail, export_out
@@ -43,14 +43,15 @@ def get_episode_by_number(slug: str, number: int, request: Request):
         ep = s.scalar(select(Episode).where(Episode.project_id == p.id, Episode.number == number))
         if ep is None:
             raise LookupError(f"项目 {slug} 没有第 {number} 集")
-        return episode_detail(s, sv, ep)
+        return episode_detail(s, sv, ep, progress=manager(request).progress)
 
 
 @router.get("/episodes/{episode_id}", response_model=EpisodeDetail)
 def get_episode(episode_id: int, request: Request):
     sv = services(request)
     with sv.db.session() as s:
-        return episode_detail(s, sv, get_or_404(s, Episode, episode_id, "剧集"))
+        return episode_detail(s, sv, get_or_404(s, Episode, episode_id, "剧集"),
+                              progress=manager(request).progress)
 
 
 @router.patch("/episodes/{episode_id}", response_model=EpisodeOut)

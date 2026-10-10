@@ -27,10 +27,15 @@ from backend.config import ComfyCfg, Config, LLMCfg, ProviderCfg, ServerCfg
 
 
 @pytest.fixture
-def api(tmp_path):
+def api(tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
 
     from backend.app.main import create_app
+    from backend.engines.comfyui import health
+
+    # 测试配置里的 ComfyUI 地址连不上；默认当它在线，测「连不上」的用例自己再 monkeypatch
+    monkeypatch.setattr(health, "check_comfy",
+                        lambda client: health.ComfyHealth(True, "已连上（测试）"))
 
     cfg = Config(server=ServerCfg(data_dir=tmp_path / "data"), log_dir=tmp_path / "logs",
                  comfyui=ComfyCfg(url="http://127.0.0.1:9", max_retries=1),

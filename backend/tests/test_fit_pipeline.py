@@ -18,7 +18,7 @@ from backend.pipeline.runs import RunOptions, submit_chain
 from backend.post.fit import speech_chars
 from backend.queue.handlers import HANDLERS
 from backend.queue.manager import JobManager
-from backend.tests.helpers import FakeCtx, make_gateway, make_services, seed_episode
+from backend.tests.helpers import FakeCtx, give_selected, make_gateway, make_services, seed_episode
 from backend.tests.test_post_pipeline import TimedFFmpeg, add_video, dialogue
 
 KM_SECONDS = {"ជាង! គេប្រាប់ថា មួយនេះត្រូវដូរហើយ។": 3.2, "ប្ដូរ?": 1.0, "សុំមើលសិន។": 1.2}
@@ -158,6 +158,10 @@ def test_fit_khmer_endpoint(api):
     ep = api.post("/api/projects/demo/episodes", json={"source_text": "x"}).json()
     sh = api.post(f"/api/episodes/{ep['id']}/shots", json={"dialogue": [
         {"speaker": "陈师傅", "zh": "换？", "start": 1.0, "end": 1.6}]}).json()
+    r = api.post(f"/api/episodes/{ep['id']}/dialogue/fit-khmer",
+                 json={"shot_ids": [sh["id"]], "then": ["videos"]})
+    assert r.status_code == 400 and "S01 还没有选定首帧" in r.json()["detail"]
+    give_selected(api.app.state.services.db, sh["id"], "first_frame")
     r = api.post(f"/api/episodes/{ep['id']}/dialogue/fit-khmer",
                  json={"shot_ids": [sh["id"]], "then": ["videos", "export"],
                        "export": {"subtitles": "zh+km", "dub": "km", "bed": False,

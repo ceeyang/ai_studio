@@ -119,7 +119,7 @@ def test_hello_ping_status_and_doctor(api):
     assert st["extension_dir"].replace("\\", "/").endswith("/browser-extension")
     rows = {c["name"]: c for c in api.get("/api/doctor").json() if c["group"] == "浏览器"}
     assert rows["扩展连接"]["status"] == "warn" and "加载已解压的扩展程序" in rows["扩展连接"]["detail"]
-    assert "在该浏览器里登录 ChatGPT / Gemini" in rows["ChatGPT 登录（gpt_image）"]["detail"]
+    assert "在装了扩展的浏览器里登录 gemini.google.com / chatgpt.com" in rows["ChatGPT 登录（gpt_image）"]["detail"]
 
     with api.websocket_connect("/api/browser/ext", headers=EXT) as ws:
         w = hello(ws)
@@ -142,7 +142,7 @@ def test_hello_ping_status_and_doctor(api):
         assert rows["扩展连接"].status == "ok" and "v0.1.0" in rows["扩展连接"].detail
         assert rows["ChatGPT 登录（gpt_image）"].status == "ok" and "开着 2 个标签页" in rows["ChatGPT 登录（gpt_image）"].detail
         g = rows["Gemini 登录（gemini_image）"]
-        assert g.status == "warn" and "在该浏览器里登录" in g.detail
+        assert g.status == "warn" and "在装了扩展的浏览器里登录" in g.detail
     assert wait_for(lambda: not hub.connected)
     assert api.get("/api/browser/status").json()["connected"] is False
 

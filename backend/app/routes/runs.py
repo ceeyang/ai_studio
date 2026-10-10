@@ -8,10 +8,19 @@ from fastapi import APIRouter, Request
 from backend.app.deps import get_or_404, manager, services
 from backend.app.schemas import FitKhmerIn, RerunImpact, RunIn, RunOut, TranslateIn
 from backend.domain.models import Episode
+from backend.engines.comfyui import health
 from backend.pipeline.impact import rerun_impact
-from backend.pipeline.runs import FIT_STAGE, STAGES, RunOptions, submit_chain
+from backend.pipeline.runs import FIT_STAGE, STAGES, Precheck, RunOptions, submit_chain
 
 router = APIRouter(prefix="/api", tags=["runs"])
+
+
+def _precheck(sv) -> Precheck:
+    """用户点「跑」时提交前校验：缺首帧 / 缺视频 / ComfyUI 连不上都马上报错，不排进队列再失败。"""
+    def comfy():
+        h = health.check_comfy(sv.comfy_client)
+        return h.ok, health.comfy_url(sv.comfy_client)
+    return Precheck(comfy=comfy)
 
 
 @router.get("/episodes/{episode_id}/rerun-impact", response_model=RerunImpact)
@@ -31,7 +40,8 @@ def run_stage(episode_id: int, body: RunIn, request: Request):
     opts = RunOptions(shots=body.shots, candidates=body.candidates, force=body.force,
                       priority=body.priority,
                       export=body.export.model_dump() if body.export else None)
-    return RunOut(job_ids=submit_chain(manager(request), sv.db, sv.engines, episode_id, stages, opts))
+    return RunOut(job_ids=submit_chain(manager(request), sv.db, sv.engines, episode_id, stages, opts,
+                                       precheck=_precheck(sv)))
 
 
 @router.post("/episodes/{episode_id}/dialogue/fit-khmer", response_model=RunOut)
@@ -42,7 +52,7 @@ def fit_khmer(episode_id: int, body: FitKhmerIn, request: Request):
                       force=body.force,
                       export=body.export.model_dump() if body.export else None)
     return RunOut(job_ids=submit_chain(manager(request), sv.db, sv.engines, episode_id,
-                                       [FIT_STAGE, *body.then], opts))
+                                       [FIT_STAGE, *body.then], opts, precheck=_precheck(sv)))
 
 
 @router.post("/episodes/{episode_id}/subtitles/translate", response_model=RunOut)
