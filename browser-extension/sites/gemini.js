@@ -51,6 +51,7 @@ export const GEMINI = {
   assistant_turn: 'model-response',
   result_images: 'model-response generated-image img, model-response single-image img, model-response img.image',
   user_images: 'user-query img, uploader-file-preview img',
+  busy_marker: '',
   dismiss_buttons:
     'mat-dialog-container button:has-text("Agree"), mat-dialog-container button:has-text("同意"), ' +
     'mat-dialog-container button:has-text("Got it"), mat-dialog-container button:has-text("知道了")',

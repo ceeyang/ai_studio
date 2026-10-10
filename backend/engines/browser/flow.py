@@ -169,7 +169,7 @@ class _Flow:
                                        "等一阵再重试，或换别的图像引擎")
             if self.d.visible(s.login_wall):
                 raise not_logged_in(s)
-            busy = self.d.visible(s.stop_button)
+            busy = self.d.visible(s.stop_button) or bool(s.busy_marker and self.d.visible(s.busy_marker))
             imgs = self._results()
             if self.n_refs and elapsed <= s.echo_seconds and imgs:
                 # 生成的图不可能几秒内就出来：这时冒出来的是网站回显的参考图

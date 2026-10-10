@@ -14,6 +14,8 @@
 import { sniffMime } from './protocol.js';
 
 export const PROGRESS_MAX = 100;
+/** 等图时每隔多少秒往任务日志写一次诊断（停止按钮、候选图被排除的原因）。 */
+export const DIAG_EVERY = 30;
 
 export class FlowError extends Error {
   constructor(kind, message) {
@@ -195,14 +197,22 @@ class Flow {
     }
   }
 
-  async results() {
+  async results(why) {
     const s = this.spec;
     const mine = new Set((await this.d.images(s.user_images)).map((i) => i.src));
     const out = new Map();
+    // why（可选数组）：记下每张候选图被排除的原因，等图久了写进任务日志，方便排查选择器
+    const skip = (i, reason) => {
+      if (why) why.push(`${reason} ${i.w}x${i.h} ${String(i.src).slice(0, 80)}`);
+    };
     for (const i of await this.d.images(s.result_images)) {
-      if (!i.src || mine.has(i.src) || this.echo.has(i.src) || out.has(i.src) || !i.complete) continue;
-      if (Math.max(i.w, i.h) < s.min_image_px) continue;
-      if (s.image_src_hint.length && !s.image_src_hint.some((h) => i.src.includes(h))) continue;
+      if (!i.src) { skip(i, '无地址'); continue; }
+      if (mine.has(i.src)) { skip(i, '是用户上传的图'); continue; }
+      if (this.echo.has(i.src)) { skip(i, '是回显的参考图'); continue; }
+      if (out.has(i.src)) continue;
+      if (!i.complete) { skip(i, '还没加载完'); continue; }
+      if (Math.max(i.w, i.h) < s.min_image_px) { skip(i, '太小'); continue; }
+      if (s.image_src_hint.length && !s.image_src_hint.some((h) => i.src.includes(h))) { skip(i, '地址不像出图结果'); continue; }
       out.set(i.src, i);
     }
     return [...out.values()];
@@ -214,10 +224,15 @@ class Flow {
     let last = null;
     let stableSince = 0;
     let idleSince = 0;
+    let nextDiag = DIAG_EVERY;
     for (;;) {
       await this.checkCancel();
       const now = this.clock();
       const elapsed = now - start;
+      if (elapsed >= nextDiag) {
+        nextDiag += DIAG_EVERY;
+        await this.diagnose(elapsed);
+      }
       if (elapsed > timeout) {
         if (await this.d.visible(s.stop_button)) await this.d.click(s.stop_button);
         throw new FlowError(
@@ -233,7 +248,7 @@ class Flow {
         }
       }
       if (await this.d.visible(s.login_wall)) throw notLoggedIn(s);
-      const busy = await this.d.visible(s.stop_button);
+      const busy = await this.isBusy();
       let imgs = await this.results();
       if (this.nRefs && elapsed <= s.echo_seconds && imgs.length) {
         // 生成的图不可能几秒内就出来：这时冒出来的是网站回显的参考图
@@ -265,6 +280,28 @@ class Flow {
       this.progress(Math.min(95, Math.floor((elapsed / Math.max(s.expected_seconds, 1)) * 95)), PROGRESS_MAX);
       await this.d.sleep(this.poll);
     }
+  }
+
+  /** 还在出图：停止按钮看得见，或者网站标着这一轮没完成（busy_marker）。 */
+  async isBusy() {
+    const s = this.spec;
+    if (await this.d.visible(s.stop_button)) return true;
+    return !!s.busy_marker && (await this.d.visible(s.busy_marker));
+  }
+
+  /** 等图超过 DIAG_EVERY 秒还没结束：把判断依据写进任务日志（停止按钮在不在、候选图各自为什么不算）。 */
+  async diagnose(elapsed) {
+    const s = this.spec;
+    const why = [];
+    const busy = await this.isBusy();
+    const got = await this.results(why);
+    const all = await this.d.count(s.result_images);
+    const parts = [
+      `等了 ${Math.round(elapsed)} 秒：停止按钮${busy ? '还在' : '已消失'}`,
+      `选择器命中 ${all} 张图，可用 ${got.length} 张`,
+    ];
+    if (why.length) parts.push(`排除：${why.slice(0, 4).join('；')}`);
+    this.log(parts.join('，'));
   }
 
   async download(imgs) {

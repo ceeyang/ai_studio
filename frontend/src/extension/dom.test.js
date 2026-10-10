@@ -13,6 +13,26 @@ beforeEach(() => {
 });
 
 describe('content/dom.js', () => {
+  it('ChatGPT 2026-10 新界面：结果图在 generated-image-gallery 里、地址是 blob:，用户气泡里的图不算；这一轮没完成算忙', () => {
+    // 结构照 2026-10-11 实测的 chatgpt.com 页面（没有 article / data-message-author-role 了）
+    document.body.innerHTML = `
+      <main><div data-turn-key="k1"><div data-talvt-turn-state="streaming">
+        <div data-user-message-bubble=""><img id="ref" alt="" src="blob:https://chatgpt.com/ref-1"></div>
+        <h4 data-conversation-role="assistant">ChatGPT said:</h4>
+        <div data-testid="generated-image-gallery"><div><button data-testid="generated-image-preview" aria-label="Generated image 1">
+          <img id="out" alt="Generated image 1" src="blob:https://chatgpt.com/ff6e435f-41f9"></button>
+          <button data-testid="generated-image-preview" style="display:none"><img id="dup" alt="Generated image 1" src="blob:https://chatgpt.com/dup"></button></div></div>
+      </div></div></main>`;
+    expect(D.queryAll(CHATGPT.result_images).map((e) => e.id)).toContain('out');
+    expect(D.queryAll(CHATGPT.user_images).map((e) => e.id)).toEqual(['ref']);
+    // 同一张图网站还放了一个不显示的副本（地址不同）：不显示的不算，免得一张图存成两个候选
+    expect(D.images(CHATGPT.result_images).map((i) => i.src)).toEqual(['blob:https://chatgpt.com/ff6e435f-41f9']);
+    expect(CHATGPT.image_src_hint.some((h) => 'blob:https://chatgpt.com/ff6e435f-41f9'.includes(h))).toBe(true);
+    expect(D.visible(CHATGPT.busy_marker)).toBe(true);
+    document.querySelector('[data-talvt-turn-state]').setAttribute('data-talvt-turn-state', 'complete');
+    expect(D.visible(CHATGPT.busy_marker)).toBe(false);
+  });
+
   it('按顶层逗号拆选择器，引号和括号里的逗号不拆', () => {
     expect(D.splitList('a, b[x="1,2"], c:has-text("a, b"), d:not(.x, .y)')).toEqual([
       'a', 'b[x="1,2"]', 'c:has-text("a, b")', 'd:not(.x, .y)',

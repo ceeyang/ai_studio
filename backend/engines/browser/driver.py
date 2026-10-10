@@ -49,8 +49,10 @@ _FETCH_JS = """async (src) => {
   return btoa(s);
 }"""
 
-_IMAGES_JS = """els => els.map(e => ({src: e.currentSrc || e.src || '', w: e.naturalWidth || 0,
-                                   h: e.naturalHeight || 0, complete: !!e.complete}))"""
+# 不显示的图不算（和扩展的 content/dom.js 一致）：网站会给同一张图再放一个不显示的副本
+_IMAGES_JS = """els => els.filter(e => { const r = e.getBoundingClientRect(); return r.width > 0 && r.height > 0; })
+                .map(e => ({src: e.currentSrc || e.src || '', w: e.naturalWidth || 0,
+                            h: e.naturalHeight || 0, complete: !!e.complete}))"""
 
 _PASTE_JS = """([sel, files]) => {
   const el = document.querySelector(sel);

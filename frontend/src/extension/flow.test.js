@@ -47,6 +47,17 @@ describe('extension flow', () => {
     expect(logs.some((m) => m.includes('已提交'))).toBe(true);
   });
 
+  it('ChatGPT 新界面：结果图是 blob: 地址也能认出来并取回；等久了日志里有诊断', async () => {
+    const BLOB = 'blob:https://chatgpt.com/ff6e435f-41f9';
+    const page = new FakePage(CHATGPT).afterSubmit([
+      [1, (p) => p.show(CHATGPT.stop_button)],
+      [40, (p) => p.finish(BLOB)],
+    ]);
+    const { out, logs } = await run(page);
+    expect(out.map((o) => o.src)).toEqual([BLOB]);
+    expect(logs.some((m) => m.startsWith('等了 30 秒：停止按钮还在'))).toBe(true);
+  });
+
   it('上传参考图走 file input，网站回显的参考图不算结果（5 秒回显规则）', async () => {
     const page = new FakePage(CHATGPT).afterSubmit([
       [1, (p) => p.show(CHATGPT.stop_button)],

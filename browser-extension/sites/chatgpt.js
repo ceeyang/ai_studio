@@ -58,11 +58,16 @@ export const CHATGPT = {
   attachment_busy: 'form [role="progressbar"], form .animate-spin',
   assistant_turn: 'article[data-turn="assistant"], [data-message-author-role="assistant"]',
   result_images:
+    // 2026-10 实测的新界面：结果图在 generated-image-gallery 里，alt 是「Generated image 1」，地址是 blob:
+    '[data-testid="generated-image-gallery"] img, img[alt^="Generated image"], ' +
     'article[data-turn="assistant"] img, [data-message-author-role="assistant"] img, ' +
-    'img[alt="Generated image"], img[alt*="已生成图片"], img[alt*="生成的图片"], ' +
-    // 新界面的消息结构没实测过：兜底取页面里所有 estuary 地址的图（参考图靠 user_images 和回显规则排除）
+    'img[alt*="已生成图片"], img[alt*="生成的图片"], ' +
+    // 兜底取页面里所有 estuary 地址的图（参考图靠 user_images 和回显规则排除）
     'main img[src*="/backend-api/estuary/content"]',
-  user_images: 'article[data-turn="user"] img, [data-message-author-role="user"] img, form img',
+  user_images:
+    '[data-user-message-bubble] img, article[data-turn="user"] img, [data-message-author-role="user"] img, form img',
+  // 新界面里这一轮还没标成 complete 也算还在出图（停止按钮不一定看得见）
+  busy_marker: '[data-talvt-turn-state]:not([data-talvt-turn-state="complete"])',
   dismiss_buttons:
     '[role="dialog"] button:has-text("Got it"), [role="dialog"] button:has-text("知道了"), ' +
     '[role="dialog"] button:has-text("Okay, let’s go")',
@@ -78,7 +83,7 @@ export const CHATGPT = {
     /content polic/i, /violat/i, /won[’']?t be able/i, /无法(生成|创建|制作|帮|提供|满足)/i,
     /不能(生成|创建|制作|帮)/i, /违反/i, /内容政策/i,
   ],
-  image_src_hint: ['/backend-api/estuary/content', 'oaiusercontent.com', '/backend-api/files'],
+  image_src_hint: ['/backend-api/estuary/content', 'oaiusercontent.com', '/backend-api/files', 'blob:https://chatgpt.com/'],
   min_image_px: 384,
   ready_timeout: 45,
   upload_timeout: 90,

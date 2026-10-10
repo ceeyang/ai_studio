@@ -103,7 +103,13 @@
     if (!el || !el.isConnected) return false;
     const st = root.getComputedStyle ? root.getComputedStyle(el) : null;
     if (st && (st.display === 'none' || st.visibility === 'hidden')) return false;
-    if (root.__aiStudioDomNoLayout) return true; // jsdom 没有布局，单测里打开
+    if (root.__aiStudioDomNoLayout) {
+      // jsdom 没有布局（单测里打开）：只能看祖先有没有 display:none
+      for (let p = el.parentElement; p; p = p.parentElement) {
+        if (root.getComputedStyle(p).display === 'none') return false;
+      }
+      return true;
+    }
     const r = el.getBoundingClientRect();
     return r.width > 0 && r.height > 0;
   }
@@ -287,7 +293,8 @@
     },
     images(sel) {
       return queryAll(sel)
-        .filter((e) => e.tagName === 'IMG')
+        // 不显示的不算：网站会给同一张图再放一个不显示的副本（地址还不一样）
+        .filter((e) => e.tagName === 'IMG' && isVisible(e))
         .map((e) => ({ src: e.currentSrc || e.src || '', w: e.naturalWidth || 0, h: e.naturalHeight || 0, complete: !!e.complete }));
     },
     /** 在页面里取图（同源请求自动带登录 cookie，blob: 也能取），返回 base64。 */
