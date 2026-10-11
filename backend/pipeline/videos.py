@@ -42,6 +42,14 @@ def scene_qc(ctx, sv, path, code: str) -> dict | None:
     return {"hard_cuts": cuts}
 
 
+def clean_selection(s, shot_id: int, fresh_hashes) -> bool:
+    """当前选定的视频是不是「干净的」：没被出片自检标成疑似跳切，而且输入没过期。"""
+    cur = selected_candidate(s, "shot", shot_id, "video")
+    if cur is None or cur.input_hash not in fresh_hashes:
+        return False
+    return not (((cur.params or {}).get("qc") or {}).get("hard_cuts"))
+
+
 def _speakers(proj, shot) -> dict[str, Speaker]:
     on = {c.get("character_id") for c in shot.cast or [] if isinstance(c, dict)}
     return {c.name: Speaker(short_ref(c.visual_prompt), c.id in on) for c in proj.characters}
@@ -138,10 +146,14 @@ def run_video(ctx, payload: dict) -> dict:
                   "workflow": sv.media.rel(run_dir / "workflow.api.json"), "inputs": inputs}
         if qc is not None:
             params["qc"] = qc
+        # 新的一条疑似跳切、而当前选定的是干净且没过期的：不抢选定（无人值守时坏片不进成片），重拍也一样
+        keep = bool(qc and qc["hard_cuts"]) and clean_selection(s, shot_id, (h, h_legacy))
         c = add_candidate(s, slot, file_path=sv.media.rel(dst), engine=engine_name,
                           params=params,
-                          input_hash=h, job_id=ctx.job_id,
-                          force_select=bool(payload.get("force")))  # 重拍：新的一条直接选中
+                          input_hash=h, job_id=ctx.job_id, auto_select=not keep,
+                          force_select=bool(payload.get("force")) and not keep)  # 重拍：新的一条直接选中
+        if keep:
+            ctx.log(f"视频 {code}：新的一条疑似跳切，没有替换当前选定的视频；要用它请手动选")
         if qc and qc["hard_cuts"]:
             c.note = cut_note(qc["hard_cuts"])
         cid = c.id

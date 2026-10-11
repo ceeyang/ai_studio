@@ -47,6 +47,9 @@ def run_export(ctx, payload: dict) -> dict:
     card = cut.end_card or {}
     if opts.end_card and not any((x.get("text") or "").strip() for x in card.get("lines") or []):
         raise JobError("项目还没有设置片尾卡，先在导演台或 studio project end-card 里填写")
+    if cut.flagged:
+        ctx.log(f"注意：这些选定的视频出片自检疑似跳切，成片里会有画面突变：{'；'.join(cut.flagged)}"
+                "（不对就到视频阶段重拍或换一条再导出）")
     width, height = OUTPUT_SIZES[cut.aspect]
     variant = cut.aspect.replace(":", "x")
     ctx.check_canceled()

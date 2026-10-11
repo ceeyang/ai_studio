@@ -60,6 +60,16 @@ describe('ExportStage', () => {
     expect(screen.queryByTestId('missing-videos')).toBeNull();
   });
 
+  it('选定的视频出片自检疑似跳切：就绪检查里警告（不拦导出）', async () => {
+    const cut = withVideo(12, 'S02');
+    cut.slots[0].candidates[0].params = { qc: { hard_cuts: [2.04] } };
+    installFetch(routes({ 'GET /api/episodes/4': makeEpisode({ id: 4, shots: [withVideo(11, 'S01'), cut] }) }));
+    renderAt(<ExportStage />, AT);
+    const warn = await screen.findByTestId('flagged-videos');
+    expect(warn.textContent).toContain('选定的视频疑似跳切：S02（2.0s）');
+    expect((screen.getByRole('button', { name: '合成导出' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
   it('合成导出带上字幕、配音、片尾卡选项；勾高棉语字幕会连带勾中文字幕', async () => {
     localStorage.clear();
     const calls = installFetch(routes({ 'POST /api/episodes/4/run': { job_ids: [41] } }));

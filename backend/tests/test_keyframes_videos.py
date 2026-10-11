@@ -535,3 +535,27 @@ def test_engine_video_prompt_puts_motion_first_and_keeps_hash_version():
     # 算哈希的老写法不变：锚整段在前
     old = compose_video_prompt("she looks up", "img", "hum", dlg, anchor=ANCHOR6, has_audio=True)
     assert old.startswith(ANCHOR6 + " she looks up")
+
+
+def test_flagged_video_does_not_replace_clean_selection(tmp_path, db):
+    """出片自检疑似跳切的新视频，不抢干净、没过期的选定（重拍也一样），候选照样登记、写 note。"""
+    ctx, runner, shot_id = setup(tmp_path, db)
+    ctx.services.ffmpeg = CutFFmpeg(cuts=[])
+    run_keyframe(ctx, {"shot_id": shot_id})
+    clean = run_video(ctx, {"shot_id": shot_id})["candidate_ids"][0]
+    ctx.services.ffmpeg = CutFFmpeg(cuts=[2.04])
+    bad = run_video(ctx, {"shot_id": shot_id, "force": True})["candidate_ids"][0]
+    with db.session() as s:
+        assert selected_candidate(s, "shot", shot_id, "video").id == clean
+        video_slot = next(sl for sl in slots_for(s, "shot", shot_id) if sl.kind == "video")
+        assert "疑似跳切" in next(c for c in video_slot.candidates if c.id == bad).note
+    assert any("没有替换当前选定的视频" in m for m in ctx.logs)
+    # 当前选定本身也疑似跳切：新的一条（重拍）照常选中
+    newer = run_video(ctx, {"shot_id": shot_id, "force": True})["candidate_ids"][0]
+    with db.session() as s:
+        assert selected_candidate(s, "shot", shot_id, "video").id == clean
+        from backend.domain.slots import select_candidate
+        select_candidate(s, bad)
+    latest = run_video(ctx, {"shot_id": shot_id, "force": True})["candidate_ids"][0]
+    with db.session() as s:
+        assert selected_candidate(s, "shot", shot_id, "video").id == latest != newer

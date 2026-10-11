@@ -46,6 +46,7 @@ class Cut:
     dialogue: list[list[dict]] = field(default_factory=list)
     shot_seconds: list[float] = field(default_factory=list)
     missing: list[str] = field(default_factory=list)
+    flagged: list[str] = field(default_factory=list)   # 选定视频出片自检疑似跳切的镜头（「S02 2.0s」）
     voices: dict[str, str | None] = field(default_factory=dict)
     end_card: dict | None = None
 
@@ -66,6 +67,9 @@ def load_cut(sv, episode_id: int, *, allow_missing: bool = False) -> Cut:
             cut.codes.append(sh.code)
             cut.clips.append(sv.media.abs(c.file_path))
             cut.clip_rels.append(c.file_path)
+            cuts = ((c.params or {}).get("qc") or {}).get("hard_cuts") or []
+            if cuts:
+                cut.flagged.append(f"{sh.code} {'、'.join(f'{x:.1f}s' for x in cuts)}")
             cut.dialogue.append([dict(d) for d in sh.dialogue or []])
             cut.shot_seconds.append(float(sh.duration))
             trans.append(sh.transition_out)

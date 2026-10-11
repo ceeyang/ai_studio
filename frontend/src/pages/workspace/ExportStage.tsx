@@ -8,7 +8,8 @@ import { EpisodeLoadError, nextActionProps } from '../../components/EpisodeHeade
 import { useJobNotice } from '../../components/JobNotice';
 import { fmtTime } from '../../format';
 import { EndCardPanel } from '../director/EndCardPanel';
-import { slotMark, slotOf } from '../director/slots';
+import { hardCuts } from '../director/shotStatus';
+import { selectedOf, slotMark, slotOf } from '../director/slots';
 import { workspacePath } from './urls';
 
 const SUBTITLE_TAG: Record<string, string> = { zh: '中文字幕', 'zh+km': '中高字幕' };
@@ -79,12 +80,16 @@ function toOptions(c: Choice): ExportOptions {
   };
 }
 
-/** 就绪检查：几镜有选定视频、哪些缺、哪些视频过期。 */
+/** 就绪检查：几镜有选定视频、哪些缺、哪些视频过期、哪些选定的视频出片自检疑似跳切。 */
 export function readiness(shots: ShotDetail[]) {
   const marks = shots.map((s) => ({ code: s.code, mark: slotMark(slotOf(s, 'video')) }));
   const missing = marks.filter((m) => m.mark === 'none').map((m) => m.code);
   const stale = marks.filter((m) => m.mark === 'stale').map((m) => m.code);
-  return { total: shots.length, ready: shots.length - missing.length, missing, stale };
+  const flagged = shots
+    .map((s) => ({ code: s.code, cuts: hardCuts(selectedOf(slotOf(s, 'video'))) }))
+    .filter((x) => x.cuts.length > 0)
+    .map((x) => `${x.code}（${x.cuts.map((t) => `${t.toFixed(1)}s`).join('、')}）`);
+  return { total: shots.length, ready: shots.length - missing.length, missing, stale, flagged };
 }
 
 function ExportsList({ rows, episodeId }: { rows: ExportRow[]; episodeId: number }) {
@@ -223,6 +228,11 @@ function ExportBody({ slug, id }: { slug: string; id: number }) {
             合成导出
           </button>
         </div>
+        {r.flagged.length > 0 && (
+          <p className="warn" data-testid="flagged-videos">
+            选定的视频疑似跳切：{r.flagged.join('、')}。合成后这些地方画面会突变，建议先到<Link to={videosStage}>视频阶段</Link>重拍或换一条。
+          </p>
+        )}
         {r.missing.length > 0 && (
           <p className="warn" data-testid="missing-videos">
             还缺视频：{r.missing.join('、')}。<Link to={videosStage}>去视频阶段</Link>

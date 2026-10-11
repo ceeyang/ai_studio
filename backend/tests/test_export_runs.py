@@ -54,6 +54,22 @@ def test_export_assembles_selected_videos_in_order(tmp_path, db):
         assert s.get(Episode, ep_id).status == "exported"
 
 
+def test_export_warns_about_flagged_hard_cuts(tmp_path, db):
+    """选定的视频出片自检疑似跳切：导出照常进行，日志里列出来。"""
+    from backend.domain.slots import selected_candidate
+
+    sv = make_services(tmp_path, db, ffmpeg=FakeFFmpeg())
+    ep_id, ids = seed_shots(db)
+    for i, sid in enumerate(ids):
+        add_video(sv, sid, f"h{i}")
+    with db.session() as s:
+        c = selected_candidate(s, "shot", ids[1], "video")
+        c.params = {"qc": {"hard_cuts": [2.04]}}
+    ctx = FakeCtx(sv, job_id=5)
+    run_export(ctx, {"episode_id": ep_id})
+    assert any("疑似跳切" in m and "S02 2.0s" in m for m in ctx.logs)
+
+
 def test_export_reports_missing_videos(tmp_path, db):
     ff = FakeFFmpeg()
     sv = make_services(tmp_path, db, ffmpeg=ff)
