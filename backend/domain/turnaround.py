@@ -157,10 +157,27 @@ _SHEET_WORDS = re.compile(r"\s*\b(?:cinematic|drama|still)\b", re.I)
 STYLE_WORDS = 25
 
 
-def style_line(anchor: str) -> str:
+# 风格预设 → 设定图里怎么说「同一个人出现几次」（审查 P2-5）：模板默认写实（photographic / photographed），
+# 动漫、国风、美漫说成画出来的 character model sheet，3D 写实说成渲染出来的。真人写实、商业广告不变。
+_DRAWN = {"photographic model sheet": "character model sheet",
+          "photographic headshot reference": "character headshot reference",
+          "photographed": "drawn"}
+_RENDERED = {"photographic model sheet": "3D character model sheet",
+             "photographic headshot reference": "3D character headshot reference",
+             "photographed": "rendered"}
+_MEDIUM_WORDING = {"anime": _DRAWN, "guofeng": _DRAWN, "western_comic": _DRAWN,
+                   "cg_realistic": _RENDERED}
+NON_PHOTO_DEFAULT_STYLE = "Clean consistent character design, everything in sharp focus."
+
+
+def _is_photo(preset: str | None) -> bool:
+    return (preset or "live_action") not in _MEDIUM_WORDING
+
+
+def style_line(anchor: str, preset: str | None = None) -> str:
     """设定图用的风格句：风格锚里只和成像有关的分句（photo_style，去掉场景、天气、光源），再去掉
     浅景深、变形镜头、光晕、焦段这类和「正交、整张清晰」矛盾的分句和 cinematic / drama 这类词，
-    没有画风（写实 / 动漫）时补上默认的写实，最后写明全部清晰。"""
+    没有画风（写实 / 动漫）时补上默认的写实（非写实的风格预设不补），最后写明全部清晰。"""
     # 包 backend.pipeline 会反过来导入本模块
     from backend.pipeline.prompting import MEDIUM_TERMS, photo_style
 
@@ -170,8 +187,9 @@ def style_line(anchor: str) -> str:
                 and len(" ".join(kept + [clause]).split()) <= STYLE_WORDS:
             kept.append(clause)
     if not kept:
-        return DEFAULT_STYLE
-    if not any(MEDIUM_TERMS.search(c) for c in kept):   # 锚里写了画风（动漫、三维、漫画…）就不补写实
+        return DEFAULT_STYLE if _is_photo(preset) else NON_PHOTO_DEFAULT_STYLE
+    if not any(MEDIUM_TERMS.search(c) for c in kept) and _is_photo(preset):
+        # 锚里写了画风（动漫、三维、漫画…）就不补写实；非写实的风格预设也不补
         kept.insert(0, "Photorealistic live-action photography")
     text = ", ".join(kept).rstrip(" .")
     return text[:1].upper() + text[1:] + ", everything in sharp focus."
@@ -184,8 +202,13 @@ def _v1_style_line(anchor: str) -> str:
     return first if first[-1] in ".!?。" else first + "."
 
 
-def sheet_prompt(sheet: str, description: str, anchor: str) -> str:
-    return TEMPLATES[sheet].format(description=description.strip(), style=style_line(anchor))
+def sheet_prompt(sheet: str, description: str, anchor: str, preset: str | None = None) -> str:
+    """preset：项目的风格预设。非写实预设把模板里的 photographic / photographed 换成画出来 / 渲染出来的
+    说法（模板文字不进输入哈希，换说法不会让已有设定图过期）。"""
+    text = TEMPLATES[sheet]
+    for old, new in _MEDIUM_WORDING.get(preset or "", {}).items():
+        text = text.replace(old, new)
+    return text.format(description=description.strip(), style=style_line(anchor, preset))
 
 
 def sheet_slot_kind(sheet: str) -> str:
@@ -214,7 +237,8 @@ def sheet_inputs(char: Character, sheet: str) -> tuple[str, str]:
 
     proj = char.project
     style = proj.style_bible
-    prompt = sheet_prompt(sheet, look_of(char), style.anchor_text if style else "")
+    prompt = sheet_prompt(sheet, look_of(char), style.anchor_text if style else "",
+                          getattr(proj, "style_preset", None))
     negative = join_negative(proj.negative, style.negative if style else "", SHEET_NEGATIVE)
     return prompt, negative
 

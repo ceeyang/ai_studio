@@ -79,6 +79,55 @@ def test_no_auto_retry_for_clean_or_cut_only_take(tmp_path, db):
         assert db is not None and s.get(Project, 1).auto_retry_video
 
 
+# ---------------------------------------------------------------- P2-5 三视图模板按画风写
+LOOK_A = "Japanese teenage girl, short black bob, navy sailor school uniform with a red ribbon."
+
+
+def test_sheet_prompt_for_photo_presets_is_unchanged():
+    from backend.domain.turnaround import sheet_prompt
+
+    anchor = "Photorealistic live-action photography, fine film grain."
+    for preset in (None, "live_action", "commercial"):
+        p = sheet_prompt("body", LOOK_A, anchor, preset)
+        assert p == sheet_prompt("body", LOOK_A, anchor)
+        assert "photographic model sheet" in p and "photographed four times" in p
+
+
+def test_sheet_prompt_for_drawn_presets_says_drawn_not_photographed():
+    from backend.domain.turnaround import sheet_prompt
+
+    anchor = "2D cel-shaded anime, clean line art, flat colors with soft gradient shading."
+    for preset in ("anime", "guofeng", "western_comic"):
+        for sheet in ("body", "face"):
+            low = sheet_prompt(sheet, LOOK_A, anchor, preset).lower()
+            assert "photograph" not in low and "photorealistic" not in low, (preset, sheet)
+            assert "drawn" in low and ("character model sheet" in low
+                                       or "character headshot reference" in low)
+    low = sheet_prompt("body", LOOK_A, "Clean bright colors.", "anime").lower()
+    # 锚没写画风：也不补「写实照片」
+    assert "photorealistic" not in low and "photograph" not in low
+
+
+def test_sheet_prompt_for_cg_preset_says_rendered():
+    from backend.domain.turnaround import sheet_prompt
+
+    low = sheet_prompt("face", LOOK_A, "High-end 3D CG render, subsurface scattering.",
+                       "cg_realistic").lower()
+    assert "photograph" not in low and "rendered three times" in low
+
+
+def test_sheet_job_uses_project_preset(tmp_path, db):
+    from backend.domain.models import Character
+    from backend.domain.turnaround import sheet_inputs
+    from backend.tests import test_turnaround as tt
+
+    ctx, runner, ids = tt.setup(tmp_path, db)
+    with db.session() as s:
+        s.get(Project, ids["project"]).style_preset = "anime"
+        prompt, _ = sheet_inputs(s.get(Character, ids["chen"]), "body")
+    assert "photographed" not in prompt and "drawn four times" in prompt
+
+
 # ---------------------------------------------------------------- P2-6 首帧先写景别再写锚
 def test_engine_image_prompt_puts_framing_before_anchor():
     from backend.pipeline.prompting import engine_image_prompt
