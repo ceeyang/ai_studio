@@ -1,11 +1,12 @@
-// 角色抽屉的「资料」页签：名字、人物描述、核心特征、配音音色；英文外观提示词收在「高级」里。
-import { errorText } from '../../api/client';
+// 角色抽屉的「资料」页签：从参考图写外观、名字、人物描述、核心特征、配音音色；英文外观提示词收在「高级」里。
 import { useState } from 'react';
+import { errorText } from '../../api/client';
 import { usePatchCharacter, useRefreshShotLooks } from '../../api/queries';
 import type { Character, CharacterPatch } from '../../api/types';
 import { EditableFields, type FieldSpec, type FieldValues } from '../../components/EditableFields';
 import { VOICES } from '../../format';
 import { refreshText } from './CharacterLooks';
+import { PhotoLookPanel } from './PhotoLookPanel';
 
 const CHARACTER_FIELDS: FieldSpec[] = [
   { name: 'name', label: '名字' },
@@ -45,8 +46,11 @@ export function CharacterProfile({
   const refresh = useRefreshShotLooks();
   // 改了外貌后自动「把镜头里的外貌更新为当前造型」的结果（换了几个、哪些对不上 / 只对上一部分）
   const [refreshMsg, setRefreshMsg] = useState<string | null>(null);
+  // 资料有没保存的修改时，「从参考图写外观」不直接填入
+  const [dirty, setDirty] = useState(false);
   return (
     <div className="char-fields">
+      <PhotoLookPanel c={c} slug={slug} profileDirty={dirty} />
       <EditableFields
         fields={CHARACTER_FIELDS}
         initial={{
@@ -59,7 +63,10 @@ export function CharacterProfile({
         advancedOpen={advancedOpen}
         saving={patch.isPending}
         error={patch.error ? errorText(patch.error) : refresh.error ? `镜头外貌没更新：${errorText(refresh.error)}` : null}
-        onDirtyChange={onDirtyChange}
+        onDirtyChange={(d) => {
+          setDirty(d);
+          onDirtyChange(d);
+        }}
         onSave={(_v, ch) => {
           const old = c.visual_prompt;
           // 外貌改了：镜头里一字不差抄着旧外貌的地方一起换成新外貌（占位符，出图时按景别填）

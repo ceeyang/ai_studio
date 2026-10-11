@@ -38,6 +38,9 @@ class Project(Base):
     video_engine: Mapped[str] = mapped_column(String(40), default="h3_video")
     seed: Mapped[int] = mapped_column(Integer, default=12345)
     negative: Mapped[str] = mapped_column(Text, default="")
+    # 风格预设（backend/domain/style_presets.py）：真人写实 / 3D 写实 / 日系动漫 / 国风漫画 / 美式漫画 / 商业广告
+    style_preset: Mapped[str] = mapped_column(String(32), default="live_action",
+                                              server_default="live_action")
     style_bible_id: Mapped[int | None] = mapped_column(
         ForeignKey("style_bibles.id", ondelete="SET NULL"), nullable=True)
     # 片尾卡：{"seconds": 3, "background": "#0b1a33", "lines": [{text, font, size, bold}]}

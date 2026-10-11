@@ -4,12 +4,13 @@ from __future__ import annotations
 from fastapi import APIRouter, Request
 
 from backend.app.deps import check_engines, get_or_404, manager, services
-from backend.app.routes.projects import character_out
+from backend.app.routes.projects import character_out, read_image_upload
 from backend.app.schemas import (CharacterOut, PortraitDrawIn, RecommendIn, RefreshLooksIn,
                                  RefreshLooksOut, RunOut, SuggestIn,
                                  TurnaroundCropIn, TurnaroundGenerateIn, TurnaroundLookPatch,
                                  TurnaroundSelectIn)
-from backend.domain.characters import (known_looks, portrait_of, refresh_shot_looks,
+from backend.domain.characters import (appearance_ref_of, known_looks, portrait_of,
+                                       refresh_shot_looks, set_appearance_ref, set_photo_look,
                                        use_portrait)
 from backend.domain.turnaround import (SHEETS, crop_cells, look_of, select_sheet,
                                        sheet_slot_kind)
@@ -87,6 +88,43 @@ def suggest(char_id: int, body: SuggestIn, request: Request):
     jid = manager(request).submit("character.suggest", payload, project_id=project_id,
                                   owner_type="character", owner_id=char_id)
     return RunOut(job_ids=[jid])
+
+
+@router.post("/characters/{char_id}/appearance-ref", response_model=CharacterOut)
+async def upload_appearance_ref(char_id: int, request: Request):
+    """「从参考图写外观」的参考照片：multipart 上传 file，或 JSON {"path"}。只给 LLM 看，不当出图参考图。"""
+    data, name = await read_image_upload(request)
+    sv = services(request)
+    with sv.db.session() as s:
+        c = get_or_404(s, Character, char_id, "角色")
+        set_appearance_ref(s, sv.media, c, data, name)
+        return character_out(s, c, sv=sv)
+
+
+@router.post("/characters/{char_id}/appearance-from-photo", response_model=RunOut)
+def appearance_from_photo(char_id: int, request: Request):
+    """LLM 看参考照片写英文外观提示词（文本模型要能看图）。结果记在参考照片上，用户确认后再填进外观提示词。"""
+    sv = services(request)
+    with sv.db.session() as s:
+        c = get_or_404(s, Character, char_id, "角色")
+        if appearance_ref_of(s, char_id) is None:
+            raise JobError(f"角色 {c.name} 还没有上传参考照片，先上传一张")
+        project_id = c.project_id
+    jid = manager(request).submit("character.from_photo", {"character_id": char_id},
+                                  project_id=project_id, owner_type="character", owner_id=char_id)
+    return RunOut(job_ids=[jid])
+
+
+@router.delete("/characters/{char_id}/appearance-from-photo", response_model=CharacterOut)
+def discard_photo_look(char_id: int, request: Request):
+    """不用 LLM 按参考照片写的外观了（照片留着，可以再写一次）。"""
+    sv = services(request)
+    with sv.db.session() as s:
+        c = get_or_404(s, Character, char_id, "角色")
+        ref = appearance_ref_of(s, char_id)
+        if ref is not None:
+            set_photo_look(s, ref, None)
+        return character_out(s, c, sv=sv)
 
 
 @router.post("/episodes/{episode_id}/characters/recommend", response_model=RunOut)

@@ -191,6 +191,17 @@ class CharacterRecommendations(BaseModel):
     characters: list[RecommendedCharacter] = Field(default_factory=list)
 
 
+class PhotoLook(BaseModel):
+    """从参考照片写的外观：英文外观提示词 + 中文核心特征。"""
+    visual_prompt: str
+    core_features: str = ""
+
+    @field_validator("visual_prompt")
+    @classmethod
+    def _words(cls, v: str) -> str:
+        return " ".join(_look_words(v).split())
+
+
 # ---------------------------------------------------------------- 三视图
 class TurnaroundLook(BaseModel):
     """出三视图设定图用的全身描述：一段英文，从头到脚。"""

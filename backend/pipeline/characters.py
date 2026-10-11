@@ -1,11 +1,12 @@
 """角色卡：本地图像引擎抽定妆照（image.portrait），LLM 推荐造型（character.suggest）、
-按剧本推荐缺的角色（character.recommend），以及三视图（character.turnaround_look 写全身描述，
-image.turnaround 出设定图并自动切成单个视角）。"""
+按剧本推荐缺的角色（character.recommend）、从参考照片写外观（character.from_photo），
+以及三视图（character.turnaround_look 写全身描述，image.turnaround 出设定图并自动切成单个视角）。"""
 from __future__ import annotations
 
 import shutil
+from urllib.parse import quote
 
-from backend.domain.characters import add_portrait, portrait_of
+from backend.domain.characters import add_portrait, appearance_ref_of, portrait_of, set_photo_look
 from backend.domain.hashing import input_hash
 from backend.domain.settings import portrait_engine, sheet_engine
 from backend.domain.models import Character, Episode
@@ -13,7 +14,7 @@ from backend.engines.base import ImageRequest
 from backend.domain.slots import add_candidate, get_or_create_slot
 from backend.domain.turnaround import (SHEETS, crop_cells, look_of,
                                        sheet_hash, sheet_inputs, sheet_slot_kind)
-from backend.llm.schemas import CharacterRecommendations, DesignOptions, TurnaroundLook
+from backend.llm.schemas import CharacterRecommendations, DesignOptions, PhotoLook, TurnaroundLook
 from backend.pipeline.common import load_episode
 from backend.pipeline.keyframes import run_comfy
 from backend.pipeline.prompting import join_negative, photo_style, portrait_look, shot_seed
@@ -200,6 +201,66 @@ def run_turnaround_look(ctx, payload: dict) -> dict:
     n = len(out.description.split())
     ctx.log(f"{name} 的全身描述已写好（{n} 词）")
     return {"words": n}
+
+
+def photo_look_problems(vp: str) -> list[str]:
+    """看图写的外观：不能有中文（会被画成字），不写坐蹲跪这类姿势（定妆照是站着的半身）。"""
+    from backend.pipeline.prompting import _POSE
+    from backend.pipeline.storyboard import cjk_chars
+
+    out = []
+    bad = cjk_chars(vp)
+    if bad:
+        out.append(f"visual_prompt 里有中文「{bad[:20]}」，全部用英文写")
+    poses = sorted({m.group(0).lower() for m in _POSE.finditer(vp or "")})
+    if poses:
+        out.append(f"visual_prompt 里写了姿势（{', '.join(poses)}），只写外观，不写坐、蹲、跪这类姿势")
+    return out
+
+
+@HANDLERS.register("character.from_photo")
+def run_from_photo(ctx, payload: dict) -> dict:
+    """LLM 看角色的参考照片，写英文外观提示词（只写外观）。结果记在参考照片上，等用户确认后填进外观提示词。
+    文本模型看不了图时任务失败，提示到设置页换这一步的文本模型（或用手动粘贴）。"""
+    sv = ctx.services
+    char_id = int(payload["character_id"])
+    with sv.db.session() as s:
+        ch = _load_char(s, char_id)
+        ref = appearance_ref_of(s, char_id)
+        if ref is None:
+            raise JobError(f"角色 {ch.name} 还没有上传参考照片，先在资料页上传一张")
+        ref_id, ref_path = ref.id, sv.media.abs(ref.file_path)
+        ref_url = "/media/" + quote(ref.file_path)
+        proj, style = ch.project, ch.project.style_bible
+        system, user = sv.prompts(proj.slug).render(
+            "character_from_photo", project_title=proj.title, char_name=ch.name,
+            description=ch.description, current_prompt=ch.visual_prompt,
+            character_rules=style.character_rules if style else "")
+        name = ch.name
+    if not ref_path.is_file():
+        raise JobError(f"参考照片文件不见了：{ref_path}，重新上传一张")
+
+    def check(out: PhotoLook, *, last: bool = True) -> None:
+        bad = photo_look_problems(out.visual_prompt)
+        if bad and not last:
+            raise ValueError("；".join(bad))
+
+    out = sv.llm.generate(LLM_TASK, system, user, PhotoLook, check=check, log=ctx.log,
+                          manual=payload.get("manual") or {},
+                          key=f"character.from_photo:{char_id}", step="character.from_photo",
+                          images=[ref_path], image_urls=[ref_url])
+    look = {"visual_prompt": out.visual_prompt, "core_features": out.core_features,
+            "job_id": ctx.job_id}
+    with sv.db.session() as s:
+        from backend.domain.models import Candidate
+
+        cand = s.get(Candidate, ref_id)
+        if cand is not None:
+            set_photo_look(s, cand, look)
+    n = len(out.visual_prompt.split())
+    ctx.log(f"{name}：按参考照片写好外观（{n} 词），到角色资料页确认后填入")
+    return {"visual_prompt": out.visual_prompt, "core_features": out.core_features,
+            "candidate_id": ref_id}
 
 
 def sheet_engine_name(sv, proj) -> str:

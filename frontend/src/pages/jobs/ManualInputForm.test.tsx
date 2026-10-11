@@ -99,4 +99,20 @@ describe('ManualInputForm', () => {
     expect(screen.getByText('上次粘贴的结果不合格：新错误：缺少字段 scenes')).toBeTruthy();
     expect(screen.queryByText('上次粘贴的结果不合格：旧错误：JSON 解析失败')).toBeNull();
   });
+
+  it('要看图的步骤：显示图片的本机路径和缩略图，提示连图一起发给模型', () => {
+    const job = makeJob({
+      ...WAITING,
+      result: {
+        input_request: {
+          key: 'character.from_photo:6', task: 'character', system: 's', user: 'u',
+          images: ['D:/data/demo/media/appearance_ref/a.png'], image_urls: ['/media/demo/media/appearance_ref/a.png'],
+        },
+      },
+    });
+    renderAt(<ManualInputForm job={job} />);
+    expect(screen.getByText('D:/data/demo/media/appearance_ref/a.png')).toBeTruthy();
+    expect(screen.getByRole('img', { name: '要发给模型的图片 1' }).getAttribute('src')).toBe('/media/demo/media/appearance_ref/a.png');
+    expect(screen.getByText(/这一步要模型看图/)).toBeTruthy();
+  });
 });

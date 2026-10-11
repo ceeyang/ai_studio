@@ -5,7 +5,7 @@ from backend.pipeline.prompting import keyframe_input_hash, video_input_hash
 
 
 def seed(api, n=3):
-    api.post("/api/projects", json={"title": "demo"})
+    api.post("/api/projects", json={"title": "demo", "negative": ""})
     ep = api.post("/api/projects/demo/episodes", json={"source_text": "x"}).json()
     db = api.app.state.services.db
     with db.session() as s:

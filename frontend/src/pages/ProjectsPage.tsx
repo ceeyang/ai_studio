@@ -17,11 +17,13 @@ import {
   useProjects,
   keys,
   useAppSettings,
+  useStylePresets,
 } from '../api/queries';
-import type { Aspect, EngineRow, Episode, EpisodeStats, Project, ProjectOverview } from '../api/types';
+import type { Aspect, EngineRow, Episode, EpisodeStats, Project, ProjectOverview, StylePresetKey } from '../api/types';
 import { useConfirm } from '../components/ConfirmDialog';
 import { Dialog } from '../components/Dialog';
 import { Menu, type MenuItem } from '../components/Menu';
+import { StylePresetPicker, stylePresetLabel } from '../components/StylePresetPicker';
 import { EPISODE_STATUS_LABEL, engineLabel } from '../format';
 import { forgetEpisode, readLastEpisode } from '../lastEpisode';
 import { workspacePath } from './workspace/urls';
@@ -80,15 +82,27 @@ function NewProjectDialog({ onClose }: { onClose: () => void }) {
   const navigate = useNavigate();
   const [title, setTitle] = useState('');
   const [aspect, setAspect] = useState<Aspect>('9:16');
+  const [preset, setPreset] = useState<StylePresetKey>('live_action');
+  const presets = useStylePresets();
   const [imageEngine, setImageEngine] = useState('');
   const [videoEngine, setVideoEngine] = useState('');
   const image = imageEngine || pickDefault(engines.data?.image, settings.data?.image_engine.effective ?? 'zimage');
   const video = videoEngine || pickDefault(engines.data?.video, settings.data?.video_engine.effective ?? 'h3_video');
 
+  // 换预设：预选它推荐的引擎（只是建议，下面的下拉框照样能改）；推荐的都不可用就不动
+  const choosePreset = (key: StylePresetKey) => {
+    setPreset(key);
+    const rec = presets.data?.find((p) => p.key === key);
+    const has = (rows: EngineRow[] | undefined, name: string | null | undefined) =>
+      !!name && (rows ?? []).some((r) => r.name === name);
+    if (has(engines.data?.image, rec?.image_engine)) setImageEngine(rec!.image_engine!);
+    if (has(engines.data?.video, rec?.video_engine)) setVideoEngine(rec!.video_engine!);
+  };
+
   const submit = (e: FormEvent) => {
     e.preventDefault();
     create.mutate(
-      { title: title.trim(), aspect, image_engine: image, video_engine: video },
+      { title: title.trim(), aspect, image_engine: image, video_engine: video, style_preset: preset },
       { onSuccess: (p) => navigate(`/projects/${enc(p.slug)}`) },
     );
   };
@@ -100,6 +114,7 @@ function NewProjectDialog({ onClose }: { onClose: () => void }) {
           <span>项目标题</span>
           <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="如：提词员" />
         </label>
+        <StylePresetPicker value={preset} onChange={choosePreset} />
         <div className="field-grid">
           <label className="field">
             <span>画幅</span>
@@ -110,7 +125,7 @@ function NewProjectDialog({ onClose }: { onClose: () => void }) {
           </label>
           <label className="field">
             <span>图像引擎</span>
-            <select value={image} onChange={(e) => setImageEngine(e.target.value)}>
+            <select value={image} onChange={(e) => setImageEngine(e.target.value)} title="选了风格预设会预选推荐的引擎，可以改">
               {(engines.data?.image ?? []).map((r) => (
                 <option key={r.name} value={r.name}>
                   {engineLabel(r)}
@@ -175,11 +190,51 @@ function RenameProjectDialog({ project, onClose }: { project: Project; onClose: 
   );
 }
 
-/** 项目的「⋯」菜单：改名、归档 / 取消归档。归档先确认（数据都在，可以找回）。 */
+/** 项目设置：风格预设。改了不会自动重写已有的风格锚和外观，要重新生成剧本才按新预设写。 */
+function ProjectSettingsDialog({ project, onClose }: { project: Project; onClose: () => void }) {
+  const patch = usePatchProject(project.slug);
+  const [preset, setPreset] = useState<StylePresetKey>(project.style_preset ?? 'live_action');
+  const changed = preset !== (project.style_preset ?? 'live_action');
+  const submit = (e: FormEvent) => {
+    e.preventDefault();
+    if (changed) patch.mutate({ style_preset: preset }, { onSuccess: onClose });
+  };
+  return (
+    <Dialog
+      title="项目设置"
+      subtitle={`「${project.title}」的风格预设：决定风格锚的画风方向、负面词默认值和分镜写法。`}
+      onClose={onClose}
+      guard={() => changed}
+      busy={patch.isPending}
+    >
+      <form className="fields" onSubmit={submit}>
+        <StylePresetPicker value={preset} onChange={setPreset} name="project-style-preset" />
+        {changed && (
+          <p className="preset-note" role="note">
+            已经写好的风格锚、角色和场景外观不会自动改：到工作台的剧本阶段「重新生成剧本」，视觉设定才会按「
+            {stylePresetLabel(preset)}」重写（已定妆的角色外观不覆盖）。负面词还是原预设的默认值时会跟着换；项目的图像/视频引擎不变（推荐引擎只在新建项目时预选）。
+          </p>
+        )}
+        {patch.error && <p className="error">{errorText(patch.error)}</p>}
+        <div className="modal-foot">
+          <button type="button" className="ghost" disabled={patch.isPending} onClick={onClose}>
+            取消
+          </button>
+          <button type="submit" className="primary" disabled={!changed || patch.isPending}>
+            {patch.isPending ? '保存中…' : '保存'}
+          </button>
+        </div>
+      </form>
+    </Dialog>
+  );
+}
+
+/** 项目的「⋯」菜单：项目设置、改名、归档 / 取消归档。归档先确认（数据都在，可以找回）。 */
 function ProjectMenu({ p }: { p: Project }) {
   const patch = usePatchProject(p.slug);
   const confirm = useConfirm();
   const [renaming, setRenaming] = useState(false);
+  const [editing, setEditing] = useState(false);
   const archive = async () => {
     const ok = await confirm({
       title: `归档项目「${p.title}」？`,
@@ -189,6 +244,7 @@ function ProjectMenu({ p }: { p: Project }) {
     if (ok) patch.mutate({ archived: true });
   };
   const items: MenuItem[] = [
+    { label: '项目设置', onSelect: () => setEditing(true) },
     { label: '改名', onSelect: () => setRenaming(true) },
     p.archived
       ? { label: '取消归档', onSelect: () => patch.mutate({ archived: false }) }
@@ -199,6 +255,7 @@ function ProjectMenu({ p }: { p: Project }) {
       <Menu label={`更多操作 ${p.title}`} items={items} disabled={patch.isPending} />
       {patch.error && <span className="error">{errorText(patch.error)}</span>}
       {renaming && <RenameProjectDialog project={p} onClose={() => setRenaming(false)} />}
+      {editing && <ProjectSettingsDialog project={p} onClose={() => setEditing(false)} />}
     </>
   );
 }
@@ -241,6 +298,9 @@ function ProjectCard({ p }: { p: Project }) {
           )}
         </p>
         <div className="engine-chips">
+          <span className="chip" title="风格预设">
+            <b>风</b> {stylePresetLabel(p.style_preset)}
+          </span>
           <span className="chip" title="图像引擎">
             <b>图</b> {engineLabel(p.image_engine)}
           </span>
@@ -600,6 +660,9 @@ function ProjectDetail({ slug }: { slug: string }) {
                   {p.archived && <span className="chip">已归档</span>}
                   <span className="chip">
                     <b>画幅</b> {p.aspect}
+                  </span>
+                  <span className="chip">
+                    <b>风格</b> {stylePresetLabel(p.style_preset)}
                   </span>
                   <span className="chip">
                     <b>图像</b> {engineLabel(p.image_engine)}

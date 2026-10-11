@@ -3,6 +3,22 @@
 
 export type Aspect = '9:16' | '16:9';
 
+/** 风格预设（backend/domain/style_presets.py） */
+export type StylePresetKey = 'live_action' | 'cg_realistic' | 'anime' | 'guofeng' | 'western_comic' | 'commercial';
+
+/** GET /api/style-presets 的一项：image_engine / video_engine 是推荐引擎里第一个可用的（只是建议） */
+export interface StylePreset {
+  key: StylePresetKey;
+  label: string;
+  description: string;
+  negative: string;
+  image_engines: string[];
+  video_engines: string[];
+  has_storyboard_guidance: boolean;
+  image_engine: string | null;
+  video_engine: string | null;
+}
+
 export interface Project {
   id: number;
   slug: string;
@@ -12,6 +28,8 @@ export interface Project {
   video_engine: string;
   seed: number;
   negative: string;
+  /** 风格预设；老项目是 live_action（真人写实） */
+  style_preset: StylePresetKey;
   style_bible_id: number | null;
   /** 归档了的项目默认不在项目中心显示（GET /api/projects?archived=1 才带上） */
   archived: boolean;
@@ -22,6 +40,8 @@ export interface Project {
 export interface ProjectPatch {
   title?: string;
   archived?: boolean;
+  /** 改风格预设：负面词还是旧预设的默认值时跟着换；风格锚和外观要重新生成视觉设定才变 */
+  style_preset?: StylePresetKey;
 }
 
 export interface ProjectIn {
@@ -30,6 +50,7 @@ export interface ProjectIn {
   aspect: Aspect;
   image_engine: string;
   video_engine: string;
+  style_preset: StylePresetKey;
 }
 
 export interface EngineRow {
@@ -465,6 +486,16 @@ export interface Character {
   turnaround?: Turnaround | null;
   /** 最近一次失败的抽卡（之后没有成功的抽卡才有） */
   last_failure?: JobBrief | null;
+  /** 「从参考图写外观」上传的参考照片（只给 LLM 看，不当出图参考图）和 LLM 写好、等确认的外观 */
+  appearance_ref?: AppearanceRef | null;
+}
+
+export interface AppearanceRef {
+  candidate_id: number;
+  url: string;
+  /** LLM 按照片写的英文外观；还没写 / 放弃了是 null */
+  visual_prompt: string | null;
+  core_features: string | null;
 }
 
 export type TurnaroundSheetKey = 'body' | 'face';
@@ -603,6 +634,9 @@ export interface InputRequest {
   user: string;
   schema?: unknown;
   error?: string;
+  /** 这一步要模型看图（如「从参考图写外观」）：图片的本机路径，和页面上能打开的地址 */
+  images?: string[];
+  image_urls?: string[];
 }
 
 export interface JobResult {

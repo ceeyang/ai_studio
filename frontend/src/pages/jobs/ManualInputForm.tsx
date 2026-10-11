@@ -62,6 +62,24 @@ export function ManualInputForm({ job, onSubmitted }: ManualInputFormProps) {
       {req.error && <p className="error">上次粘贴的结果不合格：{req.error}</p>}
       <PromptBlock label="系统提示词（system）" text={req.system} />
       <PromptBlock label="用户提示词（user）" text={req.user} />
+      {req.images && req.images.length > 0 && (
+        <div className="fields" aria-label="要一起发给模型的图片">
+          <p className="muted">这一步要模型看图：把下面的图片和提示词一起发给能看图的模型（网页版 Claude、ChatGPT 等都行）。</p>
+          {req.images.map((path, i) => {
+            const url = req.image_urls?.[i];
+            return (
+              <div key={path} className="photo-look-row">
+                {url && (
+                  <a href={url} target="_blank" rel="noreferrer">
+                    <img className="photo-look-thumb" src={url} alt={`要发给模型的图片 ${i + 1}`} />
+                  </a>
+                )}
+                <code>{path}</code>
+              </div>
+            );
+          })}
+        </div>
+      )}
       <label className="field">
         <span>模型输出</span>
         <textarea rows={12} value={text} onChange={(e) => setText(e.target.value)} placeholder='{"...": ...}' />

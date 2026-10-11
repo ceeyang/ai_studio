@@ -4,11 +4,15 @@
 """
 from __future__ import annotations
 
+import math
+import re
+
 from sqlalchemy import select
 
 from backend.domain.characters import portrait_of
 from backend.domain.hashing import input_hash
 from backend.domain.models import Character, Location, SceneBlock, StyleBible
+from backend.domain.style_presets import prompt_vars
 from backend.llm.schemas import ScriptStructure, ScriptVisual
 from backend.pipeline.common import (clean_note, continue_chain, load_episode, render_with_note,
                                      template_rules)
@@ -20,8 +24,10 @@ from backend.queue.handlers import HANDLERS
 # 指纹只算数据（原文、时长、角色表……），模板文字不进指纹：版本不同只提示「规则已更新」、不自动重跑。
 # 以前的指纹是整段渲染后提示词的哈希（字符串），模板一改就全对不上，一次不强制的整集运行就会
 # 重写剧本结构、清空段落、牵连所有镜头。
-STRUCTURE_RULES_VERSION = 2
-VISUAL_RULES_VERSION = 2
+#   v3（结构）：爆款剧本规范（3 秒钩子、冲突、反转、结尾钩子、对白密度和长度、对白格式）、风格预设
+#   v3（视觉）：风格锚按项目的风格预设定画风方向，负面词参考预设
+STRUCTURE_RULES_VERSION = 3
+VISUAL_RULES_VERSION = 3
 SCRIPT_RULES_OUTDATED_HINT = "剧本规则已更新，要按新规则重出请强制重跑（会重写段落、牵连镜头）"
 DEFAULT_SHOT_SECONDS = 5.0
 
@@ -59,7 +65,7 @@ def visual_inputs_fp(project_title: str, characters: list[dict], locations: list
 def structure_prompt_fp(prompts, project_title: str, target_seconds: float,
                         source_text: str, note: str | None = None, *, shot_count: int = 0,
                         shot_seconds: float = DEFAULT_SHOT_SECONDS,
-                        aspect: str = "9:16") -> tuple[str, str, str]:
+                        aspect: str = "9:16", preset: str | None = None) -> tuple[str, str, str]:
     """剧本结构这次要用的提示词及其输入指纹（不调用 LLM）。script 阶段和重跑影响预估共用。
     指纹见 structure_inputs_fp（不含修改意见、不含模板文字）。"""
     if not shot_count:
@@ -68,16 +74,19 @@ def structure_prompt_fp(prompts, project_title: str, target_seconds: float,
                                           project_title=project_title,
                                           target_seconds=target_seconds, source_text=source_text,
                                           shot_count=shot_count, shot_seconds=shot_seconds,
-                                          aspect=aspect or "9:16")
+                                          aspect=aspect or "9:16", **prompt_vars(preset))
     return system, user, structure_inputs_fp(project_title, target_seconds, source_text)
 
 
 def visual_prompt_fp(prompts, project_title: str, characters: list[dict], locations: list[dict],
-                     excerpt: str, note: str | None = None) -> tuple[str, str, str]:
-    """视觉设定这次要用的提示词及其输入指纹（不调用 LLM）。script 阶段和重跑影响预估共用。"""
+                     excerpt: str, note: str | None = None,
+                     preset: str | None = None) -> tuple[str, str, str]:
+    """视觉设定这次要用的提示词及其输入指纹（不调用 LLM）。script 阶段和重跑影响预估共用。
+    风格预设只进提示词、不进指纹：换预设不自动重写视觉设定，要重新生成才按新预设写。"""
     system, user, _, _ = render_with_note(prompts, "script_visual", note,
                                           project_title=project_title, characters=characters,
-                                          locations=locations, excerpt=excerpt)
+                                          locations=locations, excerpt=excerpt,
+                                          **prompt_vars(preset))
     return system, user, visual_inputs_fp(project_title, characters, locations, excerpt)
 
 
@@ -86,7 +95,7 @@ def structure_inputs(sv, ep, proj, note: str | None = None) -> tuple[str, str, s
     count, seconds = shot_plan(sv.engines, proj.video_engine, ep.target_seconds)
     return structure_prompt_fp(sv.prompts(proj.slug), proj.title, ep.target_seconds,
                                ep.source_text, note, shot_count=count, shot_seconds=seconds,
-                               aspect=proj.aspect or "9:16")
+                               aspect=proj.aspect or "9:16", preset=proj.style_preset)
 
 
 def judge_script(record, fp: str, rules: str, has_output: bool):
@@ -145,8 +154,17 @@ def _structure(ctx, episode_id: int, force: bool, manual: dict, note: str | None
                               bool(ep.scene_blocks))
         if judged.unchanged and not force:
             return _skip(ctx, ep, "structure", "剧本结构", fp, judged)
-    out = sv.llm.generate("script", system, user, ScriptStructure, log=ctx.log, manual=manual,
-                          key="script_structure")
+        target, source = float(ep.target_seconds), ep.source_text or ""
+
+    def check(out: ScriptStructure, *, last: bool = True) -> None:
+        bad = dialogue_problems([sc.text for sc in out.scenes], target, source)
+        if bad and not last:   # 最后一次机会不为对白写法让整段失败
+            raise ValueError("；".join(bad))
+        if bad:
+            ctx.log(f"剧本结构：对白没完全达到爆款规范（不再重写）：{'；'.join(bad)}")
+
+    out = sv.llm.generate("script", system, user, ScriptStructure, check=check, log=ctx.log,
+                          manual=manual, key="script_structure")
     with sv.db.session() as s:
         ep, proj = load_episode(s, episode_id)
         for c in out.characters:
@@ -182,6 +200,50 @@ def _structure(ctx, episode_id: int, force: bool, manual: dict, note: str | None
     return "done"
 
 
+# 爆款剧本规范的对白校验。段落里的对白按「角色名：「台词」」写（模板要求），能认出来才校验：
+# 单句不超过 16 个字（和分镜的台词上限一致），全集每 5 秒约 1 句（留 30% 余量）。
+# 素材里本来就没有对白、模型也没写对白时不卡（无声的片子）；素材有对白、段落里却一句都认不出来，
+# 多半是没按格式写，让它重写。
+DIALOGUE_MAX_CHARS = 16
+DIALOGUE_SECONDS_PER_LINE = 5.0
+DIALOGUE_DENSITY_SLACK = 0.7
+_DIALOGUE = re.compile(r"[:：]\s*[「“\"]([^」”\"\n]*)[」”\"]")
+_SOURCE_SPEECH = re.compile(r"[「“\"][^」”\"\n]+[」”\"]|[说道问喊][:：]")
+
+
+def dialogue_lines(texts: list[str]) -> list[str]:
+    return [m.group(1).strip() for t in texts for m in _DIALOGUE.finditer(t or "")
+            if m.group(1).strip()]
+
+
+def _speech_len(line: str) -> int:
+    return len("".join(line.split()))
+
+
+def min_dialogue_lines(target_seconds: float) -> int:
+    return max(1, math.floor(target_seconds / DIALOGUE_SECONDS_PER_LINE * DIALOGUE_DENSITY_SLACK))
+
+
+def dialogue_problems(texts: list[str], target_seconds: float, source_text: str = "") -> list[str]:
+    lines = dialogue_lines(texts)
+    out = []
+    if not lines:
+        if _SOURCE_SPEECH.search(source_text or ""):
+            out.append("段落里认不出对白：对白要写成 角色名：「台词」（全角冒号加直角引号，一句一对引号）")
+        return out
+    long = [x for x in lines if _speech_len(x) > DIALOGUE_MAX_CHARS]
+    if long:
+        shown = "、".join(f"「{x[:24]}」（{_speech_len(x)} 字）" for x in long[:4])
+        out.append(f"有 {len(long)} 句台词超过 {DIALOGUE_MAX_CHARS} 个字：{shown}；"
+                   "拆成几句短的口语，或删掉书面的部分，不写长独白")
+    need = min_dialogue_lines(target_seconds)
+    if len(lines) < need:
+        out.append(f"全集只有 {len(lines)} 句台词，{int(target_seconds)} 秒的一集至少要 {need} 句"
+                   f"（约每 {DIALOGUE_SECONDS_PER_LINE:g} 秒 1 句）；让人物多说短句推动剧情，"
+                   "台词和动作放在同一个节拍里，不要超出镜头预算")
+    return out
+
+
 # 风格锚只写成像风格。锚会拼到每个首帧前面：写进雨、灯泡、工具，室内镜头也会下雨，
 # 视频里一半词是道具。出现场景 / 天气 / 时间 / 具体光源 / 道具词就让模型重写（最后一次机会不卡）。
 ANCHOR_WORDS = (30, 90)
@@ -209,7 +271,8 @@ def _visual(ctx, episode_id: int, force: bool, manual: dict, note: str | None = 
         chars, locs = visual_chars_and_locations(proj)
         prompts = sv.prompts(proj.slug)
         system, user, fp = visual_prompt_fp(prompts, proj.title, chars, locs,
-                                            ep.source_text[:4000], note)
+                                            ep.source_text[:4000], note,
+                                            preset=proj.style_preset)
         rules = visual_rules(prompts)
         judged = judge_script((ep.stage_hashes or {}).get("visual"), fp, rules,
                               bool(proj.style_bible_id))

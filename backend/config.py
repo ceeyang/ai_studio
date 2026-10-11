@@ -41,6 +41,9 @@ class ProviderCfg(BaseModel):
     local_gpu: bool = False
     unload_cmd: list[str] | None = None
     use_sdk: bool = True  # 仅 claude：先试 Agent SDK，失败退回 claude -p
+    # 能不能看图（「从参考图写外观」要把照片发给模型）：false = 明确不支持，这一步直接报错让用户换模型；
+    # 不写按支持处理（OpenAI 兼容接口发 image_url，claude 发图片内容块），模型不支持时接口报错再提示
+    vision: bool | None = None
     timeout: float = 1800.0
 
     def api_key(self) -> str | None:
