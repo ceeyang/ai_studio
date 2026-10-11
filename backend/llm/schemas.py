@@ -113,7 +113,9 @@ class ShotOut(BaseModel):
         if words < 60 or words > 180:
             raise ValueError(f"image_prompt 要写 80–150 个英文单词，现在是 {words} 个")
         if "same as" in v.lower():
-            raise ValueError("image_prompt 里不能写 same as before / same as previous，必须完整复述外貌与场景")
+            raise ValueError("image_prompt 里不能写 same as before / same as previous：每个镜头都要独立写全"
+                             "（角色第一次出现带上按景别取舍的外貌，之后用 the stocky man 这样的简短指代；"
+                             "场景写看得见的具体物件）")
         return v
 
     @model_validator(mode="after")

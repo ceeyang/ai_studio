@@ -55,18 +55,22 @@ def cjk_chars(text: str) -> str:
     return "".join(_CJK.findall(text or ""))
 
 
-def cjk_outside_quotes(text: str) -> str:
-    return cjk_chars(_QUOTED.sub(" ", text or ""))
+def cjk_outside_quotes(text: str, names=()) -> str:
+    """引号外的中文；引号里的中文当作画面上要出现的字放行，但引号里写角色名不行（那是想偷渡名字）。"""
+    text = text or ""
+    names = [n for n in names if n]
+    quoted_names = "".join(n for q in _QUOTED.findall(text) for n in names if n in q)
+    return quoted_names + cjk_chars(_QUOTED.sub(" ", text))
 
 
-def cjk_problems(shots) -> list[str]:
+def cjk_problems(shots, names=()) -> list[str]:
     out = []
     for i, sh in enumerate(shots, start=1):
         for field in ("image_prompt", "motion_prompt", "audio_prompt"):
-            bad = cjk_outside_quotes(getattr(sh, field, "") or "")
+            bad = cjk_outside_quotes(getattr(sh, field, "") or "", names)
             if bad:
                 out.append(f"第 {i} 镜 {field} 里有中文「{bad[:20]}」")
-        bad = "".join(cjk_outside_quotes(p) for p in (getattr(sh, "props", None) or []))
+        bad = "".join(cjk_outside_quotes(p, names) for p in (getattr(sh, "props", None) or []))
         if bad:
             out.append(f"第 {i} 镜 props 里有中文「{bad[:20]}」")
     return out
@@ -152,6 +156,7 @@ class StoryboardPlan:
     char_ids: dict[str, int]
     blocks: list[dict]   # [{"id", "order", "text", "location", "count", "seconds"}]，按段落顺序
     prompts: object       # PromptLibrary
+    aspect: str = "9:16"
 
 
 def build_storyboard_plan(s: Session, sv, episode_id: int) -> StoryboardPlan:
@@ -183,7 +188,7 @@ def build_storyboard_plan(s: Session, sv, episode_id: int) -> StoryboardPlan:
             for b, n in zip(blocks, counts)]
     return StoryboardPlan(ep=ep, shot_seconds=shot_seconds, max_seconds=max_seconds, anchor=anchor,
                           characters=characters, char_ids=char_ids, blocks=plan,
-                          prompts=sv.prompts(proj.slug))
+                          prompts=sv.prompts(proj.slug), aspect=proj.aspect or "9:16")
 
 
 def previous_shot_lines(db, block_id: int) -> list[str]:
@@ -227,14 +232,15 @@ def storyboard_rules(prompts) -> str:
 
 
 def storyboard_inputs_fp(anchor, characters, location, text, count, shot_seconds, max_seconds,
-                         prev_action, block_seconds=None) -> str:
+                         prev_action, block_seconds=None, aspect: str = "9:16") -> str:
     """某段落分镜的输入指纹：只算数据，不算模板文字（模板改动由 STORYBOARD_RULES_VERSION 单独记）。
     修改意见、上一版镜头、前面段落已定的道具说法都不算：前两样靠 force 一定会跑，道具说法只是提示。"""
     return input_hash("storyboard-inputs", anchor=anchor or "", characters=characters,
                       location=location, text=text, count=int(count),
                       shot_seconds=float(shot_seconds), max_seconds=float(max_seconds),
                       prev_action=prev_action or "",
-                      block_seconds=float(block_seconds) if block_seconds else None)
+                      block_seconds=float(block_seconds) if block_seconds else None,
+                      aspect=aspect or "9:16")
 
 
 def shot_content_hash(sh) -> str:
@@ -296,7 +302,8 @@ def storyboard_prompt_fp(prompts, anchor, characters, location, text, count, sho
                          max_seconds, prev_action, note: str | None = None,
                          previous_shots: list[str] | None = None,
                          block_seconds: float | None = None,
-                         props: list[str] | None = None) -> tuple[str, str, str]:
+                         props: list[str] | None = None,
+                         aspect: str = "9:16") -> tuple[str, str, str]:
     """某段落这次会用到的分镜提示词及其输入指纹（不调用 LLM）。
 
     note 是修改意见；previous_shots 是这一段上一版的镜头（只在有修改意见时提供）；
@@ -306,9 +313,10 @@ def storyboard_prompt_fp(prompts, anchor, characters, location, text, count, sho
         prompts, "storyboard", note, {"previous_shots": previous_shots or []},
         anchor=anchor, characters=characters, location=location, text=text,
         count=count, shot_seconds=shot_seconds, max_seconds=max_seconds, prev_action=prev_action,
-        block_seconds=block_seconds, previous_shots=[], known_props=list(props or []))
+        block_seconds=block_seconds, previous_shots=[], known_props=list(props or []),
+        aspect=aspect)
     fp = storyboard_inputs_fp(anchor, characters, location, text, count, shot_seconds,
-                              max_seconds, prev_action, block_seconds)
+                              max_seconds, prev_action, block_seconds, aspect)
     return system, user, fp
 
 
@@ -342,7 +350,8 @@ def run_storyboard(ctx, payload: dict) -> dict:
         system, user, fp = storyboard_prompt_fp(prompts, anchor, characters, blk["location"],
                                                blk["text"], n, shot_seconds, max_seconds,
                                                prev_action, note, previous,
-                                               block_seconds=blk["seconds"], props=props)
+                                               block_seconds=blk["seconds"], props=props,
+                                               aspect=plan_data.aspect)
         key = f"storyboard:{blk['id']}"
         with sv.db.session() as s:
             ep = s.get(Episode, episode_id)
@@ -355,7 +364,8 @@ def run_storyboard(ctx, payload: dict) -> dict:
                 ep.stage_hashes = {**(ep.stage_hashes or {}), key: upgraded_record(fp)}
         if judged.unchanged and not force:
             if judged.legacy:
-                ctx.log(f"{label}：旧版指纹，按输入没变处理，已换成新格式；{RULES_OUTDATED_HINT}")
+                ctx.log(f"{label}：旧版记录，无法判断有没有变，先不动（已换成新格式）；"
+                        "要重出请用重新生成")
             elif judged.rules_outdated:
                 ctx.log(f"{label}：输入没变，跳过；{RULES_OUTDATED_HINT}")
             else:
@@ -371,7 +381,7 @@ def run_storyboard(ctx, payload: dict) -> dict:
             unknown = {c for sh in out.shots for c in sh.cast} - set(char_ids)
             if unknown:
                 raise ValueError(f"cast 里有未知角色 {sorted(unknown)}，只能用：{sorted(char_ids)}")
-            cjk = cjk_problems(out.shots)
+            cjk = cjk_problems(out.shots, list(char_ids))
             if cjk:
                 raise ValueError("；".join(cjk) + "。image_prompt、motion_prompt、audio_prompt 和 props "
                                  "必须全英文，不能有任何中文字符：角色名要换成角色表里该角色的英文外貌"

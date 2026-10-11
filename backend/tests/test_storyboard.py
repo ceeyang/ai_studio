@@ -446,7 +446,8 @@ def test_upgrade_from_old_whole_prompt_hash_keeps_shots_and_selection(tmp_path, 
     ctx.logs.clear()
     assert run_storyboard(ctx, {"episode_id": ep_id}) == {"blocks_done": 0, "blocks_skipped": 2}
     assert len(prov.calls) == 2
-    assert any("旧版指纹" in m and "强制重跑" in m for m in ctx.logs)
+    assert any("旧版记录，无法判断有没有变" in m and "重新生成" in m for m in ctx.logs)
+    assert not any("输入没变" in m for m in ctx.logs)
     with db.session() as s:
         ep = s.get(Episode, ep_id)
         assert sorted(x.id for x in ep.shots) == ids_before
@@ -560,3 +561,74 @@ def test_shrink_fallback_with_manual_provider(tmp_path, db):
     run_storyboard(ctx, {"episode_id": ep_id, "manual": manual})
     with db.session() as s:
         assert [x.duration for x in s.get(Episode, ep_id).shots[:2]] == [5.0, 5.0]
+
+
+# ---------------------------------------------------------------- 第二轮评审
+# 内置分镜模板的内容哈希（统一成 LF 后 sha256 前 16 位）和规则版本绑在一起
+TEMPLATE_HASH_FOR_RULES = {2: "7357bca01548d446"}
+
+
+def test_builtin_template_hash_is_bound_to_rules_version():
+    import hashlib
+
+    from backend.llm.prompts import BUILTIN_DIR
+    from backend.pipeline.storyboard import STORYBOARD_RULES_VERSION
+
+    text = (BUILTIN_DIR / "storyboard.md").read_text(encoding="utf-8").replace("\r\n", "\n")
+    h = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+    assert TEMPLATE_HASH_FOR_RULES.get(STORYBOARD_RULES_VERSION) == h, (
+        f"改了分镜模板要把 STORYBOARD_RULES_VERSION 加一，并更新这里的哈希（现在是 {h}）")
+
+
+def test_prompt_renders_project_aspect(tmp_path, db):
+    ctx, ep_id, prov = setup(tmp_path, db, [shots_json(2)] * 4)
+    run_storyboard(ctx, {"episode_id": ep_id})
+    assert "画面是 9:16 竖屏" in prov.calls[0]["system"]
+    with db.session() as s:
+        s.get(Episode, ep_id).project.aspect = "16:9"
+    # 画幅是输入：改了就重出
+    assert run_storyboard(ctx, {"episode_id": ep_id})["blocks_done"] == 2
+    assert "画面是 16:9 横屏" in prov.calls[2]["system"]
+
+
+def test_storyboard_prompt_round2_rules():
+    from backend.llm.prompts import PromptLibrary
+    from backend.services import BUILTIN_DIR
+
+    system, _ = PromptLibrary(BUILTIN_DIR, BUILTIN_DIR / "none").render(
+        "storyboard", anchor="A", characters=[], location=None, text="x", count=3,
+        shot_seconds=5, max_seconds=10, prev_action="", block_seconds=15.0)
+    # 外貌并进「主体」那一步：第一次出现就带外貌，排在环境前面
+    assert "2. 主体 + 动作瞬间：主体第一次出现就带上外貌" in system
+    assert "4. 外貌" not in system and system.index("2. 主体") < system.index("4. 环境")
+    assert "镜头数固定；放不下时优先保留插入镜头和主线动作，次要动作省略" in system
+    assert "镜头不够就把次要的动作合并" not in system
+    assert "每人的外貌各压缩成一句" in system
+    assert "motion_prompt 里用简短指代就够了" in system
+    assert "image_prompt 和 motion_prompt 都逐字重复" not in system
+
+
+def test_quoted_character_name_is_not_exempt():
+    from types import SimpleNamespace as NS
+
+    from backend.pipeline.storyboard import cjk_problems
+
+    sh = NS(image_prompt='a man whose name tag reads "林夏" stands', motion_prompt="x",
+            audio_prompt='a sign reading "老周修车"', props=[])
+    out = cjk_problems([sh], ["林夏", "老周"])
+    assert any("image_prompt" in x and "林夏" in x for x in out)
+    assert any("audio_prompt" in x and "老周" in x for x in out)
+    assert cjk_problems([NS(image_prompt='a sign reading "修车"', motion_prompt="x",
+                            audio_prompt="x", props=[])], ["林夏", "老周"]) == []
+
+
+def test_same_as_error_text_matches_short_reference_rule():
+    import pytest
+    from pydantic import ValidationError
+
+    from backend.llm.schemas import ShotOut
+
+    with pytest.raises(ValidationError) as ei:
+        ShotOut(action="a", image_prompt="same as before " + "word " * 80, motion_prompt="m")
+    msg = str(ei.value)
+    assert "简短指代" in msg and "完整复述外貌" not in msg

@@ -77,7 +77,8 @@ def scan_storyboard(s: Session, sv, episode_id: int, force: bool,
             continue
         fp = storyboard_inputs_fp(plan_data.anchor, plan_data.characters, blk["location"],
                                   blk["text"], blk["count"], plan_data.shot_seconds,
-                                  plan_data.max_seconds, prev_action, blk["seconds"])
+                                  plan_data.max_seconds, prev_action, blk["seconds"],
+                                  plan_data.aspect)
         record = stage_hashes.get(f"storyboard:{blk['id']}")
         llm_shots = list(s.scalars(select(Shot).where(Shot.scene_block_id == blk["id"],
                                                       Shot.origin == "llm")))
