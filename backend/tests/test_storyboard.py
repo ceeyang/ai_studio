@@ -567,7 +567,7 @@ def test_shrink_fallback_with_manual_provider(tmp_path, db):
 
 # ---------------------------------------------------------------- 第二轮评审
 # 内置分镜模板的内容哈希（统一成 LF 后 sha256 前 16 位）和规则版本绑在一起
-TEMPLATE_HASH_FOR_RULES = {2: "7357bca01548d446", 3: "82bf8c0712f702c9"}
+TEMPLATE_HASH_FOR_RULES = {2: "7357bca01548d446", 3: "8436da3c14f43567"}
 
 
 def test_builtin_template_hash_is_bound_to_rules_version():
@@ -601,7 +601,7 @@ def test_storyboard_prompt_round2_rules():
         "storyboard", anchor="A", characters=[], location=None, text="x", count=3,
         shot_seconds=5, max_seconds=10, prev_action="", block_seconds=15.0)
     # 外貌并进「主体」那一步：第一次出现写外貌占位符，排在环境前面
-    assert "2. 主体 + 动作瞬间：人物第一次出现时写他的外貌占位符" in system
+    assert "人物第一次出现时写他的外貌占位符" in system and "2. 主体 + 动作瞬间" in system
     assert "{{char:3}}" in system and "不要再自己写他的脸" in system
     assert "4. 外貌" not in system and system.index("2. 主体") < system.index("4. 环境")
     assert "镜头数固定；放不下时优先保留插入镜头和主线动作，次要动作省略" in system
@@ -754,3 +754,15 @@ def test_old_v2_records_still_compare_looks(tmp_path, db):
         new, old = block_fps(plan, blk, "")
         assert new != old and pick_fp({"inputs": "x"}, new, old) == old
         assert pick_fp({"placeholders": True}, new, old) == new
+
+
+def test_storyboard_prompt_gaze_and_small_details():
+    from backend.llm.prompts import PromptLibrary
+    from backend.services import BUILTIN_DIR
+
+    system, _ = PromptLibrary(BUILTIN_DIR, BUILTIN_DIR / "none").render(
+        "storyboard", anchor="A", characters=[], location=None, text="x", count=3,
+        shot_seconds=5, max_seconds=10, prev_action="", block_seconds=15.0)
+    assert "人物不看镜头，除非剧本写了看镜头" in system and "glancing up toward" in system
+    assert "中景、全景不写手上的细节和小饰品" in system
+    assert "with both arms extended" in system

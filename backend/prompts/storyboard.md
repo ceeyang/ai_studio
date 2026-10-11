@@ -10,13 +10,13 @@
 - 不写人名：image_prompt、motion_prompt、audio_prompt 里提到人时一律用英文外貌简称（如 the stocky man、the young woman），中文名不行，拼音也不行（不能写 Lao Zhou、Lin Xiaoman、Xiaoman 这类）。
 - image_prompt：你写的部分 60–120 个英文单词（外貌占位符不算）。风格锚由系统自动接在每个 image_prompt 前面，不要自己抄进来。按这个顺序写：
   1. 景别与焦段、机位高度与角度（如 medium close-up, 85mm, eye level）
-  2. 主体 + 动作瞬间：人物第一次出现时写他的外貌占位符（角色表里名字后面的那个，如 {% raw %}{{char:3}}{% endraw %}），占位符单独成句、放在描写他的句子前面；出图时系统会按这一镜的景别把它换成他当前的英文外貌，所以你不要再自己写他的脸、发型、服装。接着用简短指代（如 the stocky man，从他的外貌里取性别、年龄或体型）写他此刻的姿态、动作开始的那一瞬间（首帧是静止画面，只画一个瞬间）、表情。cast 里的每个人都要有自己的占位符，不在 cast 里的人不写占位符
+  2. 主体 + 动作瞬间（动作要写具体、写出方向：如 holding the shoe out toward the old man with both arms extended，而不是 holding the shoe）：人物第一次出现时写他的外貌占位符（角色表里名字后面的那个，如 {% raw %}{{char:3}}{% endraw %}），占位符单独成句、放在描写他的句子前面；出图时系统会按这一镜的景别把它换成他当前的英文外貌，所以你不要再自己写他的脸、发型、服装。接着用简短指代（如 the stocky man，从他的外貌里取性别、年龄或体型）写他此刻的姿态、动作开始的那一瞬间（首帧是静止画面，只画一个瞬间）、表情。cast 里的每个人都要有自己的占位符，不在 cast 里的人不写占位符
   3. 构图：主体在画面里的位置，前景和背景的层次
-  4. 环境：至少三个看得见的具体物件及其位置、材质
+  4. 环境：至少三个看得见的具体物件及其位置、材质。中景、全景不写手上的细节和小饰品（手指、指甲、戒指、细线），它们在远处画不清、容易画错；需要看清的小东西给它单独一个特写
   5. 光线：主光方向、软硬、色温，辅光或轮廓光
   6. 本镜特有的色彩重点和焦点：哪个物件是点睛的颜色、焦点落在哪里。不要写胶片型号、颗粒、photorealistic、cinematic 这类全片通用的词——它们在风格锚里
   每个镜头都独立写全，禁止写 "same as before" 或 "same as previous shot"。不要堆 beautiful、amazing、cinematic 这类空词，只写画面里看得见的东西。
-- motion_prompt：30–60 个英文单词。第一次提到主体时用 image_prompt 里那个简短指代（如 the stocky man），不要只写 he / she（两人同框时分不清是谁）；写主体在这几秒里的微动作、镜头运动和结束时的状态。镜头运动只用一种，从这些里选：static / slow push in / slow pull back / slow pan left / slow pan right / slow tilt up / slow tilt down / subtle handheld；人脸近景不用快速运动。motion_prompt 里不写外貌占位符。
+- motion_prompt：30–60 个英文单词。第一次提到主体时用 image_prompt 里那个简短指代（如 the stocky man），不要只写 he / she（两人同框时分不清是谁）；人物的视线写明方向和对象（如 glancing up toward the old man at frame left），人物不看镜头，除非剧本写了看镜头；写主体在这几秒里的微动作、镜头运动和结束时的状态。镜头运动只用一种，从这些里选：static / slow push in / slow pull back / slow pan left / slow pan right / slow tilt up / slow tilt down / subtle handheld；人脸近景不用快速运动。motion_prompt 里不写外貌占位符。
 - audio_prompt：20–40 个英文单词，写环境声、动作音效、有无音乐；有台词时写明谁在说（用英文外貌简称）、什么语气。
 - dialogue：只在有人说话时写。speaker 只能是角色表里的名字。zh 是中文台词，每句不超过 16 个字，语速每秒不超过 5 个字（如 10 个字至少给 2 秒）；start / end 是相对本镜开头的秒数，第一句不早于 0.4 秒，最后一句结束后留 0.4 秒。
 - cast：出场角色名（画面里看得见的人），只能从角色表里选；没有人出场就写空数组。

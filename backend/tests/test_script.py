@@ -234,8 +234,8 @@ def test_rerun_visual_keeps_chosen_look(tmp_path, db):
 
 
 # 内置剧本模板的内容哈希（统一成 LF 后 sha256 前 16 位）和规则版本绑在一起
-SCRIPT_TEMPLATE_HASHES = {("script_structure", 2): "9364973a34699f76",
-                          ("script_visual", 2): "426c19ef39184cce"}
+SCRIPT_TEMPLATE_HASHES = {("script_structure", 2): "5d1f0d3de3c6698f",
+                          ("script_visual", 2): "d4a150a183a70949"}
 
 
 @pytest.mark.parametrize("name,attr", [("script_structure", "STRUCTURE_RULES_VERSION"),
@@ -251,3 +251,26 @@ def test_builtin_script_template_hash_is_bound_to_rules_version(name, attr):
     version = getattr(sc, attr)
     assert SCRIPT_TEMPLATE_HASHES.get((name, version)) == h, (
         f"改了 {name}.md 要把 {attr} 加一，并更新这里的哈希（现在是 {h}）")
+
+
+def test_structure_prompt_keeps_synopsis_cast_and_beats():
+    """第二次样片：剧本把画外的小女孩加成了出镜角色，丢了「抬头看阿青」「摆手不收钱」。"""
+    from backend.llm.prompts import PromptLibrary
+    from backend.services import BUILTIN_DIR
+
+    system, _ = PromptLibrary(BUILTIN_DIR, BUILTIN_DIR / "none").render(
+        "script_structure", project_title="t", target_seconds=25, source_text="x", shot_count=5,
+        shot_seconds=5, aspect="9:16")
+    assert "不要新增素材里没有的出镜人物" in system and "只出声，不出镜" in system
+    assert "情绪节点和动作" in system and "一个不少" in system
+    assert "输出前自检" in system and system.index("输出前自检") < system.index("只输出一个 JSON")
+
+
+def test_visual_prompt_asks_for_renderable_signature_details():
+    from backend.llm.prompts import PromptLibrary
+    from backend.services import BUILTIN_DIR
+
+    lib = PromptLibrary(BUILTIN_DIR, BUILTIN_DIR / "none")
+    system, _ = lib.render("script_visual", project_title="t", characters=[], locations=[],
+                           excerpt="x")
+    assert "不写老茧、缠线" in system and "黄金时段" in system

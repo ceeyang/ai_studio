@@ -570,3 +570,21 @@ def test_video_frames_keep_last_dialogue_line(tmp_path, db):
     run_keyframe(ctx, {"shot_id": shot_id})
     run_video(ctx, {"shot_id": shot_id})
     assert runner.calls[-1].meta["frames"] == 141   # 124 帧（5.17s）会截掉 5.3s 结束的台词
+
+
+def test_engine_video_prompt_keeps_eyes_off_the_lens():
+    """第二次样片 S03：人物抬头被 H3 理解成看镜头。画面里有人时写明视线，剧本让他看镜头时不写。"""
+    from backend.pipeline.prompting import GAZE_LINE, Speaker
+
+    on = {"林夏": Speaker("the young woman", True)}
+    off = {"林夏": Speaker("the young woman", False)}
+    v = compose_video_prompt("The young woman glances up.", "img", "", [], anchor="", has_audio=True,
+                             speakers=on)
+    assert GAZE_LINE in v
+    v = compose_video_prompt("The young woman looks straight into the camera.", "img", "", [],
+                             anchor="", has_audio=True, speakers=on)
+    assert GAZE_LINE not in v
+    assert GAZE_LINE not in compose_video_prompt("Rain falls.", "img", "", [], anchor="",
+                                                 has_audio=True, speakers=off)
+    # 算哈希的老写法不加
+    assert GAZE_LINE not in compose_video_prompt("x", "img", "", [], anchor="", has_audio=True)

@@ -235,6 +235,11 @@ def _dialogue_line(d: dict, speakers: dict[str, Speaker] | None, anyone_on_scree
     return f"an off-screen voice {said}{lips}"
 
 
+GAZE_LINE = ("The people on screen keep their eyes on each other and on what they are doing, "
+             "looking away from the camera.")
+_AT_CAMERA = re.compile(r"\b(?:into|at|toward|towards|to)\s+(?:the\s+)?(?:camera|lens|viewer)\b", re.I)
+
+
 def compose_video_prompt(motion_prompt: str, image_prompt: str, audio_prompt: str,
                          dialogue: list[dict], *, anchor: str, has_audio: bool,
                          speakers: dict[str, Speaker] | None = None) -> str:
@@ -245,6 +250,9 @@ def compose_video_prompt(motion_prompt: str, image_prompt: str, audio_prompt: st
         text = compose_image_prompt(body, anchor)
     else:                  # 发给引擎：动作在前，后面一句短的成像风格
         text = f"{body} {video_style(anchor)}".strip()
+        # 第二次样片 S03：motion 写 glancing up，H3 理解成看镜头。画面里有人、剧本没让他看镜头时写明视线
+        if any(sp.on_screen for sp in speakers.values()) and not _AT_CAMERA.search(body):
+            text = f"{text} {GAZE_LINE}"
     if not has_audio:
         return text
     audio = (audio_prompt or "").strip()
