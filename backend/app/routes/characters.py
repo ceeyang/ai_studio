@@ -9,13 +9,15 @@ from backend.app.schemas import (CharacterOut, PortraitDrawIn, RecommendIn, Refr
                                  RefreshLooksOut, RunOut, SuggestIn,
                                  TurnaroundCropIn, TurnaroundGenerateIn, TurnaroundLookPatch,
                                  TurnaroundSelectIn)
-from backend.domain.characters import portrait_of, refresh_shot_looks, use_portrait
+from backend.domain.characters import (known_looks, portrait_of, refresh_shot_looks,
+                                       use_portrait)
 from backend.domain.turnaround import (SHEETS, crop_cells, look_of, select_sheet,
                                        sheet_slot_kind)
 from backend.domain.models import Candidate, Character, Episode, Slot
 from backend.domain.settings import portrait_engine
 from backend.engines.registry import check_ready
 from backend.pipeline.characters import sheet_engine_name
+from backend.pipeline.storyboard import rebase_after_look_change
 from backend.queue.errors import JobError
 
 router = APIRouter(prefix="/api", tags=["characters"])
@@ -62,7 +64,12 @@ def refresh_look(char_id: int, body: RefreshLooksIn, request: Request):
     sv = services(request)
     with sv.db.session() as s:
         c = get_or_404(s, Character, char_id, "角色")
-        return RefreshLooksOut(**refresh_shot_looks(s, c, body.old))
+        changed: dict[int, str] = {}
+        old_looks = known_looks(s, c, body.old)
+        res = refresh_shot_looks(s, c, body.old, changed)
+        # v2 分镜的段落记录跟着换成现在的外貌，下一次整集运行不会要求删光这些段重出
+        res["blocks_rebased"] = rebase_after_look_change(s, sv, c, old_looks, changed) if changed else 0
+        return RefreshLooksOut(**res)
 
 
 @router.post("/characters/{char_id}/suggest", response_model=RunOut)

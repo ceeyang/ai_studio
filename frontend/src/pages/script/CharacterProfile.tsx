@@ -1,9 +1,11 @@
 // 角色抽屉的「资料」页签：名字、人物描述、核心特征、配音音色；英文外观提示词收在「高级」里。
 import { errorText } from '../../api/client';
+import { useState } from 'react';
 import { usePatchCharacter, useRefreshShotLooks } from '../../api/queries';
 import type { Character, CharacterPatch } from '../../api/types';
 import { EditableFields, type FieldSpec, type FieldValues } from '../../components/EditableFields';
 import { VOICES } from '../../format';
+import { refreshText } from './CharacterLooks';
 
 const CHARACTER_FIELDS: FieldSpec[] = [
   { name: 'name', label: '名字' },
@@ -41,6 +43,8 @@ export function CharacterProfile({
 }) {
   const patch = usePatchCharacter(slug);
   const refresh = useRefreshShotLooks();
+  // 改了外貌后自动「把镜头里的外貌更新为当前造型」的结果（换了几个、哪些对不上 / 只对上一部分）
+  const [refreshMsg, setRefreshMsg] = useState<string | null>(null);
   return (
     <div className="char-fields">
       <EditableFields
@@ -54,7 +58,7 @@ export function CharacterProfile({
         }}
         advancedOpen={advancedOpen}
         saving={patch.isPending}
-        error={patch.error ? errorText(patch.error) : null}
+        error={patch.error ? errorText(patch.error) : refresh.error ? `镜头外貌没更新：${errorText(refresh.error)}` : null}
         onDirtyChange={onDirtyChange}
         onSave={(_v, ch) => {
           const old = c.visual_prompt;
@@ -62,10 +66,20 @@ export function CharacterProfile({
           const sync = ch.visual_prompt !== undefined && ch.visual_prompt.trim() !== old.trim() && old.trim();
           patch.mutate(
             { id: c.id, ...toCharacterPatch(ch) },
-            { onSuccess: () => (sync ? refresh.mutate({ id: c.id, old: [old] }) : undefined) },
+            {
+              onSuccess: () => {
+                setRefreshMsg(null);
+                if (sync) refresh.mutate({ id: c.id, old: [old] }, { onSuccess: (r) => setRefreshMsg(refreshText(r)) });
+              },
+            },
           );
         }}
       />
+      {refreshMsg && (
+        <p className="notice small" data-testid="profile-refresh-look-result">
+          {refreshMsg}
+        </p>
+      )}
     </div>
   );
 }

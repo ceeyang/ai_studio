@@ -360,7 +360,7 @@ def test_refresh_shot_looks_replaces_exact_old_text_with_placeholder(tmp_path, d
         ch.visual_prompt = NEW
         res = refresh_shot_looks(s, ch, [OLD])
     assert res == {"updated": ["第1集 S01"], "replacements": 1, "already": ["第1集 S03"],
-                   "unmatched": ["第1集 S02"]}
+                   "unmatched": ["第1集 S02"], "partial": []}
     with db.session() as s:
         s1 = s.query(Shot).filter_by(code="S01").one()
         assert s1.image_prompt == f"medium shot, 35mm. {{{{char:{ids['char']}}}}} He crouches by the scooter."
@@ -474,3 +474,46 @@ def test_portrait_look_keeps_upper_part_of_mixed_clause():
     look = "A tall man. Wears a long navy coat over grey trousers, sitting on a stool, black boots."
     assert portrait_look(look) == "A tall man. Wears a long navy coat."
     assert upper_body_look(look) == "A tall man. Wears a long navy coat, sitting on a stool."
+
+
+def test_refresh_does_not_half_replace_a_v2_paraphrase(tmp_path, db):
+    """真实的 v2 写法：特写只原样抄了外貌第一句、服装是改写的（还带着旧外貌连续 6 个词）。
+    换掉第一句会把旧服装留在提示词里——不换，列进 partial；中景只抄了第一句的也不按「只留脸」去换。"""
+    from backend.domain.characters import refresh_shot_looks
+    from backend.domain.models import Shot
+
+    ctx, runner, ids = setup(tmp_path, db, look=OLD)
+    cast = [{"character_id": ids["char"], "variation_id": None}]
+    first = "Chinese man in his mid-fifties with a weathered square face and grey stubble."
+    close = (f"close-up, 85mm. {first} He wears a faded navy-blue cotton work jacket over a grey "
+             "T-shirt, frowning at the shoe.")
+    mid = f"medium shot, 50mm. {first} He wears a dark jacket and crouches by the scooter."
+    with db.session() as s:
+        s.add_all([Shot(episode_id=ids["episode"], order=0, code="S01", shot_size="特写", cast=cast,
+                        image_prompt=close),
+                   Shot(episode_id=ids["episode"], order=1, code="S02", shot_size="中景", cast=cast,
+                        image_prompt=mid)])
+        s.flush()
+        ch = s.get(Character, ids["char"])
+        ch.visual_prompt = NEW
+        res = refresh_shot_looks(s, ch, [OLD])
+    assert res["updated"] == [] and res["partial"] == ["第1集 S01"] and res["unmatched"] == ["第1集 S02"]
+    with db.session() as s:
+        assert s.query(Shot).filter_by(code="S01").one().image_prompt == close
+        assert s.query(Shot).filter_by(code="S02").one().image_prompt == mid
+
+
+def test_refresh_close_up_with_clean_face_copy_is_replaced(tmp_path, db):
+    from backend.domain.characters import refresh_shot_looks
+    from backend.domain.models import Shot
+
+    ctx, runner, ids = setup(tmp_path, db, look=OLD)
+    first = "Chinese man in his mid-fifties with a weathered square face and grey stubble."
+    with db.session() as s:
+        s.add(Shot(episode_id=ids["episode"], order=0, code="S01", shot_size="特写",
+                   cast=[{"character_id": ids["char"], "variation_id": None}],
+                   image_prompt=f"close-up, 85mm. {first} He frowns at the shoe."))
+        s.flush()
+        ch = s.get(Character, ids["char"])
+        ch.visual_prompt = NEW
+        assert refresh_shot_looks(s, ch, [OLD])["updated"] == ["第1集 S01"]

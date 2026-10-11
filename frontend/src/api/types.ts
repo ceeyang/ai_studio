@@ -523,6 +523,10 @@ export interface RefreshLooksOut {
   already: string[];
   /** 出场但找不到一字不差的旧外貌的镜头（分镜改写过）：要手改或重写分镜 */
   unmatched: string[];
+  /** 只对上一部分（换了还会留下旧服装等外貌文字）的镜头：没有换，要手改或重写分镜 */
+  partial?: string[];
+  /** 跟着更新了分镜记录的段落数（换干净以后，整集运行不再要求删掉这些段重出） */
+  blocks_rebased?: number;
 }
 
 export type CharacterPatch = Partial<Pick<Character, 'name' | 'description' | 'visual_prompt' | 'core_features' | 'voice'>>;

@@ -766,3 +766,52 @@ def test_storyboard_prompt_gaze_and_small_details():
     assert "人物不看镜头，除非剧本写了看镜头" in system and "glancing up toward" in system
     assert "中景、全景不写手上的细节和小饰品" in system
     assert "with both arms extended" in system
+
+
+def test_v2_storyboard_is_not_rewritten_after_look_refresh(tmp_path, db):
+    """v2 分镜（外貌抄进 image_prompt）：换造型后不处理，下一次整集运行要删光重出；
+    「把镜头里的外貌更新为当前造型」换干净以后，段落记录跟着换成新外貌，不再要求重出，也不算用户改过。"""
+    from backend.domain.characters import known_looks, refresh_shot_looks
+    from backend.pipeline.impact import rerun_impact
+    from backend.pipeline.storyboard import (block_fps, build_storyboard_plan,
+                                             rebase_after_look_change, shot_content_hash)
+
+    ctx, ep_id, prov = setup(tmp_path, db, [shots_json(2), shots_json(2)])
+    run_storyboard(ctx, {"episode_id": ep_id})
+    # 改造成 v2 的样子：外貌原文抄在镜头里，记录是带外貌的老格式指纹
+    with db.session() as s:
+        ep = s.get(Episode, ep_id)
+        for sh in ep.shots:
+            sh.image_prompt = sh.image_prompt.replace("{{char:1}}", LOOK + ".")
+        s.flush()
+        plan = build_storyboard_plan(s, ctx.services, ep_id)
+        hashes = dict(ep.stage_hashes)
+        prev = ""
+        for blk in plan.blocks:
+            _, old_fp = block_fps(plan, blk, prev)
+            shots = [x for x in ep.shots if x.scene_block_id == blk["id"]]
+            hashes[f"storyboard:{blk['id']}"] = {"inputs": old_fp, "rules": "2",
+                                                 "shots": {str(x.id): shot_content_hash(x) for x in shots}}
+            prev = shots[-1].action
+        ep.stage_hashes = hashes
+    with db.session() as s:
+        assert rerun_impact(s, ctx.services, ep_id, "storyboard", False).will_run is False
+        s.scalar(select(Character)).visual_prompt = "a tall man in his forties with a shaved head"
+    with db.session() as s:
+        assert rerun_impact(s, ctx.services, ep_id, "storyboard", False).will_run is True
+    with db.session() as s:
+        ch = s.scalar(select(Character))
+        changed: dict = {}
+        olds = known_looks(s, ch, [LOOK])
+        res = refresh_shot_looks(s, ch, [LOOK], changed)
+        assert len(res["updated"]) == 4 and res["partial"] == []
+        assert rebase_after_look_change(s, ctx.services, ch, olds, changed) == 2
+    with db.session() as s:
+        im = rerun_impact(s, ctx.services, ep_id, "storyboard", False)
+        assert im.will_run is False and im.edited_shots == 0
+    with db.session() as s:
+        from backend.pipeline.storyboard import edited_shot_ids
+        ep = s.get(Episode, ep_id)
+        for b in ep.scene_blocks:
+            shots = [x for x in ep.shots if x.scene_block_id == b.id]
+            assert edited_shot_ids(ep.stage_hashes[f"storyboard:{b.id}"], shots) == []

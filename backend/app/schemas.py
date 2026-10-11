@@ -200,6 +200,8 @@ class RefreshLooksOut(BaseModel):
     replacements: int
     already: list[str]        # 本来就用占位符的镜头（自动跟着当前造型）
     unmatched: list[str]      # 出场但找不到一字不差的旧外貌的镜头（分镜改写过，要手改或重写分镜）
+    partial: list[str] = Field(default_factory=list)   # 只对上一部分、换了还会留下旧外貌的镜头（没换）
+    blocks_rebased: int = 0   # 跟着更新了分镜记录的段落数（不再要求删掉重出）
 
 
 class CharacterPatch(BaseModel):

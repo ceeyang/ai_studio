@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from pathlib import Path
 
 from sqlalchemy.orm import Session
@@ -98,55 +99,86 @@ def known_looks(s: Session, char: Character, extra=()) -> list[str]:
     return sorted(looks, key=len, reverse=True)
 
 
-def _variants(look: str) -> list[str]:
-    from backend.pipeline.prompting import face_look, upper_body_look
+def _variants(look: str, shot_size: str = "") -> list[str]:
+    """这一镜可能抄进去的旧外貌写法：整段，以及按这一镜景别取舍后的那一段（和出图时一致）。
+    不再试别的景别的写法——特写的「只留脸」去匹配中景，会只换掉第一句、把旧服装留在提示词里。"""
+    from backend.pipeline.prompting import look_for_size
 
-    out = []
-    for v in (look, look.rstrip(" ."), upper_body_look(look), upper_body_look(look).rstrip(" ."),
-              face_look(look), face_look(look).rstrip(" .")):
-        v = v.strip()
-        if len(v) >= 20 and v not in out:
-            out.append(v)
+    out: list[str] = []
+    for v in (look, look_for_size(look, shot_size)):
+        for w in (v.strip(), v.strip().rstrip(" .")):
+            if len(w) >= 20 and w not in out:
+                out.append(w)
     return sorted(out, key=len, reverse=True)
 
 
-def refresh_shot_looks(s: Session, char: Character, extra_old=()) -> dict:
-    """「把镜头里的外貌更新为当前造型」：镜头 image_prompt 里一字不差抄着旧外貌（整段、去掉下半身的、
-    只留脸的）的地方，换成这个角色的外貌占位符——出图时按景别填当前外貌，以后再换造型也自动跟上。
-    只做精确替换：分镜按景别改写过的外貌对不上，列进 unmatched，让用户手改或重写分镜。"""
+_WORDS = re.compile(r"[a-z0-9][a-z0-9'-]*")
+LEFTOVER_NGRAM = 6
+
+
+def _leftover(text: str, looks: list[str]) -> bool:
+    """替换后提示词里还留着旧外貌：某一整句（4 个词以上）原样还在，或有连续 6 个词和旧外貌一样。"""
+    words = _WORDS.findall((text or "").lower())
+    grams = {tuple(words[i:i + LEFTOVER_NGRAM]) for i in range(len(words) - LEFTOVER_NGRAM + 1)}
+    for look in looks:
+        for sent in re.split(r"(?<=[.!?])\s+", look):
+            sent = sent.strip().rstrip(" .")
+            if len(sent.split()) >= 4 and sent in text:
+                return True
+        ow = _WORDS.findall(look.lower())
+        if any(tuple(ow[i:i + LEFTOVER_NGRAM]) in grams for i in range(len(ow) - LEFTOVER_NGRAM + 1)):
+            return True
+    return False
+
+
+def refresh_shot_looks(s: Session, char: Character, extra_old=(),
+                       changed: dict[int, str] | None = None) -> dict:
+    """「把镜头里的外貌更新为当前造型」：镜头 image_prompt 里一字不差抄着旧外貌（整段，或按这一镜景别
+    取舍后的那段）的地方，换成这个角色的外貌占位符——出图时按景别填当前外貌，以后再换造型也自动跟上。
+
+    只做干净的替换：换完以后提示词里还留着旧外貌的整句或连续 6 个词（分镜只抄了一部分、其余改写过），
+    就不换，列进 partial；完全对不上的列进 unmatched。两种都要用户手改或重写这几段分镜。
+    changed：换过的镜头 id → 换之前的镜头内容哈希（给分镜记录跟着更新用）。"""
     from sqlalchemy import select
 
     from backend.domain.models import Episode, Shot
     from backend.pipeline.prompting import char_token
+    from backend.pipeline.storyboard import shot_content_hash
 
     token = char_token(char.id)
-    olds = [v for look in known_looks(s, char, extra_old) for v in _variants(look)]
-    olds = sorted(dict.fromkeys(olds), key=len, reverse=True)
+    looks = known_looks(s, char, extra_old)
     rows = s.execute(select(Shot, Episode.number).join(Episode, Shot.episode_id == Episode.id)
                      .where(Episode.project_id == char.project_id)
                      .order_by(Episode.number, Shot.order, Shot.id)).all()
-    updated, already, unmatched = [], [], []
+    updated, already, unmatched, partial = [], [], [], []
     replacements = 0
     for shot, number in rows:
         label = f"第{number}集 {shot.code or shot.id}"
-        text = shot.image_prompt or ""
-        n = 0
+        before = shot.image_prompt or ""
+        olds = sorted(dict.fromkeys(v for look in looks for v in _variants(look, shot.shot_size or "")),
+                      key=len, reverse=True)
+        text, n = before, 0
         for old in olds:
             k = text.count(old)
             if k:
                 text = text.replace(old, token)
                 n += k
+        in_cast = any(isinstance(c, dict) and c.get("character_id") == char.id
+                      for c in shot.cast or [])
+        if n and _leftover(text, looks):
+            partial.append(label)
+            continue
         if n:
+            if changed is not None:
+                changed[shot.id] = shot_content_hash(shot)
             shot.image_prompt = text
             replacements += n
             updated.append(label)
             continue
-        in_cast = any(isinstance(c, dict) and c.get("character_id") == char.id
-                      for c in shot.cast or [])
-        if token in text:
+        if token in before:
             already.append(label)
         elif in_cast:
             unmatched.append(label)
     s.flush()
     return {"updated": updated, "replacements": replacements, "already": already,
-            "unmatched": unmatched}
+            "unmatched": unmatched, "partial": partial}

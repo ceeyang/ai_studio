@@ -42,6 +42,9 @@ export function refreshText(r: RefreshLooksOut): string {
   const parts: string[] = [];
   if (r.updated.length) parts.push(`${r.updated.length} 个镜头里的旧外貌换成了当前造型（${r.updated.join('、')}），它们的首帧会过期`);
   if (r.already.length) parts.push(`${r.already.length} 个镜头本来就自动跟着当前造型`);
+  const partial = r.partial ?? [];
+  if (partial.length)
+    parts.push(`${partial.length} 个镜头只抄了一部分旧外貌（${partial.join('、')}），换了会留下旧服装描述，没有换，要手改提示词或重新生成这几段分镜`);
   if (r.unmatched.length)
     parts.push(`${r.unmatched.length} 个出场镜头找不到一字不差的旧外貌（${r.unmatched.join('、')}），要手改提示词或重新生成这几段分镜`);
   return parts.length ? parts.join('；') : '没有出场镜头需要更新';

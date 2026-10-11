@@ -372,7 +372,7 @@ describe('角色抽屉', () => {
   it('资料里改外观提示词：保存后把镜头里的旧外貌换成新的', async () => {
     const { calls, user } = setup(CHEN, {
       'PATCH /api/characters/6': { ...CHEN, visual_prompt: 'bald mechanic' },
-      'POST /api/characters/6/shots/refresh-look': { updated: [], replacements: 0, already: [], unmatched: [] },
+      'POST /api/characters/6/shots/refresh-look': { updated: [], replacements: 0, already: [], unmatched: [], partial: ['第1集 S04'] },
     });
     const d = await drawer();
     await user.click(within(d).getByRole('tab', { name: '资料' }));
@@ -382,6 +382,21 @@ describe('角色抽屉', () => {
     await user.click(within(d).getByRole('button', { name: '保存' }));
     await waitFor(() => expect(posts(calls)).toHaveLength(2));
     expect(posts(calls)[1]).toMatchObject({ url: '/api/characters/6/shots/refresh-look', body: { old: ['lean mechanic'] } });
+    expect((await within(d).findByTestId('profile-refresh-look-result')).textContent).toContain('1 个镜头只抄了一部分旧外貌（第1集 S04）');
+  });
+
+  it('资料里改外观提示词后更新镜头失败：显示错误', async () => {
+    const { user } = setup(CHEN, {
+      'PATCH /api/characters/6': { ...CHEN, visual_prompt: 'bald mechanic' },
+      'POST /api/characters/6/shots/refresh-look': () => new Response(JSON.stringify({ detail: '数据库忙' }), { status: 400 }),
+    });
+    const d = await drawer();
+    await user.click(within(d).getByRole('tab', { name: '资料' }));
+    const vp = within(d).getByLabelText(/外观提示词/);
+    await user.clear(vp);
+    await user.type(vp, 'bald mechanic');
+    await user.click(within(d).getByRole('button', { name: '保存' }));
+    expect(await within(d).findByText(/镜头外貌没更新：数据库忙/)).toBeTruthy();
   });
 
   it('抽屉里没有主按钮（全页唯一的主按钮在阶段条）', async () => {

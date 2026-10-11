@@ -391,6 +391,63 @@ def pick_fp(record, fp_new: str, fp_old: str) -> str:
     return fp_new if isinstance(record, dict) and record.get("placeholders") else fp_old
 
 
+def rebase_after_look_change(s: Session, sv, char, old_looks: list[str],
+                             changed: dict[int, str]) -> int:
+    """「把镜头里的外貌更新为当前造型」之后，v2（外貌抄进 image_prompt）出的段落记录跟着更新：
+    这一段里这个角色出场的 llm 镜头全都换干净了（或本来就用占位符），而且记录的指纹正好是
+    「换造型之前的外貌 + 现在的其他输入」——就把指纹改成现在的外貌，换过的镜头内容哈希也更新
+    （系统替换的，不算用户改过）。否则下一次不强制的整集运行会要求删光这一段的镜头重出。
+    返回更新了几段。"""
+    from backend.pipeline.prompting import char_token
+
+    token = char_token(char.id)
+    n = 0
+    for ep in s.scalars(select(Episode).where(Episode.project_id == char.project_id)).all():
+        try:
+            plan = build_storyboard_plan(s, sv, ep.id)
+        except JobError:
+            continue
+        hashes = dict(ep.stage_hashes or {})
+        dirty = False
+        prev_action = ""
+        for blk in plan.blocks:
+            key = f"storyboard:{blk['id']}"
+            rec = hashes.get(key)
+            shots = list(s.scalars(select(Shot).where(Shot.scene_block_id == blk["id"],
+                                                      Shot.origin == "llm")))
+            mine = [sh for sh in shots
+                    if token in (sh.image_prompt or "")
+                    or any(isinstance(c, dict) and c.get("character_id") == char.id
+                           for c in sh.cast or [])]
+            if isinstance(rec, dict) and not rec.get("placeholders") and mine \
+                    and all(token in (sh.image_prompt or "") for sh in mine):
+                _, cur = block_fps(plan, blk, prev_action)
+                args = (blk["location"], blk["text"], blk["count"], plan.shot_seconds,
+                        plan.max_seconds, prev_action, blk["seconds"], plan.aspect)
+                for old in old_looks:
+                    chars = [{**c, "visual_prompt": old} if c.get("name") == char.name else c
+                             for c in plan.characters]
+                    if rec.get("inputs") != cur and \
+                            storyboard_inputs_fp(plan.anchor, chars, *args) == rec.get("inputs"):
+                        known = rec.get("shots")
+                        if isinstance(known, dict):
+                            known = dict(known)
+                            for sh in shots:
+                                if sh.id in changed and known.get(str(sh.id)) == changed[sh.id]:
+                                    known[str(sh.id)] = shot_content_hash(sh)
+                        hashes[key] = {**rec, "inputs": cur, "shots": known}
+                        dirty = True
+                        n += 1
+                        break
+            last = s.scalar(select(Shot).where(Shot.scene_block_id == blk["id"])
+                            .order_by(Shot.order.desc(), Shot.id.desc()))
+            prev_action = (last.action if last else "") or prev_action
+        if dirty:
+            ep.stage_hashes = hashes
+    s.flush()
+    return n
+
+
 def shot_content_hash(sh) -> str:
     return input_hash("shot-content", **{f: getattr(sh, f, None) for f in SHOT_CONTENT_FIELDS})
 
