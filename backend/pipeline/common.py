@@ -1,12 +1,24 @@
 """各阶段共用的小工具。"""
 from __future__ import annotations
 
+from dataclasses import is_dataclass, replace
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.domain.hashing import input_hash
 from backend.domain.models import Episode, Project, SceneBlock
 from backend.queue.errors import JobError
+
+
+def job_services(ctx):
+    """本任务用的服务：ffmpeg 换成绑定了本任务取消信号的副本，取消时正在跑的 ffmpeg 会被杀掉。
+    （测试里的假 ffmpeg 没有 with_cancel，原样返回。）"""
+    sv = ctx.services
+    ff = getattr(sv, "ffmpeg", None)
+    if ff is None or not hasattr(ff, "with_cancel") or not is_dataclass(sv):
+        return sv
+    return replace(sv, ffmpeg=ff.with_cancel(ctx.cancel_event))
 
 
 def load_episode(s: Session, episode_id: int) -> tuple[Episode, Project]:

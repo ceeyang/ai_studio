@@ -9,6 +9,7 @@ import shutil
 from datetime import datetime
 
 from backend.domain.models import Export
+from backend.pipeline.common import job_services
 from backend.pipeline.post import (OUTPUT_FPS, clip_limits, episode_has_ai_draft, lines_missing_km,
                                    load_cut, load_dub_manifest, mark_exported)
 from backend.post.dub import build_dub_mix_cmd
@@ -32,7 +33,8 @@ def card_color(raw: str | None) -> str:
 
 @HANDLERS.register("export.episode")
 def run_export(ctx, payload: dict) -> dict:
-    sv = ctx.services
+    # 每一步之间看取消信号；正在跑的 ffmpeg 被取消时直接杀掉（job_services 里的 ffmpeg 绑定了取消信号）
+    sv = job_services(ctx)
     episode_id = int(payload["episode_id"])
     opts = ExportOptions(**(payload.get("options") or {}))
     cut = load_cut(sv, episode_id, allow_missing=bool(payload.get("allow_missing")))
@@ -47,6 +49,7 @@ def run_export(ctx, payload: dict) -> dict:
         raise JobError("项目还没有设置片尾卡，先在导演台或 studio project end-card 里填写")
     width, height = OUTPUT_SIZES[cut.aspect]
     variant = cut.aspect.replace(":", "x")
+    ctx.check_canceled()
     secs, limits = clip_limits(sv, cut, opts.trim)
     manifest = load_dub_manifest(sv, cut, limits, opts.align) if opts.dub == "km" else None
 
@@ -59,10 +62,12 @@ def run_export(ctx, payload: dict) -> dict:
     if trims:
         ctx.log("按分镜时长裁尾：" + "，".join(f"{t['code']} {t['clip']:.2f}→{t['used']:.2f}s"
                                          for t in trims))
+    ctx.check_canceled()
     ctx.log(f"合成 {len(cut.clips)} 个镜头 → {width}x{height}@{OUTPUT_FPS}")
     asm = sv.ffmpeg.assemble(cut.clips, work / "base.mp4" if post else out, width=width,
                              height=height, fps=OUTPUT_FPS, transitions=cut.transitions,
                              work_dir=work, max_seconds=limits)
+    ctx.check_canceled()
     cur = asm.path
     over = 0
     rows = manifest["lines"] if manifest is not None else []
@@ -76,6 +81,7 @@ def run_export(ctx, payload: dict) -> dict:
         if manifest is not None and manifest.get("align") == "detected":
             hit = sum(1 for r in rows if r.get("detected"))
             ctx.log(f"配音对齐实际说话：{hit}/{len(rows)} 句对上了 H3 的说话段，其余用台词时间")
+        ctx.check_canceled()
         dubbed = work / "dub.mp4"
         sv.ffmpeg.run(build_dub_mix_cmd(sv.ffmpeg.ffmpeg, cur, lines, dubbed,
                                         bed_db=bed_db, duck_db=sv.cfg.dub.duck_db,
@@ -105,12 +111,16 @@ def run_export(ctx, payload: dict) -> dict:
             spec = CardSpec("card.ass", card_seconds, width, height, OUTPUT_FPS,
                             color=card_color(card.get("background")))
             ctx.log(f"接片尾卡 {card_seconds:g}s（{len(card['lines'])} 行）")
+        ctx.check_canceled()
         sv.ffmpeg.run(build_finish_cmd(sv.ffmpeg.ffmpeg, cur, out, subs_ass=subs_name, card=spec,
                                        has_audio=sv.ffmpeg.has_audio(cur), fonts_dir=fonts),
                       cwd=work)
     elif cur != out:
         shutil.move(str(cur), out)
     shutil.rmtree(work, ignore_errors=True)
+    if ctx.cancel_event.is_set():   # 最后一步刚跑完就被取消：不登记这次导出，删掉半成品
+        out.unlink(missing_ok=True)
+        ctx.check_canceled()
     rel = sv.media.rel(out)
     settings = {"width": width, "height": height, "fps": OUTPUT_FPS, "clips": len(cut.clips),
                 "missing": cut.missing, **opts.model_dump(),

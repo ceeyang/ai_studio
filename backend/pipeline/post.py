@@ -17,7 +17,7 @@ from backend.domain.models import Episode, Shot
 from backend.domain.slots import selected_candidate
 from backend.engines.ffmpeg import xfade_timeline
 from backend.llm.schemas import TranslationOut
-from backend.pipeline.common import load_episode
+from backend.pipeline.common import job_services, load_episode
 from backend.post.dub import DubLine, edge_tts_save, fit_rate, plan_dub_lines
 from backend.post.options import ExportOptions
 from backend.post.speech import align_onsets
@@ -216,7 +216,7 @@ def _tts(sv, cache: Path, text: str, voice: str, rate: int) -> tuple[Path, float
 @HANDLERS.register("post.dub")
 def run_dub(ctx, payload: dict) -> dict:
     """按成片时间轴给每句高棉语台词配音：先原速念，塞不下窗口就提速（最多 max_rate%）。"""
-    sv = ctx.services
+    sv = job_services(ctx)
     opts = ExportOptions(**(payload.get("options") or {}))
     cut = load_cut(sv, int(payload["episode_id"]), allow_missing=bool(payload.get("allow_missing")))
     missing = lines_missing_km(cut)
@@ -232,7 +232,7 @@ def run_dub(ctx, payload: dict) -> dict:
     planned = {(ln.shot, ln.index): round(ln.start - starts[ln.shot], 3) for ln in lines}
     detected: set[tuple[int, int]] = set()
     if opts.align == "detected":
-        lines, detected = align_to_speech(ctx, cut, lines, starts, durs)
+        lines, detected = align_to_speech(ctx, cut, lines, starts, durs, sv=sv)
     manifest = dub_manifest_path(sv, cut)
     cache = manifest.parent
     rows = []
@@ -263,13 +263,14 @@ def run_dub(ctx, payload: dict) -> dict:
 
 
 def align_to_speech(ctx, cut: Cut, lines: list[DubLine], starts: list[float],
-                    durs: list[float]) -> tuple[list[DubLine], set[tuple[int, int]]]:
+                    durs: list[float], sv=None) -> tuple[list[DubLine], set[tuple[int, int]]]:
     """把每句配音挪到 H3 片段音轨里实际开口的位置（找不到就留在台词 start），窗口按新起点重算。"""
-    sv = ctx.services
+    sv = sv or ctx.services
     cfg = sv.cfg.dub
     out: list[DubLine] = []
     detected: set[tuple[int, int]] = set()
     for i in sorted({ln.shot for ln in lines}):
+        ctx.check_canceled()
         mine = [ln for ln in lines if ln.shot == i]
         segs = sv.ffmpeg.speech_segments(cut.clips[i], min_db=cfg.speech_min_db,
                                          periodicity=cfg.speech_periodicity, limit=durs[i])

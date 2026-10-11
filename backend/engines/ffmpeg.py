@@ -9,9 +9,12 @@ import json
 import re
 import shutil
 import subprocess
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
+
+from backend.queue.errors import JobCanceled
 
 XFADE = {"dissolve": "fade", "white_flash": "fadewhite", "black_dip": "fadeblack",
          "fade_out": "fade"}
@@ -19,6 +22,10 @@ XFADE = {"dissolve": "fade", "white_flash": "fadewhite", "black_dip": "fadeblack
 
 class FFmpegError(RuntimeError):
     pass
+
+
+class FFmpegCanceled(JobCanceled):
+    """任务被取消：正在跑的 ffmpeg 已被终止。是 JobCanceled，队列会把任务记成「已取消」。"""
 
 
 @dataclass
@@ -119,17 +126,50 @@ def build_normalize_cmd(ffmpeg: str, src, dst, *, width: int, height: int, fps: 
     return cmd + [str(dst)]
 
 
+POLL_SECONDS = 0.2
+
+
 class FFmpeg:
-    def __init__(self, ffmpeg: str = "ffmpeg", ffprobe: str = "ffprobe"):
+    """cancel 不为空时，每条命令跑的过程中都看它：一旦置位就杀掉 ffmpeg 并抛 FFmpegCanceled。
+    处理器用 with_cancel(ctx.cancel_event) 拿一个绑定了本任务取消信号的副本（共享实例不带）。"""
+
+    def __init__(self, ffmpeg: str = "ffmpeg", ffprobe: str = "ffprobe",
+                 cancel: threading.Event | None = None):
         self.ffmpeg = ffmpeg
         self.ffprobe = ffprobe
+        self.cancel = cancel
 
-    def run(self, args: list[str], cwd: Path | None = None) -> str:
+    def with_cancel(self, cancel: threading.Event | None) -> "FFmpeg":
+        return type(self)(self.ffmpeg, self.ffprobe, cancel)
+
+    def check_canceled(self) -> None:
+        if self.cancel is not None and self.cancel.is_set():
+            raise FFmpegCanceled()
+
+    def _exec(self, args: list, *, cwd: Path | None = None, text: bool = True
+              ) -> subprocess.CompletedProcess:
+        """跑一条命令并收集输出；绑定了取消信号时轮询它，取消就 kill 子进程。"""
+        args = [str(a) for a in args]
+        kw = dict(encoding="utf-8", errors="replace") if text else {}
+        self.check_canceled()
         try:
-            p = subprocess.run([str(a) for a in args], capture_output=True, text=True,
-                               encoding="utf-8", errors="replace", cwd=cwd)
+            proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                    stdin=subprocess.DEVNULL, cwd=cwd, text=text, **kw)
         except FileNotFoundError as e:
             raise FFmpegError(f"找不到 {args[0]}：{e}") from e
+        while True:
+            try:
+                out, err = proc.communicate(timeout=None if self.cancel is None else POLL_SECONDS)
+                break
+            except subprocess.TimeoutExpired:
+                if self.cancel is not None and self.cancel.is_set():
+                    proc.kill()
+                    proc.communicate()
+                    raise FFmpegCanceled() from None
+        return subprocess.CompletedProcess(args, proc.returncode, out, err)
+
+    def run(self, args: list[str], cwd: Path | None = None) -> str:
+        p = self._exec(args, cwd=cwd)
         if p.returncode != 0:
             raise FFmpegError(f"{Path(str(args[0])).name} 失败：\n{p.stderr[-1500:]}")
         return p.stdout
@@ -170,13 +210,9 @@ class FFmpeg:
         """音轨里最后一段声音（台词、动作声）在第几秒结束；低于 noise_db 当作环境底噪。没有音轨返回 None。"""
         if not self.has_audio(path):
             return None
-        try:
-            p = subprocess.run([self.ffmpeg, "-hide_banner", "-nostats", "-i", str(path), "-map", "0:a:0",
-                                "-af", f"silencedetect=noise={noise_db}dB:d={min_silence}",
-                                "-f", "null", "-"], capture_output=True, text=True, encoding="utf-8",
-                               errors="replace")
-        except FileNotFoundError as e:
-            raise FFmpegError(f"找不到 {self.ffmpeg}：{e}") from e
+        p = self._exec([self.ffmpeg, "-hide_banner", "-nostats", "-i", str(path), "-map", "0:a:0",
+                        "-af", f"silencedetect=noise={noise_db}dB:d={min_silence}",
+                        "-f", "null", "-"])
         if p.returncode != 0:
             raise FFmpegError(f"silencedetect 失败：\n{p.stderr[-1500:]}")
         return parse_sound_end(p.stderr, self.duration(path))
@@ -191,10 +227,7 @@ class FFmpeg:
         from backend.post.speech import SAMPLE_RATE, build_pcm_cmd, speech_segments_from_pcm
         if not self.has_audio(path):
             return []
-        try:
-            p = subprocess.run(build_pcm_cmd(self.ffmpeg, path, limit=limit), capture_output=True)
-        except FileNotFoundError as e:
-            raise FFmpegError(f"找不到 {self.ffmpeg}：{e}") from e
+        p = self._exec(build_pcm_cmd(self.ffmpeg, path, limit=limit), text=False)
         if p.returncode != 0:
             raise FFmpegError(f"解音轨失败：\n{p.stderr.decode('utf-8', 'replace')[-1500:]}")
         x = np.frombuffer(p.stdout, dtype=np.float32)
@@ -240,6 +273,7 @@ class FFmpeg:
         norm: list[Path] = []
         durs: list[float] = []
         for i, (clip, has) in enumerate(zip(clips, flags)):
+            self.check_canceled()
             dst = work_dir / f"n{i:03d}.mp4"
             mode = "keep" if has else ("silent" if any_audio else "none")
             src_dur = self.video_duration(clip)

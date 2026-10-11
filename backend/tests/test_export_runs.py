@@ -1,3 +1,6 @@
+import threading
+import time
+
 import pytest
 from sqlalchemy import select
 
@@ -7,7 +10,7 @@ from backend.domain.slots import add_candidate, get_or_create_slot
 from backend.pipeline.export import run_export
 from backend.pipeline.runs import RunOptions, submit_chain
 from backend.pipeline.script import run_script
-from backend.queue.errors import JobError
+from backend.queue.errors import JobCanceled, JobError
 from backend.queue.handlers import HANDLERS
 from backend.queue.manager import JobManager
 from backend.tests.helpers import FakeCtx, FakeFFmpeg, make_gateway, make_services, seed_episode
@@ -147,3 +150,71 @@ def test_script_handler_continues_chain(tmp_path, db, manager):
                 "options": {"candidates": 1}})
     (_, jtype, payload, _, _, _), = jobs(db)
     assert jtype == "storyboard" and payload["then"] == ["keyframes"]
+
+
+# ---------------------------------------------------------------- 取消导出
+def test_export_cancel_between_steps_stops_and_records_nothing(tmp_path, db):
+    """取消正在跑的导出：合成完这一步后看到取消，不再往下做，也不登记导出。"""
+    holder = {}
+
+    class CancelAfterAssemble(FakeFFmpeg):
+        def assemble(self, *a, **kw):
+            res = super().assemble(*a, **kw)
+            holder["ctx"].cancel_event.set()
+            return res
+
+    sv = make_services(tmp_path, db, ffmpeg=CancelAfterAssemble())
+    ep_id, ids = seed_shots(db)
+    for i, sid in enumerate(ids):
+        add_video(sv, sid, f"h{i}")
+    ctx = holder["ctx"] = FakeCtx(sv, job_id=5)
+    with pytest.raises(JobCanceled):
+        run_export(ctx, {"episode_id": ep_id})
+    with db.session() as s:
+        assert s.scalars(select(Export)).all() == []
+        assert s.get(Episode, ep_id).status != "exported"
+
+
+def test_export_uses_ffmpeg_bound_to_job_cancel(tmp_path, db):
+    """真 ffmpeg 走 job_services：拿到的是绑定了本任务取消信号的副本，共享实例不受影响。"""
+    from backend.pipeline.common import job_services
+
+    sv = make_services(tmp_path, db)
+    ctx = FakeCtx(sv)
+    bound = job_services(ctx)
+    assert bound.ffmpeg.cancel is ctx.cancel_event
+    assert sv.ffmpeg.cancel is None and bound.db is sv.db
+
+
+def test_export_job_cancel_through_manager_ends_canceled(tmp_path, db):
+    """经由队列：运行中的导出被取消后状态是 canceled（之前接口回 ok，任务却照样跑完记成 done）。"""
+    started, release = threading.Event(), threading.Event()
+
+    class Slow(FakeFFmpeg):
+        def assemble(self, *a, **kw):
+            started.set()
+            release.wait(5)
+            return super().assemble(*a, **kw)
+
+    sv = make_services(tmp_path, db, ffmpeg=Slow())
+    ep_id, ids = seed_shots(db)
+    for i, sid in enumerate(ids):
+        add_video(sv, sid, f"h{i}")
+    m = JobManager(db, HANDLERS, poll=0.02)
+    m.services = sv
+    m.start()
+    try:
+        jid = m.submit("export.episode", {"episode_id": ep_id}, owner_type="episode",
+                       owner_id=ep_id)
+        assert started.wait(5)
+        assert m.cancel(jid) is True
+        release.set()
+        end = time.monotonic() + 5
+        while time.monotonic() < end and m.get(jid)["status"] in ("queued", "running"):
+            time.sleep(0.02)
+        assert m.get(jid)["status"] == "canceled"
+        with db.session() as s:
+            assert s.scalars(select(Export)).all() == []
+    finally:
+        release.set()
+        m.stop()

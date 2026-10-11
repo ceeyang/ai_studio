@@ -1,11 +1,15 @@
 import json
 import shutil
 import subprocess
+import sys
+import threading
+import time
 
 import pytest
 
-from backend.engines.ffmpeg import (FFmpeg, FFmpegError, build_normalize_cmd, build_xfade_graph,
-                                    parse_transition, xfade_timeline)
+from backend.engines.ffmpeg import (FFmpeg, FFmpegCanceled, FFmpegError, build_normalize_cmd,
+                                    build_xfade_graph, parse_transition, xfade_timeline)
+from backend.queue.errors import JobCanceled
 
 needs_ffmpeg = pytest.mark.skipif(not (shutil.which("ffmpeg") and shutil.which("ffprobe")),
                                   reason="没有 ffmpeg")
@@ -138,3 +142,42 @@ def test_trim_silence_removes_tts_padding(tmp_path):
     assert ff.duration(raw) > 1.9
     out = ff.trim_silence(raw, tmp_path / "line.wav")
     assert abs(ff.duration(out) - 0.4) < 0.08
+
+
+# ---------------------------------------------------------------- 取消
+LONG = [sys.executable, "-c", "import time; time.sleep(30)"]
+
+
+def test_run_with_cancel_kills_long_subprocess():
+    """导出时取消：正在跑的 ffmpeg（这里用一个睡 30 秒的假进程）要被杀掉，抛 JobCanceled。"""
+    ev = threading.Event()
+    ff = FFmpeg().with_cancel(ev)
+    threading.Timer(0.3, ev.set).start()
+    t0 = time.monotonic()
+    with pytest.raises(FFmpegCanceled) as info:
+        ff.run(LONG)
+    assert isinstance(info.value, JobCanceled)
+    assert time.monotonic() - t0 < 5
+
+
+def test_run_already_canceled_does_not_start():
+    ev = threading.Event()
+    ev.set()
+    with pytest.raises(FFmpegCanceled):
+        FFmpeg().with_cancel(ev).run([sys.executable, "-c", "raise SystemExit(3)"])
+
+
+def test_run_with_cancel_still_returns_output_and_errors():
+    ff = FFmpeg().with_cancel(threading.Event())
+    assert ff.run([sys.executable, "-c", "print('ok')"]).strip() == "ok"
+    with pytest.raises(FFmpegError, match="boom"):
+        ff.run([sys.executable, "-c", "import sys; sys.stderr.write('boom'); sys.exit(2)"])
+    with pytest.raises(FFmpegError, match="找不到"):
+        ff.run(["definitely-not-a-real-binary-xyz"])
+
+
+def test_with_cancel_keeps_paths_and_shared_instance_unbound():
+    base = FFmpeg("ff", "fp")
+    bound = base.with_cancel(threading.Event())
+    assert (bound.ffmpeg, bound.ffprobe) == ("ff", "fp")
+    assert base.cancel is None and bound is not base
