@@ -11,6 +11,7 @@ from backend.domain.hashing import input_hash
 from backend.domain.models import Episode, Shot
 from backend.domain.shots import renumber_shots
 from backend.domain.slots import delete_slots
+from backend.domain.style_presets import prompt_vars
 from backend.llm.schemas import StoryboardOut
 from backend.pipeline.prompting import char_token, short_ref
 from backend.pipeline.common import (clean_note, continue_chain, load_episode, render_with_note,
@@ -287,6 +288,8 @@ class StoryboardPlan:
     aspect: str = "9:16"
     # 发给模板的角色表：比 characters 多了 id 和外貌占位符 token（characters 保持老样子，算老记录的指纹）
     char_table: list[dict] = field(default_factory=list)
+    # 项目的风格预设：只进提示词，不进指纹（换预设不自动重写分镜）
+    preset: str = "live_action"
 
 
 def build_storyboard_plan(s: Session, sv, episode_id: int) -> StoryboardPlan:
@@ -321,7 +324,7 @@ def build_storyboard_plan(s: Session, sv, episode_id: int) -> StoryboardPlan:
     return StoryboardPlan(ep=ep, shot_seconds=shot_seconds, max_seconds=max_seconds, anchor=anchor,
                           characters=characters, char_ids=char_ids, blocks=plan,
                           prompts=sv.prompts(proj.slug), aspect=proj.aspect or "9:16",
-                          char_table=char_table)
+                          char_table=char_table, preset=proj.style_preset or "live_action")
 
 
 def previous_shot_lines(db, block_id: int) -> list[str]:
@@ -345,7 +348,8 @@ def previous_shot_lines(db, block_id: int) -> list[str]:
 # 都会删光镜头、选定的首帧/视频和手改的内容，重新跑一遍 GPU。
 #   v3：image_prompt 里用外貌占位符 {{char:<id>}}（出图时按景别填当前外貌）、不写拼音名、
 #       说话人和语速校验、规则 6 不再和风格锚重叠、低风险的镜头运动词表
-STORYBOARD_RULES_VERSION = 3
+#   v4：风格预设（分镜里的风格说法；商业广告要产品特写插入镜头和结尾行动号召镜头）
+STORYBOARD_RULES_VERSION = 4
 RULES_OUTDATED_HINT = "分镜规则已更新，要按新规则重出请强制重跑"
 
 # 镜头上会被用户改动的字段：生成时记下每镜的哈希，之后对不上就是改过（含拆分出来的新镜头）
@@ -451,7 +455,7 @@ def storyboard_prompt_fp(prompts, anchor, characters, location, text, count, sho
                          previous_shots: list[str] | None = None,
                          block_seconds: float | None = None,
                          props: list[str] | None = None,
-                         aspect: str = "9:16") -> tuple[str, str, str]:
+                         aspect: str = "9:16", preset: str | None = None) -> tuple[str, str, str]:
     """某段落这次会用到的分镜提示词及其输入指纹（不调用 LLM）。
 
     note 是修改意见；previous_shots 是这一段上一版的镜头（只在有修改意见时提供）；
@@ -462,7 +466,7 @@ def storyboard_prompt_fp(prompts, anchor, characters, location, text, count, sho
         anchor=anchor, characters=characters, location=location, text=text,
         count=count, shot_seconds=shot_seconds, max_seconds=max_seconds, prev_action=prev_action,
         block_seconds=block_seconds, previous_shots=[], known_props=list(props or []),
-        aspect=aspect)
+        aspect=aspect, **prompt_vars(preset))
     legacy = [{"name": c.get("name", ""), "visual_prompt": c.get("visual_prompt", "")}
               for c in characters]
     fp = storyboard_inputs_fp(anchor, legacy, location, text, count, shot_seconds,
@@ -502,7 +506,7 @@ def run_storyboard(ctx, payload: dict) -> dict:
                                                blk["text"], n, shot_seconds, max_seconds,
                                                prev_action, note, previous,
                                                block_seconds=blk["seconds"], props=props,
-                                               aspect=plan_data.aspect)
+                                               aspect=plan_data.aspect, preset=plan_data.preset)
         # 模板里写了占位符的说明才按占位符校验（项目目录里的老覆盖模板不知道占位符）
         placeholders = "{{char:" in system
         fp_new, fp_old = block_fps(plan_data, blk, prev_action)

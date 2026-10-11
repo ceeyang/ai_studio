@@ -11,9 +11,10 @@ from sqlalchemy import func, select
 from backend.app.deps import check_engines, get_or_404, manager, project_by_slug, services
 from backend.app.schemas import (CharacterIn, CharacterOut, CharacterPatch, EndCardIO,
                                  EpisodeStats, LocationOut, LocationPatch, PortraitPathIn, ProjectIn, ProjectOut,
-                                 ProjectOverview, ProjectPatch, StyleIO, TurnaroundCellOut,
+                                 ProjectOverview, ProjectPatch, StyleIO, StylePresetOut, TurnaroundCellOut,
                                  TurnaroundOut, TurnaroundSheetOut)
 from backend.domain.characters import portrait_ext, portrait_of, set_portrait
+from backend.domain.style_presets import PRESETS, get_preset, recommended
 from backend.domain.settings import default_image_engine, default_video_engine, sheet_engine
 from backend.domain.turnaround import (DEFAULT_SHEET_ENGINE, SHEETS, VIEW_KEYS, VIEW_LABELS,
                                        VIEW_SHEET, cell_state, crop_method, sheet_slot_kind,
@@ -45,6 +46,16 @@ def list_projects(request: Request, archived: bool = False):
         return [ProjectOut.model_validate(p) for p in s.scalars(q)]
 
 
+@router.get("/style-presets", response_model=list[StylePresetOut])
+def list_style_presets(request: Request):
+    """风格预设，带上推荐引擎里第一个可用的（新建项目对话框预选，用户可以改）。"""
+    sv = services(request)
+    images, videos = sv.engines.names("image"), sv.engines.names("video")
+    return [StylePresetOut(**p.public(), image_engine=recommended(images, p.image_engines),
+                           video_engine=recommended(videos, p.video_engines))
+            for p in PRESETS.values()]
+
+
 @router.post("/projects", status_code=201, response_model=ProjectOut)
 def create_project(body: ProjectIn, request: Request):
     sv = services(request)
@@ -53,6 +64,8 @@ def create_project(body: ProjectIn, request: Request):
         raise JobError("slug 只能包含文字、数字、下划线和短横线，最长 64 个字符")
     check_engines(sv, body.image_engine, body.video_engine)
     data = body.model_dump(exclude={"slug"})
+    if body.negative is None:
+        data["negative"] = get_preset(body.style_preset).negative
     data["image_engine"] = body.image_engine or default_image_engine(sv)
     data["video_engine"] = body.video_engine or default_video_engine(sv)
     with sv.db.session() as s:
@@ -108,6 +121,11 @@ def patch_project(slug: str, body: ProjectPatch, request: Request):
     check_engines(sv, data.get("image_engine"), data.get("video_engine"))
     with sv.db.session() as s:
         p = project_by_slug(s, slug)
+        new_preset = data.get("style_preset")
+        if new_preset and new_preset != p.style_preset and "negative" not in data:
+            # 负面词没自己改过（还是旧预设的默认值或空）就换成新预设的默认值
+            if (p.negative or "").strip() in ("", get_preset(p.style_preset).negative):
+                p.negative = get_preset(new_preset).negative
         for k, v in data.items():
             if v is not None:
                 setattr(p, k, v)

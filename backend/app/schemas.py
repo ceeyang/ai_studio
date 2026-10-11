@@ -12,6 +12,9 @@ from backend.post.options import ExportOptions
 Aspect = Literal["9:16", "16:9"]
 Stage = Literal["script", "storyboard", "keyframes", "videos", "export", "all", "fit_khmer"]
 NextStage = Literal["keyframes", "videos", "export"]
+# 风格预设，和 backend/domain/style_presets.py 的 PRESETS 一致（有测试对齐）
+StylePresetKey = Literal["live_action", "cg_realistic", "anime", "guofeng", "western_comic",
+                         "commercial"]
 
 
 class ORM(BaseModel):
@@ -25,12 +28,15 @@ class ProjectIn(BaseModel):
     image_engine: str | None = None     # 不给就按设置页：首帧这一步 → 全局默认图片来源 → zimage
     video_engine: str | None = None     # 不给就按设置页：视频这一步 → 全局默认视频来源 → h3_video
     seed: int = 12345
-    negative: str = ""
+    negative: str | None = None         # 不给就用风格预设的默认负面词
+    style_preset: StylePresetKey = "live_action"
 
 
 class ProjectPatch(BaseModel):
     title: str | None = Field(None, min_length=1, max_length=200)
     aspect: Aspect | None = None
+    # 改预设：负面词还是旧预设的默认值（或空）时跟着换；已有的风格锚和外观要重新生成视觉设定才变
+    style_preset: StylePresetKey | None = None
     image_engine: str | None = None
     video_engine: str | None = None
     seed: int | None = None
@@ -47,9 +53,22 @@ class ProjectOut(ORM):
     video_engine: str
     seed: int
     negative: str
+    style_preset: str = "live_action"
     style_bible_id: int | None
     archived: bool
     created_at: datetime
+
+
+class StylePresetOut(BaseModel):
+    key: str
+    label: str
+    description: str
+    negative: str
+    image_engines: list[str]
+    video_engines: list[str]
+    has_storyboard_guidance: bool = False
+    image_engine: str | None = None     # 推荐引擎里第一个可用的（只是建议，新建项目时预选）
+    video_engine: str | None = None
 
 
 class StyleIO(ORM):

@@ -235,7 +235,9 @@ def test_rerun_visual_keeps_chosen_look(tmp_path, db):
 
 # 内置剧本模板的内容哈希（统一成 LF 后 sha256 前 16 位）和规则版本绑在一起
 SCRIPT_TEMPLATE_HASHES = {("script_structure", 2): "5d1f0d3de3c6698f",
-                          ("script_visual", 2): "d4a150a183a70949"}
+                          ("script_visual", 2): "d4a150a183a70949",
+                          ("script_structure", 3): "d5402ee5afb8a8b2",
+                          ("script_visual", 3): "aa9130be0add3439"}
 
 
 @pytest.mark.parametrize("name,attr", [("script_structure", "STRUCTURE_RULES_VERSION"),
@@ -274,3 +276,63 @@ def test_visual_prompt_asks_for_renderable_signature_details():
     system, _ = lib.render("script_visual", project_title="t", characters=[], locations=[],
                            excerpt="x")
     assert "不写老茧、缠线" in system and "黄金时段" in system
+
+
+# ------------------------------------------------------------ 爆款剧本规范（F）
+def test_structure_prompt_has_hit_drama_rules():
+    from backend.llm.prompts import PromptLibrary
+    from backend.services import BUILTIN_DIR
+
+    system, _ = PromptLibrary(BUILTIN_DIR, BUILTIN_DIR / "none").render(
+        "script_structure", project_title="t", target_seconds=60, source_text="x", shot_count=12,
+        shot_seconds=5, aspect="9:16")
+    for words in ("3 秒钩子", "冲突", "反转", "结尾钩子", "每 5 秒至少 1 句", "不超过 16 个字",
+                  "口语化", "不写长独白", "角色名：「台词」", "镜头预算优先"):
+        assert words in system, words
+    assert "约 12 句以上" in system
+    check = system[system.index("输出前自检"):system.index("只输出一个 JSON")]
+    assert "钩子" in check and "16 个字" in check and "反转" in check
+
+
+def test_dialogue_problems_rules():
+    from backend.pipeline.script import dialogue_lines, dialogue_problems, min_dialogue_lines
+
+    texts = ["老周推门进来。老周：「这钱我不收。」林夏：“你凭什么？”",
+             "林夏：「我在直播，你别乱来，你知道这样做后果有多严重吗」"]
+    assert dialogue_lines(texts) == ["这钱我不收。", "你凭什么？",
+                                     "我在直播，你别乱来，你知道这样做后果有多严重吗"]
+    assert min_dialogue_lines(60) == 8 and min_dialogue_lines(3) == 1
+    bad = dialogue_problems(texts, 20)
+    assert len(bad) == 1 and "超过 16 个字" in bad[0]
+    bad = dialogue_problems(["老周：「走。」"], 60)
+    assert len(bad) == 1 and "只有 1 句台词" in bad[0] and "至少要 8 句" in bad[0]
+    # 素材和段落都没有对白：无声的片子，不卡
+    assert dialogue_problems(["林夏发现提词器被改了。"], 20, "林夏发现提词器被改了。") == []
+    # 素材有对白、段落里却认不出：没按格式写
+    bad = dialogue_problems(["林夏质问老周为什么改词。"], 20, "林夏问：“谁改的词？”")
+    assert len(bad) == 1 and "角色名：「台词」" in bad[0]
+
+
+def test_structure_retries_on_long_dialogue_then_accepts(tmp_path, db):
+    long_line = {**STRUCTURE, "scenes": [
+        {"location": "直播间", "text": "林夏：「我在直播，你别乱来，你知道这样做后果有多严重吗」"},
+        {"location": "走廊", "text": "老周：「不是我。」林夏：「那是谁？」"}]}
+    good = {**STRUCTURE, "scenes": [
+        {"location": "直播间", "text": "林夏：「我在直播！」林夏：「你别乱来。」"},
+        {"location": "走廊", "text": "老周：「不是我。」林夏：「那是谁？」"}]}
+    ctx, ep_id, prov = setup(tmp_path, db, [long_line, good, VISUAL], target=20.0)
+    assert run_script(ctx, {"episode_id": ep_id})["structure"] == "done"
+    retry = prov.calls[1]["messages"][-1]["content"]
+    assert "超过 16 个字" in retry and "不写长独白" in retry
+    with db.session() as s:
+        assert s.get(Episode, ep_id).scene_blocks[0].text == good["scenes"][0]["text"]
+
+
+def test_structure_last_attempt_keeps_sparse_dialogue(tmp_path, db):
+    sparse = {**STRUCTURE, "scenes": [{"location": "直播间", "text": "林夏：「谁？」"},
+                                      {"location": "走廊", "text": "林夏追上老周。"}]}
+    ctx, ep_id, prov = setup(tmp_path, db, [sparse, sparse, sparse, VISUAL], target=60.0)
+    assert run_script(ctx, {"episode_id": ep_id})["structure"] == "done"
+    assert len(prov.calls) == 4   # 3 次结构（最后一次放行）+ 1 次视觉
+    assert "至少要 8 句" in prov.calls[1]["messages"][-1]["content"]
+    assert any("没完全达到爆款规范" in m for m in ctx.logs)
