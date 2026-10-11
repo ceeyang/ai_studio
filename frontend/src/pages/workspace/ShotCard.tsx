@@ -1,9 +1,10 @@
 // 镜头卡片（首帧 / 视频阶段）：9:16 缩略 + 一行（镜号、时长、台词数、出场角色）+ 一行动作 + 状态角标；
 // 一个随状态变的按钮（普通样式，全页唯一的主按钮在阶段条）和「⋯」菜单；点卡片打开镜头抽屉，左上角勾选多选。
 import { useId } from 'react';
-import type { Character, ShotDetail } from '../../api/types';
+import type { Character, ShotDetail, ShotTakes } from '../../api/types';
 import { Menu } from '../../components/Menu';
 import { type CardAction, type GenStage, activeText, cardAction, cellStatus, qcIssues } from '../director/shotStatus';
+import { shotTakesText } from './TakeStats';
 
 export interface ShotCardProps {
   shot: ShotDetail;
@@ -25,6 +26,8 @@ export interface ShotCardProps {
   onSplit(): void;
   onInsertAfter(): void;
   onDelete(): void;
+  /** 抽卡统计（这一镜首帧 / 视频抽了几次）；还没拿到时不显示 */
+  takes?: ShotTakes;
 }
 
 function Avatar({ c }: { c: Character }) {
@@ -43,6 +46,7 @@ export function ShotCard(props: ShotCardProps) {
   const kf = stage === 'videos' ? cellStatus(shot, 'keyframes') : st;
   const action = cardAction(shot, stage);
   const code = shot.code;
+  const takesText = shotTakesText(props.takes);
   // 打开按钮：名字「打开 S01」，描述 = 状态角标 + 过期 / 失败原因（读屏能听到，不被按钮名盖掉）
   const uid = useId();
   const ids = { open: `${uid}-open`, code: `${uid}-code`, status: `${uid}-status`, stale: `${uid}-stale`, fail: `${uid}-fail` };
@@ -153,6 +157,11 @@ export function ShotCard(props: ShotCardProps) {
           <span className="shot-action" title={shot.action || undefined}>
             {shot.action || <span className="muted">（没有动作描述）</span>}
           </span>
+          {takesText && (
+            <span className="shot-takes" data-testid={`takes-${code}`} title="抽卡：成功出的条数、失败次数、选定的是第几条">
+              {takesText}
+            </span>
+          )}
         </span>
       </button>
       {st.mark === 'stale' && (

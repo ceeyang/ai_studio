@@ -1548,6 +1548,12 @@ img.rail-avatar { border: 0; }
   font-size: 12px; line-height: 1.45; color: var(--text-2);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
+/* 抽卡统计（TakeStats）：卡片上一行小字，本集合计在工具栏下面 */
+.shot-takes {
+  font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.take-stats { margin: 0; font-variant-numeric: tabular-nums; }
 .shot-cast { display: flex; margin-left: auto; min-width: 0; overflow: hidden; }
 .shot-avatar {
   width: 18px; height: 18px; border-radius: 50%; object-fit: cover; margin-left: -5px; flex: none;

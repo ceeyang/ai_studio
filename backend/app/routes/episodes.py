@@ -9,11 +9,12 @@ from sqlalchemy import func, select, update
 from backend.app.deps import get_or_404, manager, project_by_slug, read_upload, services
 from backend.app.schemas import (BgmOut, EpisodeDetail, EpisodeIdeaIn, EpisodeIdeaOut, EpisodeIn,
                                  EpisodeOut, EpisodePatch, ExportOut, ExportPatch, SceneBlockOut,
-                                 SceneBlockPatch)
+                                 SceneBlockPatch, TakeStatsOut)
 from backend.app.views import candidate_out, episode_detail, export_out
 from backend.domain.models import Episode, Export, Job, SceneBlock, Shot
 from backend.domain.music import bgm_of, clear_bgm, set_bgm
 from backend.domain.slots import delete_slots
+from backend.domain.take_stats import episode_take_stats
 from backend.pipeline.episode_idea import IdeaFailed, write_episode_idea
 from backend.queue.manager import ACTIVE
 
@@ -135,6 +136,14 @@ def patch_scene_block(block_id: int, body: SceneBlockPatch, request: Request):
             setattr(blk, k, v)
         s.flush()
         return SceneBlockOut.model_validate(blk)
+
+
+@router.get("/episodes/{episode_id}/take-stats", response_model=TakeStatsOut)
+def get_take_stats(episode_id: int, request: Request):
+    """抽卡统计：每个镜头首帧 / 视频抽了几次（成功 + 失败）、选的第几条，一集的可用率和按引擎的成功 / 失败。"""
+    with services(request).db.session() as s:
+        get_or_404(s, Episode, episode_id, "剧集")
+        return TakeStatsOut.model_validate(episode_take_stats(s, episode_id))
 
 
 # ------------------------------------------------------------ 配乐

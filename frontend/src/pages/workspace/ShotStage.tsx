@@ -14,6 +14,7 @@ import {
   useReorderShots,
   useRunStage,
   useSplitShot,
+  useTakeStats,
 } from '../../api/queries';
 import type { Job, RunIn, ShotDetail } from '../../api/types';
 import { useConfirm } from '../../components/ConfirmDialog';
@@ -28,6 +29,7 @@ import { moveId } from '../director/slots';
 import type { StageKey } from '../stages';
 import { CONFIRM_OVER, type GateBatch, type ShotGate } from './shotGate';
 import { type ScriptBlockEdits, ShotGrid } from './ShotGrid';
+import { TakeStatsLine } from './TakeStats';
 import { workspacePath } from './urls';
 
 /** 工作台里这块内容的名字（阶段条的下一步事件按它发） */
@@ -90,6 +92,8 @@ export function ShotStage({
   const locations = useLocations(slug);
   const characters = useCharacters(slug);
   const run = useRunStage(id);
+  // 抽卡统计：本集合计放工具栏下面，每镜的放卡片上（工作台里藏着的阶段不请求）
+  const takeStats = useTakeStats(id, active);
   /** 上一次提交时后端给的提醒（如出场角色还没有定妆照） */
   const [runWarnings, setRunWarnings] = useState<string[]>([]);
   /** 上一次提交时后端给的说明（如接上一镜的镜头等上一镜视频，这次跳过） */
@@ -181,6 +185,7 @@ export function ShotStage({
   if (ep.isLoading) return <p className="loading">加载中…</p>;
   if (ep.error || !ep.data) return <EpisodeLoadError slug={slug} error={ep.error} />;
   const shots = ep.data.shots;
+  const takesOf = new Map((takeStats.data?.shots ?? []).map((t) => [t.shot_id, t]));
   const openId = Number(params.get('shot')) || null;
   const openShot = shots.find((s) => s.id === openId) ?? null;
   // 首帧阶段：抽屉里的镜头所在场景还没有场景图时提示去角色阶段的设定里生成
@@ -308,6 +313,7 @@ export function ShotStage({
           新增镜头
         </button>
       </div>
+      {shots.length > 0 && <TakeStatsLine stats={takeStats.data} />}
       {stage === 'keyframes' && shots.some((s) => (s.first_frame_refs_unused?.length ?? 0) > 0) && (
         <p className="muted small" role="note">
           当前首帧引擎不吃参考图，人物一致只靠文字；要锁脸可换 H3 图像
@@ -350,6 +356,7 @@ export function ShotStage({
           onDelete={(shotId) => void remove(shotId)}
           onRegenerated={(ids, text) => notice.track(ids, text)}
           blockEdits={work.scriptEdits}
+          takes={takesOf}
         />
       )}
 

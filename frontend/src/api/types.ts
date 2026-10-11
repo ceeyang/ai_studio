@@ -1052,3 +1052,46 @@ export interface AutopilotOut {
   /** 不拦提交的提醒（如首帧只能按文字出脸） */
   warnings: string[];
 }
+
+/** 一个镜头一个槽位（首帧 / 视频）的抽卡数 */
+export interface KindTakes {
+  /** 成功的抽（候选数） */
+  takes: number;
+  /** 失败的任务数 */
+  failed: number;
+  /** 选定的是第几条（从 1 开始）；没选定为 null */
+  selected_index: number | null;
+  /** 引擎 → 成功抽数 */
+  engines: Record<string, number>;
+}
+
+export interface ShotTakes {
+  shot_id: number;
+  code: string;
+  first_frame: KindTakes;
+  video: KindTakes;
+}
+
+export interface EngineTakes {
+  engine: string;
+  kind: 'first_frame' | 'video';
+  takes: number;
+  failed: number;
+}
+
+/** GET /api/episodes/{id}/take-stats：抽卡统计（重跑分镜删掉的镜头不算进 shots，单列在 archived_takes） */
+export interface TakeStats {
+  episode_id: number;
+  shots: ShotTakes[];
+  total_takes: number;
+  failed: number;
+  first_frame_takes: number;
+  video_takes: number;
+  shots_with_video: number;
+  /** 有选定视频的镜头数 / 视频总抽数；还没抽过视频为 null */
+  usable_rate: number | null;
+  /** 出完的镜头平均每镜抽了几次（首帧 + 视频，含失败） */
+  avg_takes_per_finished_shot: number | null;
+  engines: EngineTakes[];
+  archived_takes: Record<string, number>;
+}
