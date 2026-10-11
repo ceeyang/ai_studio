@@ -158,6 +158,12 @@ def run(stage: str = typer.Argument(..., help="script / storyboard / keyframes /
         trim: bool = typer.Option(True, "--trim/--no-trim", help="导出：按分镜时长裁掉台词后的多余尾巴"),
         bed: bool = typer.Option(True, "--bed/--no-bed", help="导出：配音时保留压低的原声底；--no-bed 原音轨整条静音"),
         align: str = typer.Option("timeline", help="导出：配音放在 timeline（台词时间）或 detected（H3 实际开口处）"),
+        aigc_label: bool = typer.Option(True, "--aigc-label/--no-aigc-label",
+                                        help="导出：画面角标「本片由 AI 辅助制作」（默认左上角片头 3 秒）"),
+        aigc_label_always: bool = typer.Option(False, "--aigc-label-always",
+                                               help="导出：AI 角标整集常显"),
+        aigc_metadata: bool = typer.Option(True, "--aigc-metadata/--no-aigc-metadata",
+                                           help="导出：成片元数据里写 AI 生成隐式标识"),
         then: Optional[str] = typer.Option(None, help="本阶段完成后接着跑，逗号分隔，如 videos,export")):
     if subtitles not in ("none", "zh", "zh+km") or dub not in ("off", "km") \
             or align not in ("timeline", "detected"):
@@ -179,6 +185,13 @@ def run(stage: str = typer.Argument(..., help="script / storyboard / keyframes /
     if "export" in (stage, *nxt) or stage == "all":
         body["export"] = {"subtitles": subtitles, "dub": dub, "end_card": end_card, "trim": trim,
                           "bed": bed, "align": align}
+        # AI 标识默认开着（后端默认值），只在改了时带上
+        if not aigc_label:
+            body["export"]["aigc_label"] = False
+        if aigc_label_always:
+            body["export"]["aigc_label_always"] = True
+        if not aigc_metadata:
+            body["export"]["aigc_metadata"] = False
     def show(r: dict) -> None:
         typer.echo(f"已提交 {len(r['job_ids'])} 个任务：{', '.join(map(str, r['job_ids']))}")
         for w in r.get("warnings") or []:

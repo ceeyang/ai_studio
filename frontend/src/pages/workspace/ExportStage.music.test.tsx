@@ -21,6 +21,7 @@ function routes(extra: Record<string, unknown> = {}) {
     'GET /api/episodes/4': EP,
     'GET /api/episodes/4/exports': [],
     'GET /api/projects/demo/end-card': null,
+    'GET /api/projects/demo/aigc': { label_text: '本片由 AI 辅助制作', producer: 'AI Studio' },
     'GET /api/episodes/4/bgm': null,
     ...extra,
   };
@@ -88,6 +89,7 @@ describe('ExportStage 配乐', () => {
     const c = {
       subZh: false, subKm: false, dubKm: false, endCard: false, bed: true, alignDetected: false,
       music: true, musicDb: -18, fadeIn: 1, fadeOut: 2, duck: true,
+      aigcLabel: true, aigcPos: 'top_left' as const, aigcSeconds: 3, aigcAlways: false, aigcMeta: true,
     };
     expect(toOptions(c, false).music).toBeUndefined();
     expect(toOptions(c, true)).toMatchObject({ music: true, music_db: -18, music_duck: true });

@@ -23,6 +23,14 @@ function withVideo(id: number, code: string, stale = false) {
 }
 
 const READY = makeEpisode({ id: 4, shots: [withVideo(11, 'S01'), withVideo(12, 'S02')] });
+/** 导出选项里 AI 标识的默认值：角标开、左上角、片头 3 秒、写元数据 */
+const AIGC_ON = {
+  aigc_label: true,
+  aigc_label_position: 'top_left',
+  aigc_label_seconds: 3,
+  aigc_label_always: false,
+  aigc_metadata: true,
+};
 const AT = { route: '/projects/demo/episodes/4?stage=export', path: '/projects/:slug/episodes/:episodeId' };
 
 function exportRow(p: Partial<ExportRow> = {}): ExportRow {
@@ -38,6 +46,7 @@ function routes(extra: Record<string, unknown> = {}) {
     'GET /api/episodes/4': READY,
     'GET /api/episodes/4/exports': [],
     'GET /api/projects/demo/end-card': null,
+    'GET /api/projects/demo/aigc': { label_text: '本片由 AI 辅助制作', producer: 'AI Studio' },
     ...extra,
   };
 }
@@ -95,11 +104,11 @@ describe('ExportStage', () => {
     const runs = calls.filter((c) => c.method === 'POST');
     expect(runs[0].body).toEqual({
       stage: 'export',
-      export: { subtitles: 'none', dub: 'off', end_card: false, bed: true, align: 'timeline' },
+      export: { subtitles: 'none', dub: 'off', end_card: false, bed: true, align: 'timeline', ...AIGC_ON },
     });
     expect(runs[1].body).toEqual({
       stage: 'export',
-      export: { subtitles: 'zh+km', dub: 'km', end_card: true, bed: true, align: 'timeline' },
+      export: { subtitles: 'zh+km', dub: 'km', end_card: true, bed: true, align: 'timeline', ...AIGC_ON },
     });
     expect(screen.getByRole('status').textContent).toContain('合成导出');
     await user.click(screen.getByLabelText('中文字幕'));
@@ -124,7 +133,7 @@ describe('ExportStage', () => {
     await waitFor(() => expect(calls.some((c) => c.method === 'POST')).toBe(true));
     expect(calls.find((c) => c.method === 'POST')?.body).toEqual({
       stage: 'export',
-      export: { subtitles: 'none', dub: 'km', end_card: false, bed: false, align: 'detected' },
+      export: { subtitles: 'none', dub: 'km', end_card: false, bed: false, align: 'detected', ...AIGC_ON },
     });
   });
 
@@ -143,7 +152,7 @@ describe('ExportStage', () => {
     await waitFor(() => expect(calls.some((c) => c.method === 'POST')).toBe(true));
     expect(calls.find((c) => c.method === 'POST')?.body).toEqual({
       stage: 'export',
-      export: { subtitles: 'zh', dub: 'off', end_card: false, bed: true, align: 'detected' },
+      export: { subtitles: 'zh', dub: 'off', end_card: false, bed: true, align: 'detected', ...AIGC_ON },
     });
     // 勾了配音：字幕跟着配音走，这一项不可选
     await user.click(screen.getByLabelText('高棉语配音'));

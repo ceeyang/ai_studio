@@ -13,7 +13,7 @@ from backend.pipeline.runs import RunOptions, submit_chain
 from backend.queue.errors import JobError
 from backend.queue.handlers import HANDLERS
 from backend.queue.manager import JobManager
-from backend.tests.helpers import FakeCtx, FakeFFmpeg, make_gateway, make_services, seed_episode
+from backend.tests.helpers import AIGC_DEFAULTS, FakeCtx, FakeFFmpeg, make_gateway, make_services, seed_episode
 
 D1 = [{"speaker": "小雨", "zh": "师傅，别人都说这个得换。", "start": 0.5, "end": 3.2}]
 D2 = [{"speaker": "陈师傅", "zh": "换？", "start": 2.0, "end": 2.6},
@@ -219,7 +219,7 @@ def test_chain_export_with_dub_and_km_subtitles(tmp_path, db, manager):
     assert tr[2] == {"episode_id": ep_id}
     assert dub[3] == [tr[0]] and exp[3] == [tr[0], dub[0]]
     assert exp[2]["options"] == {"subtitles": "zh+km", "dub": "km", "end_card": True, "trim": True,
-                                    "bed": True, "align": "timeline", "music": False, "music_db": -18.0, "music_fade_in": 1.0, "music_fade_out": 2.0, "music_duck": True}
+                                    "bed": True, "align": "timeline", "music": False, "music_db": -18.0, "music_fade_in": 1.0, "music_fade_out": 2.0, "music_duck": True, **AIGC_DEFAULTS}
 
 
 def test_chain_export_skips_translate_when_all_lines_have_km(tmp_path, db, manager):

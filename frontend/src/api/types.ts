@@ -529,6 +529,8 @@ export type NextStage = 'keyframes' | 'videos' | 'export';
 export type SubtitleMode = 'none' | 'zh' | 'zh+km';
 export type DubMode = 'off' | 'km';
 export type AlignMode = 'timeline' | 'detected';
+/** AI 标识角标的位置 */
+export type LabelPosition = 'top_left' | 'top_right' | 'bottom_left' | 'bottom_right';
 
 /** 导出选项（backend/post/options.py::ExportOptions）。 */
 export interface ExportOptions {
@@ -548,6 +550,21 @@ export interface ExportOptions {
   music_fade_out?: number;
   /** 有台词时自动压低配乐 */
   music_duck?: boolean;
+  /** AI 生成内容标识角标（默认开，文字在项目设置里） */
+  aigc_label?: boolean;
+  aigc_label_position?: LabelPosition;
+  /** 角标显示几秒（1 ~ 60），aigc_label_always 时忽略 */
+  aigc_label_seconds?: number;
+  /** 角标整集常显 */
+  aigc_label_always?: boolean;
+  /** 成片文件里写隐式标识元数据（出品方、作品编号、AI 参与比例） */
+  aigc_metadata?: boolean;
+}
+
+/** 项目的 AI 生成内容标识设置（GET/PUT /api/projects/{slug}/aigc）。留空保存 = 恢复默认值。 */
+export interface Aigc {
+  label_text: string;
+  producer: string;
 }
 
 /** 剧集配乐（GET/POST /api/episodes/{id}/bgm） */

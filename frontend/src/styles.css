@@ -1652,6 +1652,13 @@ img.rail-avatar { border: 0; }
 .bgm-current audio { max-width: 100%; height: 32px; }
 .export-group-music input[type='number'] { width: 5.5em; }
 
+/* 成片阶段：AI 标识（角标 + 元数据） */
+.export-group-aigc { grid-column: 1 / -1; }
+.export-group-aigc .row { flex-wrap: wrap; align-items: center; }
+.export-group-aigc input[type='number'] { width: 5.5em; }
+.export-group-aigc > .warn { margin: 0; font-size: 12px; }
+.aigc-settings .inline-field input { min-width: 12em; }
+
 /* 风格预设单选（新建项目、项目设置） */
 .preset-picker { border: 0; padding: 0; margin: 0; min-width: 0; }
 .preset-picker legend { font-size: 12.5px; color: var(--text-2); margin-bottom: var(--s-2); padding: 0; }

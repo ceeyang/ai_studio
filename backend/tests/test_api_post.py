@@ -2,7 +2,7 @@
 from sqlalchemy import select
 
 from backend.domain.models import Job, Shot
-from backend.tests.helpers import give_selected
+from backend.tests.helpers import AIGC_DEFAULTS, give_selected
 
 
 def setup(api, dialogue=None):
@@ -67,7 +67,7 @@ def test_run_export_with_options_chains_translate_and_dub(api):
     assert r.status_code == 200 and len(r.json()["job_ids"]) == 3
     assert [j[0] for j in jobs(api)] == ["subtitles.translate", "post.dub", "export.episode"]
     assert jobs(api)[-1][1]["options"] == {"subtitles": "zh+km", "dub": "km", "end_card": True,
-                                           "trim": True, "bed": True, "align": "timeline", "music": False, "music_db": -18.0, "music_fade_in": 1.0, "music_fade_out": 2.0, "music_duck": True}
+                                           "trim": True, "bed": True, "align": "timeline", "music": False, "music_db": -18.0, "music_fade_in": 1.0, "music_fade_out": 2.0, "music_duck": True, **AIGC_DEFAULTS}
     bad = api.post(f"/api/episodes/{ep['id']}/run", json={"stage": "export", "export": {"dub": "fr"}})
     assert bad.status_code == 422
 

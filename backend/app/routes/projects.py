@@ -10,14 +10,16 @@ from sqlalchemy import func, select
 
 from backend.app.deps import (check_engines, get_or_404, manager, project_by_slug, read_upload,
                               services)
-from backend.app.schemas import (AppearanceRefOut, CharacterIn, CharacterOut, CharacterPatch,
-                                 EndCardIO, EpisodeStats, PortraitPathIn, ProjectIn, ProjectOut,
+from backend.app.schemas import (AigcIO, AppearanceRefOut, CharacterIn, CharacterOut,
+                                 CharacterPatch, EndCardIO, EpisodeStats, PortraitPathIn,
+                                 ProjectIn, ProjectOut,
                                  ProjectOverview, ProjectPatch, StyleIO, StylePresetOut,
                                  TurnaroundCellOut,
                                  TurnaroundOut, TurnaroundSheetOut)
 from backend.domain.characters import (APPEARANCE_REF, portrait_ext, portrait_of,
                                        set_portrait)
 from backend.domain.style_presets import PRESETS, get_preset, recommended
+from backend.post.aigc import project_aigc
 from backend.domain.settings import preset_engine, sheet_engine
 from backend.domain.turnaround import (DEFAULT_SHEET_ENGINE, SHEETS, VIEW_KEYS, VIEW_LABELS,
                                        VIEW_SHEET, cell_state, crop_method, sheet_slot_kind,
@@ -296,6 +298,22 @@ def put_style(slug: str, body: StyleIO, request: Request):
             setattr(sb, k, v)
         s.flush()
         return StyleIO.model_validate(sb)
+
+
+@router.get("/projects/{slug}/aigc", response_model=AigcIO)
+def get_aigc(slug: str, request: Request):
+    """AI 生成内容标识设置（没设过就是默认值）。"""
+    with services(request).db.session() as s:
+        return AigcIO(**project_aigc(project_by_slug(s, slug).aigc))
+
+
+@router.put("/projects/{slug}/aigc", response_model=AigcIO)
+def put_aigc(slug: str, body: AigcIO, request: Request):
+    """导出时烧进画面的角标文字、写进成片元数据的出品方，整个项目共用。留空恢复默认值。"""
+    with services(request).db.session() as s:
+        val = project_aigc(body.model_dump())
+        project_by_slug(s, slug).aigc = val
+        return AigcIO(**val)
 
 
 @router.get("/projects/{slug}/end-card", response_model=EndCardIO | None)

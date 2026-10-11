@@ -13,11 +13,12 @@ import {
   useTranslateSubtitles,
   useUploadBgm,
 } from '../../api/queries';
-import type { Bgm, ExportOptions, ExportRow, ShotDetail } from '../../api/types';
+import type { Bgm, ExportOptions, ExportRow, LabelPosition, ShotDetail } from '../../api/types';
 import { EpisodeLoadError, nextActionProps } from '../../components/EpisodeHeader';
 import { useJobNotice } from '../../components/JobNotice';
 import { useMediaGroup } from '../../components/MediaViewer';
 import { fmtTime } from '../../format';
+import { AigcPanel } from '../director/AigcPanel';
 import { EndCardPanel } from '../director/EndCardPanel';
 import { qcIssues } from '../director/shotStatus';
 import { selectedOf, slotMark, slotOf } from '../director/slots';
@@ -36,6 +37,9 @@ export function exportTags(settings: Record<string, unknown>): string[] {
   if (settings.align === 'detected') tags.push(settings.dub === 'km' ? '配音对齐说话' : '字幕对齐说话');
   if (settings.music === true) tags.push('配乐');
   if (settings.end_card === true) tags.push('片尾卡');
+  // AI 标识默认开着，只标出关掉的、或者 ffmpeg 烧不了角标的（和后端 export_label 一致）
+  if (settings.aigc_label === false) tags.push('无 AI 角标');
+  else if (settings.aigc_label_burned === false) tags.push('AI 角标没烧上');
   if (typeof settings.duration === 'number') tags.push(`${settings.duration.toFixed(1)} 秒`);
   return tags;
 }
@@ -60,7 +64,20 @@ interface Choice {
   fadeOut: number;
   /** 有台词时自动压低配乐 */
   duck: boolean;
+  /** AI 生成内容标识：画面角标（默认开）、位置、显示秒数 / 整集常显、文件元数据 */
+  aigcLabel: boolean;
+  aigcPos: LabelPosition;
+  aigcSeconds: number;
+  aigcAlways: boolean;
+  aigcMeta: boolean;
 }
+
+export const LABEL_POSITIONS: [LabelPosition, string][] = [
+  ['top_left', '左上角'],
+  ['top_right', '右上角'],
+  ['bottom_left', '左下角'],
+  ['bottom_right', '右下角'],
+];
 
 const DEFAULT_CHOICE: Choice = {
   subZh: false,
@@ -74,6 +91,11 @@ const DEFAULT_CHOICE: Choice = {
   fadeIn: 1,
   fadeOut: 2,
   duck: true,
+  aigcLabel: true,
+  aigcPos: 'top_left',
+  aigcSeconds: 3,
+  aigcAlways: false,
+  aigcMeta: true,
 };
 
 /** 数字选项的范围（和后端 ExportOptions 一致） */
@@ -81,6 +103,7 @@ const LIMITS: Partial<Record<keyof Choice, [number, number]>> = {
   musicDb: [-40, 6],
   fadeIn: [0, 10],
   fadeOut: [0, 10],
+  aigcSeconds: [1, 60],
 };
 
 const clamp = (k: keyof Choice, v: number) => {
@@ -102,6 +125,7 @@ function loadChoice(episodeId: number): Choice {
       if (typeof DEFAULT_CHOICE[k] === 'number' && typeof v === 'number' && Number.isFinite(v))
         (out as Record<string, unknown>)[k] = clamp(k, v);
     }
+    if (LABEL_POSITIONS.some(([p]) => p === saved.aigcPos)) out.aigcPos = saved.aigcPos as LabelPosition;
     return out;
   } catch {
     // 隐私模式、存储被禁用、内容坏了：用默认值
@@ -126,6 +150,11 @@ export function toOptions(c: Choice, hasBgm = false): ExportOptions {
     bed: c.bed,
     // 对齐实际开口：配音版对齐配音；不配音时对齐中文字幕（配乐压低也跟着走）
     align: c.alignDetected && (c.dubKm || c.subZh) ? 'detected' : 'timeline',
+    aigc_label: c.aigcLabel,
+    aigc_label_position: c.aigcPos,
+    aigc_label_seconds: c.aigcSeconds,
+    aigc_label_always: c.aigcAlways,
+    aigc_metadata: c.aigcMeta,
   };
   if (c.music && hasBgm) {
     out.music = true;
@@ -245,6 +274,58 @@ function MusicGroup({
         有台词时自动压低
       </label>
       {error && <p className="error small">{errorText(error)}</p>}
+    </fieldset>
+  );
+}
+
+/** AI 生成内容标识（广电总局微短剧要求、《人工智能生成合成内容标识办法》）：画面角标 + 文件元数据。 */
+function AigcGroup({ slug, choice, set }: { slug: string; choice: Choice; set: (patch: Partial<Choice>) => void }) {
+  const on = choice.aigcLabel;
+  return (
+    <fieldset className="export-group export-group-aigc">
+      <legend>AI 标识</legend>
+      <p className="muted small">
+        按规定 AI 参与制作的微短剧要在明显位置标注「AI 辅助制作」，文件里也要带隐式标识。角标在收尾那次编码里直接叠在画面上，不加片头，字幕和配乐的时间不变。
+      </p>
+      <label>
+        <input type="checkbox" aria-label="画面角标" checked={on} onChange={(ev) => set({ aigcLabel: ev.target.checked })} /> 画面角标
+      </label>
+      <div className="row">
+        <label className="inline-field">
+          <span>位置</span>
+          <select aria-label="角标位置" value={choice.aigcPos} disabled={!on} onChange={(ev) => set({ aigcPos: ev.target.value as LabelPosition })}>
+            {LABEL_POSITIONS.map(([v, text]) => (
+              <option key={v} value={v}>
+                {text}
+              </option>
+            ))}
+          </select>
+        </label>
+        <NumField
+          label="片头显示（秒）"
+          value={choice.aigcSeconds}
+          range={LIMITS.aigcSeconds!}
+          step={1}
+          disabled={!on || choice.aigcAlways}
+          onChange={(v) => set({ aigcSeconds: v })}
+        />
+        <label>
+          <input
+            type="checkbox"
+            aria-label="整集常显"
+            checked={choice.aigcAlways}
+            disabled={!on}
+            onChange={(ev) => set({ aigcAlways: ev.target.checked })}
+          />{' '}
+          整集常显
+        </label>
+      </div>
+      <label title="成片 mp4 的元数据里写上 AI 生成标记、出品方、作品编号（项目-集数）、AI 参与比例（按镜头算，上传的素材不算）">
+        <input type="checkbox" aria-label="写入隐式标识" checked={choice.aigcMeta} onChange={(ev) => set({ aigcMeta: ev.target.checked })} />{' '}
+        文件里写隐式标识（元数据）
+      </label>
+      {!on && <p className="warn small">不带角标的成片不符合 AI 微短剧的标识要求，只适合内部预览。</p>}
+      <AigcPanel slug={slug} />
     </fieldset>
   );
 }
@@ -494,6 +575,7 @@ function ExportBody({ slug, id }: { slug: string; id: number }) {
             </label>
           </fieldset>
           <MusicGroup episodeId={id} bgm={bgm} choice={choice} set={set} />
+          <AigcGroup slug={slug} choice={choice} set={set} />
           <fieldset className="export-group export-group-card">
             <legend>片尾卡</legend>
             <label>

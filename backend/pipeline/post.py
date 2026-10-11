@@ -54,6 +54,10 @@ class Cut:
     # continued[i]：第 i 段接上一镜（首帧是第 i-1 段视频的最后一帧）。这时第 i-1 段不能裁尾、
     # 接缝强制硬切（load_cut 已经改好 transitions），切点才正好落在抽出来的那一帧上
     continued: list[bool] = field(default_factory=list)
+    # 每段选定视频的引擎（算 AI 参与比例，写进成片元数据）、集名、项目的 AI 标识设置
+    engines: list[str] = field(default_factory=list)
+    episode_title: str = ""
+    aigc: dict | None = None
 
 
 def load_cut(sv, episode_id: int, *, allow_missing: bool = False) -> Cut:
@@ -62,7 +66,8 @@ def load_cut(sv, episode_id: int, *, allow_missing: bool = False) -> Cut:
         if not ep.shots:
             raise JobError("这一集还没有镜头")
         cut = Cut(episode_id, proj.slug, ep.number, proj.title, proj.aspect,
-                  voices={c.name: c.voice for c in proj.characters}, end_card=proj.end_card)
+                  voices={c.name: c.voice for c in proj.characters}, end_card=proj.end_card,
+                  episode_title=ep.title or "", aigc=proj.aigc)
         trans = []
         prev_in = False   # 上一镜（按集里的顺序）有没有进成片
         for sh in ep.shots:
@@ -79,6 +84,7 @@ def load_cut(sv, episode_id: int, *, allow_missing: bool = False) -> Cut:
             cut.codes.append(sh.code)
             cut.clips.append(sv.media.abs(c.file_path))
             cut.clip_rels.append(c.file_path)
+            cut.engines.append(c.engine or "")
             qc = (c.params or {}).get("qc") or {}
             cuts = qc.get("hard_cuts") or []
             if cuts:

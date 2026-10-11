@@ -45,6 +45,9 @@ class Project(Base):
         ForeignKey("style_bibles.id", ondelete="SET NULL"), nullable=True)
     # 片尾卡：{"seconds": 3, "background": "#0b1a33", "lines": [{text, font, size, bold}]}
     end_card: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # AI 生成内容标识：{"label_text": "本片由 AI 辅助制作", "producer": "AI Studio"}；空 = 用默认值
+    #（backend/post/aigc.py）。导出时角标烧进画面、出品方写进成片元数据
+    aigc: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     # 镜头节奏：每镜几秒（3 / 4 / 5）；空 = 跟随视频引擎的甜区（default_seconds）
     shot_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
     # 视频开头没接上首帧（出片自检 start_mismatch）时，同一个任务里换种子自动重拍一次

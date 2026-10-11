@@ -2,6 +2,7 @@
 import { type QueryClient, type QueryKey, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, enc, request } from './client';
 import type {
+  Aigc,
   ApiService,
   ApiServiceIn,
   ApiTestOut,
@@ -75,6 +76,7 @@ export const keys = {
   assets: (episodeId: number) => ['episode', episodeId, 'assets'] as const,
   style: (slug: string) => ['style', slug] as const,
   endCard: (slug: string) => ['endCard', slug] as const,
+  aigc: (slug: string) => ['aigc', slug] as const,
   exports: (episodeId: number) => ['exports', episodeId] as const,
   bgm: (episodeId: number) => ['bgm', episodeId] as const,
   // 挂在 ['episode', id] 下：任务结束（分镜重出删了镜头）时跟着刷新
@@ -182,6 +184,14 @@ export function useEndCard(slug: string) {
   return useQuery({
     queryKey: keys.endCard(slug),
     queryFn: () => api.get<EndCard | null>(`/api/projects/${enc(slug)}/end-card`),
+    enabled: slug !== '',
+  });
+}
+
+export function useAigc(slug: string) {
+  return useQuery({
+    queryKey: keys.aigc(slug),
+    queryFn: () => api.get<Aigc>(`/api/projects/${enc(slug)}/aigc`),
     enabled: slug !== '',
   });
 }
@@ -838,6 +848,14 @@ export function usePutEndCard(slug: string) {
   return useMutation({
     mutationFn: (body: EndCard) => api.put<EndCard>(`/api/projects/${enc(slug)}/end-card`, body),
     onSuccess: () => invalidate(qc, keys.endCard(slug)),
+  });
+}
+
+export function usePutAigc(slug: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Aigc) => api.put<Aigc>(`/api/projects/${enc(slug)}/aigc`, body),
+    onSuccess: () => invalidate(qc, keys.aigc(slug)),
   });
 }
 
