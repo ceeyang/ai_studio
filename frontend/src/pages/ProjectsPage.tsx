@@ -25,7 +25,7 @@ import { Dialog } from '../components/Dialog';
 import { ProjectSettingsDialog } from '../components/ProjectSettingsDialog';
 import { Menu, type MenuItem } from '../components/Menu';
 import { StylePresetPicker, stylePresetLabel } from '../components/StylePresetPicker';
-import { EPISODE_STATUS_LABEL, engineLabel, engineOptionDisabled, engineOptionText } from '../format';
+import { EPISODE_STATUS_LABEL, engineLabel, engineOptionDisabled, engineOptionText, engineUnreadyHint } from '../format';
 import { forgetEpisode, readLastEpisode } from '../lastEpisode';
 import { workspacePath } from './workspace/urls';
 
@@ -38,7 +38,8 @@ function pickDefault(rows: EngineRow[] | undefined, preferred: string): string {
 function videoEngineText(r: EngineRow): string {
   const label = engineLabel(r);
   const text = label.includes('声') ? label : `${label}${r.caps.has_audio ? '（有声）' : '（无声）'}`;
-  return engineOptionDisabled(r) ? `${text}（先在 API 服务里填 Key）` : text;
+  const hint = engineUnreadyHint(r);
+  return hint ? `${text}（${hint}）` : text;
 }
 
 function statusLabel(s: string): string {
@@ -113,6 +114,17 @@ function NewProjectDialog({ onClose }: { onClose: () => void }) {
   // 首帧引擎吃不吃参考图（caps.max_refs）：不吃的话首帧没法用定妆照锁脸、也用不上场景图
   const imageRow = (engines.data?.image ?? []).find((r) => r.name === image);
   const noRefs = imageRow?.caps?.max_refs === 0;
+  const videoRow = (engines.data?.video ?? []).find((r) => r.name === video);
+  // 选中的引擎还没配置好（ComfyUI 没连上、扩展没连上、没填 Key…）：表单下面提示一句，仍然能建项目
+  const unready = (kind: string, rows: EngineRow[] | undefined, row: EngineRow | undefined) => {
+    if (!engines.data) return null;
+    if (!rows?.length) return `没有可用的${kind}，先在 config.yaml 或设置页「API 服务」里配置。`;
+    if (!row || row.ready !== false) return null;
+    return `${kind}「${engineLabel(row)}」未配置好：${row.note ?? engineUnreadyHint(row)}。`;
+  };
+  const engineWarnings = [unready('图像引擎', engines.data?.image, imageRow), unready('视频引擎', engines.data?.video, videoRow)].filter(
+    (w): w is string => !!w,
+  );
   // 预设推荐的定妆照引擎（如真人写实的 krea2）：和首帧引擎不同时提一句
   const portraitRec = rec?.portrait_engine ?? null;
   const portraitHint = portraitRec && portraitRec !== image ? portraitRec : null;
@@ -170,6 +182,11 @@ function NewProjectDialog({ onClose }: { onClose: () => void }) {
           {noRefs && `${engineLabel(image)} 不吃参考图，首帧只能按文字出脸、场景图也用不上。`}
           {portraitHint && `定妆照默认用 ${engineLabel(portraitHint)}（这个风格预设推荐的；设置页「角色定妆照」设了别的、且和预设合得来时用设置的）。`}
         </p>
+        {engineWarnings.length > 0 && (
+          <p className="warn small" data-testid="engine-unready">
+            {engineWarnings.join(' ')}
+          </p>
+        )}
         {engines.error && <p className="error">读取引擎列表失败：{errorText(engines.error)}</p>}
         {create.error && <p className="error">{errorText(create.error)}</p>}
         <div className="modal-foot">

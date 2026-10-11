@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { VOICES, engineLabel, fmtDuration, fmtShortTime, fmtTime, jobStatusLabel, jobTypeLabel } from './format';
+import { VOICES, engineLabel, engineOptionText, fmtDuration, fmtShortTime, fmtTime, jobStatusLabel, jobTypeLabel } from './format';
 
 /** 后端 HANDLERS.register 登记的全部任务类型（grep -rn "HANDLERS.register" backend）。新增类型时这里也要加。 */
 const BACKEND_JOB_TYPES = [
@@ -78,5 +78,13 @@ describe('format', () => {
     const d = new Date(Date.UTC(2026, 9, 8, 10, 5, 30));
     const p2 = (n: number) => String(n).padStart(2, '0');
     expect(fmtShortTime('2026-10-08T10:05:30')).toBe(`${d.getMonth() + 1}/${d.getDate()} ${p2(d.getHours())}:${p2(d.getMinutes())}`);
+  });
+});
+
+describe('engineOptionText', () => {
+  it('不可用的引擎按运行方式写原因', () => {
+    expect(engineOptionText({ name: 'h3_video', runtime: 'comfyui', ready: true })).toBe('H3 视频（有声）');
+    expect(engineOptionText({ name: 'h3_video', runtime: 'comfyui', ready: false })).toBe('H3 视频（有声）（未配置：ComfyUI 没连上）');
+    expect(engineOptionText({ name: 'x', label: 'X', runtime: 'api', ready: false })).toBe('X（先在 API 服务里填 Key）');
   });
 });
