@@ -993,12 +993,13 @@ pre.error { background: rgba(255, 90, 95, 0.06); border-color: rgba(255, 90, 95,
 .char-looks { display: flex; flex-direction: column; gap: var(--s-3); min-width: 0; }
 .small { font-size: 12px; margin: 0; }
 .portrait-strip { display: flex; flex-wrap: wrap; gap: var(--s-2); padding: 4px 2px 6px; }
-.pcard, .pcard-img, .pcard-empty { flex: none; width: 120px; aspect-ratio: 9 / 16; border-radius: var(--r-md); }
+/* 定妆照现在出 3:4；以前的 9:16 用 contain 整张放进框里（上下不裁头） */
+.pcard, .pcard-img, .pcard-empty { flex: none; width: 120px; aspect-ratio: 3 / 4; border-radius: var(--r-md); }
 .pcard {
   position: relative; height: auto; padding: 0; overflow: hidden; background: #000;
   border: 1px solid var(--border-strong); display: block;
 }
-.pcard img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.pcard img { width: 100%; height: 100%; object-fit: contain; display: block; }
 .pcard-open { width: 100%; height: 100%; padding: 0; border: 0; border-radius: 0; background: transparent; display: block; cursor: zoom-in; }
 .pcard-open:hover:not(:disabled) { background: transparent; border: 0; }
 .pcard .pcard-use {
