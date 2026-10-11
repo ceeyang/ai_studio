@@ -231,22 +231,54 @@ def test_keyframe_no_ref_hint_without_portraits(tmp_path, db):
 
 
 # ---------------------------------------------------------------- 视频连续性：提示词 + 出片自检
+ROOM = ("A cramped roadside motorcycle repair shop at night, oil-stained concrete floor, "
+        "a rolling steel shutter half open. Bare bulbs hang from the beams.")
+
+
+def test_continuity_clause_is_positive_and_names_the_location():
+    """H3 曾在镜头中途切到定妆照。连续性要求用正面写法、点名这一镜的地点；不写「no studio background」
+    之类的否定（会把影棚背景招进画面）。"""
+    from backend.pipeline.prompting import continuity_clause, location_summary
+
+    loc = location_summary(ROOM)
+    assert loc == ("a cramped roadside motorcycle repair shop at night, oil-stained concrete floor, "
+                   "a rolling steel shutter half open")
+    c = continuity_clause(loc)
+    assert c == (f"One continuous take inside {loc}; the background stays this same place for the "
+                 "whole clip, matching the first frame. No cut.")
+    low = c.lower()
+    assert "studio" not in low and "portrait" not in low and "reference" not in low
+    assert continuity_clause("") == ("One continuous take; the background stays the same place "
+                                     "shown in the first frame for the whole clip. No cut.")
+    assert location_summary("直播间") == ""            # 中文的场景名不能进英文提示词
+    assert len(location_summary("word " * 80).split()) <= 30
+
+
 def test_video_prompt_has_continuity_clause_without_changing_hash(tmp_path, db):
-    """H3 曾在镜头中途切到定妆照：提示词里写明单个连续镜头、和首帧同一地点、不切镜、不要影棚背景。
-    这句不进输入哈希，已有视频不会因为模板更新全部变成过期。"""
-    from backend.pipeline.prompting import CONTINUITY_CLAUSE, video_input_hash
+    """连续性要求点名这一镜所在段落的场景外观，拼在 Audio 段前面；不进输入哈希，已有视频不会全部过期。"""
+    from backend.domain.models import Episode, Location, SceneBlock
+    from backend.pipeline.prompting import continuity_clause, location_summary, video_input_hash
 
     ctx, runner, shot_id = setup(tmp_path, db)
+    with db.session() as s:
+        shot = s.get(Shot, shot_id)
+        ep = s.get(Episode, shot.episode_id)
+        loc = Location(project_id=ep.project_id, name="修车铺", visual_prompt=ROOM)
+        s.add(loc)
+        s.flush()
+        blk = SceneBlock(episode_id=ep.id, order=0, location_id=loc.id, text="甲")
+        s.add(blk)
+        s.flush()
+        shot.scene_block_id = blk.id
     run_keyframe(ctx, {"shot_id": shot_id})
     run_video(ctx, {"shot_id": shot_id})
     prompt = runner.calls[-1].workflow["6"]["inputs"]["prompt"]
     body, audio = prompt.split("\nAudio:", 1)
-    assert CONTINUITY_CLAUSE in body and CONTINUITY_CLAUSE not in audio
-    low = CONTINUITY_CLAUSE.lower()
-    assert "continuous" in low and "same location" in low and "no cut" in low and "studio" in low
+    clause = continuity_clause(location_summary(ROOM))
+    assert body.endswith(clause) and clause not in audio
     with db.session() as s:
         v = selected_candidate(s, "shot", shot_id, "video")
-        assert CONTINUITY_CLAUSE not in v.params["inputs"]["prompt"]
+        assert "One continuous take" not in v.params["inputs"]["prompt"]
         shot, _, proj, style = load_shot(s, shot_id)
         assert v.input_hash == video_input_hash(shot, proj, style,
                                                 v.params["first_frame_candidate_id"], "h3_video", True)

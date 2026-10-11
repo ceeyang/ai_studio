@@ -74,16 +74,37 @@ def compose_video_prompt(motion_prompt: str, image_prompt: str, audio_prompt: st
 
 # 视频连续性：H3 带参考图时曾在镜头中途切到定妆照（灰色影棚背景、正面站立）。只拼进发给引擎的提示词，
 # 不进输入哈希和 inputs 摘要——否则模板一改，所有已出的视频都会被判过期。
-CONTINUITY_CLAUSE = ("Single continuous shot with no cut: the whole clip stays in the same location "
-                     "as the first frame, no scene change, no jump to a reference image, "
-                     "no studio background, no portrait backdrop.")
+# 用正面写法点名这一镜的地点：「no studio background」这类否定词反而会把影棚背景招进画面。
+_CJK_ANY = re.compile(r"[⺀-鿿가-힯豈-﫿＀-￯]")
 
 
-def with_continuity(video_prompt: str) -> str:
-    """把连续性要求接在画面描述后面、Audio 段前面。"""
+def location_summary(visual_prompt: str | None, max_words: int = 30) -> str:
+    """场景外观的第一句（最多 max_words 个词），句首冠词小写，拼进「inside …」；有中文就不用。"""
+    text = (visual_prompt or "").strip()
+    if not text or _CJK_ANY.search(text):
+        return ""
+    first = re.split(r"(?<=[.!?])\s+", text)[0].rstrip(" .!?;")
+    words = first.split()
+    if len(words) > max_words:
+        first = " ".join(words[:max_words]).rstrip(",;")
+    if re.match(r"(A|An|The)\b", first):
+        first = first[0].lower() + first[1:]
+    return first
+
+
+def continuity_clause(location: str = "") -> str:
+    if location:
+        return (f"One continuous take inside {location}; the background stays this same place for "
+                "the whole clip, matching the first frame. No cut.")
+    return ("One continuous take; the background stays the same place shown in the first frame "
+            "for the whole clip. No cut.")
+
+
+def with_continuity(video_prompt: str, location: str = "") -> str:
+    """把连续性要求接在画面描述后面、Audio 段前面。location 是 location_summary 的结果。"""
     body, sep, audio = (video_prompt or "").partition("\nAudio:")
     body = body.rstrip()
-    return f"{body} {CONTINUITY_CLAUSE}".strip() + (sep + audio if sep else "")
+    return f"{body} {continuity_clause(location)}".strip() + (sep + audio if sep else "")
 
 
 def join_negative(*parts: str | None) -> str:

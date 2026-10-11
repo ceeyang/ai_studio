@@ -8,8 +8,10 @@ from backend.domain.slots import add_candidate, get_or_create_slot, selected_can
 from backend.engines.base import VideoRequest
 from backend.pipeline.common import job_services
 from backend.pipeline.keyframes import load_shot, ref_labels, run_comfy
-from backend.pipeline.prompting import (compose_video_prompt, join_negative, shot_seed,
-                                        video_input_hash, video_inputs, with_continuity)
+from backend.domain.models import Location, SceneBlock
+from backend.pipeline.prompting import (compose_video_prompt, join_negative, location_summary,
+                                        shot_seed, video_input_hash, video_inputs,
+                                        with_continuity)
 from backend.queue.errors import JobCanceled, JobError
 from backend.queue.handlers import HANDLERS
 
@@ -37,6 +39,13 @@ def scene_qc(ctx, sv, path, code: str) -> dict | None:
     if cuts:
         ctx.log(f"视频 {code}：{cut_note(cuts)}")
     return {"hard_cuts": cuts}
+
+
+def _shot_location(s, shot) -> str:
+    """这一镜所在段落的场景外观摘要（英文）；手工镜头没挂段落、场景没写外观时为空。"""
+    blk = s.get(SceneBlock, shot.scene_block_id) if shot.scene_block_id else None
+    loc = s.get(Location, blk.location_id) if blk is not None and blk.location_id else None
+    return location_summary(loc.visual_prompt) if loc is not None else ""
 
 
 @HANDLERS.register("video.shot", gpu=True)
@@ -75,8 +84,9 @@ def run_video(ctx, payload: dict) -> dict:
         seconds = max(1.0, min(float(shot.duration), engine.caps.max_seconds))
         first = sv.media.abs(ff.file_path)
         slug, code, aspect = proj.slug, shot.code, proj.aspect
+        place = _shot_location(s, shot)
     # 连续性要求只加在发给引擎的提示词里，不进输入哈希
-    call = engine.build(VideoRequest(prompt=with_continuity(prompt), first_frame=first,
+    call = engine.build(VideoRequest(prompt=with_continuity(prompt, place), first_frame=first,
                                      aspect=aspect, seed=seed,
                                      seconds=seconds, negative=negative, refs=refs,
                                      prefix=f"studio/{slug}/clip_{code}"))
