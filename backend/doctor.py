@@ -119,6 +119,9 @@ def _check_extension(used: dict, browser) -> list[Check]:
         s = st.get(key)
         if not info.get("connected"):
             out.append(Check("浏览器", name, "warn", f"扩展没连上，查不了登录状态。{EXT_LOGIN_HINT}"))
+        elif s is None and key not in (info.get("sites") or []):
+            out.append(Check("浏览器", name, "warn", f"现在连着的扩展 v{info.get('version') or '?'} 还不认识 {host}，"
+                                                   "在 chrome://extensions 里把扩展「重新加载」一下"))
         elif s is None:
             out.append(Check("浏览器", name, "warn", f"扩展还没报 {host} 的状态，稍后重新检查"))
         else:

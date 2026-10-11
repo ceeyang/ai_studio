@@ -518,5 +518,6 @@ def test_doctor_reports_claude_login_and_old_extension():
         assert checks["扩展版本"].status == "warn" and "重新加载" in checks["扩展版本"].detail
         assert "Claude 登录（网页文本模型）" in checks
         assert checks["Claude 登录（网页文本模型）"].status == "warn"
+        assert "重新加载" in checks["Claude 登录（网页文本模型）"].detail
     finally:
         loop.close()
