@@ -396,6 +396,8 @@ class RunIn(BaseModel):
     then: list[NextStage] | None = None   # 本阶段完成后接着跑，如 fit_khmer → videos → export
     scene_block_ids: list[int] | None = None   # 只重写这些段落的分镜（只对 storyboard 有效）
     note: str | None = Field(None, max_length=500)   # 修改意见，写进提示词；非空时等同 force
+    # 不强制的剧本/分镜运行会删掉有选定首帧/视频或改过的镜头时，要带 confirm=true 才提交
+    confirm: bool = False
 
 
 class FitKhmerIn(BaseModel):
@@ -437,6 +439,8 @@ class RerunImpact(BaseModel):
     selected_videos: int       # 其中有选定视频的
     manual_kept: int           # 手工镜头数（保留）
     overwrites: list[str]      # script 阶段会覆盖的东西，如 ["角色描述", "场景氛围"]
+    edited_shots: int = 0      # 会被删掉的镜头里，生成后被改过的（改了提示词、台词、拆分出来的……）
+    rules_outdated: bool = False  # 分镜规则更新过，现有镜头是按旧规则出的（不强制不会自动重跑）
 
 
 class CandidatePatch(BaseModel):

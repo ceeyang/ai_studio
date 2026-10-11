@@ -230,7 +230,8 @@ def test_after_note_regen_unforced_run_with_same_inputs_skips(tmp_path, db):
         before = dict(s.get(Episode, ep_id).stage_hashes)
     run_storyboard(ctx, {"episode_id": ep_id, "note": "更紧凑"})
     with db.session() as s:
-        assert s.get(Episode, ep_id).stage_hashes == before
+        after = s.get(Episode, ep_id).stage_hashes
+        assert {k: v["inputs"] for k, v in after.items()} == {k: v["inputs"] for k, v in before.items()}
     assert run_storyboard(ctx, {"episode_id": ep_id}) == {"blocks_done": 0, "blocks_skipped": 2}
     assert len(prov.calls) == 4
 
@@ -306,22 +307,22 @@ def test_block_target_share():
 
 
 def test_storyboard_rescales_block_to_target_and_logs(tmp_path, db):
-    # target 20 秒、两段各 2 镜 → 每段 10 秒；LLM 给了 7+7=14 秒
-    ctx, ep_id, prov = setup(tmp_path, db, [shots_json(2, duration=7), shots_json(2)])
+    # target 20 秒、两段各 2 镜 → 每段 10 秒；LLM 给了 6+6=12 秒（缩 17%，在 25% 以内按比例缩）
+    ctx, ep_id, prov = setup(tmp_path, db, [shots_json(2, duration=6), shots_json(2)])
     run_storyboard(ctx, {"episode_id": ep_id})
     with db.session() as s:
         shots = s.get(Episode, ep_id).shots
         assert abs(sum(x.duration for x in shots) - 20.0) <= 2.0
         assert [x.duration for x in shots[:2]] == [5.0, 5.0]
-    assert any("14.0" in m and "10.0" in m for m in ctx.logs)
+    assert any("12.0" in m and "10.0" in m for m in ctx.logs)
     assert "10 秒" in prov.calls[0]["messages"][0]["content"]
 
 
 def test_storyboard_duration_unfittable_because_of_dialogue_retries(tmp_path, db):
-    # 每镜台词说到 6.5 秒，两镜最少 2×6.9 秒，本段只给 10 秒（±10%）：缩不下，要 LLM 重写
-    long = shots_json(2, duration=7)
+    # 每镜台词说到 6.0 秒，两镜最少 2×6.4 秒，本段只给 10 秒（±10%）：缩不下，要 LLM 重写
+    long = shots_json(2, duration=6.5)
     for sh in long["shots"]:
-        sh["dialogue"] = [{"speaker": "林夏", "zh": "词被改了", "start": 0.5, "end": 6.5}]
+        sh["dialogue"] = [{"speaker": "林夏", "zh": "词被改了", "start": 0.5, "end": 6.0}]
     ctx, ep_id, prov = setup(tmp_path, db, [long, shots_json(2), shots_json(2)])
     run_storyboard(ctx, {"episode_id": ep_id})
     err = prov.calls[1]["messages"][2]["content"]
@@ -338,3 +339,197 @@ def test_storyboard_prompt_has_quality_rules():
     assert "中文字符" in system and "一个主动作" in system
     assert "特写插入镜头" in system and "逐字重复" in system
     assert "10.0 秒" in user or "10 秒" in user
+
+
+# ---------------------------------------------------------------- 指纹：输入指纹 + 规则版本
+def test_record_is_inputs_rules_and_shot_hashes(tmp_path, db):
+    from backend.pipeline.storyboard import STORYBOARD_RULES_VERSION, edited_shot_ids
+
+    ctx, ep_id, _ = setup(tmp_path, db, [shots_json(2)] * 2)
+    run_storyboard(ctx, {"episode_id": ep_id})
+    with db.session() as s:
+        ep = s.get(Episode, ep_id)
+        b1 = ep.scene_blocks[0].id
+        rec = ep.stage_hashes[f"storyboard:{b1}"]
+        assert rec["rules"] == str(STORYBOARD_RULES_VERSION) and len(rec["inputs"]) == 16
+        mine = [x for x in ep.shots if x.scene_block_id == b1]
+        assert sorted(rec["shots"]) == sorted(str(x.id) for x in mine)
+        assert edited_shot_ids(rec, mine) == []
+        mine[0].image_prompt += " with a red umbrella"
+        assert edited_shot_ids(rec, mine) == [mine[0].id]
+
+
+def test_rules_version_change_alone_does_not_rerun(tmp_path, db, monkeypatch):
+    """改了分镜模板（规则版本加一）：不强制的运行不重跑，只提示；强制才按新规则重出。"""
+    import backend.pipeline.storyboard as sb
+    from backend.pipeline.impact import rerun_impact
+
+    ctx, ep_id, prov = setup(tmp_path, db, [shots_json(2)] * 4)
+    run_storyboard(ctx, {"episode_id": ep_id})
+    with db.session() as s:
+        ids_before = sorted(x.id for x in s.get(Episode, ep_id).shots)
+    monkeypatch.setattr(sb, "STORYBOARD_RULES_VERSION", sb.STORYBOARD_RULES_VERSION + 1)
+    ctx.logs.clear()
+    assert run_storyboard(ctx, {"episode_id": ep_id}) == {"blocks_done": 0, "blocks_skipped": 2}
+    assert len(prov.calls) == 2
+    assert sum("分镜规则已更新，要按新规则重出请强制重跑" in m for m in ctx.logs) == 2
+    with db.session() as s:
+        assert sorted(x.id for x in s.get(Episode, ep_id).shots) == ids_before
+        im = rerun_impact(s, ctx.services, ep_id, "storyboard", False)
+        assert im.will_run is False and im.rules_outdated is True and im.shots_deleted == 0
+    assert run_storyboard(ctx, {"episode_id": ep_id, "force": True})["blocks_done"] == 2
+    with db.session() as s:
+        im = rerun_impact(s, ctx.services, ep_id, "storyboard", False)
+        assert im.rules_outdated is False
+        recs = [v for k, v in s.get(Episode, ep_id).stage_hashes.items()
+                if k.startswith("storyboard:")]
+        assert all(r["rules"] == str(sb.STORYBOARD_RULES_VERSION) for r in recs)
+
+
+def test_template_text_is_not_part_of_inputs_fingerprint(tmp_path, db, monkeypatch):
+    """模板文字变了（比如这次的提示词修改）但没加规则版本：输入指纹不变，也不会重跑。"""
+    from backend.llm.prompts import PromptLibrary
+
+    ctx, ep_id, prov = setup(tmp_path, db, [shots_json(2)] * 2)
+    run_storyboard(ctx, {"episode_id": ep_id})
+    real = PromptLibrary.render
+
+    def render(self, name, **kw):
+        system, user = real(self, name, **kw)
+        return system + "\n新加的一条规则", user
+
+    monkeypatch.setattr(PromptLibrary, "render", render)
+    assert run_storyboard(ctx, {"episode_id": ep_id}) == {"blocks_done": 0, "blocks_skipped": 2}
+
+
+def test_inputs_change_still_reruns(tmp_path, db):
+    ctx, ep_id, prov = setup(tmp_path, db, [shots_json(2)] * 3)
+    run_storyboard(ctx, {"episode_id": ep_id})
+    with db.session() as s:
+        s.get(Episode, ep_id).scene_blocks[1].text = "丙" * 50
+    assert run_storyboard(ctx, {"episode_id": ep_id}) == {"blocks_done": 1, "blocks_skipped": 1}
+
+
+def test_project_override_template_counts_as_rules(tmp_path, db):
+    from backend.pipeline.storyboard import STORYBOARD_RULES_VERSION, storyboard_rules
+
+    ctx, ep_id, _ = setup(tmp_path, db, [])
+    assert storyboard_rules(ctx.services.prompts("demo")) == str(STORYBOARD_RULES_VERSION)
+    d = ctx.services.media.project_dir("demo") / "prompts"
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "storyboard.md").write_text("自定义\n=== user ===\n{{ text }}", encoding="utf-8")
+    r = storyboard_rules(ctx.services.prompts("demo"))
+    assert r.startswith(f"{STORYBOARD_RULES_VERSION}+") and len(r) > 3
+
+
+def test_upgrade_from_old_whole_prompt_hash_keeps_shots_and_selection(tmp_path, db):
+    """升级场景：库里是旧格式指纹（整段提示词的哈希，模板改了没法重算）、镜头已经选了视频。
+    不强制的整集运行不能删镜头、不能调 LLM；旧值换成新格式，之后照常按输入判断。"""
+    from backend.domain.slots import add_candidate, get_or_create_slot
+    from backend.pipeline.impact import rerun_impact
+
+    ctx, ep_id, prov = setup(tmp_path, db, [shots_json(2)] * 3)
+    run_storyboard(ctx, {"episode_id": ep_id})
+    with db.session() as s:
+        ep = s.get(Episode, ep_id)
+        olds = ["c22408c005790620", "316c7dcffe702b1c"]
+        ep.stage_hashes = {"structure": "fa8c14136157dc75",
+                           **{f"storyboard:{b.id}": o for b, o in zip(ep.scene_blocks, olds)}}
+        first = ep.shots[0].id
+        add_candidate(s, get_or_create_slot(s, "shot", first, "video"),
+                      file_path="demo/media/video/x.mp4", engine="h3_video", params={},
+                      input_hash="h", job_id=None)
+        ids_before = sorted(x.id for x in ep.shots)
+    with db.session() as s:
+        im = rerun_impact(s, ctx.services, ep_id, "storyboard", False)
+        assert im.will_run is False and im.rules_outdated is True and im.selected_videos == 0
+    ctx.logs.clear()
+    assert run_storyboard(ctx, {"episode_id": ep_id}) == {"blocks_done": 0, "blocks_skipped": 2}
+    assert len(prov.calls) == 2
+    assert any("旧版指纹" in m and "强制重跑" in m for m in ctx.logs)
+    with db.session() as s:
+        ep = s.get(Episode, ep_id)
+        assert sorted(x.id for x in ep.shots) == ids_before
+        recs = [ep.stage_hashes[f"storyboard:{b.id}"] for b in ep.scene_blocks]
+        assert all(isinstance(r, dict) and r["rules"] is None for r in recs)
+        assert ep.stage_hashes["structure"] == "fa8c14136157dc75"
+        ep.scene_blocks[1].text = "丙" * 50      # 升级之后输入真变了：照常重跑这一段
+    assert run_storyboard(ctx, {"episode_id": ep_id}) == {"blocks_done": 1, "blocks_skipped": 1}
+
+
+def test_old_format_hash_without_llm_shots_still_runs(tmp_path, db):
+    ctx, ep_id, prov = setup(tmp_path, db, [shots_json(2)] * 2)
+    with db.session() as s:
+        ep = s.get(Episode, ep_id)
+        ep.stage_hashes = {f"storyboard:{b.id}": "c22408c005790620" for b in ep.scene_blocks}
+    assert run_storyboard(ctx, {"episode_id": ep_id}) == {"blocks_done": 2, "blocks_skipped": 0}
+
+
+# ---------------------------------------------------------------- 道具说法跨段沿用
+def test_props_from_earlier_blocks_go_into_next_block_prompt(tmp_path, db):
+    first = shots_json(2)
+    scooter = "a battered red scooter with a cracked left mirror"
+    first["shots"][0]["props"] = [scooter]
+    first["shots"][1]["props"] = [scooter, "a yellowed envelope"]
+    ctx, ep_id, prov = setup(tmp_path, db, [first, shots_json(2)])
+    run_storyboard(ctx, {"episode_id": ep_id})
+    u1 = prov.calls[0]["messages"][0]["content"]
+    u2 = prov.calls[1]["messages"][0]["content"]
+    assert "已定的道具英文说法" not in u1
+    assert "已定的道具英文说法" in u2
+    assert u2.count(scooter) == 1 and "a yellowed envelope" in u2
+    with db.session() as s:
+        assert s.get(Episode, ep_id).shots[1].props[1] == "a yellowed envelope"
+
+
+def test_cjk_in_props_and_audio_rejected_but_quoted_sign_text_allowed():
+    from types import SimpleNamespace as NS
+
+    from backend.pipeline.storyboard import cjk_problems
+
+    ok = NS(image_prompt='a shop sign reading "老周修车" above the shutter',
+            motion_prompt="static", audio_prompt="rain on metal",
+            props=['a tin sign reading "老周修车"'])
+    assert cjk_problems([ok]) == []
+    bad = NS(image_prompt="x", motion_prompt="x", audio_prompt="老周 sighs", props=["红色摩托"])
+    out = cjk_problems([bad])
+    assert any("audio_prompt" in x for x in out) and any("props" in x for x in out)
+
+
+def test_shrink_over_25_percent_asks_llm_to_rewrite(tmp_path, db):
+    # 本段预算 10 秒，LLM 给了 7+7=14 秒（要砍 29%）：打回让 LLM 重新分配，不机械缩放
+    ctx, ep_id, prov = setup(tmp_path, db,
+                             [shots_json(2, duration=7), shots_json(2), shots_json(2)])
+    run_storyboard(ctx, {"episode_id": ep_id})
+    err = prov.calls[1]["messages"][2]["content"]
+    assert "14.0" in err and "10.0" in err and "重新分配" in err
+    with db.session() as s:
+        assert [x.duration for x in s.get(Episode, ep_id).shots[:2]] == [5.0, 5.0]
+
+
+def test_shrink_over_25_percent_is_scaled_on_last_attempt(tmp_path, db):
+    from backend.llm.gateway import MAX_RETRIES
+
+    tries = [shots_json(2, duration=7)] * (1 + MAX_RETRIES) + [shots_json(2)]
+    ctx, ep_id, prov = setup(tmp_path, db, tries)
+    run_storyboard(ctx, {"episode_id": ep_id})
+    with db.session() as s:
+        assert [x.duration for x in s.get(Episode, ep_id).shots[:2]] == [5.0, 5.0]
+    assert any("按比例调成" in m for m in ctx.logs)
+
+
+def test_storyboard_prompt_rules_v2():
+    from backend.llm.prompts import PromptLibrary
+    from backend.services import BUILTIN_DIR
+
+    system, user = PromptLibrary(BUILTIN_DIR, BUILTIN_DIR / "none").render(
+        "storyboard", anchor="A", characters=[], location=None, text="x", count=3,
+        shot_seconds=5, max_seconds=10, prev_action="", block_seconds=15.0,
+        known_props=["a battered red scooter"])
+    assert "输出前自检" in system and system.index("输出前自检") > system.index("transition_out")
+    assert "不要自己抄进来" in system and "风格锚点" not in system
+    assert "the stocky man" in system and "按景别取舍" in system
+    assert "off-screen voice" in system and "lips closed" in system
+    assert "这 3 个镜头之内" in system and "不能额外多出镜头" in system
+    assert '"老周修车"' in system
+    assert "a battered red scooter" in user and "逐字沿用" in user

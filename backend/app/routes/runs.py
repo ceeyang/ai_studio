@@ -9,7 +9,7 @@ from backend.app.deps import get_or_404, manager, services
 from backend.app.schemas import FitKhmerIn, RerunImpact, RunIn, RunOut, TranslateIn
 from backend.domain.models import Episode
 from backend.engines.comfyui import health
-from backend.pipeline.impact import rerun_impact
+from backend.pipeline.impact import protected_losses, rerun_impact
 from backend.pipeline.runs import FIT_STAGE, STAGES, Precheck, RunOptions, submit_chain
 from backend.queue.errors import JobError
 
@@ -51,6 +51,14 @@ def _parse_ids(raw: str | None) -> list[int] | None:
 def run_stage(episode_id: int, body: RunIn, request: Request):
     sv = services(request)
     stages = list(STAGES) if body.stage == "all" else [body.stage, *(body.then or [])]
+    if not body.confirm:
+        # 不强制的剧本/分镜运行会删掉做过的镜头（有选定首帧/视频、改过）：先拒绝，确认后再带 confirm=true
+        with sv.db.session() as s:
+            loss = (protected_losses(s, sv, episode_id, stages, force=body.force,
+                                     scene_block_ids=body.scene_block_ids, note=body.note)
+                    if s.get(Episode, episode_id) is not None else None)
+        if loss:
+            raise JobError(loss)
     opts = RunOptions(shots=body.shots, candidates=body.candidates, force=body.force,
                       priority=body.priority,
                       export=body.export.model_dump() if body.export else None,

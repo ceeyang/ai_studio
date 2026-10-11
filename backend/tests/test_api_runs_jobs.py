@@ -310,3 +310,86 @@ def test_run_regenerate_params(api):
     r = api.post(url, json={"stage": "storyboard", "scene_block_ids": [foreign]})
     assert r.status_code == 400 and "段落" in r.json()["detail"]
     assert api.post(url, json={"stage": "script", "note": "长" * 501}).status_code == 422
+
+
+# ---------------------------------------------------------------- 不强制的分镜/剧本运行：保护做过的镜头
+def _seed_storyboarded(api, slug="demo"):
+    """一集两段、每段一个 llm 镜头，分镜记录按新格式写好（S01 段输入没变，S02 段的输入指纹对不上）。"""
+    from backend.domain.models import Episode, SceneBlock
+    from backend.pipeline.impact import scan_storyboard
+    from backend.pipeline.storyboard import (build_storyboard_plan, shot_content_hash,
+                                             storyboard_inputs_fp, storyboard_rules)
+
+    sv = api.app.state.services
+    api.post("/api/projects", json={"title": slug})
+    ep_id = api.post(f"/api/projects/{slug}/episodes", json={"source_text": "梗概"}).json()["id"]
+    with sv.db.session() as s:
+        ep = s.get(Episode, ep_id)
+        ep.scene_blocks.append(SceneBlock(order=0, text="甲" * 30))
+        ep.scene_blocks.append(SceneBlock(order=1, text="乙" * 30))
+        s.flush()
+        b1, b2 = ep.scene_blocks[0].id, ep.scene_blocks[1].id
+        a = Shot(episode_id=ep_id, scene_block_id=b1, order=0, action="动作甲", image_prompt="p")
+        b = Shot(episode_id=ep_id, scene_block_id=b2, order=1000, action="动作乙", image_prompt="p")
+        s.add_all([a, b])
+        s.flush()
+        renumber_shots(s, ep_id)
+        plan = build_storyboard_plan(s, sv, ep_id)
+        rules = storyboard_rules(plan.prompts)
+        blk = plan.blocks[0]
+        fp1 = storyboard_inputs_fp(plan.anchor, plan.characters, blk["location"], blk["text"],
+                                   blk["count"], plan.shot_seconds, plan.max_seconds, "",
+                                   blk["seconds"])
+        ep.stage_hashes = {
+            f"storyboard:{b1}": {"inputs": fp1, "rules": rules,
+                                 "shots": {str(a.id): shot_content_hash(a)}},
+            f"storyboard:{b2}": {"inputs": "changed", "rules": rules,
+                                 "shots": {str(b.id): shot_content_hash(b)}}}
+        ids = (a.id, b.id)
+    with sv.db.session() as s:
+        assert scan_storyboard(s, sv, ep_id, False).block_ids == [b2]
+    return ep_id, ids
+
+
+def test_unforced_storyboard_run_refuses_to_delete_selected_shots(api):
+    ep_id, (a, b) = _seed_storyboarded(api)
+    url = f"/api/episodes/{ep_id}/run"
+    # S02 那段会重跑，但 S02 没有选定、没改过：照常提交
+    assert api.post(url, json={"stage": "storyboard"}).status_code == 200
+    with api.app.state.services.db.session() as s:
+        _cand(s, b, "video")
+    r = api.post(url, json={"stage": "storyboard"})
+    assert r.status_code == 400
+    d = r.json()["detail"]
+    assert "S02" in d and "选定" in d and "confirm=true" in d and "--yes" in d and "S01" not in d
+    assert api.post(url, json={"stage": "storyboard", "confirm": True}).status_code == 200
+    # 强制 / 带修改意见：用户明确要重出（界面上的「重新生成」对话框已经先给看过影响）
+    assert api.post(url, json={"stage": "storyboard", "force": True}).status_code == 200
+    assert api.post(url, json={"stage": "storyboard", "note": "更紧凑"}).status_code == 200
+    # 后面的阶段不受影响
+    assert api.post(url, json={"stage": "keyframes", "shots": ["S01"]}).status_code == 200
+
+
+def test_unforced_run_refuses_to_delete_edited_shots(api):
+    ep_id, (a, b) = _seed_storyboarded(api)
+    api.patch(f"/api/shots/{b}", json={"image_prompt": "用户改过的提示词"})
+    r = api.post(f"/api/episodes/{ep_id}/run", json={"stage": "storyboard"})
+    assert r.status_code == 400 and "S02 生成后改过" in r.json()["detail"]
+    im = api.get(f"/api/episodes/{ep_id}/rerun-impact",
+                 params={"stage": "storyboard", "force": 0}).json()
+    assert im["edited_shots"] == 1 and im["shots_deleted"] == 1 and im["rules_outdated"] is False
+    # 改的是不会重跑的 S01：不拦
+    ep2, (a2, _) = _seed_storyboarded(api, "demo2")
+    api.patch(f"/api/shots/{a2}", json={"image_prompt": "改过"})
+    assert api.post(f"/api/episodes/{ep2}/run", json={"stage": "storyboard"}).status_code == 200
+
+
+def test_unforced_all_run_counts_script_rerun_losses(api):
+    """整集 all：剧本结构会重跑（还没有结构指纹）→ llm 镜头都会变孤儿被删，有选定的要确认。"""
+    ep_id, (a, b) = _seed_storyboarded(api)
+    with api.app.state.services.db.session() as s:
+        _cand(s, a, "first_frame")
+    url = f"/api/episodes/{ep_id}/run"
+    r = api.post(url, json={"stage": "all"})
+    assert r.status_code == 400 and "S01" in r.json()["detail"]
+    assert api.post(url, json={"stage": "all", "confirm": True}).status_code == 200

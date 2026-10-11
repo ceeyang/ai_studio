@@ -92,8 +92,19 @@ class ShotOut(BaseModel):
     image_prompt: str
     motion_prompt: str
     audio_prompt: str = ""
+    # 本镜出现的关键道具的英文说法（和 image_prompt 里一字不差），后面的段落沿用同一个说法
+    props: list[str] = Field(default_factory=list, max_length=8)
     duration: float = Field(default=5.0, ge=2, le=10)
     transition_out: Transition = "hard_cut"
+
+    @field_validator("props", mode="before")
+    @classmethod
+    def _props_clean(cls, v):
+        if v is None:
+            return []
+        if not isinstance(v, list):
+            raise ValueError("props 要写成英文字符串数组")
+        return [str(x).strip() for x in v if str(x).strip()][:8]
 
     @field_validator("image_prompt")
     @classmethod

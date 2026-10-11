@@ -224,3 +224,17 @@ def test_project_end_card_set_and_show(cli, api, tmp_path):
     r = cli("--json", "project", "end-card", "demo")
     assert json.loads(r.stdout)["lines"][0]["text"] == "Telegram 0318891666"
     assert "Telegram 0318891666" in cli("project", "end-card", "demo").stdout
+
+
+def test_run_storyboard_prints_impact_and_needs_yes_to_delete_selected(cli, api):
+    from backend.tests.test_api_runs_jobs import _cand, _seed_storyboarded
+
+    ep_id, (a, b) = _seed_storyboarded(api)
+    with api.app.state.services.db.session() as s:
+        _cand(s, b, "video")
+    r = cli("run", "storyboard", "demo")
+    assert r.exit_code == 1
+    assert "重跑影响（storyboard）：会重跑段落 2：删除 1 个镜头（其中 1 个有选定视频）" in r.output
+    assert "S02" in r.output and "--yes" in r.output
+    r = cli("run", "storyboard", "demo", "--yes")
+    assert r.exit_code == 0 and "已提交 1 个任务" in r.output

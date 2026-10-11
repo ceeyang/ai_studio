@@ -150,6 +150,8 @@ def run(stage: str = typer.Argument(..., help="script / storyboard / keyframes /
         shots: Optional[str] = typer.Option(None, help="只跑这些镜头，逗号分隔，如 S01,S03"),
         candidates: int = typer.Option(1, help="每个镜头出几张首帧候选（1–4）"),
         force: bool = typer.Option(False, help="输入没变也重新生成"),
+        yes: bool = typer.Option(False, "--yes", "-y",
+                                 help="剧本/分镜重跑会删掉有选定首帧/视频或改过的镜头时，确认照删"),
         subtitles: str = typer.Option("none", help="导出：烧字幕 none / zh / zh+km（中文在上、高棉语在下）"),
         dub: str = typer.Option("off", help="导出：off / km（高棉语外挂配音，原音轨压低当底）"),
         end_card: bool = typer.Option(False, "--end-card/--no-end-card", help="导出：接项目片尾卡"),
@@ -166,6 +168,10 @@ def run(stage: str = typer.Argument(..., help="script / storyboard / keyframes /
     nxt = [x.strip() for x in (then or "").split(",") if x.strip()]
     ep = _call("GET", f"/api/projects/{project}/episodes/by-number/{episode}")
     body: dict = {"stage": stage, "candidates": candidates, "force": force}
+    if stage in ("script", "storyboard", "all") and not force:
+        _print_impact(ep["id"], "script" if stage in ("script", "all") else "storyboard")
+    if yes:
+        body["confirm"] = True
     if shots:
         body["shots"] = [x.strip() for x in shots.split(",") if x.strip()]
     if nxt:
@@ -175,6 +181,41 @@ def run(stage: str = typer.Argument(..., help="script / storyboard / keyframes /
                           "bed": bed, "align": align}
     _emit(_call("POST", f"/api/episodes/{ep['id']}/run", json=body),
           lambda r: typer.echo(f"已提交 {len(r['job_ids'])} 个任务：{', '.join(map(str, r['job_ids']))}"))
+
+
+def impact_line(im: dict) -> str:
+    """重跑影响写成一句话（和界面上的确认框同一个意思）。"""
+    if not im.get("will_run"):
+        line = "输入没变，会跳过"
+    else:
+        where = f"段落 {'、'.join(map(str, im['blocks']))}" if im.get("blocks") else "整集"
+        line = f"会重跑{where}：删除 {im['shots_deleted']} 个镜头"
+        extra = [f"{im[k]} 个{label}" for k, label in (("selected_videos", "有选定视频"),
+                                                      ("selected_first_frames", "有选定首帧"),
+                                                      ("edited_shots", "生成后改过"))
+                 if im.get(k)]
+        if extra:
+            line += f"（其中 {'、'.join(extra)}）"
+        if im.get("manual_kept"):
+            line += f"，保留 {im['manual_kept']} 个手工镜头"
+        if im.get("overwrites"):
+            line += f"；会覆盖{'、'.join(im['overwrites'])}"
+    if im.get("rules_outdated"):
+        line += "；分镜规则已更新，要按新规则重出请加 --force"
+    return line
+
+
+def _print_impact(episode_id: int, stage: str) -> None:
+    if STATE["json"]:
+        return
+    try:   # 只是提示：拿不到影响（比如还没有段落）就不打印，照常提交，由服务端报错
+        r = _client().get(f"/api/episodes/{episode_id}/rerun-impact", params={"stage": stage})
+    except httpx.HTTPError:
+        return
+    if r.status_code >= 400:
+        return
+    im = r.json()
+    typer.echo(f"重跑影响（{stage}）：{impact_line(im)}", err=True)
 
 
 # ------------------------------------------------------------ 任务

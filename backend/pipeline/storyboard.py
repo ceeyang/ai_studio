@@ -7,12 +7,13 @@ from dataclasses import dataclass
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
+from backend.domain.hashing import input_hash
 from backend.domain.models import Episode, Shot
 from backend.domain.shots import renumber_shots
 from backend.domain.slots import delete_slots
 from backend.llm.schemas import StoryboardOut
-from backend.pipeline.common import (clean_note, continue_chain, load_episode, prompt_fp,
-                                     render_with_note)
+from backend.llm.gateway import MAX_RETRIES
+from backend.pipeline.common import clean_note, continue_chain, load_episode, render_with_note
 from backend.queue.errors import JobError
 from backend.queue.handlers import HANDLERS
 
@@ -44,19 +45,31 @@ _CJK = re.compile(r"[\u2e80-\u2fff\u3000-\u303f\u3040-\u30ff\u3100-\u31ff\u3400-
 DURATION_TOLERANCE = 0.10   # 每段镜头总时长和预算的允许偏差（±10%），整集因此也在目标的 ±10% 内
 MIN_SHOT_SECONDS = 2.0      # 和 ShotOut.duration 的下限一致
 DIALOGUE_TAIL = 0.4         # 最后一句台词说完后留的余量
+MAX_SHRINK = 0.25           # 要按比例砍掉超过 25% 的时长时让 LLM 重写，不机械缩放
+
+
+# 双引号里的是画面上要出现的字（如 a sign reading "老周修车"），允许中文
+_QUOTED = re.compile(r'"[^"\n]*"|“[^”\n]*”|「[^」\n]*」')
 
 
 def cjk_chars(text: str) -> str:
     return "".join(_CJK.findall(text or ""))
 
 
+def cjk_outside_quotes(text: str) -> str:
+    return cjk_chars(_QUOTED.sub(" ", text or ""))
+
+
 def cjk_problems(shots) -> list[str]:
     out = []
     for i, sh in enumerate(shots, start=1):
-        for field in ("image_prompt", "motion_prompt"):
-            bad = cjk_chars(getattr(sh, field, ""))
+        for field in ("image_prompt", "motion_prompt", "audio_prompt"):
+            bad = cjk_outside_quotes(getattr(sh, field, "") or "")
             if bad:
                 out.append(f"第 {i} 镜 {field} 里有中文「{bad[:20]}」")
+        bad = "".join(cjk_outside_quotes(p) for p in (getattr(sh, "props", None) or []))
+        if bad:
+            out.append(f"第 {i} 镜 props 里有中文「{bad[:20]}」")
     return out
 
 
@@ -96,13 +109,23 @@ def shot_min_seconds(sh) -> float:
     return max(MIN_SHOT_SECONDS, min(float(sh.duration), end + DIALOGUE_TAIL))
 
 
-def budget_durations(shots, target: float, max_seconds: float) -> tuple[list[float], str | None]:
-    """把一段镜头的时长落进预算 target（±10%）。返回 (时长, 错误)：缩放也落不进（台词太长）时给错误，
-    让 LLM 重写；引擎上限凑不够预算不算错（不是 LLM 能改的）。"""
+def budget_durations(shots, target: float, max_seconds: float, *, rewrite_over: bool = True
+                     ) -> tuple[list[float], str | None]:
+    """把一段镜头的时长落进预算 target（±10%）。返回 (时长, 错误)：
+
+    - 偏差在 ±10% 内不动；
+    - 要缩短超过 25%（rewrite_over=True 时）给错误让 LLM 重新分配——机械地按比例砍会把节奏砍乱；
+    - 缩放也落不进（台词太长）给错误，让 LLM 重写；
+    - 引擎上限凑不够预算不算错（不是 LLM 能改的）。"""
     durs = [min(float(sh.duration), max_seconds) for sh in shots]
     tol = max(target * DURATION_TOLERANCE, 0.5)
-    if abs(sum(durs) - target) <= tol:
+    total_in = sum(durs)
+    if abs(total_in - target) <= tol:
         return durs, None
+    if rewrite_over and total_in > 0 and 1 - target / total_in > MAX_SHRINK:
+        return durs, (f"这一段镜头 duration 加起来 {total_in:.1f} 秒，本段预算 {target:.1f} 秒"
+                      f"（±{tol:.1f} 秒），要砍掉 {(1 - target / total_in) * 100:.0f}% 才放得下；"
+                      "请重新分配每镜时长（必要时减少台词、合并动作），让 duration 加起来落在预算内")
     fitted = fit_durations(durs, [shot_min_seconds(sh) for sh in shots], target, hi=max_seconds)
     total = sum(fitted)
     if total > target + tol:
@@ -178,22 +201,116 @@ def previous_shot_lines(db, block_id: int) -> list[str]:
         return lines
 
 
+# ------------------------------------------------------------ 指纹
+# 分镜规则（storyboard.md 里的写法要求）的版本号：改了模板里的规则就把它加一。
+# 不强制的运行只比较输入指纹（风格锚、角色表、场景、段落文本、镜头数、时长预算、上一镜动作），
+# 规则版本不同只提示「规则已更新」、不自动重跑——否则每改一次模板，所有剧集下一次整集运行
+# 都会删光镜头、选定的首帧/视频和手改的内容，重新跑一遍 GPU。
+STORYBOARD_RULES_VERSION = 2
+RULES_OUTDATED_HINT = "分镜规则已更新，要按新规则重出请强制重跑"
+
+# 镜头上会被用户改动的字段：生成时记下每镜的哈希，之后对不上就是改过（含拆分出来的新镜头）
+SHOT_CONTENT_FIELDS = ("shot_size", "camera_move", "action", "dialogue", "cast", "props",
+                       "image_prompt", "motion_prompt", "audio_prompt", "duration",
+                       "transition_out", "image_engine", "video_engine", "use_end_frame",
+                       "continue_from_prev")
+
+
+def storyboard_rules(prompts) -> str:
+    """这次用的分镜规则：内置模板就是版本号；项目目录里有覆盖模板时再带上覆盖模板的内容哈希。"""
+    source = getattr(prompts, "source", None)
+    if source is None:
+        return str(STORYBOARD_RULES_VERSION)
+    src, overridden = source("storyboard")
+    if not overridden:
+        return str(STORYBOARD_RULES_VERSION)
+    return f"{STORYBOARD_RULES_VERSION}+{input_hash('storyboard-template', src)[:8]}"
+
+
+def storyboard_inputs_fp(anchor, characters, location, text, count, shot_seconds, max_seconds,
+                         prev_action, block_seconds=None) -> str:
+    """某段落分镜的输入指纹：只算数据，不算模板文字（模板改动由 STORYBOARD_RULES_VERSION 单独记）。
+    修改意见、上一版镜头、前面段落已定的道具说法都不算：前两样靠 force 一定会跑，道具说法只是提示。"""
+    return input_hash("storyboard-inputs", anchor=anchor or "", characters=characters,
+                      location=location, text=text, count=int(count),
+                      shot_seconds=float(shot_seconds), max_seconds=float(max_seconds),
+                      prev_action=prev_action or "",
+                      block_seconds=float(block_seconds) if block_seconds else None)
+
+
+def shot_content_hash(sh) -> str:
+    return input_hash("shot-content", **{f: getattr(sh, f, None) for f in SHOT_CONTENT_FIELDS})
+
+
+@dataclass
+class BlockCheck:
+    unchanged: bool        # 输入没变（且这一段有 llm 镜头）：不强制时跳过
+    rules_outdated: bool   # 现有镜头是按旧规则出的
+    legacy: bool           # 旧格式指纹（整段渲染后提示词的哈希），没法重算，按没变处理
+
+
+def judge_block(record, inputs_fp: str, rules: str, has_llm_shots: bool) -> BlockCheck:
+    """按 stage_hashes 里这一段的记录判断要不要重跑。
+
+    新格式：{"inputs": 输入指纹, "rules": 规则版本, "shots": {镜头 id: 内容哈希}}。
+    旧格式是一个字符串（整段提示词的哈希，模板一改就全对不上）：有 llm 镜头时按没变处理，
+    由调用方换成新格式，不重跑。"""
+    if isinstance(record, dict):
+        same = record.get("inputs") == inputs_fp and has_llm_shots
+        return BlockCheck(same, has_llm_shots and record.get("rules") != rules, False)
+    if isinstance(record, str) and record and has_llm_shots:
+        return BlockCheck(True, True, True)
+    return BlockCheck(False, False, False)
+
+
+def upgraded_record(inputs_fp: str) -> dict:
+    """旧格式升级成新格式：规则版本未知（算旧规则），镜头内容哈希未知（不知道哪些手改过）。"""
+    return {"inputs": inputs_fp, "rules": None, "shots": None}
+
+
+def edited_shot_ids(record, shots) -> list[int]:
+    """这一段里生成后被改过的 llm 镜头（记录里没有的 id 也算，比如拆分出来的）；旧记录不知道，返回空。"""
+    known = record.get("shots") if isinstance(record, dict) else None
+    if not isinstance(known, dict):
+        return []
+    return [sh.id for sh in shots if known.get(str(sh.id)) != shot_content_hash(sh)]
+
+
+def known_props(db, block_ids: list[int]) -> list[str]:
+    """前面这些段落的镜头里已经定下的道具英文说法（按镜头顺序去重），给后面的段落沿用。"""
+    if not block_ids:
+        return []
+    with db.session() as s:
+        order = {bid: i for i, bid in enumerate(block_ids)}
+        shots = s.scalars(select(Shot).where(Shot.scene_block_id.in_(block_ids))).all()
+        shots = sorted(shots, key=lambda x: (order[x.scene_block_id], x.order, x.id))
+        out: list[str] = []
+        for sh in shots:
+            for p in sh.props or []:
+                p = p.strip() if isinstance(p, str) else ""
+                if p and p not in out:
+                    out.append(p)
+        return out[:30]
+
+
 def storyboard_prompt_fp(prompts, anchor, characters, location, text, count, shot_seconds,
                          max_seconds, prev_action, note: str | None = None,
                          previous_shots: list[str] | None = None,
-                         block_seconds: float | None = None) -> tuple[str, str, str]:
+                         block_seconds: float | None = None,
+                         props: list[str] | None = None) -> tuple[str, str, str]:
     """某段落这次会用到的分镜提示词及其输入指纹（不调用 LLM）。
 
-    分镜阶段决定跳过还是重跑、重跑影响预估决定会不会动这一段，都走这一个函数，避免两边判断走偏。
-    note 是修改意见；previous_shots 是这一段上一版的镜头（只在有修改意见时提供）。
-    指纹只按不带这两样的基础提示词算（见 prompt_fp）：带意见的重出靠 force 一定会跑。
+    note 是修改意见；previous_shots 是这一段上一版的镜头（只在有修改意见时提供）；
+    props 是前面段落已定的道具英文说法。指纹见 storyboard_inputs_fp（不含这三样，也不含模板文字）。
     """
-    system, user, bs, bu = render_with_note(
+    system, user, _, _ = render_with_note(
         prompts, "storyboard", note, {"previous_shots": previous_shots or []},
         anchor=anchor, characters=characters, location=location, text=text,
         count=count, shot_seconds=shot_seconds, max_seconds=max_seconds, prev_action=prev_action,
-        block_seconds=block_seconds, previous_shots=[])
-    return system, user, prompt_fp("storyboard", bs, bu)
+        block_seconds=block_seconds, previous_shots=[], known_props=list(props or []))
+    fp = storyboard_inputs_fp(anchor, characters, location, text, count, shot_seconds,
+                              max_seconds, prev_action, block_seconds)
+    return system, user, fp
 
 
 @HANDLERS.register("storyboard")
@@ -210,33 +327,48 @@ def run_storyboard(ctx, payload: dict) -> dict:
         anchor, characters, char_ids = plan_data.anchor, plan_data.characters, plan_data.char_ids
         plan = plan_data.blocks
         prompts = plan_data.prompts
+    rules = storyboard_rules(prompts)
 
     done = skipped = 0
     prev_action = ""
-    for blk in plan:
+    for idx, blk in enumerate(plan):
         if only and blk["id"] not in only:
             prev_action = _last_action(sv.db, blk["id"]) or prev_action
             continue
         ctx.check_canceled()
         n = blk["count"]
+        label = f"段落 {blk['order'] + 1}"
         previous = previous_shot_lines(sv.db, blk["id"]) if note else []
+        props = known_props(sv.db, [b["id"] for b in plan[:idx]])
         system, user, fp = storyboard_prompt_fp(prompts, anchor, characters, blk["location"],
                                                blk["text"], n, shot_seconds, max_seconds,
                                                prev_action, note, previous,
-                                               block_seconds=blk["seconds"])
+                                               block_seconds=blk["seconds"], props=props)
         key = f"storyboard:{blk['id']}"
         with sv.db.session() as s:
             ep = s.get(Episode, episode_id)
             existing = s.scalar(select(func.count()).select_from(Shot)
                                 .where(Shot.scene_block_id == blk["id"], Shot.origin == "llm"))
-            unchanged = (ep.stage_hashes or {}).get(key) == fp and existing > 0
-        if unchanged and not force:
-            ctx.log(f"段落 {blk['order'] + 1}：输入没变，跳过")
+            record = (ep.stage_hashes or {}).get(key)
+            judged = judge_block(record, fp, rules, existing > 0)
+            if judged.legacy and not force:
+                # 旧格式指纹没法按新算法重算：当作没变，换成新格式，不重跑（不删镜头和选定的首帧/视频）
+                ep.stage_hashes = {**(ep.stage_hashes or {}), key: upgraded_record(fp)}
+        if judged.unchanged and not force:
+            if judged.legacy:
+                ctx.log(f"{label}：旧版指纹，按输入没变处理，已换成新格式；{RULES_OUTDATED_HINT}")
+            elif judged.rules_outdated:
+                ctx.log(f"{label}：输入没变，跳过；{RULES_OUTDATED_HINT}")
+            else:
+                ctx.log(f"{label}：输入没变，跳过")
             skipped += 1
             prev_action = _last_action(sv.db, blk["id"]) or prev_action
             continue
 
+        tries = [0]
+
         def check(out: StoryboardOut, n: int = n, target: float = blk["seconds"]) -> None:
+            tries[0] += 1
             if len(out.shots) != n:
                 raise ValueError(f"需要正好 {n} 个镜头，实际给了 {len(out.shots)} 个")
             unknown = {c for sh in out.shots for c in sh.cast} - set(char_ids)
@@ -244,10 +376,13 @@ def run_storyboard(ctx, payload: dict) -> dict:
                 raise ValueError(f"cast 里有未知角色 {sorted(unknown)}，只能用：{sorted(char_ids)}")
             cjk = cjk_problems(out.shots)
             if cjk:
-                raise ValueError("；".join(cjk) + "。image_prompt 和 motion_prompt 必须全英文，不能有任何"
-                                 "中文字符：角色名要换成角色表里该角色的英文外貌描述（如 a stocky man "
-                                 "in his fifties），招牌、字条上的字改成英文描述")
-            _, err = budget_durations(out.shots, target, max_seconds)
+                raise ValueError("；".join(cjk) + "。image_prompt、motion_prompt、audio_prompt 和 props "
+                                 "必须全英文，不能有任何中文字符：角色名要换成角色表里该角色的英文外貌"
+                                 "描述（如 a stocky man in his fifties）；画面里要出现的招牌、字条上的字"
+                                 "写在英文双引号里（如 a sign reading \"老周修车\"）或改成英文描述")
+            # 最后一次机会时不再因为「差得太多」打回，按比例缩放兜底（台词放不下的照样打回）
+            _, err = budget_durations(out.shots, target, max_seconds,
+                                      rewrite_over=tries[0] < 1 + MAX_RETRIES)
             if err:
                 raise ValueError(err)
 
@@ -259,7 +394,8 @@ def run_storyboard(ctx, payload: dict) -> dict:
             delete_slots(s, "shot", gone)
             s.execute(delete(Shot).where(Shot.scene_block_id == blk["id"], Shot.origin == "llm"))
             trimmed = 0
-            durs, _ = budget_durations(out.shots, blk["seconds"], max_seconds)
+            durs, _ = budget_durations(out.shots, blk["seconds"], max_seconds, rewrite_over=False)
+            added: list[Shot] = []
             for j, (sh, dur) in enumerate(zip(out.shots, durs)):
                 dialogue = []
                 for d in sh.dialogue:
@@ -269,26 +405,31 @@ def run_storyboard(ctx, payload: dict) -> dict:
                     dd = d.model_dump()
                     dd["end"] = min(dd["end"], dur)
                     dialogue.append(dd)
-                s.add(Shot(
+                row = Shot(
                     episode_id=episode_id, scene_block_id=blk["id"], order=blk["order"] * 1000 + j,
                     shot_size=sh.shot_size, camera_move=sh.camera_move, action=sh.action,
                     dialogue=dialogue,
                     cast=[{"character_id": char_ids[c], "variation_id": None} for c in sh.cast],
-                    image_prompt=sh.image_prompt, motion_prompt=sh.motion_prompt,
-                    audio_prompt=sh.audio_prompt, duration=dur,
-                    transition_out=sh.transition_out))
+                    props=list(sh.props), image_prompt=sh.image_prompt,
+                    motion_prompt=sh.motion_prompt, audio_prompt=sh.audio_prompt, duration=dur,
+                    transition_out=sh.transition_out)
+                s.add(row)
+                added.append(row)
+            s.flush()
             raw = [float(sh.duration) for sh in out.shots]
             if [min(d, max_seconds) for d in raw] != durs:
-                ctx.log(f"段落 {blk['order'] + 1}：镜头总时长 {sum(raw):.1f}s 和本段预算 "
+                ctx.log(f"{label}：镜头总时长 {sum(raw):.1f}s 和本段预算 "
                         f"{blk['seconds']:.1f}s 差太多，按比例调成 "
                         f"{'+'.join(f'{d:g}' for d in durs)} = {sum(durs):.1f}s")
             if trimmed:
-                ctx.log(f"段落 {blk['order'] + 1}：时长截断后裁掉 {trimmed} 句超出的台词")
+                ctx.log(f"{label}：时长截断后裁掉 {trimmed} 句超出的台词")
             ep = s.get(Episode, episode_id)
-            ep.stage_hashes = {**(ep.stage_hashes or {}), key: fp}
+            ep.stage_hashes = {**(ep.stage_hashes or {}), key: {
+                "inputs": fp, "rules": rules,
+                "shots": {str(x.id): shot_content_hash(x) for x in added}}}
         done += 1
         prev_action = out.shots[-1].action
-        ctx.log(f"段落 {blk['order'] + 1}：{n} 个镜头")
+        ctx.log(f"{label}：{n} 个镜头")
 
     with sv.db.session() as s:
         ep = s.get(Episode, episode_id)
