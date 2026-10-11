@@ -155,7 +155,7 @@ function NewProjectDialog({ onClose }: { onClose: () => void }) {
         <p className="muted small" data-testid="engine-hint">
           首帧引擎要能吃参考图才能锁脸、用场景图（如 H3 图像）。
           {noRefs && `${engineLabel(image)} 不吃参考图，首帧只能按文字出脸、场景图也用不上。`}
-          {portraitHint && `定妆照推荐用 ${engineLabel(portraitHint)}：建好项目后到设置页「角色定妆照」这一步选。`}
+          {portraitHint && `定妆照默认用 ${engineLabel(portraitHint)}（这个风格预设推荐的；设置页「角色定妆照」设了别的、且和预设合得来时用设置的）。`}
         </p>
         {engines.error && <p className="error">读取引擎列表失败：{errorText(engines.error)}</p>}
         {create.error && <p className="error">{errorText(create.error)}</p>}

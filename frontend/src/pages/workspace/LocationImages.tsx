@@ -9,12 +9,9 @@ import { ImageEngineSelect } from '../../components/ImageEngineSelect';
 import { Lightbox } from '../../components/Lightbox';
 import { engineLabel } from '../../format';
 import { useEvents } from '../../ws/EventsContext';
+import { hasEnglishPrompt } from '../stages';
 
-/** 场景有没有能用来出场景图的英文画面提示词（后端没有时直接拒绝） */
-export function hasEnglishPrompt(loc: Location): boolean {
-  const vp = loc.visual_prompt.trim();
-  return vp !== '' && !/[⺀-鿿]/.test(vp);
-}
+export { hasEnglishPrompt };
 
 export function LocationImages({ loc, slug }: { loc: Location; slug: string }) {
   const { progress } = useEvents();

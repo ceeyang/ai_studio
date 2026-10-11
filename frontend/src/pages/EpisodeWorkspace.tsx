@@ -5,7 +5,8 @@ import { type ComponentType, useEffect, useRef, useState } from 'react';
 import { Navigate, type RouteObject, useLocation, useParams, useSearchParams } from 'react-router-dom';
 import { useCharacters, useEpisode, useExports, useRecentDoneJobs } from '../api/queries';
 import type { LeaveCheck } from '../components/confirmDiscard';
-import { EpisodeHeader, EpisodeLoadError } from '../components/EpisodeHeader';
+import { EpisodeHeader, EpisodeLoadError, useSceneInfo } from '../components/EpisodeHeader';
+import { setSceneSkipped } from './workspace/sceneSkip';
 import { type NextStep, type StageKey, episodeStages, exportStep, isStageKey } from './stages';
 import { CastStage } from './workspace/CastStage';
 import { ExportStage } from './workspace/ExportStage';
@@ -88,7 +89,8 @@ function Workspace({ slug, id }: { slug: string; id: number }) {
   });
   const [getScriptEdits] = useState(() => () => scriptEdits.current);
 
-  const progress = ep.data ? episodeStages(ep.data, characters.data ?? [], exports.data ?? []) : null;
+  const scenes = useSceneInfo(slug, id);
+  const progress = ep.data ? episodeStages(ep.data, characters.data ?? [], exports.data ?? [], scenes) : null;
   // 角色和成片也读到了（或读失败了）才算得准默认阶段
   const ready = !!progress && (!!characters.data || characters.isError) && (!!exports.data || exports.isError);
   const param = params.get('stage');
@@ -180,6 +182,7 @@ function Workspace({ slug, id }: { slug: string; id: number }) {
           nextDisabled={gate ? gate.kind === 'busy' || submitting : exportNext ? false : !!progress.next?.busy}
           onSelect={(s) => void select(s)}
           onRun={() => triggerNextAction(PANEL_OF[stage])}
+          onSkip={() => setSceneSkipped(id, true)}
         />
       ) : (
         <p className="loading">加载中…</p>

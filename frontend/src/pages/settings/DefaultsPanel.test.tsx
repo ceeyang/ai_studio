@@ -182,5 +182,18 @@ describe('设置页「默认模型」', () => {
     const sel = screen.getByLabelText('场景图用什么') as HTMLSelectElement;
     expect(sel.options[0].textContent).toBe('跟随默认（项目图片引擎）');
   });
+
+  it('定妆照跟项目走时写明按风格预设推荐；说明里讲清全局设置和预设合不来时不用', async () => {
+    const portrait = { ...STEP('portrait', '角色定妆照', 'image', 'zimage'), follows_project: true };
+    base({ 'GET /api/settings': settings({ steps: [STEP('script', '剧本', 'llm', 'claude'), portrait] }) });
+    renderAt(<SettingsPage />, { route: '/settings', path: '/settings' });
+    const cell = await screen.findByTestId('effective-portrait');
+    expect(cell.textContent).toBe('跟随项目（风格预设推荐 / 图片引擎）');
+    const sel = screen.getByLabelText('角色定妆照用什么') as HTMLSelectElement;
+    expect(sel.options[0].textContent).toBe('跟随默认（项目风格预设推荐 / 图片引擎）');
+    const help = screen.getByText(/定妆照：抽卡时手选的/);
+    expect(help.textContent).toContain('和项目的风格预设合得来');
+    expect(help.textContent).toContain('真人写实、商业广告推荐 krea2');
+  });
 });
 

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import type { Character, ExportRow } from '../api/types';
+import type { Character, ExportRow, Location } from '../api/types';
 import { makeCandidate, makeEpisode, makeShot, makeSlot } from '../test/factories';
-import { STAGE_KEYS, castTarget, episodeStages, exportStep, isStageKey } from './stages';
+import { STAGE_KEYS, castTarget, episodeStages, exportStep, isStageKey, scenesToDraw } from './stages';
 
 function char(id: number, portrait: boolean, over: Partial<Character> = {}): Character {
   return {
@@ -159,6 +159,69 @@ describe('episodeStages', () => {
     expect(exportStep(all, [exp(1)], false)).toEqual({ label: '再导出一版', stage: 'export', action: 'run', count: 2, stale: false });
     expect(exportStep(all, [exp(1)], true)).toBe('done');
     expect(exportStep([], [], false)).toBeNull();
+  });
+
+  describe('场景图（角色阶段里的可跳过一步）', () => {
+    const blocks = [{ id: 1, order: 0, location_id: 7, text: 'a' }];
+    const refShot = (id: number, ff: 'none' | 'ok' | 'stale' = 'none') => ({ ...shot(id, ff, 'none'), scene_block_id: 1, image_max_refs: 9 });
+    function loc(id: number, over: Partial<Location> = {}): Location {
+      return { id, project_id: 1, name: `场景${id}`, time_of_day: '夜', atmosphere: '', visual_prompt: 'a narrow stairwell', image_candidate_id: null, image_url: null, ...over };
+    }
+    const locs = [loc(7), loc(8, { name: '没用到的场景' })];
+
+    it('定妆照齐了、本集用到的场景缺场景图：角色阶段 detail 写「场景图 0/1」，下一步生成场景图（可跳过）', () => {
+      const ep = makeEpisode({ id: 4, scene_blocks: blocks, shots: [refShot(1), refShot(2)] });
+      const r = episodeStages(ep, [char(1, true)], [], { locations: locs });
+      expect(byKey(r).cast).toMatchObject({ state: 'active', detail: '1/1 · 场景图 0/1' });
+      expect(r.next).toEqual({ label: '生成场景图（1 个）', stage: 'cast', action: 'run', count: 1, stale: false, skippable: true, kind: 'scenes' });
+    });
+
+    it('跳过了 / 首帧已经开始做 / 场景图都有：角色阶段算完成，下一步去首帧', () => {
+      const ep = makeEpisode({ id: 4, scene_blocks: blocks, shots: [refShot(1), refShot(2)] });
+      const skipped = episodeStages(ep, [char(1, true)], [], { locations: locs, skipped: true });
+      expect(byKey(skipped).cast).toMatchObject({ state: 'done', detail: '1/1 · 场景图 0/1' });
+      expect(skipped.next?.stage).toBe('keyframes');
+      const started = makeEpisode({ id: 4, scene_blocks: blocks, shots: [refShot(1, 'ok'), refShot(2)] });
+      expect(episodeStages(started, [char(1, true)], [], { locations: locs }).next?.stage).toBe('keyframes');
+      const withImg = [loc(7, { image_candidate_id: 70, image_url: '/m/7.png' })];
+      const done = episodeStages(ep, [char(1, true)], [], { locations: withImg });
+      expect(byKey(done).cast).toMatchObject({ state: 'done', detail: '1/1 · 场景图 1/1' });
+    });
+
+    it('过期的场景图不算有；首帧引擎不吃参考图时不提场景图', () => {
+      const ep = makeEpisode({ id: 4, scene_blocks: blocks, shots: [refShot(1)] });
+      const stale = [loc(7, { image_candidate_id: 70, image_url: '/m/7.png', image_stale: true })];
+      expect(byKey(episodeStages(ep, [char(1, true)], [], { locations: stale })).cast.detail).toBe('1/1 · 场景图 0/1');
+      const noRefs = makeEpisode({ id: 4, scene_blocks: blocks, shots: [{ ...refShot(1), image_max_refs: 0 }] });
+      const r = episodeStages(noRefs, [char(1, true)], [], { locations: locs });
+      expect(byKey(r).cast).toMatchObject({ state: 'done', detail: '1/1' });
+      expect(r.next?.stage).toBe('keyframes');
+    });
+
+    it('缺场景图的都在生成中：下一步显示生成中并标忙；都没有英文画面提示词时不提（只显示 x/y）', () => {
+      const ep = makeEpisode({ id: 4, scene_blocks: blocks, shots: [refShot(1)] });
+      const busy = [loc(7, { active_jobs: [{ id: 3, type: 'image.location', status: 'running' }] })];
+      expect(episodeStages(ep, [char(1, true)], [], { locations: busy }).next).toEqual({
+        label: '生成场景图中（1 个）', stage: 'cast', action: 'run', count: 0, stale: false, busy: true, skippable: true, kind: 'scenes',
+      });
+      const zh = [loc(7, { visual_prompt: '狭窄的楼梯间' })];
+      const r = episodeStages(ep, [char(1, true)], [], { locations: zh });
+      expect(byKey(r).cast.detail).toBe('1/1 · 场景图 0/1');
+      expect(r.next?.stage).toBe('keyframes');
+    });
+
+    it('定妆照还没齐：下一步仍是抽定妆照，detail 同时显示场景图进度', () => {
+      const ep = makeEpisode({ id: 4, scene_blocks: blocks, shots: [refShot(1)] });
+      const r = episodeStages(ep, [char(1, false)], [], { locations: locs });
+      expect(byKey(r).cast.detail).toBe('0/1 · 场景图 0/1');
+      expect(r.next?.label).toBe('抽定妆照（1 个角色缺）');
+    });
+
+    it('scenesToDraw：缺场景图、有英文提示词、没在生成的本集场景', () => {
+      const ep = makeEpisode({ id: 4, scene_blocks: blocks, shots: [refShot(1)] });
+      expect(scenesToDraw(ep, locs).map((l) => l.id)).toEqual([7]);
+      expect(scenesToDraw(ep, [loc(7, { image_url: '/m.png', image_candidate_id: 1 })])).toEqual([]);
+    });
   });
 
   it('isStageKey：只认五段的名字', () => {

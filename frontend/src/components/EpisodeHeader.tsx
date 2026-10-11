@@ -3,9 +3,10 @@
 import { type ReactNode, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { enc, errorText } from '../api/client';
-import { useCharacters, useEpisodes, useExports, useProject } from '../api/queries';
+import { useCharacters, useEpisodes, useExports, useLocations, useProject } from '../api/queries';
 import type { EpisodeDetail } from '../api/types';
-import { type NextStep, type Stage, type StageKey, episodeStages } from '../pages/stages';
+import { type NextStep, type SceneInfo, type Stage, type StageKey, episodeStages } from '../pages/stages';
+import { useSceneSkipped } from '../pages/workspace/sceneSkip';
 import { workspacePath } from '../pages/workspace/urls';
 import { ProjectSettingsDialog } from './ProjectSettingsDialog';
 import { stylePresetLabel } from './StylePresetPicker';
@@ -38,8 +39,16 @@ export function isNextActionFor(ev: Event, panel: string): boolean {
 export function useEpisodeProgress(slug: string, ep: EpisodeDetail | undefined): { stages: Stage[]; next: NextStep | null } {
   const characters = useCharacters(slug);
   const exports = useExports(ep?.id ?? 0);
+  const scenes = useSceneInfo(slug, ep?.id ?? 0);
   if (!ep) return { stages: [], next: null };
-  return episodeStages(ep, characters.data ?? [], exports.data ?? []);
+  return episodeStages(ep, characters.data ?? [], exports.data ?? [], scenes);
+}
+
+/** 阶段条算场景图这一步用的：项目的场景（还没读到时不看场景图）和这一集有没有跳过 */
+export function useSceneInfo(slug: string, episodeId: number): SceneInfo | undefined {
+  const locations = useLocations(slug);
+  const skipped = useSceneSkipped(episodeId);
+  return locations.data ? { locations: locations.data, skipped } : undefined;
 }
 
 /**

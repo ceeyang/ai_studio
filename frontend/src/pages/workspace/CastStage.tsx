@@ -3,12 +3,20 @@
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { errorText } from '../../api/client';
-import { useCharacters, useEpisode, useLocations, usePatchLocation, usePutStyle, useStyle } from '../../api/queries';
+import {
+  useCharacters,
+  useDrawLocationImages,
+  useEpisode,
+  useLocations,
+  usePatchLocation,
+  usePutStyle,
+  useStyle,
+} from '../../api/queries';
 import type { LocationPatch, Style } from '../../api/types';
 import { useConfirm } from '../../components/ConfirmDialog';
 import { type LeaveCheck, confirmDiscard } from '../../components/confirmDiscard';
-import { EpisodeLoadError, useNextAction } from '../../components/EpisodeHeader';
-import { castTarget, hasPortrait } from '../stages';
+import { EpisodeLoadError, nextActionProps, useNextAction } from '../../components/EpisodeHeader';
+import { castTarget, hasPortrait, scenesToDraw } from '../stages';
 import {
   type DrawerLoss,
   EditableFields,
@@ -80,6 +88,7 @@ export function CastStage({
   const style = useStyle(slug);
   const patchLoc = usePatchLocation(slug);
   const putStyle = usePutStyle(slug);
+  const drawScenes = useDrawLocationImages(slug);
   // ?settings=1（首帧阶段「去生成场景图」的链接）：一进来就展开设定
   const [settingsOpen, setSettingsOpen] = useState(() => params.get('settings') === '1');
   const wantSettings = params.get('settings') === '1';
@@ -164,6 +173,17 @@ export function CastStage({
   // 轮到的角色：和阶段条下一步的算法一致（缺定妆照、没在抽卡；有提示词的优先）
   const target = nextAct ? castTarget(e.shots, chars) : null;
   const nextCharId = target?.id ?? undefined;
+  // 场景图：首帧引擎吃参考图时，本集用到、缺场景图的场景可以一键各出一张（阶段条下一步「生成场景图」触发它）
+  const canUseScenes = e.shots.some((s) => (s.image_max_refs ?? 0) > 0);
+  const toDraw = scenesToDraw(e, locs);
+  const drawMissingScenes = async () => {
+    setSettingsOpen(true);
+    try {
+      for (const l of toDraw) await drawScenes.mutateAsync({ id: l.id, count: 1 });
+    } catch {
+      // 出错写在按钮旁（drawScenes.error），剩下的场景不再提交
+    }
+  };
   const openChar = chars.find((c) => c.id === shownId) ?? null;
   const open = (cid: number, prompt = false) => {
     setPromptFor(prompt ? cid : null);
@@ -186,6 +206,19 @@ export function CastStage({
             {withPortrait}/{chars.length} 个角色有定妆照
           </span>
         )}
+        {canUseScenes && toDraw.length > 0 && (
+          <button
+            type="button"
+            className="sm"
+            {...nextActionProps(nextAct?.kind === 'scenes')}
+            disabled={drawScenes.isPending}
+            title="给本集用到、还没有场景图的场景各出一张空场景图（出首帧时排在参考图第一张，同一场景各镜的布景更一致）"
+            onClick={() => void drawMissingScenes()}
+          >
+            生成场景图（{toDraw.length} 个）
+          </button>
+        )}
+        {drawScenes.error && <span className="error small">{errorText(drawScenes.error)}</span>}
       </div>
 
       {chars.length === 0 ? (

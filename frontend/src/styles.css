@@ -1322,6 +1322,7 @@ div.error.banner.job-notice a { color: #ffd0d1; text-decoration: underline; }
    ========================================================================= */
 .stage-bar { display: flex; align-items: center; gap: var(--s-3); min-width: 0; }
 .stage-bar .stepper { flex: 1; min-width: 0; }
+.stage-next-group { flex: none; display: flex; align-items: center; gap: 6px; }
 .stage-next { flex: none; max-width: 340px; height: auto; min-height: 40px; padding: 8px 14px; white-space: normal; line-height: 1.35; text-align: left; }
 .stage-body { display: flex; flex-direction: column; gap: var(--s-4); min-width: 0; }
 .ws-body { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--s-4); align-items: start; }

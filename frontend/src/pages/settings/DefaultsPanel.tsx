@@ -24,6 +24,15 @@ function draftOf(d: AppSettings): Draft {
   };
 }
 
+/**
+ * 不带项目时跟项目走的步骤写什么：定妆照先看项目的风格预设推荐（真人写实 / 商业广告推荐 krea2），
+ * 没推荐才是项目图片引擎；场景图等直接跟项目图片引擎。inOption = 下拉框「跟随默认（…）」里的写法。
+ */
+function followsLabel(key: string, inOption: boolean): string {
+  if (key !== 'portrait') return '项目图片引擎';
+  return inOption ? '项目风格预设推荐 / 图片引擎' : '项目（风格预设推荐 / 图片引擎）';
+}
+
 /** 只把改过的字段变成 PUT 体；空串 → null（跟随默认） */
 export function settingsPatch(saved: Draft, draft: Draft): AppSettingsIn {
   const out: AppSettingsIn = {};
@@ -238,7 +247,7 @@ export function DefaultsPanel() {
                 </td>
                 <td>
                   <select aria-label={`${s.label}用什么`} value={draft.steps[s.key] ?? ''} onChange={(e) => setStep(s.key, e.target.value)}>
-                    <option value="">{`跟随默认（${s.follows_project ? '项目图片引擎' : nameOf(s.kind, s.fallback)}）`}</option>
+                    <option value="">{`跟随默认（${s.follows_project ? followsLabel(s.key, true) : nameOf(s.kind, s.fallback)}）`}</option>
                     <InvalidOption v={s} />
                     <Options kind={s.kind} data={data} />
                   </select>
@@ -246,14 +255,16 @@ export function DefaultsPanel() {
                 </td>
                 <td className="muted" data-testid={`effective-${s.key}`}>
                   {/* 不带项目时这一步实际跟各项目的图片引擎走，effective 只是新项目默认引擎的估计 */}
-                  {s.follows_project && !draft.steps[s.key] ? '跟随项目图片引擎' : nameOf(s.kind, s.effective)}
+                  {s.follows_project && !draft.steps[s.key] ? `跟随${followsLabel(s.key, false)}` : nameOf(s.kind, s.effective)}
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
         <p className="muted small">
-          文本步骤：这里的设置 → 上面的默认文本模型 → 配置文件。定妆照、三视图：抽卡时手选的 → 这里的设置 → 项目的图像引擎（三视图没设置时有 H3 先用 H3）。首帧、视频没有单独设置：跟项目和镜头上选的引擎走。
+          文本步骤：这里的设置 → 上面的默认文本模型 → 配置文件。三视图、场景图：抽卡时手选的 → 这里的设置 → 项目的图像引擎（三视图没设置时有 H3 先用 H3）。
+          定妆照：抽卡时手选的 → 这里的设置（只在它和项目的风格预设合得来时用，即在预设推荐的引擎里；这里设成 krea2，动漫、国风项目不会也画成写实照片）→ 预设推荐的定妆照引擎（真人写实、商业广告推荐 krea2）→ 项目的图像引擎。
+          首帧、视频没有单独设置：跟项目和镜头上选的引擎走。
         </p>
       </details>
     </section>

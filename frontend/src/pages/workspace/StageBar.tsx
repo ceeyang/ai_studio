@@ -13,6 +13,8 @@ interface StageBarProps {
   onRun: () => void;
   /** 下一步暂时做不了（如首帧都在生成中）：按钮禁用，字照样显示 */
   nextDisabled?: boolean;
+  /** 下一步是可以跳过的建议（场景图）：主按钮旁给「跳过」 */
+  onSkip?: () => void;
 }
 
 /**
@@ -30,7 +32,7 @@ export function triggerNextAction(panel: string) {
   }, 0);
 }
 
-export function StageBar({ stages, current, next, onSelect, onRun, nextDisabled = false }: StageBarProps) {
+export function StageBar({ stages, current, next, onSelect, onRun, nextDisabled = false, onSkip }: StageBarProps) {
   const runHere = !!next && next.stage === current && next.action === 'run';
   const target = next ? stages.find((s) => s.key === next.stage) : undefined;
   return (
@@ -55,15 +57,22 @@ export function StageBar({ stages, current, next, onSelect, onRun, nextDisabled 
         })}
       </ol>
       {next ? (
-        <button
-          type="button"
-          className="primary stage-next"
-          disabled={nextDisabled}
-          title={runHere || !target ? undefined : `切到「${target.label}」阶段`}
-          onClick={() => (runHere ? onRun() : onSelect(next.stage))}
-        >
-          下一步：{next.label}
-        </button>
+        <span className="stage-next-group">
+          <button
+            type="button"
+            className="primary stage-next"
+            disabled={nextDisabled}
+            title={runHere || !target ? undefined : `切到「${target.label}」阶段`}
+            onClick={() => (runHere ? onRun() : onSelect(next.stage))}
+          >
+            下一步：{next.label}
+          </button>
+          {next.skippable && onSkip && (
+            <button type="button" className="ghost sm stage-skip" title="这一步是建议，不做也能去出首帧" onClick={onSkip}>
+              跳过
+            </button>
+          )}
+        </span>
       ) : (
         <span className="chip ep-all-done">五段都完成了</span>
       )}

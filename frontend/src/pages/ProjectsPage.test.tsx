@@ -133,7 +133,7 @@ describe('ProjectsPage', () => {
     await user.click((await screen.findAllByRole('button', { name: '新建项目' }))[0]);
     const hint = await screen.findByTestId('engine-hint');
     expect(hint.textContent).toContain('首帧引擎要能吃参考图才能锁脸、用场景图');
-    await waitFor(() => expect(screen.getByTestId('engine-hint').textContent).toContain('定妆照推荐'));
+    await waitFor(() => expect(screen.getByTestId('engine-hint').textContent).toContain('定妆照默认用 Krea2 人像（这个风格预设推荐的'));
     expect(screen.getByTestId('engine-hint').textContent).not.toContain('不吃参考图');
     await user.selectOptions(screen.getByLabelText('图像引擎'), 'krea2');
     expect(screen.getByTestId('engine-hint').textContent).toContain('不吃参考图');
