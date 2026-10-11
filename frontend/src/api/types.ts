@@ -353,6 +353,8 @@ export interface RunIn {
   scene_block_ids?: number[];
   /** 修改意见（≤500 字），写进提示词；有内容时按强制算 */
   note?: string;
+  /** 不强制的剧本/分镜运行会删掉有选定首帧/视频或改过的镜头时，用户已确认 */
+  confirm?: boolean;
 }
 
 /** 按高棉语时长改写中文（POST /api/episodes/{id}/dialogue/fit-khmer）。 */
@@ -400,6 +402,10 @@ export interface RerunImpact {
   manual_kept: number;
   /** 会覆盖的东西，原样显示 */
   overwrites: string[];
+  /** 会删掉的镜头里生成后被改过的（改了提示词、台词、拆分出来的……） */
+  edited_shots?: number;
+  /** 分镜规则更新过，现有镜头按旧规则出的（不强制不会自动重跑） */
+  rules_outdated?: boolean;
 }
 
 export interface Character {

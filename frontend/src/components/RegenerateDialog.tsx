@@ -9,14 +9,24 @@ import { Dialog } from './Dialog';
 export const NOTE_MAX = 500;
 export const NOTE_PLACEHOLDER = '例如「第 3 段改成在车底对话」「镜头更紧凑，少用远景」';
 
+/** 会删掉用户挑过、改过的东西：确认按钮用危险样式 */
+export function impactLosesWork(im: RerunImpact): boolean {
+  return im.selected_videos > 0 || im.selected_first_frames > 0 || (im.edited_shots ?? 0) > 0;
+}
+
+export const RULES_OUTDATED_NOTE = '分镜规则已更新，现有镜头是按旧规则出的；这次重新生成会按新规则出';
+
 /** 重跑影响写成一句话：「将重建段落 3、5 的镜头：删除 12 个镜头（其中 8 个有选定视频），保留 2 个手工镜头；会覆盖角色描述、场景氛围」 */
 export function impactText(im: RerunImpact): string {
   const parts: string[] = [];
   if (im.shots_deleted > 0 || im.blocks.length > 0) {
     const where = im.blocks.length > 0 ? `将重建段落 ${im.blocks.join('、')} 的镜头` : '将重建镜头';
     let del = `删除 ${im.shots_deleted} 个镜头`;
-    if (im.selected_videos > 0) del += `（其中 ${im.selected_videos} 个有选定视频）`;
-    else if (im.selected_first_frames > 0) del += `（其中 ${im.selected_first_frames} 个有选定首帧）`;
+    const among: string[] = [];
+    if (im.selected_videos > 0) among.push(`${im.selected_videos} 个有选定视频`);
+    else if (im.selected_first_frames > 0) among.push(`${im.selected_first_frames} 个有选定首帧`);
+    if ((im.edited_shots ?? 0) > 0) among.push(`${im.edited_shots} 个生成后改过`);
+    if (among.length > 0) del += `（其中 ${among.join('、')}）`;
     if (im.manual_kept > 0) del += `，保留 ${im.manual_kept} 个手工镜头`;
     parts.push(`${where}：${del}`);
   }
@@ -64,7 +74,7 @@ function RegenerateDialogBody({
   const busy = saving || run.isPending;
   const im = impact.data;
   // 会删掉已选定的视频或首帧（用户挑过的结果）：危险样式
-  const danger = !!im && (im.selected_videos > 0 || im.selected_first_frames > 0);
+  const danger = !!im && impactLosesWork(im);
 
   const submit = async (ev?: FormEvent) => {
     ev?.preventDefault();
@@ -125,6 +135,7 @@ function RegenerateDialogBody({
           />
         </label>
         {impactView}
+        {im?.rules_outdated && <p className="muted">{RULES_OUTDATED_NOTE}</p>}
         {unsavedNote && <p className="warn">{unsavedNote}</p>}
         {error && <p className="error">{error}</p>}
         <div className="modal-foot">

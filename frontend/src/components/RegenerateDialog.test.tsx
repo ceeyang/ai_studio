@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { installFetch } from '../test/fetch';
 import { renderAt } from '../test/render';
-import { RegenerateDialog } from './RegenerateDialog';
+import { RegenerateDialog, impactText } from './RegenerateDialog';
 
 const IMPACT = {
   stage: 'storyboard', will_run: true, blocks: [3, 5], shots_deleted: 12, selected_first_frames: 10,
@@ -136,6 +136,22 @@ describe('RegenerateDialog', () => {
     await user.click(within(dlg).getByRole('button', { name: '重新生成' }));
     expect(await within(dlg).findByText(/修改意见太长/)).toBeTruthy();
     expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('会删改过的镜头、分镜规则已更新：一并写明，改过的镜头也算危险', async () => {
+    setup({}, {
+      'GET /api/episodes/4/rerun-impact': { ...MILD, edited_shots: 2, rules_outdated: true },
+    });
+    const dlg = await screen.findByRole('dialog');
+    expect(await within(dlg).findByText('将重建段落 2 的镜头：删除 3 个镜头（其中 2 个生成后改过）')).toBeTruthy();
+    expect(within(dlg).getByText('分镜规则已更新，现有镜头是按旧规则出的；这次重新生成会按新规则出')).toBeTruthy();
+    expect(within(dlg).getByRole('button', { name: '重新生成' }).className).toContain('danger');
+  });
+
+  it('impactText：选定和改过的一起列', () => {
+    expect(impactText({ ...IMPACT, edited_shots: 3 } as never)).toBe(
+      '将重建段落 3、5 的镜头：删除 12 个镜头（其中 8 个有选定视频、3 个生成后改过），保留 2 个手工镜头；会覆盖角色描述、场景氛围',
+    );
   });
 
   it('取消：不提交', async () => {

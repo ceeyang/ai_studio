@@ -19,7 +19,7 @@ import {
 import type { EpisodePatch, Job, RerunImpact, SceneBlock } from '../../api/types';
 import type { ScriptBlockEdits } from './ShotGrid';
 import { useConfirm } from '../../components/ConfirmDialog';
-import { RegenerateDialog, impactText } from '../../components/RegenerateDialog';
+import { RegenerateDialog, impactLosesWork, impactText } from '../../components/RegenerateDialog';
 import { EpisodeLoadError, nextActionProps, useNextAction } from '../../components/EpisodeHeader';
 import { EditableFields, type FieldSpec, type FieldValues, type FieldsState, useUnsavedGuard } from '../../components/EditableFields';
 import { useJobNotice } from '../../components/JobNotice';
@@ -282,6 +282,8 @@ export function ScriptStage({
           !locations.data ||
           locations.data.length > 0 ||
           style.data !== null;
+    // 用户在确认框里看过影响并点了继续：带 confirm，后端才会删有选定首帧/视频或改过的镜头
+    let confirmed = false;
     if (needImpact) {
       let im: RerunImpact;
       setChecking(true);
@@ -294,7 +296,11 @@ export function ScriptStage({
         setChecking(false);
       }
       if (!im.will_run) {
-        notice.info('输入没变，已经是最新的');
+        notice.info(
+          im.rules_outdated
+            ? '输入没变，已经是最新的；分镜规则已更新，要按新规则重出请用「重新生成分镜…」'
+            : '输入没变，已经是最新的',
+        );
         return;
       }
       const body = impactText(im);
@@ -303,13 +309,14 @@ export function ScriptStage({
           title: stage === 'script' ? '生成剧本？' : '生成分镜？',
           body,
           confirmText: '继续生成',
-          danger: im.shots_deleted > 0,
+          danger: im.shots_deleted > 0 || impactLosesWork(im),
         });
         if (!ok) return;
+        confirmed = true;
       }
     }
     run.mutate(
-      { stage, force: false },
+      { stage, force: false, ...(confirmed ? { confirm: true } : {}) },
       {
         onSuccess: (r) => track(stage, r.job_ids, STAGE_LABEL[stage]),
         onError: (err) => notice.error(errorText(err)),

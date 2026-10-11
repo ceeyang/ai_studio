@@ -305,6 +305,36 @@ describe('ScriptStage', () => {
     expect(writes(calls)).toHaveLength(0);
   });
 
+  it('确认框里点了「继续生成」：提交时带 confirm（后端才会删有选定或改过的镜头）', async () => {
+    const calls = installFetch({
+      ...ROUTES,
+      'GET /api/episodes/4': makeEpisode({ id: 4, scene_blocks: [] }),
+      'GET /api/episodes/4/rerun-impact': { ...NO_IMPACT, overwrites: ['角色外观'] },
+      'POST /api/episodes/4/run': { job_ids: [9] },
+      'GET /api/jobs/9': makeJob({ id: 9, status: 'running' }),
+    });
+    renderAt(<ScriptStage />, AT);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: '生成剧本' }));
+    const dlg = await screen.findByRole('dialog');
+    await user.click(within(dlg).getByRole('button', { name: '继续生成' }));
+    await waitFor(() => expect(writes(calls)).toHaveLength(1));
+    expect(writes(calls)[0].body).toEqual({ stage: 'script', force: false, confirm: true });
+  });
+
+  it('输入没变但分镜规则已更新：提示用「重新生成分镜…」按新规则重出，不提交', async () => {
+    const calls = installFetch({
+      ...ROUTES,
+      'GET /api/episodes/4': makeEpisode({ id: 4, scene_blocks: [] }),
+      'GET /api/episodes/4/rerun-impact': { ...NO_IMPACT, will_run: false, rules_outdated: true },
+    });
+    renderAt(<ScriptStage />, AT);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: '生成剧本' }));
+    expect(await screen.findByText(/分镜规则已更新，要按新规则重出请用「重新生成分镜…」/)).toBeTruthy();
+    expect(writes(calls)).toHaveLength(0);
+  });
+
   it('全新的集（没段落、项目里没角色 / 场景 / 风格）生成剧本：不查影响直接提交', async () => {
     const calls = installFetch({
       ...ROUTES,
