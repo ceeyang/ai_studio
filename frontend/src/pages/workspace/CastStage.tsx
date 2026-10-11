@@ -1,5 +1,5 @@
 // 单集工作台的角色阶段：顶部「按剧本推荐角色」，中间角色卡网格（深度编辑在角色抽屉，?char=<id> 打开），
-// 下方可折叠的「设定」放场景和风格编辑器（折叠用 hidden、保持挂载，收起不丢正在编辑的内容）。
+// 下方可折叠的「设定」放场景（含场景图）和风格编辑器（折叠用 hidden、保持挂载，收起不丢正在编辑的内容）。
 import { useEffect, useRef, useState } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { errorText } from '../../api/client';
@@ -20,6 +20,7 @@ import {
 import { RecommendPanel } from '../script/RecommendPanel';
 import { CastCard } from './CastCard';
 import { CharacterDrawer } from './CharacterDrawer';
+import { LocationImages } from './LocationImages';
 
 const LOCATION_FIELDS: FieldSpec[] = [
   { name: 'name', label: '名字' },
@@ -204,7 +205,7 @@ export function CastStage({
         >
           设定
           <span className="muted">
-            场景 {locs.length} 个 · 风格{style.data ? '' : '（未设）'}
+            场景 {locs.length} 个{locs.length > 0 ? `（${locs.filter((l) => l.image_url).length} 个有场景图）` : ''} · 风格{style.data ? '' : '（未设）'}
             {styleDirty || dirtyLocs.size > 0 ? ' · 有未保存的修改' : ''}
           </span>
         </button>
@@ -222,6 +223,7 @@ export function CastStage({
                   onSave={(_v, ch) => patchLoc.mutate({ id: l.id, ...(ch as LocationPatch) })}
                   onDirtyChange={(d) => setLocDirty(l.id, d)}
                 />
+                <LocationImages loc={l} slug={slug} />
               </div>
             ))}
           </div>

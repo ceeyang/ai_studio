@@ -298,6 +298,18 @@ export interface ShotDetail extends Shot {
   first_frame_refs_unused?: string[];
   /** image_prompt 里有角色外貌占位符时，出图实际用的文字（占位符按景别换成角色当前外貌） */
   image_prompt_resolved?: string | null;
+  /** 构图参考图（最多 2 张，首帧参考图里排在场景图后面） */
+  shot_refs?: Candidate[];
+  /** 首帧引擎最多吃几张参考图；0 = 不吃参考图；引擎不存在时 null */
+  image_max_refs?: number | null;
+  /** 开了「接上一镜」：上一镜是哪个、有没有选定视频；第一镜或没开时 null */
+  continue_prev?: ContinuePrev | null;
+}
+
+export interface ContinuePrev {
+  shot_id: number;
+  code: string;
+  has_video: boolean;
 }
 
 export interface EpisodeDetail extends Episode {
@@ -317,6 +329,8 @@ export interface ShotPatch {
   duration?: number;
   transition_out?: Transition;
   dialogue?: DialogueLine[];
+  /** 接上一镜：首帧取上一镜选定视频的最后一帧 */
+  continue_from_prev?: boolean;
 }
 
 export interface ShotIn extends ShotPatch {
@@ -340,6 +354,22 @@ export interface ExportOptions {
   bed?: boolean;
   /** detected：配音放到 H3 音轨里实际开口的位置 */
   align?: AlignMode;
+  /** 配乐：把这一集上传的背景音乐垫在下面 */
+  music?: boolean;
+  /** 配乐音量（dB，-40 ~ 6） */
+  music_db?: number;
+  music_fade_in?: number;
+  music_fade_out?: number;
+  /** 有台词时自动压低配乐 */
+  music_duck?: boolean;
+}
+
+/** 剧集配乐（GET/POST /api/episodes/{id}/bgm） */
+export interface Bgm {
+  candidate_id: number;
+  url: string;
+  filename: string;
+  created_at: string;
 }
 
 export interface RunIn {
@@ -534,6 +564,15 @@ export interface Location {
   time_of_day: string;
   atmosphere: string;
   visual_prompt: string;
+  /** 选定的场景图（不出人物，首帧参考图里排第一），没有时为 null */
+  image_candidate_id?: number | null;
+  image_url?: string | null;
+  /** 全部场景图候选（上传的 + AI 出的） */
+  images?: Candidate[];
+  /** 排队 / 生成中的场景图任务（image.location） */
+  active_jobs?: JobBrief[];
+  /** 最近一次出场景图失败（之后没出过新的才有） */
+  last_failure?: JobBrief | null;
 }
 
 export type LocationPatch = Partial<Pick<Location, 'name' | 'time_of_day' | 'atmosphere' | 'visual_prompt'>>;

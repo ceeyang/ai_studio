@@ -1518,3 +1518,24 @@ img.rail-avatar { border: 0; }
 .drawer .drawer-tabs { position: static; margin: 0 0 var(--s-4); padding: 0; background: none; border-radius: 0; }
 .fields-advanced { margin: 0; }
 .fields-advanced > .field { margin-top: var(--s-3); }
+
+/* 场景卡里的场景图（卡片框沿用 .pcard，图片 contain） */
+.location-images { display: flex; flex-direction: column; gap: var(--s-2); margin-top: var(--s-3); padding-top: var(--s-2); border-top: 1px solid rgba(127, 127, 127, 0.2); }
+.location-images > h5 { margin: 0; font-size: 13px; }
+.location-images .draw-bar { flex-wrap: wrap; }
+
+/* 镜头抽屉：接上一镜、构图参考 */
+.shot-continue { display: flex; flex-direction: column; gap: 4px; }
+.shot-continue > label { display: inline-flex; align-items: center; gap: 6px; }
+.shot-refs { display: flex; flex-direction: column; gap: var(--s-2); }
+.shot-ref-list { display: flex; flex-wrap: wrap; gap: var(--s-2); }
+.shot-ref { margin: 0; width: 120px; display: flex; flex-direction: column; gap: 4px; }
+.shot-ref img { width: 120px; height: 120px; object-fit: cover; border-radius: 6px; display: block; }
+.shot-ref figcaption { display: flex; align-items: center; justify-content: space-between; gap: 4px; }
+
+/* 成片阶段：配乐 */
+.export-group-music { grid-column: 1 / -1; }
+.export-group-music .row { flex-wrap: wrap; }
+.bgm-current { display: flex; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
+.bgm-current audio { max-width: 100%; height: 32px; }
+.export-group-music input[type='number'] { width: 5.5em; }
