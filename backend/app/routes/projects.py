@@ -18,7 +18,7 @@ from backend.app.schemas import (AppearanceRefOut, CharacterIn, CharacterOut, Ch
 from backend.domain.characters import (APPEARANCE_REF, portrait_ext, portrait_of,
                                        set_portrait)
 from backend.domain.style_presets import PRESETS, get_preset, recommended
-from backend.domain.settings import default_image_engine, default_video_engine, sheet_engine
+from backend.domain.settings import preset_engine, sheet_engine
 from backend.domain.turnaround import (DEFAULT_SHEET_ENGINE, SHEETS, VIEW_KEYS, VIEW_LABELS,
                                        VIEW_SHEET, cell_state, crop_method, sheet_slot_kind,
                                        sheet_state)
@@ -70,8 +70,10 @@ def create_project(body: ProjectIn, request: Request):
     data = body.model_dump(exclude={"slug"})
     if body.negative is None:
         data["negative"] = get_preset(body.style_preset).negative
-    data["image_engine"] = body.image_engine or default_image_engine(sv)
-    data["video_engine"] = body.video_engine or default_video_engine(sv)
+    # 没指定引擎：按风格预设推荐（设置页明确设了、和预设合得来时用设置的），和前端新建项目对话框一致
+    preset = get_preset(body.style_preset)
+    data["image_engine"] = body.image_engine or preset_engine(sv, "image", preset.image_engines)
+    data["video_engine"] = body.video_engine or preset_engine(sv, "video", preset.video_engines)
     with sv.db.session() as s:
         if s.scalar(select(Project).where(Project.slug == slug)):
             raise HTTPException(409, f"项目 {slug} 已存在")

@@ -5,7 +5,8 @@ from backend.pipeline.prompting import keyframe_input_hash, video_input_hash
 
 
 def seed(api, n=3):
-    api.post("/api/projects", json={"title": "demo", "negative": ""})
+    # 首帧引擎固定 zimage（不传时按风格预设推荐 h3_image，这些用例按 zimage 写的）
+    api.post("/api/projects", json={"title": "demo", "negative": "", "image_engine": "zimage"})
     ep = api.post("/api/projects/demo/episodes", json={"source_text": "x"}).json()
     db = api.app.state.services.db
     with db.session() as s:

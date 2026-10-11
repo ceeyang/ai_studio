@@ -142,7 +142,35 @@ export function qcIssues(c?: Candidate): QcIssue[] {
       short: '声音性别不对',
     });
   }
+  const ghosts = ghostRefs(c);
+  if (ghosts.length > 0) {
+    const parts = ghosts.map(
+      (g) => `${g.t.toFixed(1)}s 前后画面和${g.ref || '参考图'}很像（相似度 ${g.ssim.toFixed(2)}，开头 ${g.base.toFixed(2)}）`,
+    );
+    out.push({
+      label: '疑似叠入参考图',
+      tip: `疑似叠入参考图：${parts.join('；')}，可能把参考图（影棚灰底定妆照）半透明叠进了画面，建议看一下，不对就重拍`,
+      short: '叠入参考图',
+    });
+  }
   return out;
+}
+
+export interface GhostRef {
+  ref: string;
+  t: number;
+  ssim: number;
+  base: number;
+}
+
+/** 出片自检：视频中段某帧和这条视频带的某张参考图明显像（后端 params.qc.ghost_refs） */
+export function ghostRefs(c?: Candidate): GhostRef[] {
+  const qc = c?.params?.qc as { ghost_refs?: unknown } | undefined;
+  if (!Array.isArray(qc?.ghost_refs)) return [];
+  const num = (x: unknown) => (typeof x === 'number' ? x : 0);
+  return qc.ghost_refs
+    .filter((g): g is Record<string, unknown> => !!g && typeof g === 'object')
+    .map((g) => ({ ref: typeof g.ref === 'string' ? g.ref : '', t: num(g.t), ssim: num(g.ssim), base: num(g.base) }));
 }
 
 export interface VoiceMismatch {

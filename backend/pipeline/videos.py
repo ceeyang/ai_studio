@@ -50,9 +50,29 @@ def voice_note(items: list[dict]) -> str:
             + "，H3 可能把台词给了画面里的人，建议听一下，不对就重拍")
 
 
+# 中段叠入参考图（第五次实跑 S05 第一版：0.9–3.6 s 半透明叠了一张江屿定妆照，跳切、首帧相似度都正常）：
+# 抽视频 25% / 50% / 75% 处的帧，和这条视频带的每张参考图比 SSIM（32×32、yuv444p，见 FFmpeg.frame_ssim），
+# 中段某帧和某张参考图明显像、而且比第 0 帧和它像得多，就标「疑似叠入参考图」。
+# 校准（第三、四、五次实跑 28 条视频 × 项目里每张定妆照，约 60 对）：鬼影那条 0.30（第 0 帧 0.01，升 0.29）；
+# 干净的中段最高 0.18、升幅最高 0.18。两个条件都满足才标，阈值取在中间偏保守。
+GHOST_POINTS = (0.25, 0.5, 0.75)
+GHOST_MIN = 0.22     # 中段帧和参考图的相似度至少这么高
+GHOST_RISE = 0.20    # 而且比第 0 帧和这张参考图的相似度高出这么多
+
+
+def ghost_note(items: list[dict]) -> str:
+    """qc.ghost_refs：[{ref, t, ssim, base}]。"""
+    parts = [f"{float(g.get('t') or 0):.1f}s 前后画面和{g.get('ref') or '参考图'}很像"
+             f"（相似度 {float(g.get('ssim') or 0):.2f}，开头 {float(g.get('base') or 0):.2f}）"
+             for g in items]
+    return ("疑似叠入参考图：" + "；".join(parts)
+            + "，H3 可能把参考图（影棚灰底定妆照）半透明叠进了画面，建议看一下，不对就重拍")
+
+
 def qc_bad(qc: dict | None) -> bool:
-    """出片自检有没有发现问题：疑似跳切、开头没接上首帧，或疑似声音性别不对。"""
-    return bool(qc and (qc.get("hard_cuts") or qc.get("start_mismatch") or qc.get("voice_mismatch")))
+    """出片自检有没有发现问题：疑似跳切、开头没接上首帧、疑似声音性别不对，或疑似叠入参考图。"""
+    return bool(qc and (qc.get("hard_cuts") or qc.get("start_mismatch") or qc.get("voice_mismatch")
+                        or qc.get("ghost_refs")))
 
 
 def qc_note(qc: dict | None) -> str:
@@ -65,6 +85,8 @@ def qc_note(qc: dict | None) -> str:
         parts.append(cut_note(qc["hard_cuts"]))
     if qc.get("voice_mismatch"):
         parts.append(voice_note(qc["voice_mismatch"]))
+    if qc.get("ghost_refs"):
+        parts.append(ghost_note(qc["ghost_refs"]))
     return "；".join(parts)
 
 
@@ -118,9 +140,34 @@ def _voice_qc(ctx, sv, path, code: str, lines: list[dict]) -> list[dict] | None:
     return bad
 
 
-def scene_qc(ctx, sv, path, code: str, first=None, voices: list[dict] | None = None) -> dict | None:
+def _ghost_qc(ctx, sv, path, code: str, refs: list[tuple[str, object]]) -> list[dict] | None:
+    """中段帧和参考图比相似度（见 GHOST_MIN / GHOST_RISE）。refs：[(标签, 参考图路径)]。
+    检测失败返回 None（只记日志）；没发现返回空列表。"""
+    sim = getattr(sv.ffmpeg, "frame_ssim", None)
+    if sim is None or not refs:
+        return None
+    try:
+        dur = float(sv.ffmpeg.video_duration(path))
+        hits = []
+        for label, ref in refs:
+            base = float(sim(path, 0.0, ref))
+            best, at = max((float(sim(path, f * dur, ref)), f * dur) for f in GHOST_POINTS)
+            if best >= GHOST_MIN and best - base >= GHOST_RISE:
+                hits.append({"ref": label, "t": round(at, 2), "ssim": round(best, 3),
+                             "base": round(base, 3)})
+    except JobCanceled:
+        raise
+    except Exception as e:
+        ctx.log(f"视频 {code}：参考图叠入检测没跑成，跳过（{_why(e)}）")
+        return None
+    return hits
+
+
+def scene_qc(ctx, sv, path, code: str, first=None, voices: list[dict] | None = None,
+             refs: list[tuple[str, object]] | None = None) -> dict | None:
     """出片自检：找片段内部的硬切；给了首帧图时再看视频开头是不是从首帧开始；给了台词（voices，见
-    voice_lines）时粗查说话人的声音性别（基频）对不对。检测本身失败只记日志，不影响出片。"""
+    voice_lines）时粗查说话人的声音性别（基频）对不对；给了这条视频带的参考图（refs）时查中段有没有把
+    参考图叠进画面。检测本身失败只记日志，不影响出片。"""
     qc: dict = {}
     detect = getattr(sv.ffmpeg, "scene_cuts", None)
     if detect is not None:
@@ -151,6 +198,10 @@ def scene_qc(ctx, sv, path, code: str, first=None, voices: list[dict] | None = N
     if bad_voice:
         qc["voice_mismatch"] = bad_voice
         ctx.log(f"视频 {code}：{voice_note(bad_voice)}")
+    ghosts = _ghost_qc(ctx, sv, path, code, refs or [])
+    if ghosts:
+        qc["ghost_refs"] = ghosts
+        ctx.log(f"视频 {code}：{ghost_note(ghosts)}")
     return qc or None
 
 
@@ -170,7 +221,9 @@ def _speakers(proj, shot, episode_shots=()) -> dict[str, Speaker]:
     「the stocky man」和「the Chinese man in his early fifties」两个名字）。
     性别从外貌第一句看，看不出来时看叫法（画外音要说清男声女声）。只露手 / 腰的插入镜头里没人露脸，
     都按不在画面里算（不加视线句，说话就是画外音）。"""
-    on = {c.get("character_id") for c in shot.cast or [] if isinstance(c, dict)}
+    # 只出声的角色（voice_only）就算被加进了 cast 也不算在画面里
+    unseen = {c.id for c in proj.characters if getattr(c, "voice_only", False)}
+    on = {c.get("character_id") for c in shot.cast or [] if isinstance(c, dict)} - unseen
     if insert_kind(shot.image_prompt or "", getattr(shot, "shot_size", "") or "") in ("hands", "body"):
         on = set()
     refs = token_refs(shot.image_prompt)
@@ -205,7 +258,7 @@ def _speakers(proj, shot, episode_shots=()) -> dict[str, Speaker]:
                 found = next((r for r in heard if r not in taken and gender_of(r)), "")
                 if found:
                     ref, g = found, gender_of(found)
-        out[c.name] = Speaker(ref, c.id in on, g)
+        out[c.name] = Speaker(ref, c.id in on, g, c.id in unseen)
     return out
 
 
@@ -273,6 +326,11 @@ def run_video(ctx, payload: dict) -> dict:
                                       [r.candidate_id for r in old_plan.refs[:engine.caps.max_refs]])}
         if plan.continued:
             ok_hashes.add(video_input_hash(shot, proj, style, ff.id, engine_name, has_audio, []))
+            # 接上一镜以前不看画面里有没有写这个人（第五次实跑修复之前）
+            prev_rule = video_ref_plan(s, shot, ff, lambda n: image_max_refs(sv.engines, n),
+                                       in_frame_only=False)
+            ok_hashes.add(video_input_hash(shot, proj, style, ff.id, engine_name, has_audio,
+                                           [r.candidate_id for r in prev_rule.refs[:engine.caps.max_refs]]))
         inputs = video_inputs(shot, proj, style, ff.id, engine_name, has_audio, used)
         if not payload.get("force"):
             cur = selected_candidate(s, "shot", shot.id, "video")
@@ -300,6 +358,8 @@ def run_video(ctx, payload: dict) -> dict:
         # 有声引擎才查台词的声音性别（第四次实跑 S04：画外男声被念成画面里女人的声音）
         voices = voice_lines(shot.dialogue, speakers) if has_audio else []
         base_seed, taken = proj.seed, len(slot.candidates)
+        # 中段叠入参考图的检测：和这条视频实际带的参考图比
+        ghost_refs = [(r.label, sv.media.abs(r.file_path)) for r in used]
     cids: list[int] = []
     retry_of: int | None = None
     for attempt in range(2):
@@ -325,7 +385,7 @@ def run_video(ctx, payload: dict) -> dict:
         shutil.copyfile(video, dst)
         canceled: JobCanceled | None = None
         try:
-            qc = scene_qc(ctx, sv, dst, code, first, voices)
+            qc = scene_qc(ctx, sv, dst, code, first, voices, ghost_refs)
         except JobCanceled as e:
             # 视频已经出好了：先登记成候选（没做自检），再把取消报上去，GPU 的活不白干
             qc, canceled = None, e

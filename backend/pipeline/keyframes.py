@@ -10,6 +10,7 @@ from backend.engines.base import ImageRequest
 from backend.engines.runninghub.client import RunningHubError
 from backend.pipeline.common import load_episode
 from backend.pipeline.prompting import (engine_image_prompt, join_negative, keyframe_input_hash,
+                                        only_people_clause,
                                         keyframe_inputs, shot_image_prompt, shot_seed)
 from backend.queue.errors import JobError
 from backend.queue.handlers import HANDLERS
@@ -95,6 +96,10 @@ def run_keyframe(ctx, payload: dict) -> dict:
         notes: list[str] = []
         # 发给引擎：景别那一句放在风格锚前面（只改发出去的版本，输入哈希仍按锚在前算）
         prompt = engine_image_prompt(shot_image_prompt(shot, proj, notes), anchor)
+        # 有只出声角色的台词：写明画面里只有谁（只改发出去的版本，不进哈希）
+        only = only_people_clause(shot, proj)
+        if only:
+            prompt = f"{prompt} {only}"
         negative = join_negative(proj.negative, style.negative if style else "")
         packed = shot_refs(s, shot)
         no_portrait = missing_portraits(s, shot) if engine.caps.max_refs > 0 else []

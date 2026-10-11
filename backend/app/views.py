@@ -177,6 +177,11 @@ def shot_detail(s: Session, sv, shot, proj, style, *, jobs: OwnerJobs | None = N
             if plan.continued:
                 legacy_ok["video"].add(video_input_hash(shot, proj, style, ff.selected_candidate_id,
                                                         ve, has_audio, []))
+                prev_rule = video_ref_plan(s, shot, ff_sel, lambda n: _max_refs(sv, "image", n),
+                                           in_frame_only=False)
+                legacy_ok["video"].add(video_input_hash(
+                    shot, proj, style, ff.selected_candidate_id, ve, has_audio,
+                    [r.candidate_id for r in prev_rule.refs[:v_cap]]))
             inputs["video"] = video_inputs(shot, proj, style, ff.selected_candidate_id, ve,
                                            has_audio, v_refs)
     outs = []

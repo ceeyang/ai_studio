@@ -89,4 +89,16 @@ describe('shotStatus', () => {
     expect(voice[0].short).toBe('声音性别不对');
     expect(qcIssues(makeCandidate({ params: { qc: { voice_mismatch: [] } } }))).toEqual([]);
   });
+
+  it('qcIssues：疑似叠入参考图一个角标，说明写哪张参考图、在第几秒、相似度', () => {
+    const ghost = qcIssues(makeCandidate({
+      params: { qc: { hard_cuts: [], ghost_refs: [{ ref: '江屿 定妆照', t: 1.1, ssim: 0.3, base: 0.01 }] } },
+    }));
+    expect(ghost.map((x) => x.label)).toEqual(['疑似叠入参考图']);
+    expect(ghost[0].tip).toContain('江屿 定妆照');
+    expect(ghost[0].tip).toContain('1.1s');
+    expect(ghost[0].tip).toContain('0.30');
+    expect(ghost[0].short).toBe('叠入参考图');
+    expect(qcIssues(makeCandidate({ params: { qc: { ghost_refs: [] } } }))).toEqual([]);
+  });
 });

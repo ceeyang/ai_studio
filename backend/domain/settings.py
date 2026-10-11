@@ -115,6 +115,23 @@ def default_video_engine(sv, st: AppSettings | None = None) -> str:
     return _first(names, st.video_engine, FALLBACK_VIDEO) or (names[0] if names else FALLBACK_VIDEO)
 
 
+def preset_engine(sv, kind: str, preferred: tuple[str, ...] | list[str],
+                  st: AppSettings | None = None) -> str:
+    """新建项目没指定引擎时按风格预设挑（和前端新建项目对话框同一个规则）：
+    设置页明确设了、可用、而且在预设推荐的引擎里（预设没列就都算合得来）→ 用设置的；
+    否则预设推荐里第一个可用的；都没有再退到设置页 / 内置默认（default_image_engine / default_video_engine）。"""
+    st = st or _settings(sv)
+    names = sv.engines.names(kind)
+    explicit = st.image_engine if kind == "image" else st.video_engine
+    prefs = tuple(preferred or ())
+    if explicit and explicit in names and (not prefs or explicit in prefs):
+        return explicit
+    rec = next((n for n in prefs if n in names), None)
+    if rec:
+        return rec
+    return default_image_engine(sv, st) if kind == "image" else default_video_engine(sv, st)
+
+
 def portrait_engine(sv, project_engine: str, explicit: str | None = None,
                     st: AppSettings | None = None, preset: str | None = None) -> str:
     """定妆照引擎。preset 是项目的风格预设（key）；不给（老调用、全局设置页不带项目）时不看预设。

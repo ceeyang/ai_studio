@@ -11,12 +11,12 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from backend.domain.hashing import input_hash
-from backend.domain.models import Candidate, Shot
+from backend.domain.models import Candidate, Character, Shot
 from backend.domain.refs import Ref, shot_refs
 from backend.domain.shots import prev_shot
 from backend.domain.slots import add_candidate, get_or_create_slot, selected_candidate
 from backend.pipeline.common import job_services, load_episode
-from backend.pipeline.prompting import first_frame_locked_face, insert_kind
+from backend.pipeline.prompting import CHAR_TOKEN, first_frame_locked_face, insert_kind
 from backend.queue.errors import JobError
 from backend.queue.handlers import HANDLERS
 
@@ -79,17 +79,29 @@ class VideoRefPlan:
     locked_chars: list[int] = field(default_factory=list)   # 这条视频里脸按定妆照锁过的角色
 
 
+def in_frame_ids(s, shot) -> set[int]:
+    """这一镜画面里的人：cast 里的、不是只出声的角色；image_prompt 写了占位符时只算写进画面的那几个
+    （cast 里有、画面描述里没写的人不在画面里——第五次实跑 S05 第一版 cast 加了江屿、画面只写了许棠，
+    视频带上江屿的定妆照，H3 把这张定妆照半透明叠进了画面）。"""
+    cast = set(_cast_ids(shot))
+    unseen = {cid for cid in cast if (ch := s.get(Character, cid)) is not None and ch.voice_only}
+    written = {int(x) for x in CHAR_TOKEN.findall(shot.image_prompt or "")}
+    return (cast & written if written else cast) - unseen
+
+
 def _ref_chars(refs: list[Ref]) -> list[int]:
     return sorted({r.character_id for r in refs if r.character_id is not None})
 
 
 def video_ref_plan(s, shot, ff, image_max_refs: Callable[[str], int],
-                   packed: list[Ref] | None = None) -> VideoRefPlan:
+                   packed: list[Ref] | None = None, in_frame_only: bool = True) -> VideoRefPlan:
     """选定首帧 ff 下视频带哪些参考图。videos.run_video 和 views.shot_detail（过期判断）共用。
 
     - 普通首帧：锁过脸（带了定妆照 / 三视图）就带全部出场角色的定妆照，没锁就一张不带（两张脸会打架）；
     - 接上一镜的首帧：尾帧里锁过脸的角色接着带（沿用上一镜）；这一镜 cast 里有、上一镜 cast 里没有的角色
       （从画外进来，尾帧里还没有这个人）总要带上定妆照——不然 H3 会自己编一张脸（第三次样片 S06）。
+      两种都只带这一镜画面里的人（in_frame_ids）：cast 里有、画面里没写的人不带（第五次实跑 S05 鬼影）。
+      in_frame_only=False 是以前的规则，算老视频的哈希用（不判过期）。
 
     packed 不给时按现在的规则打包（每人一张脸）；给了（以前的打包，legacy_video_refs）用来算老视频的哈希。"""
     if packed is None:
@@ -109,6 +121,11 @@ def video_ref_plan(s, shot, ff, image_max_refs: Callable[[str], int],
     cast = list(dict.fromkeys(_cast_ids(shot)))
     entering = [cid for cid in cast if cid not in before]
     keep = set(entering) | _tail_locked(s, ff, image_max_refs)
+    if in_frame_only:
+        frame = in_frame_ids(s, shot)
+        entering = [cid for cid in entering if cid in frame]
+        keep &= frame
+        cast = [cid for cid in cast if cid in frame]
     refs = [r for r in packed if r.character_id in keep]
     with_refs = {r.character_id for r in packed}
     full = bool(refs) and all(cid in keep for cid in cast if cid in with_refs)

@@ -2,10 +2,26 @@
 from __future__ import annotations
 
 import re
-
+from contextlib import contextmanager
+from contextvars import ContextVar
 from typing import NamedTuple
 
 from backend.domain.hashing import input_hash
+
+# 算输入哈希 / inputs 摘要时用以前的写法：只改「发给引擎的提示词」的修复不能让已出的首帧、视频过期
+# （非强制重跑时会重出、抢掉已选的）。第五次实跑修复：分号也算分句边界（标志性细节写在分号后面时
+# 不再被当成下半身整段删掉）、只出声角色的占位符发给引擎时去掉——这两处按老写法算指纹。
+_FINGERPRINT = ContextVar("prompt_fingerprint_mode", default=False)
+
+
+@contextmanager
+def fingerprint_mode():
+    """在这个 with 里按老写法拼提示词（算哈希、inputs 摘要用）。"""
+    token = _FINGERPRINT.set(True)
+    try:
+        yield
+    finally:
+        _FINGERPRINT.reset(token)
 
 # ------------------------------------------------------------ 定妆照用的风格词
 # 风格锚是给镜头用的，里面混着场景、时间、天气、光源（雨夜、灯泡、积水……）。定妆照要的是干净的
@@ -76,31 +92,55 @@ _HAND_DETAIL = re.compile(r"\bhands?\b|fingers?|fingertips?|knuckles?|\bnails?\b
 _SUBPART = re.compile(r"(\s+(?:and|with|over|under|plus|above)\s+|\s+tucked into\s+)", re.I)
 
 
+_CLAUSE_SEP = re.compile(r"(\s*[,;]\s*)")
+
+
+def _split_clauses(body: str) -> tuple[list[str], list[str]]:
+    """按逗号、分号拆分句，返回 (分句, 每个分句前面的分隔符)；第一个分句前面是空串。
+    算指纹时（fingerprint_mode）只按逗号拆——以前的写法，「…shoes; signature detail: glasses」是一个分句。"""
+    if _FINGERPRINT.get():
+        parts = re.split(r"(,\s*)", body)
+    else:
+        parts = _CLAUSE_SEP.split(body)
+    clauses = parts[0::2]
+    seps = [""] + ["; " if ";" in x else ", " for x in parts[1::2]]
+    return clauses, seps
+
+
 def _strip_clauses(text: str, drop: re.Pattern, keep: re.Pattern | None) -> str:
-    """按句、按逗号分句去掉命中 drop 的部分。分句同时写了 keep（如上衣）时只去掉其中命中 drop 的
-    「and / with / over …」子句（「a navy coat over grey trousers」→「a navy coat」）。"""
+    """按句、按逗号和分号分句去掉命中 drop 的部分。分句同时写了 keep（如上衣）时只去掉其中命中 drop 的
+    「and / with / over …」子句（「a navy coat over grey trousers」→「a navy coat」）。
+    分号也算分句边界（第五次实跑：江屿「… black trousers and worn black leather shoes; signature detail:
+    a pair of thick black-framed rectangular glasses」以前整段当下半身删掉，定妆照和首帧都没戴眼镜）。"""
     out = []
     for sentence in re.split(r"(?<=[.!?])\s+", (text or "").strip()):
+        if not sentence:   # 空外貌（只出声角色发给引擎时）
+            continue
         body, end = (sentence[:-1], sentence[-1]) if sentence[-1:] in ".!?" else (sentence, ".")
-        kept = []
-        for clause in re.split(r",\s*", body):
+        clauses, seps = _split_clauses(body)
+        kept: list[tuple[str, str]] = []
+        for sep, clause in zip(seps, clauses):
             if not drop.search(clause):
-                kept.append(clause)
+                kept.append((sep, clause))
                 continue
             if keep is None or not keep.search(clause):
                 continue
             parts = _SUBPART.split(clause)   # [片段, 连接词, 片段, 连接词, …]
             pieces = [parts[0]] if not drop.search(parts[0]) else []
-            for sep, frag in zip(parts[1::2], parts[2::2]):
+            for sub, frag in zip(parts[1::2], parts[2::2]):
                 if not drop.search(frag):
-                    pieces.append((sep if pieces else "") + frag)
+                    pieces.append((sub if pieces else "") + frag)
             if pieces and keep.search("".join(pieces)):
-                kept.append("".join(pieces).strip())
-        if kept == re.split(r",\s*", body):   # 这一句没动：原样保留
+                kept.append((sep, "".join(pieces).strip()))
+        if [c for _, c in kept] == clauses:   # 这一句没动：原样保留
             out.append(sentence)
         elif kept:
-            first = re.sub(r"^(?:and|with)\s+", "", kept[0].strip(), flags=re.I)
-            out.append(", ".join([first[:1].upper() + first[1:]] + kept[1:]) + end)
+            first = re.sub(r"^(?:and|with)\s+", "", kept[0][1].strip(), flags=re.I)
+            # 第一个留下的分句前面不要分隔符；其余沿用自己前面的（逗号 / 分号）
+            text_out = first[:1].upper() + first[1:]
+            for sep, c in kept[1:]:
+                text_out += (sep or ", ") + c
+            out.append(text_out + end)
     return " ".join(out)
 
 
@@ -292,7 +332,11 @@ def _resolve(text: str, looks: dict[int, str], pick) -> str:
 
 
 def project_looks(project) -> dict[int, str]:
-    return {c.id: c.visual_prompt or "" for c in getattr(project, "characters", None) or []}
+    """角色 id → 外貌。只出声的角色（voice_only）发给引擎时给空串：占位符直接去掉，画面里不画这个人
+    （算指纹时照旧填，老首帧不过期）。"""
+    legacy = _FINGERPRINT.get()
+    return {c.id: "" if getattr(c, "voice_only", False) and not legacy else c.visual_prompt or ""
+            for c in getattr(project, "characters", None) or []}
 
 
 def shot_image_prompt(shot, project, notes: list | None = None) -> str:
@@ -328,6 +372,48 @@ def video_style(anchor: str, max_words: int = VIDEO_STYLE_WORDS) -> str:
     return f"Visual style: {text}."
 
 
+def only_people_clause(shot, project) -> str:
+    """首帧（发给引擎）：这一镜有只出声角色（voice_only）的台词时，写明画面里只有谁——用正面写法点名画面里
+    的人（分镜给的简短指代），不提那个只出声的人（提了反而会被画出来）。插入镜头、画面里没人时不写。"""
+    talkers = {d.get("speaker") for d in getattr(shot, "dialogue", None) or [] if isinstance(d, dict)}
+    chars = list(getattr(project, "characters", None) or [])
+    if not any(getattr(c, "voice_only", False) and c.name in talkers for c in chars):
+        return ""
+    if insert_kind(shot.image_prompt or "", getattr(shot, "shot_size", "") or "") in ("hands", "body"):
+        return ""
+    unseen = {c.id for c in chars if getattr(c, "voice_only", False)}
+    refs = token_refs(shot.image_prompt)
+    names = list(dict.fromkeys(ref for cid, ref in refs.items() if cid not in unseen))
+    if not names:
+        return ""
+    if len(names) == 1:
+        return f"{names[0][:1].upper()}{names[0][1:]} is the only person in the frame."
+    who = ", ".join(names[:-1]) + " and " + names[-1]
+    return f"{who[:1].upper()}{who[1:]} are the only people in the frame."
+
+
+def unseen_speakers_clause(dialogue, speakers: dict[str, Speaker]) -> str:
+    """这一镜有台词的只出声角色（voice_only、不在画面里）：写明说话的人始终不出现在画面里、只听得到声音。
+    第五次实跑 S05：画外音「Off-screen voice of the middle-aged man」被 H3 理解成要出场，在黑门里画出一个
+    中年男人。只拼进发给引擎的提示词。"""
+    refs: list[str] = []
+    for d in dialogue or []:
+        sp = speakers.get(d.get("speaker", "")) if isinstance(d, dict) else None
+        if sp is None or sp.on_screen or not sp.voice_only:
+            continue
+        ref = sp.ref if sp.ref and sp.ref != "the speaker" else ""
+        if ref not in refs:
+            refs.append(ref)
+    if not refs:
+        return ""
+    named = [r for r in refs if r]
+    if len(refs) == 1:
+        who = f"The speaker ({named[0]})" if named else "The speaker"
+        return f"{who} is never seen on screen; only the voice is heard."
+    who = f"The speakers ({', '.join(named)})" if named else "The speakers"
+    return f"{who} are never seen on screen; only their voices are heard."
+
+
 def compose_image_prompt(image_prompt: str, anchor: str) -> str:
     p, a = (image_prompt or "").strip(), (anchor or "").strip()
     return p if not a or a in p else f"{a} {p}"
@@ -355,10 +441,12 @@ def engine_image_prompt(image_prompt: str, anchor: str) -> str:
 
 class Speaker(NamedTuple):
     """视频提示词里怎么称呼说话人：英文简称（不写中文名；画面里的人用分镜里写的同一个简称），
-    他在不在画面里（在这一镜的 cast 里），以及性别（male / female / 空），画外音要说清是男声还是女声。"""
+    他在不在画面里（在这一镜的 cast 里），性别（male / female / 空），画外音要说清是男声还是女声；
+    voice_only：只出声、不出镜的角色（画面里始终看不见他）。"""
     ref: str
     on_screen: bool
     gender: str = ""
+    voice_only: bool = False
 
 
 _FEMALE = re.compile(r"\b(?:woman|women|girl|lady|female|mother|grandmother|wife|sister|daughter|aunt"
@@ -427,7 +515,7 @@ def short_ref(visual_prompt: str | None) -> str:
     return "the " + " ".join(words) if words else "the speaker"
 
 
-def _dialogue_line(d: dict, speakers: dict[str, Speaker] | None, anyone_on_screen: bool) -> str:
+def _dialogue_line(d: dict, speakers: dict[str, Speaker] | None, on_screen: int) -> str:
     said = f'says in Mandarin Chinese: "{d["zh"]}"'
     if speakers is None:   # 老写法：算输入哈希用，保持一字不差，已有视频不会因此过期
         return f'{d.get("speaker", "")} {said}'
@@ -437,7 +525,9 @@ def _dialogue_line(d: dict, speakers: dict[str, Speaker] | None, anyone_on_scree
     voice = f"An off-screen {sp.gender} voice" if sp is not None and sp.gender else "An off-screen voice"
     if sp is not None and sp.ref and sp.ref != "the speaker":
         voice += f" ({sp.ref})"
-    lips = ", the on-screen character's lips stay closed." if anyone_on_screen else ""
+    # 画面里有几个人：两人同框写复数（第五次实跑 S05 两人同框仍写 character's）
+    lips = ("" if not on_screen else ", the on-screen character's lips stay closed." if on_screen == 1
+            else ", the on-screen characters' lips stay closed.")
     return f"{voice} {said}{lips}"
 
 
@@ -468,11 +558,14 @@ def compose_video_prompt(motion_prompt: str, image_prompt: str, audio_prompt: st
         n_on = sum(1 for sp in speakers.values() if sp.on_screen)
         if n_on and not _AT_CAMERA.search(body):
             text = f"{text} {GAZE_ONE if n_on == 1 else GAZE_LINE}"
+        unseen = unseen_speakers_clause(dialogue, speakers)
+        if unseen:
+            text = f"{text} {unseen}"
     if not has_audio:
         return text
     audio = (audio_prompt or "").strip()
-    anyone = any(sp.on_screen for sp in (speakers or {}).values())
-    lines = [_dialogue_line(d, speakers, anyone)
+    n_on = sum(1 for sp in (speakers or {}).values() if sp.on_screen)
+    lines = [_dialogue_line(d, speakers, n_on)
              for d in dialogue or [] if d.get("zh") and d["zh"] not in audio]
     if speakers is not None:   # 发给引擎：只要画面里的声音，音乐交给成片配乐（不进输入哈希）
         audio = diegetic_audio(audio)
@@ -550,10 +643,29 @@ def location_summary(visual_prompt: str | None, max_words: int = 30) -> str:
             first = ("an " if low[0] in "aeiou" else "a ") + first
     else:
         first = "this location: " + first
-    words = first.split()
-    if len(words) > max_words:
-        first = " ".join(words[:max_words]).rstrip(",;")
-    return first
+    return _clip_words(first, max_words)
+
+
+# 截断后句尾不能停在这些虚词上（「… peeling pale green paint and」）
+_DANGLING = re.compile(r"(?:\s+(?:and|or|but|with|of|in|on|at|by|for|to|from|into|onto|over|under"
+                       r"|the|a|an|its|their|his|her|as|while|where|which|that))+$", re.I)
+
+
+def _clip_words(text: str, max_words: int) -> str:
+    """超过 max_words 个词时按分句（逗号 / 分号）边界截：留下放得下的前几个整分句（第五次实跑场景句截成
+    「walls with peeling pale green paint and; the background …」）；第一个分句就放不下时按词截，
+    再去掉句尾的 and / with / of 这类虚词。"""
+    if len(text.split()) <= max_words:
+        return text
+    kept = ""
+    for clause in re.split(r"\s*[,;]\s*", text):
+        cand = f"{kept}, {clause}" if kept else clause
+        if len(cand.split()) > max_words:
+            break
+        kept = cand
+    if not kept:
+        kept = " ".join(text.split()[:max_words])
+    return _DANGLING.sub("", kept.rstrip(" ,;:")).rstrip(" ,;:")
 
 
 def continuity_clause(location: str = "") -> str:
@@ -657,9 +769,16 @@ def _refs(ref_ids) -> dict:
     return {"refs": list(ref_ids)} if ref_ids else {}
 
 
+def fingerprint_image_prompt(shot, project) -> str:
+    """算输入哈希、inputs 摘要用的 image_prompt：按老写法填外貌（见 fingerprint_mode）。"""
+    with fingerprint_mode():
+        return shot_image_prompt(shot, project)
+
+
 def keyframe_input_hash(shot, project, style, engine_name: str, ref_ids=()) -> str:
     """ref_ids：引擎实际用到的定妆照候选 id，换了定妆照首帧就过期。"""
-    return input_hash("first_frame", compose_image_prompt(shot_image_prompt(shot, project), _anchor(style)),
+    return input_hash("first_frame", compose_image_prompt(fingerprint_image_prompt(shot, project),
+                                                          _anchor(style)),
                       _negative(project, style), engine_name, project.aspect, **_refs(ref_ids))
 
 
@@ -690,7 +809,7 @@ def _is_face_ref(r) -> bool:
 
 def video_input_hash(shot, project, style, first_frame_candidate_id: int, engine_name: str,
                      has_audio: bool, ref_ids=()) -> str:
-    prompt = compose_video_prompt(shot.motion_prompt, shot_image_prompt(shot, project),
+    prompt = compose_video_prompt(shot.motion_prompt, fingerprint_image_prompt(shot, project),
                                   shot.audio_prompt,
                                   shot.dialogue, anchor=_anchor(style), has_audio=has_audio)
     return input_hash("video", prompt, first_frame_candidate_id, engine_name, project.aspect,
@@ -709,14 +828,14 @@ def ref_inputs(refs) -> list[dict]:
 
 def keyframe_inputs(shot, project, style, engine_name: str, refs=()) -> dict:
     """refs：引擎实际用到的参考图（domain.refs.Ref），与 keyframe_input_hash 的 ref_ids 一一对应。"""
-    return {"prompt": compose_image_prompt(shot_image_prompt(shot, project), _anchor(style)),
+    return {"prompt": compose_image_prompt(fingerprint_image_prompt(shot, project), _anchor(style)),
             "negative": _negative(project, style), "engine": engine_name,
             "aspect": project.aspect, "refs": ref_inputs(refs)}
 
 
 def video_inputs(shot, project, style, first_frame_candidate_id: int, engine_name: str,
                  has_audio: bool, refs=()) -> dict:
-    prompt = compose_video_prompt(shot.motion_prompt, shot_image_prompt(shot, project),
+    prompt = compose_video_prompt(shot.motion_prompt, fingerprint_image_prompt(shot, project),
                                   shot.audio_prompt,
                                   shot.dialogue, anchor=_anchor(style), has_audio=has_audio)
     return {"prompt": prompt, "negative": _negative(project, style), "engine": engine_name,

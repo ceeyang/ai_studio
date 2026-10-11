@@ -95,8 +95,9 @@ _SHOWINFO_PTS = re.compile(r"Parsed_showinfo.*?\bpts_time:\s*(-?[\d.]+)")
 
 SSIM_SIZE = (32, 32)
 _SSIM_LINE = re.compile(r"SSIM\s+(Y:.*)")
-_SSIM_CH = re.compile(r"\b([YUV]):\s*([0-9.]+)")
-_SSIM_ALL = re.compile(r"All:\s*([0-9.]+)")
+# SSIM 可能是负数（两张图结构相反，如暗场对亮灰底）：以前只认非负数，Y 是负的时被漏掉、只剩 U / V
+_SSIM_CH = re.compile(r"\b([YUV]):\s*(-?[0-9.]+)")
+_SSIM_ALL = re.compile(r"All:\s*(-?[0-9.]+)")
 
 
 def parse_ssim(log: str) -> float | None:
@@ -319,6 +320,24 @@ class FFmpeg:
         # 第二个信号：整体平均颜色。大块纯色区域的 SSIM 对颜色不敏感（纯红对纯绿 U / V 仍有 0.6），
         # 平均色差大就按色差算
         return min(v, self._mean_color_similarity(video, image))
+
+    def frame_ssim(self, video: Path, at: float, image: Path) -> float:
+        """视频第 at 秒那一帧和一张图有多像（SSIM，取 Y / U / V 里最低的；和 first_frame_ssim 同一套：
+        都缩到 SSIM_SIZE、yuv444p）。查中段把参考图叠进画面用（pipeline/videos._ghost_qc）。"""
+        w, h = SSIM_SIZE
+        graph = (f"[0:v]trim=end_frame=1,setpts=PTS-STARTPTS,scale={w}:{h},format=yuv444p[a];"
+                 f"[1:v]trim=end_frame=1,setpts=PTS-STARTPTS,scale={w}:{h},format=yuv444p[b];"
+                 "[a][b]ssim")
+        seek = ["-ss", f"{max(float(at), 0.0):.3f}"] if at and at > 0 else []
+        p = self._exec([self.ffmpeg, "-hide_banner", "-nostats", *seek, "-i", str(video),
+                        "-i", str(image), "-an", "-filter_complex", graph, "-frames:v", "1",
+                        "-f", "null", "-"])
+        if p.returncode != 0:
+            raise FFmpegError(f"帧相似度检测失败：\n{(p.stderr or '')[-1500:]}")
+        v = parse_ssim(p.stderr)
+        if v is None:
+            raise FFmpegError("帧相似度检测没有结果")
+        return v
 
     def _mean_color_similarity(self, video: Path, image: Path) -> float:
         """两张图各缩成 1×1 像素（平均颜色）比 RGB 距离：1 = 一样，0 = 黑对白。"""

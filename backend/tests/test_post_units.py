@@ -199,7 +199,8 @@ def test_dub_mix_cmd_ducks_bed_and_delays_lines():
     assert graph.startswith("[0:a]volume=-14.0dB,volume=-16.0dB:enable='between(t,1.35,3.75)+between(t,3.85,5.25)'")
     assert "[1:a]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,adelay=1500:all=1[v1]" in graph
     assert "adelay=4000:all=1[v2]" in graph
-    assert "[bed][v1][v2]amix=inputs=3:normalize=0:dropout_transition=0:duration=first[a]" in graph
+    assert "[bed][v1][v2]amix=inputs=3:normalize=0:dropout_transition=0:duration=first[mix]" in graph
+    assert graph.endswith("[mix]alimiter=limit=0.841:level=0:latency=1[a]")
     assert cmd[cmd.index("-c:v") + 1] == "copy"
 
 

@@ -15,6 +15,9 @@ DUCK_RAMP = 0.3       # 压低 / 恢复用多少秒
 PAD_BEFORE = 0.15     # 台词开始前多早开始压
 PAD_AFTER = 0.25      # 台词结束后多晚开始恢复
 FMT = f"aformat=sample_fmts=fltp:sample_rates={SAMPLE_RATE}:channel_layouts=stereo"
+# 混音最后的限幅：峰值压在 -1.5 dBFS（线性 0.841），AAC 编码后约 -1 dBTP，叠了配乐也不削波（第五次实跑
+# 成片峰值顶到 0.0 dB）。level=0：不自动拉响度；latency=1：补偿前视延迟，声画不错位
+LIMITER = "alimiter=limit=0.841:level=0:latency=1"
 
 
 def duck_windows(spans, *, total: float | None = None, pad_before: float = PAD_BEFORE,
@@ -61,9 +64,10 @@ def build_music_mix_cmd(ffmpeg: str, src, music, out, *, total: float, volume_db
     parts = [chain + "[bgm]"]
     if has_audio:
         parts += [f"[0:a]{FMT}[orig]",
-                  "[orig][bgm]amix=inputs=2:normalize=0:dropout_transition=0:duration=first[a]"]
+                  "[orig][bgm]amix=inputs=2:normalize=0:dropout_transition=0:duration=first[mix]",
+                  f"[mix]{LIMITER}[a]"]
     else:
-        parts.append("[bgm]anull[a]")
+        parts.append(f"[bgm]{LIMITER}[a]")
     return [ffmpeg, "-y", "-i", str(src), "-stream_loop", "-1", "-i", str(music),
             "-filter_complex", ";".join(parts), "-map", "0:v", "-map", "[a]",
             "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-ar", str(SAMPLE_RATE),

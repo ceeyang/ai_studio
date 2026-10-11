@@ -45,7 +45,9 @@ def test_music_cmd_with_original_audio_and_ducking():
     assert "volume=-18.0dB" in graph
     assert "volume='1-0.6838*min(1," in graph and ":eval=frame" in graph
     assert "afade=t=in:st=0:d=1.00" in graph and "afade=t=out:st=10.500:d=2.00" in graph
-    assert "[orig][bgm]amix=inputs=2:normalize=0:dropout_transition=0:duration=first[a]" in graph
+    assert "[orig][bgm]amix=inputs=2:normalize=0:dropout_transition=0:duration=first[mix]" in graph
+    # 最后限幅：峰值压在 -1.5 dBFS，AAC 后约 -1 dBTP，不削波
+    assert graph.endswith("[mix]alimiter=limit=0.841:level=0:latency=1[a]")
     assert cmd[cmd.index("-c:v") + 1] == "copy" and cmd[-1] == "out.mp4"
     assert cmd[cmd.index("-t") + 1] == "12.500"
 
@@ -55,7 +57,7 @@ def test_music_cmd_without_audio_or_ducking():
                               fade_in=0, fade_out=0, windows=[], has_audio=False)
     graph = cmd[cmd.index("-filter_complex") + 1]
     assert "eval=frame" not in graph and "afade" not in graph and "[0:a]" not in graph
-    assert graph.endswith("[bgm];[bgm]anull[a]")
+    assert graph.endswith("[bgm];[bgm]alimiter=limit=0.841:level=0:latency=1[a]")
 
 
 def test_options_tag_and_label():

@@ -3,7 +3,8 @@ def test_create_project_with_chinese_title(api):
     assert r.status_code == 201, r.text
     p = r.json()
     assert p["slug"] == "提词员-第一季" and p["aspect"] == "9:16"
-    assert p["image_engine"] == "zimage" and p["video_engine"] == "h3_video"
+    # 没传引擎：按默认风格预设（真人写实）推荐的引擎
+    assert p["image_engine"] == "h3_image" and p["video_engine"] == "h3_video"
     assert (api.app.state.services.media.root / "提词员-第一季").is_dir()
     assert [x["slug"] for x in api.get("/api/projects").json()] == ["提词员-第一季"]
     assert api.get("/api/projects/提词员-第一季").json()["title"] == "提词员 第一季"

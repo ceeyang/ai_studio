@@ -194,7 +194,8 @@ def test_dub_mix_cmd_without_bed_mutes_original_track():
     graph = cmd[cmd.index("-filter_complex") + 1]
     assert graph.startswith("[0:a]volume=0,aformat=")
     assert "dB" not in graph.split("[bed]")[0]
-    assert "[bed][v1]amix=inputs=2:normalize=0:dropout_transition=0:duration=first[a]" in graph
+    assert "[bed][v1]amix=inputs=2:normalize=0:dropout_transition=0:duration=first[mix]" in graph
+    assert graph.endswith("[mix]alimiter=limit=0.841:level=0:latency=1[a]")
 
 
 def test_export_options_new_fields_and_tag():

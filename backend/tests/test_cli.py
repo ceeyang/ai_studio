@@ -23,7 +23,7 @@ def test_project_create_and_list(cli):
     assert r.exit_code == 0, r.output
     assert json.loads(r.stdout)["slug"] == "提词员"
     r = cli("project", "list")
-    assert "提词员" in r.stdout and "zimage / h3_video" in r.stdout
+    assert "提词员" in r.stdout and "h3_image / h3_video" in r.stdout
 
 
 def test_episode_import_run_and_jobs(cli, tmp_path):

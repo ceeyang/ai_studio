@@ -12,6 +12,8 @@ import math
 from dataclasses import dataclass
 from pathlib import Path
 
+from backend.post.music import LIMITER
+
 SAMPLE_RATE = 48000
 
 
@@ -69,11 +71,12 @@ def build_dub_mix_cmd(ffmpeg: str, src, lines: list[tuple], out, *, bed_db: floa
     for i, (_, st, _) in enumerate(lines, start=1):
         parts.append(f"[{i}:a]{fmt},adelay={int(round(max(st, 0.0) * 1000))}:all=1[v{i}]")
         labels.append(f"[v{i}]")
-    mixed = "[a]" if loudness is None else "[mix]"
     parts.append("".join(labels) + f"amix=inputs={len(labels)}:normalize=0:dropout_transition=0"
-                 f":duration=first{mixed}")
+                 f":duration=first[mix]")
     if loudness is not None:
-        parts.append(f"[mix]loudnorm=I={loudness:g}:TP=-1.5:LRA=11[a]")
+        parts.append(f"[mix]loudnorm=I={loudness:g}:TP=-1.5:LRA=11[a]")   # loudnorm 自己限真峰值
+    else:
+        parts.append(f"[mix]{LIMITER}[a]")   # 不拉响度时最后限幅，防削波
     return cmd + ["-filter_complex", ";".join(parts), "-map", "0:v", "-map", "[a]",
                   "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-ar", str(SAMPLE_RATE),
                   "-movflags", "+faststart", str(out)]

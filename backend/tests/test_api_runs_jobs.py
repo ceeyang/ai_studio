@@ -4,7 +4,7 @@ from backend.domain.slots import add_candidate, get_or_create_slot
 
 
 def seed(api, n=2):
-    api.post("/api/projects", json={"title": "demo"})
+    api.post("/api/projects", json={"title": "demo", "image_engine": "zimage"})
     ep = api.post("/api/projects/demo/episodes", json={"source_text": "梗概"}).json()
     with api.app.state.services.db.session() as s:
         for i in range(n):
