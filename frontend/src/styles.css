@@ -1114,8 +1114,8 @@ pre.error { background: rgba(255, 90, 95, 0.06); border-color: rgba(255, 90, 95,
 .defaults-grid .field > span { font-weight: 600; }
 .defaults-grid select { width: 100%; }
 .defaults-notes { margin: 0 0 var(--s-2); padding-left: 1.2em; }
-.step-overrides > summary { cursor: pointer; padding: var(--s-2) 0; color: var(--muted); }
-.step-overrides > summary:hover { color: inherit; }
+.step-overrides > summary, .api-services-fold > summary { cursor: pointer; padding: var(--s-2) 0; color: var(--muted); }
+.step-overrides > summary:hover, .api-services-fold > summary:hover { color: inherit; }
 .step-table select { min-width: 220px; max-width: 100%; }
 .step-table .pill { margin-left: 6px; }
 .saved-text { color: var(--ok, #6fcf97); }

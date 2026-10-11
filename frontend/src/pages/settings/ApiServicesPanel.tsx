@@ -183,11 +183,19 @@ export function ApiServicesPanel() {
           加载中…
         </p>
       )}
-      <div className="api-services">
-        {(q.data?.services ?? []).map((s) => (
-          <ServiceCard key={s.id} s={s} />
-        ))}
-      </div>
+      {/* 默认折叠：Key 填一次就不常动，展开才看三家的配置 */}
+      <details className="api-services-fold">
+        <summary>
+          {q.data
+            ? `配置 Key（已配置 ${q.data.services.filter((s) => s.configured).length} / ${q.data.services.length}）`
+            : '配置 Key'}
+        </summary>
+        <div className="api-services">
+          {(q.data?.services ?? []).map((s) => (
+            <ServiceCard key={s.id} s={s} />
+          ))}
+        </div>
+      </details>
     </section>
   );
 }
