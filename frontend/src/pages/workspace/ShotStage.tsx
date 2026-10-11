@@ -14,6 +14,7 @@ import {
   useReorderShots,
   useRunStage,
   useSplitShot,
+  useEngineAdvice,
   useTakeStats,
 } from '../../api/queries';
 import type { Job, RunIn, ShotDetail } from '../../api/types';
@@ -22,6 +23,7 @@ import { type DrawerLoss, useDrawerDirty } from '../../components/EditableFields
 import { type LeaveCheck, confirmDiscard } from '../../components/confirmDiscard';
 import { EpisodeLoadError, NEXT_ACTION_EVENT, isNextActionFor } from '../../components/EpisodeHeader';
 import { useJobNotice } from '../../components/JobNotice';
+import { EngineAdviceChip } from '../director/EngineAdvice';
 import { type EstimatePart, estimateText } from '../director/estimate';
 import { ShotDrawer } from '../director/ShotDrawer';
 import { type CardAction, type GenStage, cellOf, hasSelected } from '../director/shotStatus';
@@ -94,6 +96,8 @@ export function ShotStage({
   const run = useRunStage(id);
   // 抽卡统计：本集合计放工具栏下面，每镜的放卡片上（工作台里藏着的阶段不请求）
   const takeStats = useTakeStats(id, active);
+  // 按镜头推荐视频引擎：视频阶段工具栏上「N 镜建议换引擎」（只是建议）
+  const engineAdvice = useEngineAdvice(id, active && work.stage === 'videos');
   /** 上一次提交时后端给的提醒（如出场角色还没有定妆照） */
   const [runWarnings, setRunWarnings] = useState<string[]>([]);
   /** 上一次提交时后端给的说明（如接上一镜的镜头等上一镜视频，这次跳过） */
@@ -287,6 +291,7 @@ export function ShotStage({
         <span className="chip">
           {shots.length} 个镜头，共 {total.toFixed(1)} 秒
         </span>
+        {stage === 'videos' && <EngineAdviceChip advice={engineAdvice.data} />}
         <label>
           候选数{' '}
           <select aria-label="候选数" value={count} onChange={(ev) => setCount(Number(ev.target.value))}>

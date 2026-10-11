@@ -166,7 +166,14 @@ JWT 签名单测；最后用作者的 Key 各实跑一条。
 - **不落盘**：JWT 每个请求现签（httpx Auth），只在请求头；`scrub()` 掩掉 API Key、AK、SK，并把像 JWT 的串整个隐藏；
   任务调用明细（trace）同样掩掉 AK / SK / JWT。
 - `_ApiVideoEngine.build`：`supports_end_frame` 时 workflow 带 `end_frame`，否则尾帧记进 `dropped_refs`；
-  `max_refs > 0` 时带参考图（D3 用，现在两家都是 0）。
+  `max_refs > 0` 时带参考图（D3 用）。可灵仍是 0；Seedance 见下一条。
+- **Seedance 参考图直出（2026-10-12 补）**：多模态参考的请求格式按两处独立来源核对一致——apiyi 的 Seedance 原生接口
+  文档（`/contents/generations/tasks`，「首帧 / 首尾帧 / 多模态参考三种输入方式互斥」，2.0 系列最多 9 张图）和
+  DataCamp 用 BytePlus Ark SDK 的 Seedance 2.0 教程（`content_generation.tasks.create`）：每张参考图是
+  `{"type": "image_url", "image_url": {"url": …}, "role": "reference_image"}`。所以 `seedance_video` 的 caps 改成
+  `ref_mode=True`、`max_refs=9`；`SeedanceEngine.refs_exclusive = True`：有首帧时参考图一律不带（记进 `dropped_refs`），
+  没有首帧时只发参考图、尾帧也不带。runner 里有首帧时就算 workflow 带了 refs 也不发。首帧模式的请求和以前一样。
+  注意：2.0 系列对真人人脸参考图有限制；1.x 模型不支持多模态参考（换 1.x 模型时别用参考图直出）。同样未用真实 Key 跑过。
 
 ## 5. D3：参考图直出
 
@@ -195,6 +202,11 @@ JWT 签名单测；最后用作者的 Key 各实跑一条。
 ### 5.4 网页版的参考图直出
 
 D1 探查时记录的参考图模式，D3 时给生成器流程加「参考图模式」（切到参考模式 → 上传多张图），站点支持就打开 `ref_mode`。
+
+### 5.4.1 API 版的参考图直出（实施记录）
+
+`seedance_video` 已打开 `ref_mode`（最多 9 张，`role=reference_image`，和首尾帧互斥，见 4.5）；`kling_video` 还没核对
+多图参考接口，仍只支持首帧。网页版（即梦 / 可灵）的参考图模式等 5.4 实测后再开。
 
 ### 5.5 测试
 

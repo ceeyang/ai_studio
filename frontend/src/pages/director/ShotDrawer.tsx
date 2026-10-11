@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { errorText } from '../../api/client';
 import {
   useDeleteShotRef,
+  useEngineAdvice,
   useEngines,
   useFirstFrameFromAsset,
   usePatchShot,
@@ -22,6 +23,7 @@ import { engineLabel, engineOptionText } from '../../format';
 import { ArchivedCandidates } from './ArchivedCandidates';
 import { CandidateGrid } from './CandidateGrid';
 import { DialogueEditor } from './DialogueEditor';
+import { ShotEngineHint } from './EngineAdvice';
 import { type GenStage, CELL, activeJob, activeText, failedJob, firstFrameReady, genLabel, hasSelected, refsMode, waitsPrevVideo } from './shotStatus';
 import { SLOT_LABEL } from './slots';
 
@@ -517,6 +519,11 @@ export function ShotDrawer({
   const patchMode = usePatchShot(episodeId);
   const confirm = useConfirm();
   const [fields, setFields] = useState<FieldsState | null>(null);
+  // 引擎建议的「用这个」：改草稿里的视频引擎（不保存），seq 每次加一
+  const [assign, setAssign] = useState<{ values: FieldValues; seq: number } | null>(null);
+  // 按镜头推荐视频引擎（整集一次查完，挑这一镜的）
+  const engineAdvice = useEngineAdvice(episodeId);
+  const shotAdvice = engineAdvice.data?.shots.find((a) => a.shot_id === shot.id);
   const [dialogueDirty, setDialogueDirty] = useState(false);
   const [dialogueDraft, setDialogueDraft] = useState<DialogueLine[] | null>(null);
   const [saving, setSaving] = useState(false);
@@ -782,6 +789,17 @@ export function ShotDrawer({
             error={patch.error ? errorText(patch.error) : null}
             onValuesChange={setFields}
             onSave={(_v, changed) => patch.mutate({ id: shot.id, ...toShotPatch(changed) })}
+            assign={assign}
+            extras={{
+              video_engine: (
+                <ShotEngineHint
+                  advice={shotAdvice}
+                  draft={videoEngine}
+                  disabled={patch.isPending}
+                  onUse={(engine) => setAssign((a) => ({ values: { video_engine: engine }, seq: (a?.seq ?? 0) + 1 }))}
+                />
+              ),
+            }}
           />
           {Object.keys(shot.placeholder_names ?? {}).length > 0 && (
             <p className="muted small" data-testid="placeholder-legend">
