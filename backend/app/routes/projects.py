@@ -14,6 +14,7 @@ from backend.app.schemas import (CharacterIn, CharacterOut, CharacterPatch, EndC
                                  ProjectOverview, ProjectPatch, StyleIO, TurnaroundCellOut,
                                  TurnaroundOut, TurnaroundSheetOut)
 from backend.domain.characters import portrait_ext, portrait_of, set_portrait
+from backend.domain.settings import default_image_engine, default_video_engine
 from backend.domain.turnaround import (DEFAULT_SHEET_ENGINE, SHEETS, VIEW_KEYS, VIEW_LABELS,
                                        VIEW_SHEET, cell_state, crop_method, sheet_slot_kind,
                                        sheet_state)
@@ -51,10 +52,13 @@ def create_project(body: ProjectIn, request: Request):
     if not SLUG_RE.match(slug):
         raise JobError("slug 只能包含文字、数字、下划线和短横线，最长 64 个字符")
     check_engines(sv, body.image_engine, body.video_engine)
+    data = body.model_dump(exclude={"slug"})
+    data["image_engine"] = body.image_engine or default_image_engine(sv)
+    data["video_engine"] = body.video_engine or default_video_engine(sv)
     with sv.db.session() as s:
         if s.scalar(select(Project).where(Project.slug == slug)):
             raise HTTPException(409, f"项目 {slug} 已存在")
-        p = Project(slug=slug, **body.model_dump(exclude={"slug"}))
+        p = Project(slug=slug, **data)
         s.add(p)
         s.flush()
         out = ProjectOut.model_validate(p)

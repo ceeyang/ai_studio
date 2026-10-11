@@ -61,8 +61,10 @@ def make_gateway(texts, kind: str = "openai"):
 
 def make_services(tmp_path, db, *, llm=None, comfy=None, ffmpeg=None, cfg=None) -> Services:
     cfg = cfg or Config(server=ServerCfg(data_dir=tmp_path / "data"))
+    from backend.domain.settings import SettingsStore
+
     return Services(cfg=cfg, db=db, media=MediaStore(cfg.data_dir), engines=EngineRegistry(cfg),
-                    llm=llm, ffmpeg=ffmpeg or FFmpeg(), comfy=comfy)
+                    llm=llm, ffmpeg=ffmpeg or FFmpeg(), comfy=comfy, settings=SettingsStore(db))
 
 
 def seed_episode(db, *, slug="demo", source="林夏在直播间发现提词器被人改了。", target=20.0,

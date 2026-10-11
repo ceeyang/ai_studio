@@ -230,3 +230,11 @@ class Export(Base):
     settings: Mapped[dict] = mapped_column(JSON, default=dict)
     is_final: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class AppSetting(Base):
+    """全局设置（设置页「默认模型」）：key → JSON 值。值为 null 或没有这一行就是「跟随默认」。"""
+    __tablename__ = "app_settings"
+    key: Mapped[str] = mapped_column(String(80), primary_key=True)
+    value: Mapped[dict | list | str | None] = mapped_column(JSON, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)

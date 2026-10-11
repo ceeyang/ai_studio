@@ -27,6 +27,7 @@ class Services:
     comfy_client: Any = None  # ComfyClient
     browser: Any = None      # BrowserRunner（gpt_image / gemini_image）
     runninghub: Any = None   # RunningHubRunner（config 里配了 runninghub 才有）
+    settings: Any = None     # SettingsStore（设置页的默认模型、按步骤单独设置）
 
     def prompts(self, slug: str) -> PromptLibrary:
         return PromptLibrary(BUILTIN_DIR, self.media.project_dir(slug) / "prompts")
@@ -47,7 +48,12 @@ def build_services(cfg: Config, db: Database, manager: Any) -> Services:
     client = ComfyClient(cfg.comfyui.url, timeout=cfg.comfyui.timeout,
                          max_retries=cfg.comfyui.max_retries)
     runner = ComfyRunner(client)
-    llm = LLMGateway(cfg.llm, build_providers(cfg.llm), gpu_guard=manager.gpu_exclusive)
+    from backend.domain.settings import SettingsStore
+
+    store = SettingsStore(db)
+    # 每次调用 LLM 时现读设置：按步骤单独设置 → 全局默认文本模型 → config.yaml
+    llm = LLMGateway(cfg.llm, build_providers(cfg.llm), gpu_guard=manager.gpu_exclusive,
+                     override=store.llm_provider)
     # 换模型族、或本机 LLM 要用显卡时，先让 ComfyUI 把模型卸掉
     manager.on_family_switch = lambda old, new: runner.free()
     manager.on_gpu_handover = runner.free
@@ -71,4 +77,4 @@ def build_services(cfg: Config, db: Database, manager: Any) -> Services:
     return Services(cfg=cfg, db=db, media=MediaStore(cfg.data_dir), engines=EngineRegistry(cfg),
                     llm=llm, ffmpeg=FFmpeg(cfg.ffmpeg.ffmpeg, cfg.ffmpeg.ffprobe),
                     comfy=runner, comfy_client=client,
-                    browser=BrowserRunner(BrowserSession(cfg.browser)), runninghub=rh)
+                    browser=BrowserRunner(BrowserSession(cfg.browser)), runninghub=rh, settings=store)

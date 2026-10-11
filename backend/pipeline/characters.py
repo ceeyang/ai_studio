@@ -7,10 +7,11 @@ import shutil
 
 from backend.domain.characters import add_portrait, portrait_of
 from backend.domain.hashing import input_hash
+from backend.domain.settings import portrait_engine, sheet_engine
 from backend.domain.models import Character, Episode
 from backend.engines.base import ImageRequest
 from backend.domain.slots import add_candidate, get_or_create_slot
-from backend.domain.turnaround import (DEFAULT_SHEET_ENGINE, SHEETS, crop_cells, look_of,
+from backend.domain.turnaround import (SHEETS, crop_cells, look_of,
                                        sheet_hash, sheet_inputs, sheet_slot_kind)
 from backend.llm.schemas import CharacterRecommendations, DesignOptions, TurnaroundLook
 from backend.pipeline.common import load_episode
@@ -60,7 +61,7 @@ def run_portrait(ctx, payload: dict) -> dict:
         vp = (payload.get("visual_prompt") or ch.visual_prompt or "").strip()
         if not vp:
             raise JobError(f"角色 {ch.name} 还没有外貌提示词，先写一个或用 AI 推荐造型")
-        engine_name = str(payload.get("engine") or proj.image_engine)
+        engine_name = portrait_engine(sv, proj.image_engine, payload.get("engine"))
         try:
             engine = sv.engines.image(engine_name)
         except KeyError as e:
@@ -115,7 +116,8 @@ def run_suggest(ctx, payload: dict) -> dict:
             raise ValueError(f"要正好 {count} 个方案，现在是 {len(out.options)} 个")
 
     out = sv.llm.generate(LLM_TASK, system, user, DesignOptions, check=check, log=ctx.log,
-                          manual=payload.get("manual") or {}, key=f"character.suggest:{char_id}")
+                          manual=payload.get("manual") or {}, key=f"character.suggest:{char_id}",
+                          step="character.suggest")
     opts = [o.model_dump() for o in out.options]
     with sv.db.session() as s:
         _load_char(s, char_id).design_options = opts
@@ -142,7 +144,7 @@ def run_recommend(ctx, payload: dict) -> dict:
             episode=_episode_ctx(ep))
     out = sv.llm.generate(LLM_TASK, system, user, CharacterRecommendations, log=ctx.log,
                           manual=payload.get("manual") or {},
-                          key=f"character.recommend:{episode_id}")
+                          key=f"character.recommend:{episode_id}", step="character.recommend")
     have = set(existing)
     chars = [c.model_dump() for c in out.characters if c.name.strip() not in have][:count]
     ctx.log(f"推荐角色：{'、'.join(c['name'] for c in chars) or '（没有需要补的）'}")
@@ -167,7 +169,8 @@ def run_turnaround_look(ctx, payload: dict) -> dict:
         name = ch.name
     out = sv.llm.generate(LLM_TASK, system, user, TurnaroundLook, log=ctx.log,
                           manual=payload.get("manual") or {},
-                          key=f"character.turnaround_look:{char_id}")
+                          key=f"character.turnaround_look:{char_id}",
+                          step="character.turnaround_look")
     with sv.db.session() as s:
         _load_char(s, char_id).turnaround_look = out.description
     n = len(out.description.split())
@@ -176,8 +179,8 @@ def run_turnaround_look(ctx, payload: dict) -> dict:
 
 
 def sheet_engine_name(sv, proj) -> str:
-    """出设定图默认用 H3（带定妆照锁脸），没有 H3 时用项目的图像引擎。"""
-    return DEFAULT_SHEET_ENGINE if DEFAULT_SHEET_ENGINE in sv.engines.names("image")         else proj.image_engine
+    """出设定图默认：设置页三视图这一步的设置 → H3（带定妆照锁脸）→ 项目的图像引擎。"""
+    return sheet_engine(sv, proj.image_engine)
 
 
 @HANDLERS.register("image.turnaround", gpu=True)

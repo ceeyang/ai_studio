@@ -41,6 +41,7 @@ def _add_h3_turbo(wf: dict, lora_name: str) -> None:
 
 
 class ZImageEngine(_ComfyEngine):
+    label = "Z-Image 快速"
     name = "zimage"
     family = "zimage"
     template_name = "zimage"
@@ -62,6 +63,7 @@ class Krea2Engine(_ComfyEngine):
     """moodyCutieMixKrea2 文生图（人像向）：8 步出图 → 潜空间放大 1.5 倍 → 4 步 denoise 0.54 精修。
 
     不吃参考图；最终出图是 EmptyLatent 尺寸的 1.5 倍（9:16 出 1152×2016）。"""
+    label = "Krea2 人像"
     name = "krea2"
     family = "krea2"
     template_name = "krea2"
@@ -81,6 +83,7 @@ class Krea2Engine(_ComfyEngine):
 
 class H3ImageEngine(_ComfyEngine):
     """H3 ref2va 出 5 帧取第 0 帧。20 步定稿；turbo 4 步只适合探构图（静帧会糊）。"""
+    label = "H3 图像"
     name = "h3_image"
     family = "h3"
     template_name = "h3_image"
@@ -106,6 +109,7 @@ class H3ImageEngine(_ComfyEngine):
 
 class H3VideoEngine(_ComfyEngine):
     """H3 参考图 → 视频 + 原生立体声。帧数落在 17k+5 网格（24fps）。"""
+    label = "H3 视频（有声）"
     name = "h3_video"
     family = "h3"
     template_name = "h3_video"
@@ -145,6 +149,7 @@ class H3VideoEngine(_ComfyEngine):
 
 class Wan22I2VEngine(_ComfyEngine):
     """Wan2.2 I2V 14B + lightx2v 4 步。无声，16fps，帧数为 4k+1。"""
+    label = "Wan2.2 图生视频（无声）"
     name = "wan22_i2v"
     family = "wan22"
     template_name = "wan22_i2v"

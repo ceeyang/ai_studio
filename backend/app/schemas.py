@@ -22,8 +22,8 @@ class ProjectIn(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     slug: str | None = None
     aspect: Aspect = "9:16"
-    image_engine: str = "zimage"
-    video_engine: str = "h3_video"
+    image_engine: str | None = None     # 不给就按设置页：首帧这一步 → 全局默认图片来源 → zimage
+    video_engine: str | None = None     # 不给就按设置页：视频这一步 → 全局默认视频来源 → h3_video
     seed: int = 12345
     negative: str = ""
 

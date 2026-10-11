@@ -33,6 +33,7 @@ class ComfyCfg(BaseModel):
 class ProviderCfg(BaseModel):
     id: str
     kind: Literal["openai", "claude", "manual"]
+    label: str | None = None           # 设置页上显示的名字；不写按类型给一个
     base_url: str | None = None
     model: str | None = None
     api_key_env: str | None = None
@@ -44,6 +45,17 @@ class ProviderCfg(BaseModel):
 
     def api_key(self) -> str | None:
         return os.environ.get(self.api_key_env) if self.api_key_env else None
+
+    def display_name(self) -> str:
+        if self.label:
+            return self.label
+        if self.kind == "claude":
+            return f"Claude（本机 Claude Code{' · ' + self.model if self.model else ''}）"
+        if self.kind == "manual":
+            return "手动粘贴（自己去网页上问，再把结果贴回来）"
+        if self.local_gpu:
+            return f"本机 LM Studio（{self.model or self.id}，占显卡）"
+        return f"{self.id}（{self.model or 'OpenAI 兼容接口'}）"
 
 
 class LLMCfg(BaseModel):

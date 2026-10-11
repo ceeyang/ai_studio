@@ -50,7 +50,8 @@ def engines(request: Request):
 
     def row(name):
         e = reg.get(name)
-        return {"name": name, "family": e.family, "runtime": runtime_of(e), "caps": asdict(e.caps)}
+        return {"name": name, "label": getattr(e, "label", None) or name, "family": e.family,
+                "runtime": runtime_of(e), "caps": asdict(e.caps)}
 
     return {"image": [row(n) for n in reg.names("image")],
             "video": [row(n) for n in reg.names("video")]}

@@ -92,8 +92,10 @@ def project_list():
 def project_create(title: str,
                    slug: Optional[str] = typer.Option(None, help="目录名，默认由标题生成"),
                    aspect: str = typer.Option("9:16", help="9:16 或 16:9"),
-                   image_engine: str = typer.Option("zimage", "--image-engine"),
-                   video_engine: str = typer.Option("h3_video", "--video-engine")):
+                   image_engine: Optional[str] = typer.Option(
+                       None, "--image-engine", help="不给就按设置页的默认图片来源"),
+                   video_engine: Optional[str] = typer.Option(
+                       None, "--video-engine", help="不给就按设置页的默认视频来源")):
     body = {"title": title, "aspect": aspect, "image_engine": image_engine,
             "video_engine": video_engine}
     if slug:

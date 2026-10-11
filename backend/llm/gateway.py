@@ -2,6 +2,9 @@
 
 本机 GPU 上的 provider（LM Studio）在 gpu_guard 里调用：先等 GPU 任务让出显卡，
 调用结束后卸载模型，再把显卡还给 ComfyUI。
+
+用哪个 provider：每次调用时先问 override(step)（设置页的「按步骤单独设置 → 默认文本模型」，
+见 backend/domain/settings.py），没有再按 config.yaml 的 llm.routes / llm.default。改设置不用重启。
 """
 from __future__ import annotations
 
@@ -38,19 +41,37 @@ def parse_output(text: str, schema: type[T], check: Callable[[T], None] | None =
 class LLMGateway:
     def __init__(self, cfg: LLMCfg, providers: dict[str, LLMProvider], *,
                  gpu_guard: Callable[[], AbstractContextManager] | None = None,
-                 run: Callable[..., Any] = subprocess.run):
+                 run: Callable[..., Any] = subprocess.run,
+                 override: Callable[[str], str | None] | None = None):
         self.cfg = cfg
         self.providers = providers
         self.gpu_guard = gpu_guard
         self._run = run
+        self.override = override
+
+    def provider_cfg(self, task: str, step: str | None = None) -> ProviderCfg:
+        """这一次调用用哪个 provider：设置页的覆盖（按步骤 → 全局默认）→ config.yaml。"""
+        pid = None
+        if self.override is not None:
+            try:
+                pid = self.override(step or task)
+            except Exception as e:  # 读设置失败不能挡住任务，退回 config
+                logger.warning("读文本模型设置失败，按 config.yaml：%s", e)
+        if pid:
+            try:
+                return self.cfg.provider(pid)
+            except KeyError:
+                logger.warning("设置里的文本模型 %s 不在 config.yaml 的 llm.providers 里，按 config.yaml", pid)
+        return self.cfg.provider_for(task)
 
     def generate(self, task: str, system: str, user: str, schema: type[T], *,
                  check: Callable[[T], None] | None = None,
                  log: Callable[[str], None] | None = None,
-                 manual: dict | None = None, key: str | None = None) -> T:
+                 manual: dict | None = None, key: str | None = None,
+                 step: str | None = None) -> T:
         emit = log or (lambda m: None)
         key = key or task
-        pcfg = self.cfg.provider_for(task)
+        pcfg = self.provider_cfg(task, step)
         if pcfg.kind == "manual":
             return self._manual(task, key, system, user, schema, check, manual or {})
         provider = self.providers.get(pcfg.id)
