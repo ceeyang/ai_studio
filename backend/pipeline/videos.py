@@ -9,9 +9,9 @@ from backend.engines.base import VideoRequest
 from backend.pipeline.common import job_services
 from backend.pipeline.keyframes import load_shot, ref_labels, run_comfy
 from backend.domain.models import Location, SceneBlock
-from backend.pipeline.prompting import (compose_video_prompt, join_negative, location_summary,
-                                        shot_seed, video_input_hash, video_inputs,
-                                        with_continuity)
+from backend.pipeline.prompting import (Speaker, compose_video_prompt, join_negative,
+                                        location_summary, short_ref, shot_seed, video_input_hash,
+                                        video_inputs, with_continuity)
 from backend.queue.errors import JobCanceled, JobError
 from backend.queue.handlers import HANDLERS
 
@@ -41,6 +41,11 @@ def scene_qc(ctx, sv, path, code: str) -> dict | None:
     return {"hard_cuts": cuts}
 
 
+def _speakers(proj, shot) -> dict[str, Speaker]:
+    on = {c.get("character_id") for c in shot.cast or [] if isinstance(c, dict)}
+    return {c.name: Speaker(short_ref(c.visual_prompt), c.id in on) for c in proj.characters}
+
+
 def _shot_location(s, shot) -> str:
     """这一镜所在段落的场景外观摘要（英文）；手工镜头没挂段落、场景没写外观时为空。"""
     blk = s.get(SceneBlock, shot.scene_block_id) if shot.scene_block_id else None
@@ -63,9 +68,10 @@ def run_video(ctx, payload: dict) -> dict:
         except KeyError as e:
             raise JobError(str(e)) from None
         has_audio = engine.caps.has_audio
+        # 发给引擎的版本：说话人用英文简称、画外音写明；输入哈希仍按老写法算（见 compose_video_prompt）
         prompt = compose_video_prompt(shot.motion_prompt, shot.image_prompt, shot.audio_prompt,
                                       shot.dialogue, anchor=style.anchor_text if style else "",
-                                      has_audio=has_audio)
+                                      has_audio=has_audio, speakers=_speakers(proj, shot))
         negative = join_negative(proj.negative, style.negative if style else "")
         packed = shot_refs(s, shot)
         refs = [sv.media.abs(r.file_path) for r in packed]

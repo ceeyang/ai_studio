@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import re
 
+from typing import NamedTuple
+
 from backend.domain.hashing import input_hash
 
 # ------------------------------------------------------------ 定妆照用的风格词
@@ -60,13 +62,50 @@ def compose_image_prompt(image_prompt: str, anchor: str) -> str:
     return p if not a or a in p else f"{a} {p}"
 
 
+class Speaker(NamedTuple):
+    """视频提示词里怎么称呼说话人：英文简称（不写中文名），以及他在不在画面里（在这一镜的 cast 里）。"""
+    ref: str
+    on_screen: bool
+
+
+_REF_CUT = re.compile(r",|;|\.|\bwith\b|\bwearing\b|\bwho\b|\band\b", re.I)
+
+
+def short_ref(visual_prompt: str | None) -> str:
+    """角色外貌的英文简称：第一个分句（到逗号 / with / wearing 为止，最多 8 个词），前面加 the。
+    如「a woman in her late twenties with an oval face」→「the woman in her late twenties」。"""
+    text = (visual_prompt or "").strip()
+    if not text or _CJK_ANY.search(text):
+        return "the speaker"
+    head = _REF_CUT.split(text, 1)[0].strip()
+    words = head.split()[:8]
+    if words and words[0].lower() in ("a", "an", "the"):
+        words = words[1:]
+    return "the " + " ".join(words) if words else "the speaker"
+
+
+def _dialogue_line(d: dict, speakers: dict[str, Speaker] | None, anyone_on_screen: bool) -> str:
+    said = f'says in Mandarin Chinese: "{d["zh"]}"'
+    if speakers is None:   # 老写法：算输入哈希用，保持一字不差，已有视频不会因此过期
+        return f'{d.get("speaker", "")} {said}'
+    sp = speakers.get(d.get("speaker", ""))
+    if sp is not None and sp.on_screen:
+        return f"{sp.ref} {said}"
+    lips = ", the on-screen character's lips stay closed" if anyone_on_screen else ""
+    return f"an off-screen voice {said}{lips}"
+
+
 def compose_video_prompt(motion_prompt: str, image_prompt: str, audio_prompt: str,
-                         dialogue: list[dict], *, anchor: str, has_audio: bool) -> str:
+                         dialogue: list[dict], *, anchor: str, has_audio: bool,
+                         speakers: dict[str, Speaker] | None = None) -> str:
+    """speakers 给了（发给引擎时）：画面里的说话人用英文简称，不在画面里的写成画外音、画面里的人闭嘴；
+    不给（算输入哈希、inputs 摘要时）：沿用老写法。"""
     text = compose_image_prompt((motion_prompt or "").strip() or image_prompt, anchor)
     if not has_audio:
         return text
     audio = (audio_prompt or "").strip()
-    lines = [f'{d.get("speaker", "")} says in Mandarin Chinese: "{d["zh"]}"'
+    anyone = any(sp.on_screen for sp in (speakers or {}).values())
+    lines = [_dialogue_line(d, speakers, anyone)
              for d in dialogue or [] if d.get("zh") and d["zh"] not in audio]
     parts = [p for p in (audio, " ".join(lines)) if p]
     return text + ("\nAudio: " + " ".join(parts) if parts else "")

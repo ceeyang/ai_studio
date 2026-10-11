@@ -361,3 +361,62 @@ def test_video_cancel_during_scene_check_still_registers_candidate(tmp_path, db)
         c = video_slot.candidates[0]
         assert "qc" not in c.params and ctx.services.media.abs(c.file_path).exists()
     assert any("跳切检测时任务被取消" in m for m in ctx.logs)
+
+
+# ---------------------------------------------------------------- 视频提示词里的说话人
+def test_short_ref_from_visual_prompt():
+    from backend.pipeline.prompting import short_ref
+
+    assert short_ref("a woman in her late twenties with an oval face, slim build") == \
+        "the woman in her late twenties"
+    assert short_ref("Chinese man in his mid-fifties with a weathered square face.") == \
+        "the Chinese man in his mid-fifties"
+    assert short_ref("") == "the speaker" and short_ref("老周，五十多岁") == "the speaker"
+
+
+def test_video_dialogue_lines_use_english_refs_and_off_screen_voice():
+    from backend.pipeline.prompting import Speaker
+
+    dlg = [{"speaker": "林夏", "zh": "词被改了", "start": 0.5, "end": 2},
+           {"speaker": "老周", "zh": "我早就知道", "start": 2.2, "end": 3.5}]
+    speakers = {"林夏": Speaker("the woman in her late twenties", True),
+                "老周": Speaker("the stocky man", False)}
+    v = compose_video_prompt("she looks up", "img", "quiet hum", dlg, anchor="", has_audio=True,
+                             speakers=speakers)
+    audio = v.split("\nAudio: ", 1)[1]
+    assert 'the woman in her late twenties says in Mandarin Chinese: "词被改了"' in audio
+    assert ('an off-screen voice says in Mandarin Chinese: "我早就知道", '
+            "the on-screen character's lips stay closed") in audio
+    assert "林夏" not in v and "老周" not in v
+    # 不给 speakers（算输入哈希用）：和以前一字不差，已有视频不会因此过期
+    old = compose_video_prompt("she looks up", "img", "quiet hum", dlg[:1], anchor="A",
+                               has_audio=True)
+    assert old == 'A she looks up\nAudio: quiet hum 林夏 says in Mandarin Chinese: "词被改了"'
+
+
+def test_video_job_sends_speaker_refs_but_hash_unchanged(tmp_path, db):
+    from backend.domain.models import Character, Episode
+    from backend.pipeline.prompting import video_input_hash
+
+    ctx, runner, shot_id = setup(tmp_path, db)
+    with db.session() as s:
+        shot = s.get(Shot, shot_id)
+        ep = s.get(Episode, shot.episode_id)
+        lin = Character(project_id=ep.project_id, name="林夏",
+                        visual_prompt="a woman in her late twenties with an oval face")
+        zhou = Character(project_id=ep.project_id, name="老周",
+                         visual_prompt="a stocky man in his fifties with grey stubble")
+        s.add_all([lin, zhou])
+        s.flush()
+        shot.cast = [{"character_id": lin.id, "variation_id": None}]
+        shot.dialogue = [{"speaker": "老周", "zh": "我早就知道", "start": 0.5, "end": 2.0}]
+    run_keyframe(ctx, {"shot_id": shot_id})
+    run_video(ctx, {"shot_id": shot_id})
+    prompt = runner.calls[-1].workflow["6"]["inputs"]["prompt"]
+    assert 'an off-screen voice says in Mandarin Chinese: "我早就知道"' in prompt
+    assert "老周" not in prompt
+    with db.session() as s:
+        v = selected_candidate(s, "shot", shot_id, "video")
+        shot, _, proj, style = load_shot(s, shot_id)
+        assert v.input_hash == video_input_hash(shot, proj, style,
+                                                v.params["first_frame_candidate_id"], "h3_video", True)

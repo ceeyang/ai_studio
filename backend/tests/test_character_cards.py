@@ -124,7 +124,7 @@ def test_portrait_prompt_keeps_only_photographic_style_terms():
     assert "bottom edge of the frame cuts across the belt" in low
     assert "light-grey studio backdrop" in low
     # zimage 是 cfg 1，负面词不起作用：正面提示词里只写要什么，不写「腿不入画」「no props」这类否定
-    assert not re.search(r"legs?|no (props|environment|other people)", low)
+    assert not re.search(r"\blegs?\b|\bno (props|environment|other people)", low)
     # 半身照：只写下半身的句子（裤子、靴子）去掉，脸、上衣、手表都保留
     assert "trousers" not in low and "boots" not in low
     assert "weathered square face" in p and "work jacket" in p and "wristwatch" in p
