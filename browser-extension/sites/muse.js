@@ -1,5 +1,5 @@
 /*
- * Meta Muse 网页版（muse.ai）出图、出视频。和 backend/engines/browser/sites/muse.py 是同一份选择器——
+ * Meta Muse 网页版（muse.ai）出图、出视频，也当网页文本模型（web_muse）用。和 backend/engines/browser/sites/muse.py 是同一份选择器——
  * 网站改版时两边一起改（backend/tests/test_browser_extension_js.py 会比对两边是否一致）。
  *
  * Muse 是常驻智能体：一个主对话（用户自己的事都在里面）+ 若干 side chat。studio 只用 side chat：

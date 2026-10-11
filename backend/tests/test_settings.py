@@ -214,7 +214,7 @@ def test_api_get_defaults(api):
     assert steps["script"]["label"] == "剧本" and steps["script"]["kind"] == "llm"
     assert steps["turnaround"]["effective"] == "h3_image" and steps["portrait"]["effective"] == "zimage"
     assert [p["id"] for p in d["choices"]["llm"]] == ["manual", "openai_api", "anthropic_api", "gemini_api",
-                                                     "web_chatgpt", "web_gemini", "web_claude"]
+                                                     "web_chatgpt", "web_gemini", "web_claude", "web_muse"]
     img = {e["name"]: e for e in d["choices"]["image"]}
     assert img["krea2"]["label"] == "Krea2 人像" and img["krea2"]["runtime"] == "comfyui"
     assert img["gpt_image"]["runtime"] == "browser" and img["zimage"]["ready"] is True

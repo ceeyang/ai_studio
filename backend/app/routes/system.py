@@ -30,7 +30,7 @@ def _browser_ext(browser) -> dict:
     if info.get("connected"):
         return {"ok": True, "message": f"浏览器扩展已连上 · v{info.get('version') or '?'}"
                                        f" · {info.get('browser') or '浏览器'}"}
-    return {"ok": False, "message": "浏览器扩展没有连上，ChatGPT / Gemini 出图会失败；到设置页看安装步骤"}
+    return {"ok": False, "message": "浏览器扩展没有连上，网页出图、出视频（ChatGPT / Gemini / Muse）会失败；到设置页看安装步骤"}
 
 
 @router.get("/system/health")

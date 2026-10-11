@@ -10,7 +10,7 @@ browser.transport=cdp（备用）：studio 自己带调试端口启动独立配�
 - sites/：每个网站的选择器和文案匹配，网站改版时只改这里
 - runner.py：任务执行入口（每个网站一把锁、一个标签页，按 transport 分派），落盘、按画幅裁切
 - engines.py：gpt_image / gemini_image 两个图像引擎（把请求拼成网页出图请求）
-- chat.py：网页文本模型（web_chatgpt / web_gemini / web_claude，见 backend/llm/web_providers.py）的页面流程，
+- chat.py：网页文本模型（web_chatgpt / web_gemini / web_claude / web_muse，见 backend/llm/web_providers.py）的页面流程，
   studio 通过扩展的 rpc 一步步驱动（扩展 v0.2 起），选择器在 sites/ 里
 - conversations.py：网页会话续接（同一个角色 / 镜头 / 场景 / 道具 / 某集某一步在同一网站上接着上次的对话），
   记录在 browser_conversations 表；出图续接要扩展 v0.3（conversation 能力），旧扩展照旧每次新对话

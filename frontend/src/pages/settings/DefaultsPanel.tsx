@@ -154,9 +154,9 @@ export function DefaultsPanel() {
     save.mutate(patch, { onSuccess: () => setJustSaved(true) });
   };
   const overridden = data.steps.filter((s) => s.value).length;
-  // 网页文本模型（ChatGPT / Gemini / Claude 网页）：用不了的写明原因（扩展没连上 / 要重新加载 / 没登录）
+  // 网页文本模型（ChatGPT / Gemini / Claude / Muse 网页）：用不了的写明原因（扩展没连上 / 要重新加载 / 没登录）
   const web = data.choices.llm.filter((c) => c.kind === 'web');
-  // 几家原因一样（扩展没连上、要重新加载）合成一条：「ChatGPT / Gemini / Claude 网页用不了：…」
+  // 几家原因一样（扩展没连上、要重新加载）合成一条：「ChatGPT / Gemini / Claude / Muse 网页用不了：…」
   const webNotes = new Map<string, string[]>();
   for (const c of web) {
     if (c.ready !== false || !c.note) continue;
@@ -210,7 +210,7 @@ export function DefaultsPanel() {
           <small className="muted">剧本、分镜、角色推荐、台词适配、字幕翻译都用它（下面可以单独改）</small>
           {web.length > 0 && (
             <small className="muted" data-testid="web-llm-advice">
-              ChatGPT / Gemini / Claude 网页走浏览器扩展、用网页的免费额度，较慢：适合写梗概、角色推荐这类短文本；剧本、分镜输出长，网页版可能截断，优先用 API 或本机 Claude。
+              ChatGPT / Gemini / Claude / Muse 网页走浏览器扩展、用网页的免费额度，较慢：适合写梗概、角色推荐这类短文本；剧本、分镜输出长，网页版可能截断，优先用 API 或本机 Claude。
             </small>
           )}
           {Array.from(webNotes, ([note, names]) => (

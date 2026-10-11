@@ -114,7 +114,7 @@ def _check_extension(used: dict, browser) -> list[Check]:
         feats = info.get("features") or []
         if RPC_FEATURE not in feats:
             out.append(Check("浏览器", "扩展版本", "warn",
-                             reload_text(info.get("version") or "?", "还不支持网页文本模型（ChatGPT / Gemini / Claude 网页）")))
+                             reload_text(info.get("version") or "?", "还不支持网页文本模型（ChatGPT / Gemini / Claude / Muse 网页）")))
         elif VIDEO_FEATURE not in feats or CONVERSATION_FEATURE not in feats:
             out.append(Check("浏览器", "扩展版本", "warn",
                              reload_text(info.get("version") or "?", "还不能网页出视频、也不会接着用之前的对话")))

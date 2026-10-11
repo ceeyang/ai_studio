@@ -110,6 +110,6 @@ describe('设置页折叠块', () => {
 
   it('老扩展缺的能力写成中文', () => {
     expect(missingText(['video'])).toBe('网页出视频（Gemini / Muse）');
-    expect(missingText(undefined)).toBe('网页文本模型（ChatGPT / Gemini / Claude 网页）');
+    expect(missingText(undefined)).toBe('网页文本模型（ChatGPT / Gemini / Claude / Muse 网页）');
   });
 });

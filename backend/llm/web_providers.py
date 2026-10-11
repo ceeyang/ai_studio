@@ -1,4 +1,4 @@
-"""网页文本模型：在用户自己浏览器里已登录的 ChatGPT / Gemini / Claude 网页上问（免费额度，不用 API Key）。
+"""网页文本模型：在用户自己浏览器里已登录的 ChatGPT / Gemini / Claude / Muse 网页上问（免费额度，不用 API Key）。
 
 走浏览器扩展（browser-extension，v0.2 起有 rpc）：在专门写文本的标签页里（不用出图的那个）开一个新对话，
 归属到某集某一步的调用（剧本、分镜每段、推荐角色）重新生成时续接上次那条对话（backend/engines/browser/
@@ -24,7 +24,10 @@ from backend.queue.trace import annotate_last
 logger = logging.getLogger(__name__)
 
 # 文本模型 provider id → 网站（backend/engines/browser/sites 的 key）
-WEB_PROVIDERS: dict[str, str] = {"web_chatgpt": "chatgpt", "web_gemini": "gemini", "web_claude": "claude"}
+# Muse（muse.ai）在 side chat 里问（muse.ai/thread/new），不碰用户的主对话；2026-10-11 实测：一轮回复是一个气泡，
+# 12 个分镜约 2600 字的 JSON 31 秒写完、能直接解析，没掺进用户的个人上下文
+WEB_PROVIDERS: dict[str, str] = {"web_chatgpt": "chatgpt", "web_gemini": "gemini", "web_claude": "claude",
+                                 "web_muse": "muse"}
 WEB_TIMEOUT = 300.0          # 等回复写完的最长秒数（长输出够用；剧本、分镜更长的不建议用网页版）
 LOCK_WAIT = 900.0            # 网站被出图任务占着时最多排队等多久
 JSON_RULE = ("【输出格式】只输出一个 JSON 对象，放在 ```json 代码块里；代码块外面不要写任何文字，不要解释。"

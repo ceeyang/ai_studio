@@ -12,7 +12,7 @@ const PAGE_TEXT: Record<string, string> = {
 };
 
 const FEATURE_TEXT: Record<string, string> = {
-  rpc: '网页文本模型（ChatGPT / Gemini / Claude 网页）',
+  rpc: '网页文本模型（ChatGPT / Gemini / Claude / Muse 网页）',
   video: '网页出视频（Gemini / Muse）',
 };
 

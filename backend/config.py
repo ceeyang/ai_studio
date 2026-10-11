@@ -58,7 +58,7 @@ class ProviderCfg(BaseModel):
         if self.kind == "manual":
             return "手动粘贴（自己去网页上问，再把结果贴回来）"
         if self.kind == "web":
-            site = {"chatgpt": "ChatGPT", "gemini": "Gemini", "claude": "Claude"}.get(self.site or "", self.site or "?")
+            site = {"chatgpt": "ChatGPT", "gemini": "Gemini", "claude": "Claude", "muse": "Muse"}.get(self.site or "", self.site or "?")
             return f"{site} 网页（浏览器扩展，免费额度，较慢）"
         api = {"openai_api": "OpenAI GPT", "anthropic": "Anthropic Claude", "gemini": "Google Gemini"}
         if self.kind in api:

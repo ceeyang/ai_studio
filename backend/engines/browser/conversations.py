@@ -3,7 +3,7 @@
 作用域（同一站点内各自一条对话）：
 - 出图（gpt_image / gemini_image）：角色的定妆照、三视图等所有图 → character:<角色 id>；镜头首帧 → shot:<镜头 id>；
   场景图 → location:<id>；道具图 → prop:<id>。
-- 网页文本模型（web_chatgpt / web_gemini / web_claude）：按集、按步骤 → episode:<集 id>:<步骤 key>。
+- 网页文本模型（web_chatgpt / web_gemini / web_claude / web_muse）：按集、按步骤 → episode:<集 id>:<步骤 key>。
   剧本两步各一条（script_structure / script_visual）；分镜是按段落调用的（每段一次 LLM 调用，key 是
   storyboard:<段落 id>），所以每段一条对话：重写某段分镜就接着这段上次的对话，几十段不会挤进同一条对话里
   很快超过轮数上限；推荐角色按集一条。写梗概、推荐造型等没归属到集的步骤不续接（每次新对话）。

@@ -145,3 +145,26 @@ def test_cdp_transport_rejects_web_video(api, tmp_path, monkeypatch):
     monkeypatch.setattr(api.app.state.services.browser.session.cfg, "transport", "cdp")
     job = VideoJob(api, tmp_path).join()
     assert isinstance(job.error, BrowserError) and "只支持浏览器扩展" in str(job.error)
+
+
+# ---------------------------------------------------------------- Muse 也当网页文本模型
+def test_web_muse_text_provider():
+    from backend.config import ProviderCfg
+    from backend.llm.web_providers import WEB_PROVIDERS, WebChatProvider
+    from backend.tests.test_web_llm import ANSWER, Idea, gateway_for, make_runner
+
+    assert WEB_PROVIDERS["web_muse"] == "muse"
+    seen = {}
+
+    def fake_ask(driver, spec, prompt, images, *, timeout, log, fresh, **kw):
+        seen.update(spec=spec.key, text_reply=spec.text_reply, new=spec.new_chat_url)
+        return ANSWER
+
+    cfg = ProviderCfg(id="web_muse", kind="web", site="muse", timeout=300)
+    prov = WebChatProvider(cfg, browser=make_runner(), chat=fake_ask, driver_factory=lambda hub, tab: None)
+    out = gateway_for("web_muse", prov).generate("script", "你是编剧。", "写第一集", Idea)
+    assert out.text.startswith("第一集")
+    # 在 side chat 里问（不碰用户的主对话），读 assistant 消息
+    assert cfg.display_name() == "Muse 网页（浏览器扩展，免费额度，较慢）"
+    assert seen == {"spec": "muse", "text_reply": '[data-message-role="assistant"]',
+                    "new": "https://muse.ai/thread/new"}
