@@ -115,13 +115,17 @@ def run_video(ctx, payload: dict) -> dict:
         slot = get_or_create_slot(s, "shot", shot.id, "video")
         seed = shot_seed(proj.seed, shot.id, len(slot.candidates))
         seconds = max(1.0, min(float(shot.duration), engine.caps.max_seconds))
+        # 最后一句台词说完再留 0.3 秒：帧数网格往下取时不能把台词截掉
+        min_seconds = min(max((float(d.get("end") or 0) for d in shot.dialogue or []),
+                              default=0.0) + 0.3 if shot.dialogue else 0.0, seconds + 1.0)
         first = sv.media.abs(ff.file_path)
         slug, code, aspect = proj.slug, shot.code, proj.aspect
         place = _shot_location(s, shot)
     # 连续性要求只加在发给引擎的提示词里，不进输入哈希
     call = engine.build(VideoRequest(prompt=with_continuity(prompt, place), first_frame=first,
                                      aspect=aspect, seed=seed,
-                                     seconds=seconds, negative=negative, refs=refs,
+                                     seconds=seconds, min_seconds=min_seconds,
+                                     negative=negative, refs=refs,
                                      prefix=f"studio/{slug}/clip_{code}"))
     ctx.log(f"视频 {code} · {engine_name} · {seconds:.1f}s · seed {seed} · 参考图 {len(refs)} 张"
             f"{'（原生有声）' if has_audio else '（无声）'}"

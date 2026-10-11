@@ -396,3 +396,79 @@ def test_refresh_look_api_uses_portrait_history(api):
     assert d["image_prompt"] == f"wide. {{{{char:{cid}}}}} He waits."
     assert d["image_prompt_resolved"] == f"wide. {NEW} He waits."
     assert api.post("/api/characters/999/shots/refresh-look", json={}).status_code == 404
+
+
+# ---------------------------------------------------------------- 第二次样片的真实外貌：定妆照只留腰部以上
+RUN2_LOOKS = {
+    '老陈': (
+        'Chinese man in his mid-sixties, lean and slightly stooped frame, long weathered face wit'
+        'h deep nasolabial folds, sun-darkened leathery skin, sparse short-cropped gray-white hai'
+        'r receding at the temples, faint gray stubble. Wears a faded navy-blue cotton work jacke'
+        't with frayed cuffs over a gray undershirt, a dark brown canvas apron stained with shoe '
+        'polish and glue, loose black cotton trousers, worn black cloth shoes. Large rough hands '
+        'with thick yellowed calluses, cracked knuckles and polish-blackened fingertips. Signatur'
+        'e detail: old wire-rimmed reading glasses with one temple wrapped in black thread, hangi'
+        'ng from a cord around his neck.'
+    ),
+    '阿青': (
+        'Chinese woman in her mid-twenties, slim athletic build, oval face with defined cheekbone'
+        's, light tan skin with faint freckles and a slight sun flush, bright dark eyes. Shoulder'
+        '-length black hair pulled into a low messy ponytail, loose strands framing her temples. '
+        'Wears a bright yellow food-delivery rider jacket of lightweight waterproof nylon with si'
+        'lver reflective strips and an unbranded patch, black stretch cargo trousers, scuffed whi'
+        'te sneakers, a yellow half-shell rider helmet hooked at her hip. Signature detail: a sma'
+        'll red plastic strawberry-shaped hair clip above her left ear, clearly borrowed from a c'
+        'hild.'
+    ),
+    '小满': (
+        'Chinese girl about five or six years old, small frame, round face with chubby rosy cheek'
+        's, bright round dark eyes, short soft straight bangs. Black hair tied into two short hig'
+        'h pigtails with red elastic bands topped by small red fuzzy bobbles. Wears a pale pink k'
+        'nitted cotton cardigan over a white T-shirt printed with a tiny rabbit, a faded denim pi'
+        'nafore dress, white ankle socks, and old dull gray canvas slip-on shoes worn thin at the'
+        ' toes. Signature detail: a faded red string bracelet with a tiny brass bell on her left '
+        'wrist.'
+    ),
+}
+RUN2_ANCHOR = (
+    'Photorealistic live-action cinematic style, shot on 35mm film with an anamorphic lens, s'
+    'hallow depth of field and subtle natural film grain. Restrained, nostalgic Chinese old-s'
+    'treet drama aesthetic. Warm golden-hour palette dominated by amber, burnt orange and hon'
+    'ey tones, balanced by muted teal shadows and desaturated greens. Low-angle sunset sideli'
+    'ght with long soft shadows, gentle backlit rim light and faint atmospheric haze. Realist'
+    'ic skin with visible pores, fine lines and natural imperfections, no beauty retouching. '
+    'Tactile materials: worn leather, weathered wood, frayed cotton, polished bluestone. Quie'
+    't, intimate framing in medium and close shots, Kodak Vision3 500T color science, gentle '
+    'halation on highlights.'
+)
+
+
+@pytest.mark.parametrize("name", list(RUN2_LOOKS))
+def test_run2_portrait_prompt_is_waist_up_only(name):
+    """第二次样片：krea2（cfg 1，没有负面提示词）照着外貌里的裤子、鞋、挂在腰上的头盔画成了全身 / 坐姿，
+    锚里的 atmospheric haze 画成了烟雾，「老茧」画成了金戒指。定妆照提示词里这些都不能出现。"""
+    from backend.pipeline.characters import portrait_prompt
+
+    p = portrait_prompt(RUN2_LOOKS[name], RUN2_ANCHOR)
+    low = p.lower()
+    for bad in ("trousers", "shoes", "sneakers", "socks", "hip", "calluses", "knuckles",
+                "fingertips", "haze", "golden-hour", "backlit", "sitting", "squatting"):
+        assert not re.search(rf"\b{bad}\b", low.replace("shoe polish", "")), (name, bad)
+    assert "standing upright" in low and "cropped at the waist" in low and "waist-up crop" in low
+    assert "grey studio backdrop" in low and "Kodak Vision3 500T" in p
+    # 上半身的外貌都还在
+    if name == "老陈":
+        assert "navy-blue cotton work jacket" in p and "apron stained with shoe polish" in p
+        assert "reading glasses" in p
+    if name == "阿青":
+        assert "rider jacket" in p and "strawberry-shaped hair clip" in p
+    if name == "小满":
+        assert "pinafore dress" in p and "pigtails" in p
+
+
+def test_portrait_look_keeps_upper_part_of_mixed_clause():
+    from backend.pipeline.prompting import portrait_look, upper_body_look
+
+    look = "A tall man. Wears a long navy coat over grey trousers, sitting on a stool, black boots."
+    assert portrait_look(look) == "A tall man. Wears a long navy coat."
+    assert upper_body_look(look) == "A tall man. Wears a long navy coat, sitting on a stool."

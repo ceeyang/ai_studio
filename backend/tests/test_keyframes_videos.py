@@ -516,7 +516,7 @@ def test_video_style_is_short_and_has_no_still_or_scene_words():
     assert v.startswith("Visual style: ") and v.endswith(".")
     import re
     low = v.lower()
-    assert not re.search(r"(still|rain\w*|bulbs?|drama)", low), v
+    assert not re.search(r"\b(still|rain\w*|bulbs?|drama)\b", low), v
     assert "35mm" in low and "footage" in low
     assert len(v.split()) <= 2 + 25
     assert video_style("") == "" and video_style("ANCHOR") == ""
@@ -559,3 +559,14 @@ def test_flagged_video_does_not_replace_clean_selection(tmp_path, db):
     latest = run_video(ctx, {"shot_id": shot_id, "force": True})["candidate_ids"][0]
     with db.session() as s:
         assert selected_candidate(s, "shot", shot_id, "video").id == latest != newer
+
+
+def test_video_frames_keep_last_dialogue_line(tmp_path, db):
+    ctx, runner, shot_id = setup(tmp_path, db)
+    with db.session() as s:
+        sh = s.get(Shot, shot_id)
+        sh.duration = 5.5
+        sh.dialogue = [{"speaker": "林夏", "zh": "词被改了", "start": 4.0, "end": 5.3}]
+    run_keyframe(ctx, {"shot_id": shot_id})
+    run_video(ctx, {"shot_id": shot_id})
+    assert runner.calls[-1].meta["frames"] == 141   # 124 帧（5.17s）会截掉 5.3s 结束的台词

@@ -106,6 +106,19 @@ def test_h3_video_frames_round_to_nearest_grid_point(reg):
         assert abs(f - s * 24) <= 8.5      # 离目标帧数不超过半个网格
 
 
+def test_h3_video_frames_cover_last_dialogue_line(reg, tmp_path):
+    """第二次样片：5.5 秒的镜头出成 5.17 秒（往下取一格）。最后一句台词说到 5.2 秒时要往上取，不截台词。"""
+    eng = reg.video("h3_video")
+    assert eng.frames_for(5.5, min_seconds=5.5) == 141     # 5.875s
+    assert eng.frames_for(5.5, min_seconds=4.0) == 124     # 台词早就说完：仍取最近的
+    assert eng.frames_for(10, min_seconds=12) == eng.frames_for(10)   # 不超过引擎上限
+    wf = eng.build(VideoRequest(prompt="p", first_frame=tmp_path / "f.png", seconds=5.5,
+                                min_seconds=5.5)).workflow
+    assert wf["6"]["inputs"]["length"] == 141
+    wan = reg.video("wan22_i2v")
+    assert wan.frames_for(4.4, min_seconds=4.6) == 77 and wan.frames_for(4.4) == 69
+
+
 def test_h3_video_clamps_to_max_seconds(reg, tmp_path):
     eng = reg.video("h3_video")
     wf = eng.build(VideoRequest(prompt="p", first_frame=tmp_path / "f.png", seconds=30)).workflow

@@ -119,21 +119,27 @@ class H3VideoEngine(_ComfyEngine):
                      sizes={"9:16": (768, 1344), "16:9": (1344, 768)},
                      default_seconds=5.0, max_seconds=10.0)
 
-    def frames_for(self, seconds: float) -> int:
+    def frames_for(self, seconds: float, min_seconds: float = 0.0) -> int:
         """取离目标帧数最近的 17k+5（等距时取长的），最少 5 帧。
 
         以前一律往上取：4.5s/5s 都出成 124 帧（5.17s）、6s 出成 158 帧（6.58s），成片比分镜长 8%。
-        往下取最多短半个网格（17 帧 ÷ 2 ≈ 0.35s），分镜时长本来就是估计值，台词留了 0.4s 余量。
+        往下取最多短半个网格（17 帧 ÷ 2 ≈ 0.35s）。min_seconds（最后一句台词说完的时间）落在
+        往下取的那一格之后时，往上加一格（不超过引擎上限），免得台词被截掉。
         """
-        n = seconds * self.caps.fps
+        fps = self.caps.fps
+        n = seconds * fps
         k = math.floor((n - 5) / 17 + 0.5)
-        return max(5, 17 * k + 5)
+        f = max(5, 17 * k + 5)
+        top = max(5, 17 * math.floor((self.caps.max_seconds * fps - 5) / 17) + 5)
+        while f / fps < min_seconds and f + 17 <= top:
+            f += 17
+        return f
 
     def build(self, req: VideoRequest) -> EngineCall:
         w, h = size_for(self.caps.sizes, req.aspect)
         turbo = bool(self.overrides.get("turbo", True))
         steps = self.overrides.get("steps") or (4 if turbo else 20)
-        frames = self.frames_for(min(req.seconds, self.caps.max_seconds))
+        frames = self.frames_for(min(req.seconds, self.caps.max_seconds), req.min_seconds)
         keep, dropped = req.refs[: self.caps.max_refs], req.refs[self.caps.max_refs:]
         wf = self._render({"prompt": req.prompt, "width": w, "height": h, "frames": frames,
                            "fps": float(self.caps.fps), "seed": req.seed, "steps": steps,
@@ -159,13 +165,18 @@ class Wan22I2VEngine(_ComfyEngine):
                      sizes={"9:16": (480, 832), "16:9": (832, 480)},
                      default_seconds=5.0, max_seconds=5.0)
 
-    def frames_for(self, seconds: float) -> int:
-        n = max(1, round(seconds * self.caps.fps))
-        return max(17, (n // 4) * 4 + 1)
+    def frames_for(self, seconds: float, min_seconds: float = 0.0) -> int:
+        fps = self.caps.fps
+        n = max(1, round(seconds * fps))
+        f = max(17, (n // 4) * 4 + 1)
+        top = max(17, (round(self.caps.max_seconds * fps) // 4) * 4 + 1)
+        while f / fps < min_seconds and f + 4 <= top:
+            f += 4
+        return f
 
     def build(self, req: VideoRequest) -> EngineCall:
         w, h = size_for(self.caps.sizes, req.aspect)
-        frames = self.frames_for(min(req.seconds, self.caps.max_seconds))
+        frames = self.frames_for(min(req.seconds, self.caps.max_seconds), req.min_seconds)
         values = {"prompt": req.prompt, "first_frame": upload_ref(req.first_frame),
                   "width": w, "height": h, "frames": frames, "seed": req.seed,
                   "fps": float(self.caps.fps), "prefix": req.prefix}

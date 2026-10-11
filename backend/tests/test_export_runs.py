@@ -70,6 +70,19 @@ def test_export_warns_about_flagged_hard_cuts(tmp_path, db):
     assert any("疑似跳切" in m and "S02 2.0s" in m for m in ctx.logs)
 
 
+def test_export_warns_when_clip_is_shorter_than_dialogue(tmp_path, db):
+    """视频实际时长（假 ffmpeg 都是 5 秒）比最后一句台词短：导出照常，日志提示会被截掉。"""
+    sv = make_services(tmp_path, db, ffmpeg=FakeFFmpeg())
+    ep_id, ids = seed_shots(db)
+    for i, sid in enumerate(ids):
+        add_video(sv, sid, f"h{i}")
+    with db.session() as s:
+        s.get(Shot, ids[2]).dialogue = [{"speaker": "a", "zh": "最后一句", "start": 4.0, "end": 5.3}]
+    ctx = FakeCtx(sv, job_id=5)
+    run_export(ctx, {"episode_id": ep_id})
+    assert any("S03（视频 5.00s，台词到 5.30s）" in m for m in ctx.logs)
+
+
 def test_export_reports_missing_videos(tmp_path, db):
     ff = FakeFFmpeg()
     sv = make_services(tmp_path, db, ffmpeg=ff)

@@ -56,6 +56,8 @@ class VideoRequest:
     seconds: float = 5.0
     negative: str = ""
     end_frame: Path | None = None
+    # 至少要出多长（秒）：最后一句台词说完再留一点。帧数网格往下取会比分镜短，台词会被截掉
+    min_seconds: float = 0.0
     refs: list[Path] = field(default_factory=list)
     prefix: str = "studio/vid"
 

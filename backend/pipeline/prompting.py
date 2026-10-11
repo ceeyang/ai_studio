@@ -22,7 +22,12 @@ _SCENE_TERMS = re.compile(
     r"|storm|\bsky|cloud|concrete|reflection|bulb|lamp|neon|fluorescent|\btubes?\b|candle"
     r"|window|lantern|torch|\bfire|\btools?\b|rust|metal|\bsteel|building|road|\bcars?\b"
     r"|vehicle|landscape|scene|location|background|backdrop|environment|atmosphere|weather"
-    r"|practical|motivated|across frames", re.I)
+    r"|practical|motivated|across frames"
+    # 氛围和时段光：定妆照的灰背景上会画出烟雾、暖色偏色（第二次样片的「atmospheric haze」）
+    r"|haze|hazy|smok|\bdust|steam|atmospher|backlit|rim light|golden.hour|sidelight|sunlit", re.I)
+# 句中不该改成小写的专有名词（胶片、相机、镜头品牌）
+_PROPER = re.compile(r"(?:Kodak|Fuji|Fujifilm|ARRI|Alexa|RED|Cooke|Zeiss|Leica|Canon|Sony|Panavision"
+                     r"|Ektachrome|Portra|CineStill|Cinestill|Vision3|Ilford)\b")
 
 
 def _clauses(text: str) -> list[str]:
@@ -38,23 +43,66 @@ def _clauses(text: str) -> list[str]:
 def photo_style(anchor: str) -> str:
     """风格锚里只和成像有关的分句（画质、镜头、胶片颗粒、色彩、皮肤质感），去掉场景、时间、天气、光源。"""
     keep = [c for c in _clauses(anchor) if _PHOTO_TERMS.search(c) and not _SCENE_TERMS.search(c)]
-    keep = [c if i == 0 or c[1:2].isupper() else c[:1].lower() + c[1:] for i, c in enumerate(keep)]
+    keep = [c if i == 0 or c[1:2].isupper() or _PROPER.match(c) else c[:1].lower() + c[1:]
+            for i, c in enumerate(keep)]
     return ", ".join(keep)
 
 
-_LOWER_BODY = re.compile(r"trousers|pants|jeans|shorts|skirt|\bboots?\b|shoes?\b|sneakers?|sandals?"
-                         r"|heels|socks|stockings|leggings|\bfeet\b|\blegs?\b|\bknees?\b", re.I)
+_LOWER_BODY = re.compile(r"trousers|\bpants\b|jeans|\bshorts\b|skirt|\bboots?\b"
+                         r"|\bshoes?\b(?!\s+polish)|sneakers?|sandals?|slippers?|loafers?|\bheels\b"
+                         r"|\bsocks?\b|stockings|leggings|\btights\b|\bfeet\b|\bfoot\b|\blegs?\b"
+                         r"|\bknees?\b|\bankles?\b|\bthighs?\b|\bhips?\b|\bshins?\b", re.I)
 _UPPER_BODY = re.compile(r"face|hair|eyes?\b|jacket|shirt|coat|sweater|hoodie|blouse|vest|collar"
                          r"|sleeve|neck|shoulder|chest|hands?\b|wrist|\barms?\b|beard|stubble"
-                         r"|glasses|earring|\bhat\b|\bcap\b|scarf|windbreaker|cardigan|\btop\b", re.I)
+                         r"|glasses|earring|\bhat\b|\bcap\b|scarf|windbreaker|cardigan|\btop\b"
+                         r"|apron|uniform|cardigan|\bdress\b|pinafore|overalls", re.I)
+# 定妆照（腰部以上、站着）用不上的：坐 / 蹲 / 跪这类姿势，以及手部细节——手在腰部以下或画面边缘，
+# 「老茧」「缠线」这类细小特征 cfg 1 的模型常画错（老茧画成金戒指），再经参考图带进每个镜头
+_POSE = re.compile(r"\bsitting\b|\bseated\b|\bsits\b|squat|crouch|kneel|\blying\b|perched"
+                   r"|cross-legged", re.I)
+_HAND_DETAIL = re.compile(r"\bhands?\b|fingers?|fingertips?|knuckles?|\bnails?\b|\bpalms?\b"
+                          r"|callus|callous|\brings?\b", re.I)
+_SUBPART = re.compile(r"(\s+(?:and|with|over|under|plus|above)\s+|\s+tucked into\s+)", re.I)
+
+
+def _strip_clauses(text: str, drop: re.Pattern, keep: re.Pattern | None) -> str:
+    """按句、按逗号分句去掉命中 drop 的部分。分句同时写了 keep（如上衣）时只去掉其中命中 drop 的
+    「and / with / over …」子句（「a navy coat over grey trousers」→「a navy coat」）。"""
+    out = []
+    for sentence in re.split(r"(?<=[.!?])\s+", (text or "").strip()):
+        body, end = (sentence[:-1], sentence[-1]) if sentence[-1:] in ".!?" else (sentence, ".")
+        kept = []
+        for clause in re.split(r",\s*", body):
+            if not drop.search(clause):
+                kept.append(clause)
+                continue
+            if keep is None or not keep.search(clause):
+                continue
+            parts = _SUBPART.split(clause)   # [片段, 连接词, 片段, 连接词, …]
+            pieces = [parts[0]] if not drop.search(parts[0]) else []
+            for sep, frag in zip(parts[1::2], parts[2::2]):
+                if not drop.search(frag):
+                    pieces.append((sep if pieces else "") + frag)
+            if pieces and keep.search("".join(pieces)):
+                kept.append("".join(pieces).strip())
+        if kept:
+            first = re.sub(r"^(?:and|with)\s+", "", kept[0].strip(), flags=re.I)
+            out.append(", ".join([first[:1].upper() + first[1:]] + kept[1:]) + end)
+    return " ".join(out)
 
 
 def upper_body_look(visual_prompt: str) -> str:
-    """半身照用的外貌：去掉只写下半身（裤子、鞋）的整句，免得模型为了画靴子把镜头拉成全身。
-    一句里同时写了上身的不动。"""
-    sentences = re.split(r"(?<=[.!?])\s+", (visual_prompt or "").strip())
-    kept = [x for x in sentences if not (_LOWER_BODY.search(x) and not _UPPER_BODY.search(x))]
-    return " ".join(kept) if kept else (visual_prompt or "").strip()
+    """半身照、近景用的外貌：去掉写下半身（裤子、鞋、腿）的分句，免得模型为了画靴子把镜头拉成全身。
+    分句同时写了上身时只去掉下半身那一截。全被去掉时用原文。"""
+    return _strip_clauses(visual_prompt, _LOWER_BODY, _UPPER_BODY) or (visual_prompt or "").strip()
+
+
+def portrait_look(visual_prompt: str) -> str:
+    """定妆照用的外貌：在 upper_body_look 的基础上再去掉坐、蹲、跪这类姿势和手部细节。
+    krea2 / zimage 是 cfg 1、没有负面提示词，提示词里出现鞋、裤子、坐姿，画面就会拉到全身。"""
+    drop = re.compile(f"{_LOWER_BODY.pattern}|{_POSE.pattern}|{_HAND_DETAIL.pattern}", re.I)
+    keep = re.compile(_UPPER_BODY.pattern.replace(r"|hands?\b", ""), re.I)
+    return _strip_clauses(visual_prompt, drop, keep) or upper_body_look(visual_prompt)
 
 
 # ------------------------------------------------------------ 角色外貌占位符

@@ -16,7 +16,7 @@ from backend.domain.turnaround import (SHEETS, crop_cells, look_of,
 from backend.llm.schemas import CharacterRecommendations, DesignOptions, TurnaroundLook
 from backend.pipeline.common import load_episode
 from backend.pipeline.keyframes import run_comfy
-from backend.pipeline.prompting import join_negative, photo_style, shot_seed, upper_body_look
+from backend.pipeline.prompting import join_negative, photo_style, portrait_look, shot_seed
 from backend.queue.errors import JobError
 from backend.queue.handlers import HANDLERS
 
@@ -29,6 +29,9 @@ PORTRAIT_FRAME = ("Character reference portrait of one single person: front-faci
                   "head, shoulders, chest and both arms fill the frame, standing upright and "
                   "looking straight into the camera, relaxed neutral expression, arms relaxed at "
                   "the sides, centered in frame.")
+# 外貌后面再说一遍取景（krea2 / zimage 没有负面提示词，构图全靠正面描述）
+PORTRAIT_REMINDER = ("Waist-up crop: he or she stands upright facing the camera, the frame ends at "
+                     "the waist.")
 PORTRAIT_BACKDROP = ("Plain seamless neutral light-grey studio backdrop filling the entire "
                      "background, soft even studio lighting, the person alone against the empty "
                      "grey backdrop.")
@@ -43,12 +46,13 @@ def portrait_aspect(engine) -> str:
 
 
 def portrait_prompt(visual_prompt: str, anchor: str) -> str:
-    """定妆照提示词：构图（正面、腰部以上）→ 上半身外貌 → 中性影棚背景 → 风格锚里的成像词。
+    """定妆照提示词：构图（正面、站着、腰部以上）→ 上半身外貌（去掉下半身、坐蹲姿势、手部细节）→
+    再说一遍取景 → 中性影棚背景 → 风格锚里的成像词（去掉场景、天气、光源和雾、烟这类氛围词）。
 
     不整段拼风格锚：锚里的雨夜、灯泡、积水会和「纯色影棚背景」打架，出来的是挂在场景里的背景布，
     这张图再当参考图喂给视频模型时会被剪进镜头。"""
     style = photo_style(anchor)
-    parts = [PORTRAIT_FRAME, upper_body_look(visual_prompt), PORTRAIT_BACKDROP]
+    parts = [PORTRAIT_FRAME, portrait_look(visual_prompt), PORTRAIT_REMINDER, PORTRAIT_BACKDROP]
     if style:
         parts.append(f"Photographic style: {style}.")
     return " ".join(parts)

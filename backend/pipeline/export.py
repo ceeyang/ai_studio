@@ -54,6 +54,12 @@ def run_export(ctx, payload: dict) -> dict:
     variant = cut.aspect.replace(":", "x")
     ctx.check_canceled()
     secs, limits = clip_limits(sv, cut, opts.trim)
+    short = [f"{code}（视频 {sec:.2f}s，台词到 {end:.2f}s）"
+             for code, sec, dlg in zip(cut.codes, secs, cut.dialogue)
+             if (end := max((float(d.get("end") or 0) for d in dlg), default=0.0)) > sec + 0.05]
+    if short:
+        ctx.log("注意：这些镜头的视频比最后一句台词短，结尾的台词和字幕会被截掉："
+                + "；".join(short) + "（重出视频会按台词长度取帧数）")
     manifest = load_dub_manifest(sv, cut, limits, opts.align) if opts.dub == "km" else None
 
     out = sv.media.export_path(
