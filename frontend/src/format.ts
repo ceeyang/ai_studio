@@ -7,6 +7,7 @@ export const JOB_TYPE_LABEL: Record<string, string> = {
   'image.keyframe': '首帧',
   'image.continue_frame': '接上一镜尾帧',
   'image.location': '场景图',
+  'image.prop': '道具图',
   'video.shot': '视频',
   'export.episode': '合成导出',
   'image.portrait': '定妆照',
@@ -55,6 +56,7 @@ export const ENGINE_LABEL: Record<string, string> = {
   // 不是引擎：候选的来源
   upload: '上传',
   continue: '接上一镜尾帧',
+  asset: '已有图片',
 };
 
 /** 下拉框里引擎的写法：API 引擎没配 Key 时后面写明（同时 disabled），别的不可用写「现在不可用」 */

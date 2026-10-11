@@ -6,7 +6,8 @@ import shutil
 import time
 from pathlib import Path
 
-from backend.domain.refs import shot_refs, split_refs
+from backend.domain.refs import shot_refs, split_refs, without_props
+from backend.domain.assets import ASSET_ENGINE
 from backend.domain.models import Shot
 from backend.domain.slots import add_candidate, get_or_create_slot, selected_candidate
 from backend.engines.base import ImageRequest
@@ -210,8 +211,17 @@ def run_keyframe(ctx, payload: dict) -> dict:
         # 只要一个候选、又不强制时，输入没变就不重出（多候选是用户明确要抽卡）
         if not payload.get("force") and int(payload.get("candidates") or 1) == 1:
             cur = selected_candidate(s, "shot", shot.id, "first_frame")
-            if cur is not None and cur.input_hash == h:
+            ok = {h}
+            if any(r.kind == "prop" for r in used):
+                # 加道具图之前出的首帧不算过期（和 views.shot_detail 同一个规则）
+                old_used = split_refs(without_props(packed), engine.caps.max_refs)[0]
+                ok.add(keyframe_input_hash(shot, proj, style, engine_name,
+                                           [r.candidate_id for r in old_used]))
+            if cur is not None and cur.input_hash in ok:
                 ctx.log(f"首帧 {shot.code}：输入没变，跳过（要重出用 --force）")
+                return {"skipped": True, "candidate_ids": []}
+            if cur is not None and cur.engine == ASSET_ENGINE:
+                ctx.log(f"首帧 {shot.code}：选定的首帧是从已有图片里选的，跳过（要重出用 --force）")
                 return {"skipped": True, "candidate_ids": []}
         slot = get_or_create_slot(s, "shot", shot.id, "first_frame")
         seed = shot_seed(proj.seed, shot.id, len(slot.candidates))

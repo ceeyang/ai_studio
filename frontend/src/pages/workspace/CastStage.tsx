@@ -9,6 +9,7 @@ import {
   useEpisode,
   useLocations,
   usePatchLocation,
+  useProps,
   usePutStyle,
   useStyle,
 } from '../../api/queries';
@@ -29,6 +30,7 @@ import { RecommendPanel } from '../script/RecommendPanel';
 import { CastCard } from './CastCard';
 import { CharacterDrawer } from './CharacterDrawer';
 import { LocationImages } from './LocationImages';
+import { PropCard } from './PropImages';
 
 const LOCATION_FIELDS: FieldSpec[] = [
   { name: 'name', label: '名字' },
@@ -85,6 +87,7 @@ export function CastStage({
   const ep = useEpisode(id);
   const characters = useCharacters(slug);
   const locations = useLocations(slug);
+  const props = useProps(slug);
   const style = useStyle(slug);
   const patchLoc = usePatchLocation(slug);
   const putStyle = usePutStyle(slug);
@@ -106,14 +109,24 @@ export function CastStage({
   const nextAct = useNextAction(slug, ep.data, ['cast']);
   // 改过没保存的场景（按 id）和风格：换页面前问一句（角色抽屉自己挂了）
   const [dirtyLocs, setDirtyLocs] = useState<Set<number>>(() => new Set());
+  const [dirtyProps, setDirtyProps] = useState<Set<number>>(() => new Set());
   const [styleDirty, setStyleDirty] = useState(false);
-  useUnsavedGuard(styleDirty || dirtyLocs.size > 0);
+  useUnsavedGuard(styleDirty || dirtyLocs.size > 0 || dirtyProps.size > 0);
   const setLocDirty = (locId: number, d: boolean) =>
     setDirtyLocs((prev) => {
       if (d === prev.has(locId)) return prev;
       const next = new Set(prev);
       if (d) next.add(locId);
       else next.delete(locId);
+      return next;
+    });
+
+  const setPropDirty = (propId: number, d: boolean) =>
+    setDirtyProps((prev) => {
+      if (d === prev.has(propId)) return prev;
+      const next = new Set(prev);
+      if (d) next.add(propId);
+      else next.delete(propId);
       return next;
     });
 
@@ -168,6 +181,7 @@ export function CastStage({
   const e = ep.data;
   const chars = characters.data ?? [];
   const locs = locations.data ?? [];
+  const propList = props.data ?? [];
   const st = style.data ?? EMPTY_STYLE;
   // 只出声、不出镜的角色不用定妆照，不算进计数
   const onScreen = chars.filter((c) => !c.voice_only);
@@ -246,8 +260,10 @@ export function CastStage({
           设定
           <span className="muted">
             场景 {locs.length} 个{locs.length > 0 ? `（${locs.filter((l) => l.image_url).length} 个有场景图）` : ''}
-            {locs.some((l) => l.image_stale) ? ` · ${locs.filter((l) => l.image_stale).length} 个场景图已过期` : ''} · 风格{style.data ? '' : '（未设）'}
-            {styleDirty || dirtyLocs.size > 0 ? ' · 有未保存的修改' : ''}
+            {locs.some((l) => l.image_stale) ? ` · ${locs.filter((l) => l.image_stale).length} 个场景图已过期` : ''}
+            {propList.length > 0 ? ` · 道具 ${propList.length} 个（${propList.filter((p) => p.image_url).length} 个有道具图）` : ''} · 风格
+            {style.data ? '' : '（未设）'}
+            {styleDirty || dirtyLocs.size > 0 || dirtyProps.size > 0 ? ' · 有未保存的修改' : ''}
           </span>
         </button>
         <div id="cast-settings-body" className="cast-settings-body" hidden={!settingsOpen}>
@@ -266,6 +282,17 @@ export function CastStage({
                 />
                 <LocationImages loc={l} slug={slug} />
               </div>
+            ))}
+          </div>
+          <h4>道具（{propList.length}）</h4>
+          <p className="muted small">
+            分镜里出现过的道具。给道具出一张只拍道具、白底的图（或上传），镜头里带了这个道具时，出首帧会把道具图排在角色后面一起给引擎。
+          </p>
+          {props.error && <p className="error small">{errorText(props.error)}</p>}
+          {props.data && propList.length === 0 && <p className="muted">生成分镜后，镜头里写到的道具会列在这里。</p>}
+          <div className="cards">
+            {propList.map((p) => (
+              <PropCard key={p.id} prop={p} slug={slug} onDirtyChange={(d) => setPropDirty(p.id, d)} />
             ))}
           </div>
           <h4>风格</h4>

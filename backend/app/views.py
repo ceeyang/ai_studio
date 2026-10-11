@@ -12,8 +12,9 @@ from sqlalchemy.orm import Session
 from backend.app.schemas import (ArchivedCandidateOut, CandidateOut, ContinuePrevOut, EpisodeDetail, ExportOut, JobBrief, JobContext,
                                  SceneBlockOut, ShotDetail, SlotOut)
 from backend.domain.models import Character, Episode, Job, Project, Shot
+from backend.domain.assets import ASSET_ENGINE
 from backend.domain.refs import (SHOT_REF_SLOT, legacy_video_refs, shot_ref_images, shot_refs,
-                                 split_refs)
+                                 split_refs, without_props)
 from backend.domain.shots import prev_shot
 from backend.domain.slots import selected_candidate, slots_for
 from backend.pipeline.continuity import continue_hash, continue_inputs, video_ref_plan
@@ -138,6 +139,12 @@ def shot_detail(s: Session, sv, shot, proj, style, *, jobs: OwnerJobs | None = N
         "first_frame": keyframe_input_hash(shot, proj, style, ie,
                                            [r.candidate_id for r in ff_refs])}
     inputs: dict[str, dict] = {"first_frame": keyframe_inputs(shot, proj, style, ie, ff_refs)}
+    legacy_ok: dict[str, set[str]] = {}
+    if any(r.kind == "prop" for r in ff_refs):
+        # 加道具图之前出的首帧（打包里没有道具图）：不因为后来加了道具图过期
+        old_refs, _ = split_refs(without_props(refs), ff_cap)
+        legacy_ok["first_frame"] = {keyframe_input_hash(shot, proj, style, ie,
+                                                        [r.candidate_id for r in old_refs])}
     cont: ContinuePrevOut | None = None
     if shot.continue_from_prev:
         # 接上一镜：首帧是上一镜视频的尾帧，跟上一镜选定的视频走（和 continuity.run_continue_frame 一致）
@@ -147,9 +154,9 @@ def shot_detail(s: Session, sv, shot, proj, style, *, jobs: OwnerJobs | None = N
             cont = ContinuePrevOut(shot_id=prev.id, code=prev.code, has_video=pv is not None)
         current["first_frame"] = continue_hash(pv.id) if pv is not None else "waiting-prev-video"
         inputs["first_frame"] = continue_inputs(prev.code if prev else "", pv.id if pv else 0)
+        legacy_ok.pop("first_frame", None)
         unused = []
         lost = []
-    legacy_ok: dict[str, set[str]] = {}
     ff = next((x for x in slots if x.kind == "first_frame"), None)
     if ff is not None and ff.selected_candidate_id:
         ve = shot.video_engine or proj.video_engine
@@ -190,7 +197,10 @@ def shot_detail(s: Session, sv, shot, proj, style, *, jobs: OwnerJobs | None = N
         sel = next((c for c in sl.candidates if c.id == sl.selected_candidate_id), None)
         stale = bool(sel is not None and sl.kind in current
                      and sel.input_hash != current[sl.kind]
-                     and sel.input_hash not in legacy_ok.get(sl.kind, set()))
+                     and sel.input_hash not in legacy_ok.get(sl.kind, set())
+                     # 用户从已有图片里选的首帧：不按出图输入判过期（开了接上一镜除外）
+                     and not (sl.kind == "first_frame" and sel.engine == ASSET_ENGINE
+                              and not shot.continue_from_prev))
         reason = stale_reason((sel.params or {}).get("inputs"), inputs[sl.kind]) if stale else None
         newer = sum(1 for c in sl.candidates if c.id > sel.id) if sel is not None else 0
         selected_job[sl.kind] = sel.job_id if sel is not None else None

@@ -81,10 +81,12 @@ export function invalidationsFor(ev: WsEvent): QueryKey[] {
       if (CHARACTER_TYPES.includes(ev.job.type)) out.push(['characters']);
       // 场景卡显示进行中的场景图任务
       if (ev.job.type === 'image.location') out.push(['locations']);
+      // 道具卡显示进行中的道具图任务
+      if (ev.job.type === 'image.prop') out.push(['props']);
       if (SETTLED.includes(ev.job.status)) {
         out.push(['episode'], ['exports']);
         if (EPISODES_TYPES.includes(ev.job.type)) out.push(['episodes']);
-        if (LLM_TYPES.includes(ev.job.type)) out.push(['characters'], ['locations'], ['style']);
+        if (LLM_TYPES.includes(ev.job.type)) out.push(['characters'], ['locations'], ['style'], ['props']);
       }
       return out;
     }
@@ -145,6 +147,7 @@ export const GENERATION_TYPES = [
   'image.portrait',
   'image.turnaround',
   'image.location',
+  'image.prop',
   'export.episode',
 ];
 

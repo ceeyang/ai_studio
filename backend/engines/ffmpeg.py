@@ -396,6 +396,15 @@ class FFmpeg:
         self.run(build_trim_silence_cmd(self.ffmpeg, src, dst))
         return Path(dst)
 
+    def first_frame(self, video: Path, out_png: Path) -> Path:
+        """截视频第一帧（资产选择器里拿别的镜头视频的开头当首帧 / 构图参考）。"""
+        out_png = Path(out_png)
+        out_png.parent.mkdir(parents=True, exist_ok=True)
+        self.run([self.ffmpeg, "-y", "-i", str(video), "-frames:v", "1", "-q:v", "2", str(out_png)])
+        if not out_png.exists():
+            raise FFmpegError(f"没截到首帧：{video}")
+        return out_png
+
     def last_frame(self, video: Path, out_png: Path) -> Path:
         out_png = Path(out_png)
         out_png.parent.mkdir(parents=True, exist_ok=True)

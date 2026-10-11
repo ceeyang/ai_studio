@@ -1635,3 +1635,25 @@ img.rail-avatar { border: 0; }
 .fold-actions { margin-left: auto; }
 .fold-body { margin-top: var(--s-3); }
 .fold-panel.folded { align-self: start; }
+
+/* 资产选择器：分类页签 + 搜索 + 缩略图网格（多选，已选的描边） */
+.asset-picker { display: flex; flex-direction: column; gap: var(--s-3); }
+.asset-toolbar { display: flex; align-items: center; justify-content: space-between; gap: var(--s-3); flex-wrap: wrap; }
+.asset-toolbar .asset-tabs { position: static; margin: 0; padding: 0; background: none; border-radius: 0; flex-wrap: wrap; }
+.asset-toolbar .asset-tabs [role="tab"] { height: 36px; padding: 0 10px; font-size: 13px; }
+.asset-search { width: 200px; max-width: 100%; }
+.asset-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: var(--s-3); max-height: 52vh; overflow-y: auto; padding: 2px; }
+.asset-card { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.asset-pick { position: relative; width: 100%; aspect-ratio: 3 / 4; padding: 0; border-radius: var(--r-md); border: 1px solid var(--border); background: #000; overflow: hidden; display: block; }
+.asset-pick:hover:not(:disabled) { border-color: var(--accent-line); background: #000; }
+.asset-pick img, .asset-pick video { width: 100%; height: 100%; object-fit: contain; display: block; pointer-events: none; }
+.asset-pick:disabled { opacity: 0.45; cursor: not-allowed; }
+.asset-card.is-picked .asset-pick { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent); }
+.asset-pick .pcard-tag, .asset-pick .pcard-current { position: absolute; top: 6px; }
+.asset-label { font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.asset-frame { display: flex; gap: var(--s-2); flex-wrap: wrap; }
+.asset-frame label { display: inline-flex; align-items: center; gap: 2px; }
+.asset-options { display: flex; flex-direction: column; gap: var(--s-1); }
+.shot-ref-actions { display: flex; gap: var(--s-2); flex-wrap: wrap; align-items: center; }
+.ff-from-asset { display: flex; gap: var(--s-2); align-items: center; flex-wrap: wrap; }
+.prop-name { display: flex; align-items: center; gap: var(--s-2); margin: 0; font-family: var(--mono); font-size: 13px; overflow-wrap: anywhere; }

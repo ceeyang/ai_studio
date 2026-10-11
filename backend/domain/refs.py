@@ -2,12 +2,13 @@
 
 首帧发给引擎的顺序固定：场景图 → 镜头构图参考图（最多 2 张）→ 出场角色 → 道具 → 上一镜尾帧。
 超出引擎上限时不是简单从后往前丢（那样先丢的是定妆照，脸就没锁住）：split_refs 先给每个出场角色留一张
-定妆照，剩下的名额再按 场景图 → 构图参考 → 三视图格 补满；留下的仍按上面的顺序发，丢掉的记进任务日志。
+定妆照，剩下的名额再按 场景图 → 构图参考 → 三视图格 → 道具图 补满；留下的仍按上面的顺序发，丢掉的记进任务日志。
 - 场景图：镜头所在段落的场景选定的那张（不出人物，固定场景一致性），见 domain/locations.py。
 - 构图参考：用户在镜头抽屉上传的构图 / 动作参考（Slot kind="shot_ref"，槽位里的候选全部都用）。
 - 出场角色：先放所有出场角色选定的定妆照（按 cast 顺序），再按同样顺序放每人一张与机位最匹配的
   三视图格（见 turnaround.view_for_shot）。定妆照排在三视图前面，截断时先丢多出来的角度，保住每个角色的脸。
-- 道具：目前道具没有参考图，这一段是空的。
+- 道具：镜头 props 里写到、在角色阶段「设定」里有选定道具图的道具（见 domain/props.py），按镜头里的顺序。
+  老首帧出的时候还没有道具图：新加的道具图不让它们过期（views.shot_detail 按不带道具图的打包也认）。
 - 上一镜尾帧：开了「接上一镜」的镜头不出图，首帧直接取上一镜视频的最后一帧（pipeline/continuity.py），
   所以不会走到参考图打包。
 
@@ -41,7 +42,7 @@ class Ref:
     candidate_id: int
     file_path: str
     label: str
-    kind: str = ""     # location / shot_ref / portrait / turnaround（截断优先级和「锁脸」判断用）
+    kind: str = ""     # location / shot_ref / portrait / turnaround / prop（截断优先级和「锁脸」判断用）
     character_id: int | None = None   # 定妆照 / 三视图格是谁的（接上一镜时挑新入画的角色用）
 
 
@@ -162,18 +163,45 @@ def shot_refs(s: Session, shot, *, video: bool = False) -> list[Ref]:
         head.append(Ref(img.id, img.file_path, f"场景图·{loc.name}", "location"))
     for i, c in enumerate(shot_ref_images(s, shot.id), start=1):
         head.append(Ref(c.id, c.file_path, f"构图参考 {i}", "shot_ref"))
-    return head + cast
+    return head + cast + _prop_refs(s, shot)
+
+
+def _prop_refs(s: Session, shot) -> list[Ref]:
+    from backend.domain.models import Episode
+    from backend.domain.props import prop_image_of, shot_props
+
+    if not shot.props:
+        return []
+    ep = s.get(Episode, shot.episode_id)
+    if ep is None:
+        return []
+    out: list[Ref] = []
+    for p in shot_props(s, shot, ep.project_id):
+        img = prop_image_of(s, p.id)
+        if img is not None:
+            out.append(Ref(img.id, img.file_path, f"道具·{prop_label(p.name)}", "prop"))
+    return out
+
+
+def prop_label(name: str, n: int = 24) -> str:
+    name = " ".join((name or "").split())
+    return name if len(name) <= n else name[:n - 1].rstrip() + "…"
+
+
+def without_props(packed: list[Ref]) -> list[Ref]:
+    """加道具图之前的打包（老首帧的输入哈希按它算，不判过期）。"""
+    return [r for r in packed if r.kind != "prop"]
 
 
 # 截断时补名额的顺序（定妆照先每个角色留一张，见 split_refs）
-_FILL_ORDER = ("location", "shot_ref", "turnaround")
+_FILL_ORDER = ("location", "shot_ref", "turnaround", "prop")
 
 
 def split_refs(packed: list[Ref], max_refs: int) -> tuple[list[Ref], list[Ref]]:
     """按引擎上限截断，返回 (用到的, 丢掉的)，两边都保持 packed 里的顺序。
 
     先给每个出场角色留一张定妆照（角色比名额多时按出场顺序留前几个），剩下的名额按
-    场景图 → 构图参考 → 三视图格 补；kind 不认识的排在最后。"""
+    场景图 → 构图参考 → 三视图格 → 道具图 补；kind 不认识的排在最后。"""
     n = max(int(max_refs), 0)
     if len(packed) <= n:
         return list(packed), []

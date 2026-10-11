@@ -323,4 +323,21 @@ describe('CastStage', () => {
     await screen.findByTestId('character-8');
     expect(screen.queryByRole('button', { name: /生成场景图/ })).toBeNull();
   });
+
+  it('「设定」里列出分镜里的道具：摘要写道具数和有道具图的个数，每个道具一张卡', async () => {
+    installFetch({
+      ...ROUTES,
+      'GET /api/projects/demo/props': [
+        { id: 5, project_id: 1, name: 'a dented red thermos', description: '', visual_prompt: '', image_url: '/media/p.png', image_candidate_id: 1, images: [], uses: [{ episode_number: 1, shot_code: 'S01' }] },
+        { id: 6, project_id: 1, name: 'a rusty wrench', description: '', visual_prompt: '', images: [], uses: [] },
+      ],
+    });
+    renderAt(<CastStage />, AT);
+    const fold = await screen.findByRole('button', { name: /^设定/ });
+    await waitFor(() => expect(fold.textContent).toContain('道具 2 个（1 个有道具图）'));
+    await userEvent.setup().click(fold);
+    expect(screen.getByRole('heading', { name: '道具（2）' })).toBeTruthy();
+    expect(screen.getByTestId('prop-5').textContent).toContain('用在：第1集 S01');
+    expect(screen.getByTestId('prop-6')).toBeTruthy();
+  });
 });
