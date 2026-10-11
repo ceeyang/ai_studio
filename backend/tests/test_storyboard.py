@@ -533,3 +533,30 @@ def test_storyboard_prompt_rules_v2():
     assert "这 3 个镜头之内" in system and "不能额外多出镜头" in system
     assert '"老周修车"' in system
     assert "a battered red scooter" in user and "逐字沿用" in user
+
+
+def test_shrink_fallback_after_schema_failures_on_last_attempt(tmp_path, db):
+    """前面几次输出连 schema 都不合格（check 没被调用），最后一次超预算 29%：仍然按比例缩放兜底，不整段失败。"""
+    from backend.llm.gateway import MAX_RETRIES
+
+    tries = ["不是 JSON"] * MAX_RETRIES + [shots_json(2, duration=7), shots_json(2)]
+    ctx, ep_id, prov = setup(tmp_path, db, tries)
+    run_storyboard(ctx, {"episode_id": ep_id})
+    with db.session() as s:
+        assert [x.duration for x in s.get(Episode, ep_id).shots[:2]] == [5.0, 5.0]
+
+
+def test_shrink_fallback_with_manual_provider(tmp_path, db):
+    """手工粘贴的分镜超预算 29%：没有「让模型再写」的循环，直接按比例缩放，不再要人改。"""
+    import json
+
+    gw, _ = make_gateway([], kind="manual")
+    ctx = FakeCtx(make_services(tmp_path, db, llm=gw))
+    ep_id = seed_scripted(db)
+    with db.session() as s:
+        keys = [f"storyboard:{b.id}" for b in s.get(Episode, ep_id).scene_blocks]
+    manual = {keys[0]: json.dumps(shots_json(2, duration=7), ensure_ascii=False),
+              keys[1]: json.dumps(shots_json(2), ensure_ascii=False)}
+    run_storyboard(ctx, {"episode_id": ep_id, "manual": manual})
+    with db.session() as s:
+        assert [x.duration for x in s.get(Episode, ep_id).shots[:2]] == [5.0, 5.0]

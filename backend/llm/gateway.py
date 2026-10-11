@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import inspect
 import logging
 import subprocess
 from collections.abc import Callable
@@ -31,10 +32,23 @@ def _short(e: Exception, n: int = 800) -> str:
     return s if len(s) <= n else s[:n] + "…"
 
 
-def parse_output(text: str, schema: type[T], check: Callable[[T], None] | None = None) -> T:
+def _wants_last(check) -> bool:
+    try:
+        return "last" in inspect.signature(check).parameters
+    except (TypeError, ValueError):
+        return False
+
+
+def parse_output(text: str, schema: type[T], check: Callable[..., None] | None = None, *,
+                 last: bool = True) -> T:
+    """解析并校验。check 可以声明关键字参数 last：这是不是最后一次机会（之后不会再让模型重写），
+    最后一次可以放宽能自动兜底的规则（比如按比例缩放时长），免得整段失败。"""
     obj = schema.model_validate(extract_json(text))
     if check is not None:
-        check(obj)
+        if _wants_last(check):
+            check(obj, last=last)
+        else:
+            check(obj)
     return obj
 
 
@@ -103,7 +117,8 @@ class LLMGateway:
             emit(f"LLM {pcfg.id}（{res.model or pcfg.model or '-'}）第 {attempt + 1} 次，"
                  f"{res.seconds:.1f}s，usage={res.usage}")
             try:
-                return parse_output(res.text, schema, check)
+                # last 按真实的调用次数算（输出连 schema 都不合格时 check 根本没被调用）
+                return parse_output(res.text, schema, check, last=attempt == MAX_RETRIES)
             except (LLMError, ValueError) as e:
                 last_err, last_raw = _short(e), res.text
                 emit(f"输出不合格：{last_err}")
@@ -122,7 +137,8 @@ class LLMGateway:
         if text is None:
             raise NeedsInput(request)
         try:
-            return parse_output(text, schema, check)
+            # 手工粘贴的输出没有「让模型再写一次」的循环：能自动兜底的规则直接兜底
+            return parse_output(text, schema, check, last=True)
         except (LLMError, ValueError) as e:
             raise NeedsInput({**request, "error": _short(e)}) from None
 

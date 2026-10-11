@@ -172,3 +172,31 @@ def test_build_providers_skips_manual():
     cfg = LLMCfg(providers=[ProviderCfg(id="a", kind="openai", base_url="http://x/v1"),
                             ProviderCfg(id="b", kind="claude"), ProviderCfg(id="m", kind="manual")])
     assert sorted(build_providers(cfg)) == ["a", "b"]
+
+
+def test_check_learns_last_from_real_attempt_index_even_after_schema_failures():
+    """check 可以声明 last：按网关真实的调用次数算。前两次连 schema 都不合格（check 没被调用），
+    第三次才是最后一次机会。"""
+    seen = []
+
+    def check(o, *, last):
+        seen.append(last)
+
+    g, _ = gw(["坏1", "坏2", '{"n": 1}'])
+    assert g.generate("t", "s", "u", Out, check=check).n == 1
+    assert seen == [True]
+    seen.clear()
+    g, _ = gw(['{"n": 1}'])
+    g.generate("t", "s", "u", Out, check=check)
+    assert seen == [False]
+
+
+def test_manual_result_is_checked_as_last_chance():
+    seen = []
+    g, _ = gw([], kind="manual")
+    g.generate("t", "s", "u", Out, check=lambda o, last: seen.append(last),
+               manual={"k1": '{"n": 5}'}, key="k1")
+    assert seen == [True]
+    # 不声明 last 的老 check 照常工作
+    assert g.generate("t", "s", "u", Out, check=lambda o: None, manual={"k1": '{"n": 5}'},
+                      key="k1").n == 5

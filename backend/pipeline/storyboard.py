@@ -12,7 +12,6 @@ from backend.domain.models import Episode, Shot
 from backend.domain.shots import renumber_shots
 from backend.domain.slots import delete_slots
 from backend.llm.schemas import StoryboardOut
-from backend.llm.gateway import MAX_RETRIES
 from backend.pipeline.common import clean_note, continue_chain, load_episode, render_with_note
 from backend.queue.errors import JobError
 from backend.queue.handlers import HANDLERS
@@ -365,10 +364,8 @@ def run_storyboard(ctx, payload: dict) -> dict:
             prev_action = _last_action(sv.db, blk["id"]) or prev_action
             continue
 
-        tries = [0]
-
-        def check(out: StoryboardOut, n: int = n, target: float = blk["seconds"]) -> None:
-            tries[0] += 1
+        def check(out: StoryboardOut, n: int = n, target: float = blk["seconds"], *,
+                  last: bool = True) -> None:
             if len(out.shots) != n:
                 raise ValueError(f"需要正好 {n} 个镜头，实际给了 {len(out.shots)} 个")
             unknown = {c for sh in out.shots for c in sh.cast} - set(char_ids)
@@ -380,9 +377,9 @@ def run_storyboard(ctx, payload: dict) -> dict:
                                  "必须全英文，不能有任何中文字符：角色名要换成角色表里该角色的英文外貌"
                                  "描述（如 a stocky man in his fifties）；画面里要出现的招牌、字条上的字"
                                  "写在英文双引号里（如 a sign reading \"老周修车\"）或改成英文描述")
-            # 最后一次机会时不再因为「差得太多」打回，按比例缩放兜底（台词放不下的照样打回）
-            _, err = budget_durations(out.shots, target, max_seconds,
-                                      rewrite_over=tries[0] < 1 + MAX_RETRIES)
+            # 最后一次机会（网关按真实调用次数告诉我们；手工粘贴的输出也算）不再因为「差得太多」打回，
+            # 按比例缩放兜底（台词放不下的照样打回）
+            _, err = budget_durations(out.shots, target, max_seconds, rewrite_over=not last)
             if err:
                 raise ValueError(err)
 
