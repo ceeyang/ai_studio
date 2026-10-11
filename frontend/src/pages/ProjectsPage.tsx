@@ -90,6 +90,13 @@ function NewProjectDialog({ onClose }: { onClose: () => void }) {
   const image = imageEngine || pickDefault(engines.data?.image, settings.data?.image_engine.effective ?? 'zimage');
   const video = videoEngine || pickDefault(engines.data?.video, settings.data?.video_engine.effective ?? 'h3_video');
 
+  // 首帧引擎吃不吃参考图（caps.max_refs）：不吃的话首帧没法用定妆照锁脸、也用不上场景图
+  const imageRow = (engines.data?.image ?? []).find((r) => r.name === image);
+  const noRefs = imageRow?.caps?.max_refs === 0;
+  // 预设推荐的定妆照引擎（如真人写实的 krea2）：和首帧引擎不同时提一句
+  const portraitRec = presets.data?.find((p) => p.key === preset)?.portrait_engine ?? null;
+  const portraitHint = portraitRec && portraitRec !== image ? portraitRec : null;
+
   // 换预设：预选它推荐的引擎（只是建议，下面的下拉框照样能改）；推荐的都不可用就不动
   const choosePreset = (key: StylePresetKey) => {
     setPreset(key);
@@ -145,6 +152,11 @@ function NewProjectDialog({ onClose }: { onClose: () => void }) {
             </select>
           </label>
         </div>
+        <p className="muted small" data-testid="engine-hint">
+          首帧引擎要能吃参考图才能锁脸、用场景图（如 H3 图像）。
+          {noRefs && `${engineLabel(image)} 不吃参考图，首帧只能按文字出脸、场景图也用不上。`}
+          {portraitHint && `定妆照推荐用 ${engineLabel(portraitHint)}：建好项目后到设置页「角色定妆照」这一步选。`}
+        </p>
         {engines.error && <p className="error">读取引擎列表失败：{errorText(engines.error)}</p>}
         {create.error && <p className="error">{errorText(create.error)}</p>}
         <div className="modal-foot">

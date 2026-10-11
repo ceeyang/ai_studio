@@ -238,14 +238,15 @@ export function DefaultsPanel() {
                 </td>
                 <td>
                   <select aria-label={`${s.label}用什么`} value={draft.steps[s.key] ?? ''} onChange={(e) => setStep(s.key, e.target.value)}>
-                    <option value="">{`跟随默认（${nameOf(s.kind, s.fallback)}）`}</option>
+                    <option value="">{`跟随默认（${s.follows_project ? '项目图片引擎' : nameOf(s.kind, s.fallback)}）`}</option>
                     <InvalidOption v={s} />
                     <Options kind={s.kind} data={data} />
                   </select>
                   <InvalidNote v={s} now={nameOf(s.kind, s.effective)} id={s.key} />
                 </td>
                 <td className="muted" data-testid={`effective-${s.key}`}>
-                  {nameOf(s.kind, s.effective)}
+                  {/* 不带项目时这一步实际跟各项目的图片引擎走，effective 只是新项目默认引擎的估计 */}
+                  {s.follows_project && !draft.steps[s.key] ? '跟随项目图片引擎' : nameOf(s.kind, s.effective)}
                 </td>
               </tr>
             ))}

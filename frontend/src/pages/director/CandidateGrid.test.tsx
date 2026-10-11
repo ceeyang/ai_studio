@@ -111,4 +111,19 @@ describe('CandidateGrid', () => {
     expect(within(screen.getByTestId('candidate-302')).queryByRole('note')).toBeNull();
     expect(within(screen.getByTestId('candidate-302')).queryByText('疑似跳切')).toBeNull();
   });
+
+  it('视频开头没接上首帧（出片自检相似度低）→ 「开头没接上首帧」角标和说明', () => {
+    const slot = makeSlot({
+      kind: 'video', selected_candidate_id: 301,
+      candidates: [
+        makeCandidate({ id: 301, url: '/media/a.mp4', note: '开头没接上首帧：相似度 0.29', params: { qc: { hard_cuts: [], first_frame_ssim: 0.29, start_mismatch: true } } }),
+      ],
+    });
+    render(<CandidateGrid slot={slot} onSelect={() => {}} />);
+    const card = screen.getByTestId('candidate-301');
+    expect(within(card).getByText('开头没接上首帧').className).toContain('badge warn');
+    expect(within(card).getByRole('note').textContent).toBe('开头没接上首帧：相似度 0.29');
+    expect(within(card).queryByText('疑似跳切')).toBeNull();
+  });
 });
+

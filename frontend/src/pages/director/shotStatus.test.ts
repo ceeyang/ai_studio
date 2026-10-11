@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Slot } from '../../api/types';
 import { makeCandidate, makeShot, makeSlot } from '../../test/factories';
-import { activeText, cardAction, cellStatus, genLabel, hasSelected } from './shotStatus';
+import { activeText, cardAction, cellStatus, genLabel, hasSelected, qcIssues } from './shotStatus';
 
 function chosen(id: number, kind: string, extra: Partial<Slot> = {}): Slot {
   return makeSlot({ id, kind, selected_candidate_id: id * 10, candidates: [makeCandidate({ id: id * 10, url: `/m/${id}` })], ...extra });
@@ -66,5 +66,15 @@ describe('shotStatus', () => {
     expect(cardAction(both, 'videos').label).toBe('重拍视频');
     const failed = makeShot({ slots: [chosen(1, 'first_frame')], failures: [{ id: 2, type: 'video.shot', status: 'failed', error: 'x' }] });
     expect(cardAction(failed, 'videos')).toEqual({ kind: 'retry', label: '重试', aria: '重试视频' });
+  });
+
+  it('qcIssues：疑似跳切、开头没接上首帧各一个角标；没有问题时为空', () => {
+    expect(qcIssues(makeCandidate({ params: { qc: { hard_cuts: [], first_frame_ssim: 0.9, start_mismatch: false } } }))).toEqual([]);
+    expect(qcIssues(undefined)).toEqual([]);
+    const both = qcIssues(makeCandidate({ params: { qc: { hard_cuts: [2.04], first_frame_ssim: 0.29, start_mismatch: true } } }));
+    expect(both.map((x) => x.label)).toEqual(['开头没接上首帧', '疑似跳切']);
+    expect(both[0].tip).toContain('0.29');
+    expect(both[1].tip).toContain('2.0s');
+    expect(both.map((x) => x.short)).toEqual(['开头没接上首帧', '2.0s']);
   });
 });

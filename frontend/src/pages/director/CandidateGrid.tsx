@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { ApiError, detailText, errorText } from '../../api/client';
 import type { Slot } from '../../api/types';
 import { engineLabel, fmtTime } from '../../format';
-import { cutTip, hardCuts } from './shotStatus';
+import { qcIssues } from './shotStatus';
 
 export interface CandidateGridProps {
   slot: Slot;
@@ -95,14 +95,16 @@ export function CandidateGrid({ slot, onSelect, selecting = false }: CandidateGr
             <figcaption>
               <span>{engineLabel(c.engine)}</span>
               <span className="muted">{fmtTime(c.created_at)}</span>
-              {isVideo && hardCuts(c).length > 0 && (
+              {isVideo && qcIssues(c).length > 0 && (
                 <>
-                  <span className="badge warn" title={cutTip(c)}>
-                    疑似跳切
-                  </span>
+                  {qcIssues(c).map((q) => (
+                    <span key={q.label} className="badge warn" title={q.tip}>
+                      {q.label}
+                    </span>
+                  ))}
                   {/* 说明直接写出来（悬停提示在触屏上看不到，也容易被忽略） */}
                   <span className="cand-warn" role="note">
-                    {cutTip(c)}
+                    {c.note || qcIssues(c).map((q) => q.tip).join('；')}
                   </span>
                 </>
               )}

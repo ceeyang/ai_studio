@@ -97,6 +97,41 @@ export function cutTip(c: Candidate): string {
   return c.note || `疑似跳切：${hardCuts(c).map((t) => `${t.toFixed(1)}s`).join('、')} 处画面突变，建议重拍`;
 }
 
+/** 出片自检发现视频开头没接上首帧（第一帧和选定首帧的相似度低，H3 重新构图了）：返回相似度，没有就是 null */
+export function startMismatch(c?: Candidate): number | null {
+  const qc = c?.params?.qc as { start_mismatch?: unknown; first_frame_ssim?: unknown } | undefined;
+  if (qc?.start_mismatch !== true) return null;
+  return typeof qc.first_frame_ssim === 'number' ? qc.first_frame_ssim : 0;
+}
+
+export interface QcIssue {
+  /** 角标上的字 */
+  label: string;
+  /** 悬停说明 */
+  tip: string;
+  /** 就绪检查里镜头编号后面括号里的字 */
+  short: string;
+}
+
+/** 出片自检发现的问题（每个一个角标）：开头没接上首帧、疑似跳切 */
+export function qcIssues(c?: Candidate): QcIssue[] {
+  if (!c) return [];
+  const out: QcIssue[] = [];
+  const ssim = startMismatch(c);
+  if (ssim !== null) {
+    out.push({
+      label: '开头没接上首帧',
+      tip: `开头没接上首帧：视频第一帧和选定的首帧不像（相似度 ${ssim.toFixed(2)}），可能重新构图了，建议重拍`,
+      short: '开头没接上首帧',
+    });
+  }
+  const cuts = hardCuts(c);
+  if (cuts.length > 0) {
+    out.push({ label: '疑似跳切', tip: cutTip(c), short: cuts.map((t) => `${t.toFixed(1)}s`).join('、') });
+  }
+  return out;
+}
+
 /** 能拿来出视频的首帧：选定了、而且不过期（过期的先回首帧阶段重拍，不拿旧首帧出视频） */
 export function firstFrameReady(shot: ShotDetail): boolean {
   // 接上一镜：出视频前后端会先取上一镜的尾帧，只要上一镜有视频就行

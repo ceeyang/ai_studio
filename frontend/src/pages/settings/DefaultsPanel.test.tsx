@@ -172,4 +172,15 @@ describe('设置页「默认模型」', () => {
     await waitFor(() => expect(document.activeElement).toBe(sel));
     expect((sel.closest('details') as HTMLDetailsElement).open).toBe(true);
   });
+
+  it('全局页上跟项目图片引擎走的步骤（场景图、定妆照）写「跟随项目图片引擎」，不写一个具体引擎', async () => {
+    const loc = { ...STEP('location', '场景图', 'image', 'zimage'), follows_project: true };
+    base({ 'GET /api/settings': settings({ steps: [STEP('script', '剧本', 'llm', 'claude'), loc] }) });
+    renderAt(<SettingsPage />, { route: '/settings', path: '/settings' });
+    const cell = await screen.findByTestId('effective-location');
+    expect(cell.textContent).toBe('跟随项目图片引擎');
+    const sel = screen.getByLabelText('场景图用什么') as HTMLSelectElement;
+    expect(sel.options[0].textContent).toBe('跟随默认（项目图片引擎）');
+  });
 });
+

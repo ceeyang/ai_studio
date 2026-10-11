@@ -18,7 +18,7 @@ import { EpisodeLoadError, nextActionProps } from '../../components/EpisodeHeade
 import { useJobNotice } from '../../components/JobNotice';
 import { fmtTime } from '../../format';
 import { EndCardPanel } from '../director/EndCardPanel';
-import { hardCuts } from '../director/shotStatus';
+import { qcIssues } from '../director/shotStatus';
 import { selectedOf, slotMark, slotOf } from '../director/slots';
 import { workspacePath } from './urls';
 
@@ -246,15 +246,15 @@ function MusicGroup({
   );
 }
 
-/** 就绪检查：几镜有选定视频、哪些缺、哪些视频过期、哪些选定的视频出片自检疑似跳切。 */
+/** 就绪检查：几镜有选定视频、哪些缺、哪些视频过期、哪些选定的视频出片自检有问题（疑似跳切 / 开头没接上首帧）。 */
 export function readiness(shots: ShotDetail[]) {
   const marks = shots.map((s) => ({ code: s.code, mark: slotMark(slotOf(s, 'video')) }));
   const missing = marks.filter((m) => m.mark === 'none').map((m) => m.code);
   const stale = marks.filter((m) => m.mark === 'stale').map((m) => m.code);
   const flagged = shots
-    .map((s) => ({ code: s.code, cuts: hardCuts(selectedOf(slotOf(s, 'video'))) }))
-    .filter((x) => x.cuts.length > 0)
-    .map((x) => `${x.code}（${x.cuts.map((t) => `${t.toFixed(1)}s`).join('、')}）`);
+    .map((s) => ({ code: s.code, issues: qcIssues(selectedOf(slotOf(s, 'video'))) }))
+    .filter((x) => x.issues.length > 0)
+    .map((x) => `${x.code}（${x.issues.map((q) => q.short).join('、')}）`);
   return { total: shots.length, ready: shots.length - missing.length, missing, stale, flagged };
 }
 
@@ -398,7 +398,7 @@ function ExportBody({ slug, id }: { slug: string; id: number }) {
         </div>
         {r.flagged.length > 0 && (
           <p className="warn" data-testid="flagged-videos">
-            选定的视频疑似跳切：{r.flagged.join('、')}。合成后这些地方画面会突变，建议先到<Link to={videosStage}>视频阶段</Link>重拍或换一条。
+            选定的视频出片自检有问题：{r.flagged.join('、')}（时间点是疑似跳切）。合成后这些地方画面会突变或接不上，建议先到<Link to={videosStage}>视频阶段</Link>重拍或换一条。
           </p>
         )}
         {r.missing.length > 0 && (

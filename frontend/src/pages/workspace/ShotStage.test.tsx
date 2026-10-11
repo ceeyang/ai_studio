@@ -56,6 +56,17 @@ describe('ShotStage', () => {
     expect(posts(calls)[1].body).toEqual({ stage: 'keyframes', candidates: 1, force: false, shots: ['12'] });
   });
 
+  it('提交后后端说接上一镜的镜头先跳过（等上一镜视频）：显示成说明，不是错误', async () => {
+    const N = 'S02（接 S01） 等上一镜视频：首帧要取上一镜视频的最后一帧，这次先跳过';
+    installFetch(routes({ 'POST /api/episodes/4/run': { job_ids: [95], notes: [N] } }));
+    renderAt(<Harness />, AT);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: '生成首帧 S01' }));
+    const note = await screen.findByTestId('run-note');
+    expect(note.textContent).toBe(N);
+    expect(note.className).not.toContain('warn');
+  });
+
   it('提交后后端给了提醒（出场角色没有定妆照）：照常跟踪任务，并把提醒显示出来', async () => {
     const W = '老周 还没有定妆照：h3_image 出首帧要用定妆照锁脸';
     installFetch(routes({ 'POST /api/episodes/4/run': { job_ids: [95], warnings: [W] } }));

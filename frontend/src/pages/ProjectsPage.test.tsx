@@ -112,6 +112,33 @@ describe('ProjectsPage', () => {
     expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({ style_preset: 'guofeng' });
   });
 
+  it('新建项目：说明首帧引擎要能吃参考图；选了不吃参考图的引擎再提醒一句；预设推荐的定妆照引擎写出来', async () => {
+    installFetch({
+      'GET /api/projects': [],
+      'GET /api/engines': {
+        image: [
+          { name: 'h3_image', family: 'h3', caps: { max_refs: 9 } },
+          { name: 'krea2', family: 'krea2', caps: { max_refs: 0 } },
+        ],
+        video: ENGINES.video,
+      },
+      'GET /api/style-presets': [{
+        key: 'live_action', label: '真人写实', description: '', negative: '', image_engines: ['h3_image', 'krea2'],
+        video_engines: ['h3_video'], portrait_engines: ['krea2'], has_storyboard_guidance: false,
+        image_engine: 'h3_image', video_engine: 'h3_video', portrait_engine: 'krea2',
+      }],
+    });
+    renderAt(<ProjectsPage />, { route: '/', path: '/' });
+    const user = userEvent.setup();
+    await user.click((await screen.findAllByRole('button', { name: '新建项目' }))[0]);
+    const hint = await screen.findByTestId('engine-hint');
+    expect(hint.textContent).toContain('首帧引擎要能吃参考图才能锁脸、用场景图');
+    await waitFor(() => expect(screen.getByTestId('engine-hint').textContent).toContain('定妆照推荐'));
+    expect(screen.getByTestId('engine-hint').textContent).not.toContain('不吃参考图');
+    await user.selectOptions(screen.getByLabelText('图像引擎'), 'krea2');
+    expect(screen.getByTestId('engine-hint').textContent).toContain('不吃参考图');
+  });
+
   it('新建项目：引擎默认按设置页「新项目的图片/视频来源」；设置没加载完不能提交', async () => {
     let release: (v: unknown) => void = () => {};
     const gate = new Promise((r) => (release = r));

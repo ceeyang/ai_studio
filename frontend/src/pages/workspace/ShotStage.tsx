@@ -92,6 +92,8 @@ export function ShotStage({
   const run = useRunStage(id);
   /** 上一次提交时后端给的提醒（如出场角色还没有定妆照） */
   const [runWarnings, setRunWarnings] = useState<string[]>([]);
+  /** 上一次提交时后端给的说明（如接上一镜的镜头等上一镜视频，这次跳过） */
+  const [runNotes, setRunNotes] = useState<string[]>([]);
   const reorder = useReorderShots(id);
   const split = useSplitShot(id);
   const del = useDeleteShot(id);
@@ -125,7 +127,9 @@ export function ShotStage({
   const submit = async (batches: GateBatch[], text: string): Promise<boolean> => {
     const ids: number[] = [];
     const warns: string[] = [];
+    const notes: string[] = [];
     setRunWarnings([]);
+    setRunNotes([]);
     setSubmitting(true);
     try {
       for (const b of batches) {
@@ -134,9 +138,11 @@ export function ShotStage({
         const r = await run.mutateAsync(body);
         ids.push(...r.job_ids);
         warns.push(...(r.warnings ?? []).filter((w) => !warns.includes(w)));
+        notes.push(...(r.notes ?? []).filter((n) => !notes.includes(n)));
       }
       notice.track(ids, text);
       setRunWarnings(warns);
+      setRunNotes(notes);
       return true;
     } catch (err) {
       // 前面几批已经提交了的照常进行，错误一起说
@@ -300,6 +306,11 @@ export function ShotStage({
         </p>
       )}
       {!(openShot && active) && notice.view}
+      {runNotes.map((n) => (
+        <p key={n} className="muted small" role="note" data-testid="run-note">
+          {n}
+        </p>
+      ))}
       {runWarnings.map((w) => (
         <p key={w} className="warn small" role="note" data-testid="run-warning">
           {w}

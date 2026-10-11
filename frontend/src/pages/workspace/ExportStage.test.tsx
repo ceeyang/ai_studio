@@ -66,8 +66,18 @@ describe('ExportStage', () => {
     installFetch(routes({ 'GET /api/episodes/4': makeEpisode({ id: 4, shots: [withVideo(11, 'S01'), cut] }) }));
     renderAt(<ExportStage />, AT);
     const warn = await screen.findByTestId('flagged-videos');
-    expect(warn.textContent).toContain('选定的视频疑似跳切：S02（2.0s）');
+    expect(warn.textContent).toContain('选定的视频出片自检有问题：S02（2.0s）');
     expect((screen.getByRole('button', { name: '合成导出' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it('选定的视频开头没接上首帧：就绪检查里一起警告', async () => {
+    const off = withVideo(12, 'S02');
+    off.slots[0].candidates[0].params = { qc: { hard_cuts: [], first_frame_ssim: 0.29, start_mismatch: true } };
+    installFetch(routes({ 'GET /api/episodes/4': makeEpisode({ id: 4, shots: [withVideo(11, 'S01'), off] }) }));
+    renderAt(<ExportStage />, AT);
+    const warn = await screen.findByTestId('flagged-videos');
+    expect(warn.textContent).toContain('S02（开头没接上首帧）');
+    expect(warn.textContent).not.toContain('S01');
   });
 
   it('合成导出带上字幕、配音、片尾卡选项；勾高棉语字幕会连带勾中文字幕', async () => {

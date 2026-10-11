@@ -14,9 +14,13 @@ export interface StylePreset {
   negative: string;
   image_engines: string[];
   video_engines: string[];
+  /** 推荐的定妆照引擎（设置页「角色定妆照」这一步），如真人写实的 krea2 */
+  portrait_engines?: string[];
   has_storyboard_guidance: boolean;
   image_engine: string | null;
   video_engine: string | null;
+  /** portrait_engines 里第一个可用的 */
+  portrait_engine?: string | null;
 }
 
 export interface Project {
@@ -85,6 +89,8 @@ export interface SettingStep extends SettingValue {
   key: string;
   label: string;
   kind: SettingKind;
+  /** 不带项目时：这一步没单独设置，实际跟各项目的图片引擎走（定妆照、场景图） */
+  follows_project?: boolean;
 }
 
 export interface LlmChoice {
@@ -445,6 +451,8 @@ export interface RunOut {
   job_ids: number[];
   /** 不拦提交的提醒（如出场角色还没有定妆照，锁脸引擎只能按文字出脸） */
   warnings?: string[];
+  /** 说明（如只跑首帧时接上一镜的镜头等上一镜视频，这次跳过） */
+  notes?: string[];
 }
 
 /** GET /api/episodes/{id}/rerun-impact：现在重跑剧本 / 分镜会删什么、覆盖什么 */

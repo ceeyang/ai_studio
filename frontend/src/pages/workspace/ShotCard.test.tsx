@@ -197,4 +197,16 @@ describe('ShotCard', () => {
     const again = setup({ shot: makeShot({ id: 11, code: 'S01', slots: [cut] }) });
     expect(within(again.card).queryByText('疑似跳切')).toBeNull();
   });
+
+  it('视频阶段：开头没接上首帧 → 角标', () => {
+    const video = makeSlot({
+      id: 2, kind: 'video', selected_candidate_id: 20,
+      candidates: [makeCandidate({ id: 20, url: '/media/v.mp4', params: { qc: { hard_cuts: [], first_frame_ssim: 0.3, start_mismatch: true } } })],
+    });
+    const shot = makeShot({ id: 11, code: 'S01', slots: [chosen(1, 'first_frame'), video] });
+    const { card } = setup({ shot, stage: 'videos' });
+    expect(within(card).getByText('开头没接上首帧').getAttribute('title')).toContain('0.30');
+    expect(within(card).queryByText('疑似跳切')).toBeNull();
+  });
 });
+
