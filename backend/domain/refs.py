@@ -1,21 +1,37 @@
 """首帧 / 视频的参考图打包（设计文档 §6.4）。
 
-顺序固定：场景图 → 出场角色 → 道具 → 上一镜尾帧，超出引擎上限时从后往前丢。
-目前只有角色有参考图：先放所有出场角色选定的定妆照（按 cast 顺序），再按同样顺序放每人
-一张与机位最匹配的三视图格（见 turnaround.view_for_shot）。定妆照排在三视图前面，
-截断时先丢多出来的角度，保住每个角色的脸。
+首帧的顺序固定：场景图 → 镜头构图参考图（最多 2 张）→ 出场角色 → 道具 → 上一镜尾帧，超出引擎上限时
+从后往前丢（引擎 build 时按这个顺序截断，丢掉的记进任务日志）。
+- 场景图：镜头所在段落的场景选定的那张（不出人物，固定场景一致性），见 domain/locations.py。
+- 构图参考：用户在镜头抽屉上传的构图 / 动作参考（Slot kind="shot_ref"，槽位里的候选全部都用）。
+- 出场角色：先放所有出场角色选定的定妆照（按 cast 顺序），再按同样顺序放每人一张与机位最匹配的
+  三视图格（见 turnaround.view_for_shot）。定妆照排在三视图前面，截断时先丢多出来的角度，保住每个角色的脸。
+- 道具：目前道具没有参考图，这一段是空的。
+- 上一镜尾帧：开了「接上一镜」的镜头不出图，首帧直接取上一镜视频的最后一帧（pipeline/continuity.py），
+  所以不会走到参考图打包。
 
-没有三视图时打包结果和只带定妆照时完全一样，老镜头的输入哈希不变。
+视频只带出场角色（定妆照 + 三视图格）：场景和构图已经由首帧定下，再塞场景图给视频模型只会让它中途剪到
+空场景（和以前剪到定妆照影棚背景一样）。
+
+没有场景图、构图参考和三视图时打包结果和只带定妆照时完全一样，老镜头的输入哈希不变。
 """
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
+from pathlib import Path
 
 from sqlalchemy.orm import Session
 
 from backend.domain.characters import portrait_of
-from backend.domain.models import Character
+from backend.domain.locations import image_ext, location_image_of, shot_location
+from backend.domain.media import MediaStore
+from backend.domain.models import Candidate, Character, Slot
+from backend.domain.slots import add_candidate, get_or_create_slot
 from backend.domain.turnaround import VIEW_LABELS, pick_cell, view_for_shot
+
+SHOT_REF_SLOT = "shot_ref"
+MAX_SHOT_REFS = 2
 
 
 @dataclass(frozen=True)
@@ -39,12 +55,11 @@ def _cast(s: Session, shot) -> list[Character]:
     return out
 
 
-def shot_refs(s: Session, shot) -> list[Ref]:
-    chars = _cast(s, shot)
+def _cast_refs(s: Session, shot) -> list[Ref]:
     portraits: list[Ref] = []
     cells: list[Ref] = []
     view = view_for_shot(shot)
-    for ch in chars:
+    for ch in _cast(s, shot):
         p = portrait_of(s, ch.id)
         if p is None:
             continue  # 没有定妆照就不带三视图（三视图是按定妆照锁的脸）
@@ -54,3 +69,60 @@ def shot_refs(s: Session, shot) -> list[Ref]:
             v, c = picked
             cells.append(Ref(c.id, c.file_path, f"{ch.name} 三视图·{VIEW_LABELS[v]}"))
     return portraits + cells
+
+
+# ------------------------------------------------------------ 镜头构图参考图
+def shot_ref_images(s: Session, shot_id: int) -> list[Candidate]:
+    from sqlalchemy import select
+
+    slot = s.scalar(select(Slot).where(Slot.owner_type == "shot", Slot.owner_id == shot_id,
+                                       Slot.kind == SHOT_REF_SLOT))
+    return list(slot.candidates) if slot is not None else []
+
+
+def add_shot_ref(s: Session, media: MediaStore, shot, slug: str, data: bytes,
+                 filename: str) -> Candidate:
+    """上传一张构图 / 动作参考图。每个镜头最多 MAX_SHOT_REFS 张；槽位里的候选全部都用，不选定。"""
+    ext = image_ext(filename, "构图参考图")
+    if not data:
+        raise ValueError("构图参考图文件是空的")
+    if len(shot_ref_images(s, shot.id)) >= MAX_SHOT_REFS:
+        raise ValueError(f"每个镜头最多 {MAX_SHOT_REFS} 张构图参考图，先删掉一张再传")
+    dst = media.new_media_path(slug, "shot_ref", ext)
+    dst.write_bytes(data)
+    slot = get_or_create_slot(s, "shot", shot.id, SHOT_REF_SLOT)
+    return add_candidate(s, slot, file_path=media.rel(dst), engine="upload",
+                         params={"source": Path(filename).name},
+                         input_hash=hashlib.sha256(data).hexdigest()[:16], job_id=None,
+                         auto_select=False)
+
+
+def remove_shot_ref(s: Session, shot_id: int, candidate_id: int) -> None:
+    """删掉一张构图参考图（只删记录，文件留在磁盘上）。"""
+    c = next((x for x in shot_ref_images(s, shot_id) if x.id == candidate_id), None)
+    if c is None:
+        raise LookupError(f"镜头 {shot_id} 没有构图参考图 {candidate_id}")
+    s.delete(c)
+    s.flush()
+
+
+# ------------------------------------------------------------ 打包
+def shot_refs(s: Session, shot, *, video: bool = False) -> list[Ref]:
+    """按 §6.4 的顺序打包这一镜的参考图。video=True 时只带出场角色（视频用）。"""
+    cast = _cast_refs(s, shot)
+    if video:
+        return cast
+    head: list[Ref] = []
+    loc = shot_location(s, shot)
+    img = location_image_of(s, loc.id) if loc is not None else None
+    if img is not None:
+        head.append(Ref(img.id, img.file_path, f"场景图·{loc.name}"))
+    for i, c in enumerate(shot_ref_images(s, shot.id), start=1):
+        head.append(Ref(c.id, c.file_path, f"构图参考 {i}"))
+    return head + cast
+
+
+def split_refs(packed: list[Ref], max_refs: int) -> tuple[list[Ref], list[Ref]]:
+    """按引擎上限截断：保留前 max_refs 张（优先级高的在前），返回 (用到的, 丢掉的)。"""
+    n = max(int(max_refs), 0)
+    return packed[:n], packed[n:]

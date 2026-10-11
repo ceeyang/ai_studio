@@ -2,7 +2,7 @@
 // 视频都就绪就「去成片」。勾选了镜头时变成「对选中的 N 镜生成… / 重拍…」。纯函数：阶段条算字、镜头阶段照着提交，两边结果一致。
 import type { Job, ShotDetail } from '../../api/types';
 import { type EstimatePart, etaText } from '../director/estimate';
-import { type GenStage, activeJob, cellOf, cellStatus, firstFrameReady, hasSelected } from '../director/shotStatus';
+import { type GenStage, activeJob, cellOf, cellStatus, continues, hasSelected, waitsPrevVideo } from '../director/shotStatus';
 import type { StageKey } from '../stages';
 
 /** 超过这么多个任务才先弹预估确认 */
@@ -55,8 +55,30 @@ function partsOf(batches: GateBatch[], count: number): EstimatePart[] {
   return out;
 }
 
-/** 先不强制的、后强制的，空的去掉 */
+/**
+ * 能出视频的镜头（pool 里、按集内顺序）：首帧就绪的；接上一镜的看上一镜——上一镜有视频，或上一镜也在这一批里能出视频
+ * （后端按顺序串起来：上一镜视频 → 截尾帧 → 这一镜视频）。
+ */
+export function videoReady(pool: ShotDetail[]): Set<number> {
+  const ok = new Set<number>();
+  for (const s of pool) {
+    if (continues(s)) {
+      if (s.continue_prev!.has_video || ok.has(s.continue_prev!.shot_id)) ok.add(s.id);
+    } else if (ready(s, 'keyframes')) ok.add(s.id);
+  }
+  return ok;
+}
+
+/**
+ * 先不强制的、后强制的，空的去掉。
+ * 视频里有接上一镜的镜头时合成一批（强制）：分两次提交的话，后端没法把「上一镜视频 → 截尾帧」串起来。
+ * 没有视频的镜头强制也一样（没有可跳过的旧结果）。
+ */
 function twoBatches(stage: GenStage, fresh: ShotDetail[], forced: ShotDetail[]): GateBatch[] {
+  if (stage === 'videos' && fresh.length > 0 && forced.length > 0 && [...fresh, ...forced].some(continues)) {
+    const ids = new Set([...fresh, ...forced].map((s) => s.id));
+    return [{ stage, ids: [...ids], force: true }];
+  }
   return [
     { stage, ids: fresh.map((s) => s.id), force: false },
     { stage, ids: forced.map((s) => s.id), force: true },
@@ -80,9 +102,12 @@ function selectionGate(sel: ShotDetail[], stage: GenStage, count: number, jobs: 
   const { label } = cellOf(stage);
   const busyN = sel.filter((s) => busy(s, stage)).length;
   const free = sel.filter((s) => !busy(s, stage));
-  const noKf = stage === 'videos' ? free.filter((s) => !firstFrameReady(s)) : [];
+  const vr = videoReady(free);
+  // 首帧阶段：接上一镜而上一镜还没有视频的没法取尾帧，先跳过
+  const noKf = stage === 'videos' ? free.filter((s) => !vr.has(s.id)) : free.filter(waitsPrevVideo);
   const targets = free.filter((s) => !noKf.includes(s));
   if (targets.length === 0) {
+    if (stage === 'keyframes' && noKf.length > 0) return { kind: 'busy', label: `等上一镜视频（选中的 ${noKf.length} 镜接上一镜）` };
     if (noKf.length > 0) return { kind: 'goto', label: `先补齐首帧（选中的 ${noKf.length} 镜首帧缺少或过期）`, stage: 'keyframes' };
     return { kind: 'busy', label: `等选中的镜头生成完（${busyN} 镜生成中）` };
   }
@@ -97,7 +122,8 @@ function selectionGate(sel: ShotDetail[], stage: GenStage, count: number, jobs: 
       note: joinNote([
         has.length > 0 && fresh.length > 0 && `其中 ${fresh.length} 镜还没有${label}，生成；${has.length} 镜已有${label}，重拍（强制重出新的候选）`,
         has.length === n && `都已有${label}，重拍会强制重出新的候选`,
-        noKf.length > 0 && `另有 ${noKf.length} 镜首帧缺少或过期，先跳过`,
+        noKf.length > 0 &&
+          (stage === 'videos' ? `另有 ${noKf.length} 镜首帧缺少或过期，先跳过` : `另有 ${noKf.length} 镜接上一镜、上一镜还没有视频，先跳过`),
         busyN > 0 && `另有 ${busyN} 镜正在生成，先跳过`,
       ]),
       batches: twoBatches(stage, fresh, has),
@@ -111,7 +137,8 @@ function selectionGate(sel: ShotDetail[], stage: GenStage, count: number, jobs: 
 
 /** 这一格缺 / 过期、又没在生成的镜头：缺的不强制，过期的强制 */
 function todo(shots: ShotDetail[], stage: GenStage) {
-  const list = shots.filter((s) => !ready(s, stage) && !busy(s, stage));
+  // 首帧：接上一镜而上一镜还没有视频的取不了尾帧，不算「缺」（出视频时按顺序串起来）
+  const list = shots.filter((s) => !ready(s, stage) && !busy(s, stage) && !(stage === 'keyframes' && waitsPrevVideo(s)));
   return {
     list,
     fresh: list.filter((s) => cellStatus(s, stage).mark === 'none'),
@@ -136,7 +163,8 @@ export function shotGate(
 
   const kf = todo(shots, 'keyframes');
   const kfBusy = shots.filter((s) => busy(s, 'keyframes')).length;
-  const vidReady = shots.filter((s) => ready(s, 'keyframes'));
+  const vr = videoReady(shots);
+  const vidReady = shots.filter((s) => vr.has(s.id));
   const vid = todo(vidReady, 'videos');
   const vidBusy = shots.filter((s) => busy(s, 'videos')).length;
 

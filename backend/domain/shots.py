@@ -20,3 +20,10 @@ def renumber_shots(s: Session, episode_id: int, ordered_ids: list[int] | None = 
         sh.code = f"S{i + 1:02d}"
     s.flush()
     return shots
+
+
+def prev_shot(s: Session, shot) -> Shot | None:
+    """同一集里排在这一镜前面的那一镜（按 order）；第一镜返回 None。"""
+    return s.scalar(select(Shot).where(Shot.episode_id == shot.episode_id,
+                                       Shot.order < shot.order)
+                    .order_by(Shot.order.desc(), Shot.id.desc()).limit(1))

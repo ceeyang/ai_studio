@@ -153,7 +153,7 @@ def test_api_get_defaults(api):
     steps = {x["key"]: x for x in d["steps"]}
     assert set(steps) == {"script", "storyboard", "character.suggest", "character.recommend",
                           "character.turnaround_look", "dialogue.fit_khmer", "subtitles.translate",
-                          "portrait", "turnaround"}             # 首帧/视频跟项目走，没有步骤设置
+                          "portrait", "turnaround", "location"}             # 首帧/视频跟项目走，没有步骤设置
     assert all(x["invalid"] is False for x in d["steps"])
     assert steps["script"]["label"] == "剧本" and steps["script"]["kind"] == "llm"
     assert steps["turnaround"]["effective"] == "h3_image" and steps["portrait"]["effective"] == "zimage"

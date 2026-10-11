@@ -58,3 +58,14 @@ def install_error_handlers(app: FastAPI) -> None:
     app.add_exception_handler(ValueError, handler(400))
     app.add_exception_handler(LookupError, handler(404))
     app.add_exception_handler(PermissionError, handler(403))
+
+
+async def read_upload(request: Request, field: str = "file") -> tuple[bytes, str]:
+    """multipart 上传的文件：返回 (内容, 原文件名)。不是 multipart 或缺字段时报中文错误。"""
+    if not request.headers.get("content-type", "").startswith("multipart/form-data"):
+        raise JobError(f"要用 multipart/form-data 上传，文件放在 {field} 字段")
+    form = await request.form()
+    up = form.get(field)
+    if up is None or isinstance(up, str):
+        raise JobError(f"缺少上传文件字段 {field}")
+    return await up.read(), up.filename or ""

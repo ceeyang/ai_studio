@@ -2,8 +2,18 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { errorText } from '../../api/client';
-import { useEpisode, useExports, useFitKhmer, usePatchExport, useRunStage, useTranslateSubtitles } from '../../api/queries';
-import type { ExportOptions, ExportRow, ShotDetail } from '../../api/types';
+import {
+  useBgm,
+  useDeleteBgm,
+  useEpisode,
+  useExports,
+  useFitKhmer,
+  usePatchExport,
+  useRunStage,
+  useTranslateSubtitles,
+  useUploadBgm,
+} from '../../api/queries';
+import type { Bgm, ExportOptions, ExportRow, ShotDetail } from '../../api/types';
 import { EpisodeLoadError, nextActionProps } from '../../components/EpisodeHeader';
 import { useJobNotice } from '../../components/JobNotice';
 import { fmtTime } from '../../format';
@@ -22,6 +32,7 @@ export function exportTags(settings: Record<string, unknown>): string[] {
   if (settings.dub === 'km') tags.push('高棉语配音');
   if (settings.bed === false) tags.push('无原声底');
   if (settings.align === 'detected') tags.push('配音对齐说话');
+  if (settings.music === true) tags.push('配乐');
   if (settings.end_card === true) tags.push('片尾卡');
   if (typeof settings.duration === 'number') tags.push(`${settings.duration.toFixed(1)} 秒`);
   return tags;
@@ -40,9 +51,40 @@ interface Choice {
   endCard: boolean;
   bed: boolean;
   alignDetected: boolean;
+  /** 配乐：垫这一集上传的背景音乐 */
+  music: boolean;
+  musicDb: number;
+  fadeIn: number;
+  fadeOut: number;
+  /** 有台词时自动压低配乐 */
+  duck: boolean;
 }
 
-const DEFAULT_CHOICE: Choice = { subZh: false, subKm: false, dubKm: false, endCard: false, bed: true, alignDetected: false };
+const DEFAULT_CHOICE: Choice = {
+  subZh: false,
+  subKm: false,
+  dubKm: false,
+  endCard: false,
+  bed: true,
+  alignDetected: false,
+  music: false,
+  musicDb: -18,
+  fadeIn: 1,
+  fadeOut: 2,
+  duck: true,
+};
+
+/** 数字选项的范围（和后端 ExportOptions 一致） */
+const LIMITS: Partial<Record<keyof Choice, [number, number]>> = {
+  musicDb: [-40, 6],
+  fadeIn: [0, 10],
+  fadeOut: [0, 10],
+};
+
+const clamp = (k: keyof Choice, v: number) => {
+  const [lo, hi] = LIMITS[k] ?? [-Infinity, Infinity];
+  return Math.min(hi, Math.max(lo, v));
+};
 
 export const OPTIONS_KEY = (episodeId: number) => `ai-studio.export-options.${episodeId}`;
 
@@ -53,7 +95,10 @@ function loadChoice(episodeId: number): Choice {
     const saved = JSON.parse(raw) as Partial<Choice>;
     const out = { ...DEFAULT_CHOICE };
     for (const k of Object.keys(DEFAULT_CHOICE) as (keyof Choice)[]) {
-      if (typeof saved[k] === 'boolean') out[k] = saved[k] as boolean;
+      const v = saved[k];
+      if (typeof DEFAULT_CHOICE[k] === 'boolean' && typeof v === 'boolean') (out as Record<string, unknown>)[k] = v;
+      if (typeof DEFAULT_CHOICE[k] === 'number' && typeof v === 'number' && Number.isFinite(v))
+        (out as Record<string, unknown>)[k] = clamp(k, v);
     }
     return out;
   } catch {
@@ -70,14 +115,135 @@ function saveChoice(episodeId: number, c: Choice) {
   }
 }
 
-function toOptions(c: Choice): ExportOptions {
-  return {
+/** hasBgm：这一集有没有上传配乐（没有时不带配乐，免得后端拒绝） */
+export function toOptions(c: Choice, hasBgm = false): ExportOptions {
+  const out: ExportOptions = {
     subtitles: c.subKm ? 'zh+km' : c.subZh ? 'zh' : 'none',
     dub: c.dubKm ? 'km' : 'off',
     end_card: c.endCard,
     bed: c.bed,
     align: c.dubKm && c.alignDetected ? 'detected' : 'timeline',
   };
+  if (c.music && hasBgm) {
+    out.music = true;
+    out.music_db = c.musicDb;
+    out.music_fade_in = c.fadeIn;
+    out.music_fade_out = c.fadeOut;
+    out.music_duck = c.duck;
+  }
+  return out;
+}
+
+/** 数字输入：边打边存在本地（能清空、能先打负号），是范围内的数字才提交，失焦时回到当前值。 */
+function NumField({
+  label,
+  value,
+  range,
+  step,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  range: [number, number];
+  step: number;
+  disabled: boolean;
+  onChange(v: number): void;
+}) {
+  const [text, setText] = useState(String(value));
+  useEffect(() => setText(String(value)), [value]);
+  return (
+    <label className="inline-field">
+      <span>{label}</span>
+      <input
+        type="number"
+        aria-label={label}
+        step={step}
+        min={range[0]}
+        max={range[1]}
+        value={text}
+        disabled={disabled}
+        onChange={(ev) => {
+          const raw = ev.target.value;
+          setText(raw);
+          const v = Number(raw);
+          if (raw.trim() !== '' && Number.isFinite(v) && v >= range[0] && v <= range[1]) onChange(v);
+        }}
+        onBlur={() => setText(String(value))}
+      />
+    </label>
+  );
+}
+
+/** 配乐：上传 / 替换 / 去掉、试听，和导出时怎么混（音量、淡入淡出、有台词时压低）。 */
+function MusicGroup({
+  episodeId,
+  bgm,
+  choice,
+  set,
+}: {
+  episodeId: number;
+  bgm: Bgm | null;
+  choice: Choice;
+  set: (patch: Partial<Choice>) => void;
+}) {
+  const upload = useUploadBgm(episodeId);
+  const del = useDeleteBgm(episodeId);
+  const error = upload.error ?? del.error;
+  const on = choice.music && !!bgm;
+  const num = (k: 'musicDb' | 'fadeIn' | 'fadeOut', label: string, step: number) => (
+    <NumField label={label} value={choice[k]} range={LIMITS[k]!} step={step} disabled={!on} onChange={(v) => set({ [k]: v })} />
+  );
+  return (
+    <fieldset className="export-group export-group-music">
+      <legend>配乐</legend>
+      {bgm ? (
+        <div className="bgm-current">
+          <audio data-testid="bgm-player" src={bgm.url} controls preload="metadata" />
+          <span className="muted small" title={bgm.filename}>
+            {bgm.filename}
+          </span>
+        </div>
+      ) : (
+        <p className="muted small">这一集还没有配乐。上传一首背景音乐（mp3 / wav / m4a / aac / ogg / flac），会循环铺满整集。</p>
+      )}
+      <div className="row">
+        <label className={`btn sm${upload.isPending ? ' is-disabled' : ''}`}>
+          {upload.isPending ? '上传中…' : bgm ? '替换配乐' : '上传配乐'}
+          <input
+            type="file"
+            accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg,.flac"
+            aria-label={bgm ? '替换配乐' : '上传配乐'}
+            hidden
+            disabled={upload.isPending}
+            onChange={(ev) => {
+              const f = ev.target.files?.[0];
+              ev.target.value = '';
+              if (f) upload.mutate(f, { onSuccess: () => set({ music: true }) });
+            }}
+          />
+        </label>
+        {bgm && (
+          <button type="button" className="sm ghost" disabled={del.isPending} onClick={() => del.mutate()}>
+            去掉配乐
+          </button>
+        )}
+      </div>
+      <label>
+        <input type="checkbox" aria-label="成片垫配乐" checked={on} disabled={!bgm} onChange={(ev) => set({ music: ev.target.checked })} /> 成片垫配乐
+      </label>
+      <div className="row">
+        {num('musicDb', '音量（dB）', 1)}
+        {num('fadeIn', '淡入（秒）', 0.5)}
+        {num('fadeOut', '淡出（秒）', 0.5)}
+      </div>
+      <label title="有台词的地方把配乐再压低 10 dB，前后各 0.3 秒过渡">
+        <input type="checkbox" aria-label="有台词时自动压低" checked={choice.duck} disabled={!on} onChange={(ev) => set({ duck: ev.target.checked })} />{' '}
+        有台词时自动压低
+      </label>
+      {error && <p className="error small">{errorText(error)}</p>}
+    </fieldset>
+  );
 }
 
 /** 就绪检查：几镜有选定视频、哪些缺、哪些视频过期、哪些选定的视频出片自检疑似跳切。 */
@@ -164,6 +330,8 @@ function ExportBody({ slug, id }: { slug: string; id: number }) {
   const run = useRunStage(id);
   const translate = useTranslateSubtitles(id);
   const fit = useFitKhmer(id);
+  const bgmQ = useBgm(id);
+  const bgm = bgmQ.data ?? null;
   const notice = useJobNotice();
   const [choice, setChoice] = useState<Choice>(() => loadChoice(id));
   useEffect(() => saveChoice(id, choice), [id, choice]);
@@ -180,7 +348,7 @@ function ExportBody({ slug, id }: { slug: string; id: number }) {
   const doExport = () => {
     notice.clear();
     run.mutate(
-      { stage: 'export', export: toOptions(choice) },
+      { stage: 'export', export: toOptions(choice, !!bgm) },
       {
         onSuccess: (res) => notice.track(res.job_ids, '合成导出'),
         onError: (err) => notice.error(errorText(err)),
@@ -291,6 +459,7 @@ function ExportBody({ slug, id }: { slug: string; id: number }) {
               配音对齐实际说话
             </label>
           </fieldset>
+          <MusicGroup episodeId={id} bgm={bgm} choice={choice} set={set} />
           <fieldset className="export-group export-group-card">
             <legend>片尾卡</legend>
             <label>

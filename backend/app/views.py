@@ -9,11 +9,13 @@ from urllib.parse import quote
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from backend.app.schemas import (CandidateOut, EpisodeDetail, ExportOut, JobBrief, JobContext,
+from backend.app.schemas import (CandidateOut, ContinuePrevOut, EpisodeDetail, ExportOut, JobBrief, JobContext,
                                  SceneBlockOut, ShotDetail, SlotOut)
 from backend.domain.models import Character, Episode, Job, Project, Shot
-from backend.domain.refs import shot_refs
-from backend.domain.slots import slots_for
+from backend.domain.refs import SHOT_REF_SLOT, shot_ref_images, shot_refs
+from backend.domain.shots import prev_shot
+from backend.domain.slots import selected_candidate, slots_for
+from backend.pipeline.continuity import continue_hash, continue_inputs
 from backend.pipeline.prompting import (first_frame_locked_face, keyframe_input_hash,
                                         keyframe_inputs, shot_image_prompt, stale_reason,
                                         video_input_hash,
@@ -22,7 +24,8 @@ from backend.post.options import export_label
 from backend.queue.manager import ACTIVE
 
 # 镜头任务类型 → 它出的是哪个槽位
-SHOT_JOB_SLOTS = {"image.keyframe": "first_frame", "video.shot": "video"}
+SHOT_JOB_SLOTS = {"image.keyframe": "first_frame", "image.continue_frame": "first_frame",
+                  "video.shot": "video"}
 
 
 def candidate_out(c) -> CandidateOut:
@@ -114,17 +117,29 @@ def placeholder_names(shot, proj) -> dict[str, str]:
 
 def shot_detail(s: Session, sv, shot, proj, style, *, jobs: OwnerJobs | None = None,
                 progress: Mapping[int, float] | None = None) -> ShotDetail:
-    slots = slots_for(s, "shot", shot.id)
+    slots = [x for x in slots_for(s, "shot", shot.id) if x.kind != SHOT_REF_SLOT]
     refs = shot_refs(s, shot)
+    v_pack = shot_refs(s, shot, video=True)
     ie = shot.image_engine or proj.image_engine
     ff_cap = _max_refs(sv, "image", ie)
     ff_refs = refs[:ff_cap]
+    known_ie = ie in sv.engines.names("image")
     # 首帧引擎完全不吃参考图：定妆照对首帧没有作用，界面要提示（引擎不存在不算，那是另一种错）
-    unused = [r.label for r in refs] if ff_cap == 0 and ie in sv.engines.names("image") else []
+    unused = [r.label for r in refs] if ff_cap == 0 and known_ie else []
     current: dict[str, str] = {
         "first_frame": keyframe_input_hash(shot, proj, style, ie,
                                            [r.candidate_id for r in ff_refs])}
     inputs: dict[str, dict] = {"first_frame": keyframe_inputs(shot, proj, style, ie, ff_refs)}
+    cont: ContinuePrevOut | None = None
+    if shot.continue_from_prev:
+        # 接上一镜：首帧是上一镜视频的尾帧，跟上一镜选定的视频走（和 continuity.run_continue_frame 一致）
+        prev = prev_shot(s, shot)
+        pv = selected_candidate(s, "shot", prev.id, "video") if prev is not None else None
+        if prev is not None:
+            cont = ContinuePrevOut(shot_id=prev.id, code=prev.code, has_video=pv is not None)
+        current["first_frame"] = continue_hash(pv.id) if pv is not None else "waiting-prev-video"
+        inputs["first_frame"] = continue_inputs(prev.code if prev else "", pv.id if pv else 0)
+        unused = []
     legacy_ok: dict[str, str] = {}
     ff = next((x for x in slots if x.kind == "first_frame"), None)
     if ff is not None and ff.selected_candidate_id:
@@ -139,12 +154,12 @@ def shot_detail(s: Session, sv, shot, proj, style, *, jobs: OwnerJobs | None = N
             # 和 videos.run_video 同一个规则：首帧没锁脸时视频不带参考图，身份以首帧为准
             locked = ff_sel is not None and first_frame_locked_face(
                 ff_sel.params, _max_refs(sv, "image", ff_sel.engine))
-            v_refs = refs[:v_cap] if locked else []
+            v_refs = v_pack[:v_cap] if locked else []
             current["video"] = video_input_hash(shot, proj, style, ff.selected_candidate_id, ve,
                                                 has_audio, [r.candidate_id for r in v_refs])
             # 按以前规则（一律带参考图）出的视频不算过期
             legacy_ok["video"] = video_input_hash(shot, proj, style, ff.selected_candidate_id, ve,
-                                                  has_audio, [r.candidate_id for r in refs[:v_cap]])
+                                                  has_audio, [r.candidate_id for r in v_pack[:v_cap]])
             inputs["video"] = video_inputs(shot, proj, style, ff.selected_candidate_id, ve,
                                            has_audio, v_refs)
     outs = []
@@ -169,6 +184,9 @@ def shot_detail(s: Session, sv, shot, proj, style, *, jobs: OwnerJobs | None = N
         "active_jobs": [job_brief(j, progress) for j in jobs.active],
         "failures": [job_brief(f, failed=True) for f in sorted(failures, key=lambda x: x.id)],
         "first_frame_refs_unused": unused,
+        "shot_refs": [candidate_out(c) for c in shot_ref_images(s, shot.id)],
+        "image_max_refs": ff_cap if known_ie else None,
+        "continue_prev": cont,
         "image_prompt_resolved": resolved if resolved != (shot.image_prompt or "") else None,
         "placeholder_names": placeholder_names(shot, proj)})
 

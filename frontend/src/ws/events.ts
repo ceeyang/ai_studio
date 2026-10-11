@@ -71,6 +71,8 @@ export function invalidationsFor(ev: WsEvent): QueryKey[] {
       const out: QueryKey[] = [['jobs'], ['queue'], ['job', ev.job.id]];
       // 角色卡显示进行中的抽卡/推荐造型/三视图：排队、开跑、结束都要刷新角色
       if (CHARACTER_TYPES.includes(ev.job.type)) out.push(['characters']);
+      // 场景卡显示进行中的场景图任务
+      if (ev.job.type === 'image.location') out.push(['locations']);
       if (SETTLED.includes(ev.job.status)) {
         out.push(['episode'], ['exports']);
         if (EPISODES_TYPES.includes(ev.job.type)) out.push(['episodes']);
@@ -126,7 +128,15 @@ export function createLogThrottle(refresh: (jobId: number) => void, ms = 500) {
 // ------------------------------------------------------------ 生成任务结束的广播（右下角提示用）
 
 /** 结束时要在右下角提示一下的任务：出图、出视频、出定妆照/三视图、合成导出。 */
-export const GENERATION_TYPES = ['image.keyframe', 'video.shot', 'image.portrait', 'image.turnaround', 'export.episode'];
+export const GENERATION_TYPES = [
+  'image.keyframe',
+  'image.continue_frame',
+  'video.shot',
+  'image.portrait',
+  'image.turnaround',
+  'image.location',
+  'export.episode',
+];
 
 export function isGenerationSettled(job: Job): boolean {
   return GENERATION_TYPES.includes(job.type) && (job.status === 'done' || job.status === 'failed');

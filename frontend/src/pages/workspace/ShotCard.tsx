@@ -107,6 +107,14 @@ export function ShotCard(props: ShotCardProps) {
             {st.failed && <span className="badge fail">失败</span>}
             {st.active && <span className="media-busy">{activeText(st.active)}</span>}
             {st.fresh > 0 && <span className="badge new-cands">{st.fresh} 张新候选</span>}
+            {shot.continue_from_prev && shot.continue_prev && (
+              <span
+                className={`badge${shot.continue_prev.has_video ? '' : ' warn'}`}
+                title={`接上一镜：首帧取 ${shot.continue_prev.code} 选定视频的最后一帧`}
+              >
+                {shot.continue_prev.has_video ? `接 ${shot.continue_prev.code} 尾帧` : '等上一镜视频'}
+              </span>
+            )}
             {st.cand && stage === 'videos' && (
               <span className="shot-play">
                 <span aria-hidden="true">▶</span>
@@ -156,7 +164,7 @@ export function ShotCard(props: ShotCardProps) {
           type="button"
           className="sm soft"
           aria-label={`${action.aria} ${code}`}
-          disabled={action.kind === 'busy' || generating}
+          disabled={action.kind === 'busy' || action.kind === 'wait_prev' || generating}
           onClick={() => props.onAction(action)}
         >
           {action.label}

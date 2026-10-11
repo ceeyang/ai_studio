@@ -1,9 +1,10 @@
 // 查询键与数据 hooks。页面只通过这里读写后端；WebSocket 事件按 keys 的前缀让查询失效。
 import { type QueryClient, type QueryKey, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, enc } from './client';
+import { api, enc, request } from './client';
 import type {
   AppSettings,
   AppSettingsIn,
+  Bgm,
   BrowserLoginOut,
   BrowserStatus,
   Candidate,
@@ -59,6 +60,7 @@ export const keys = {
   style: (slug: string) => ['style', slug] as const,
   endCard: (slug: string) => ['endCard', slug] as const,
   exports: (episodeId: number) => ['exports', episodeId] as const,
+  bgm: (episodeId: number) => ['bgm', episodeId] as const,
   rerunImpact: (episodeId: number, stage: string, blockIds: number[] | null) => ['rerunImpact', episodeId, stage, blockIds] as const,
   jobs: (status: string, limit: number) => ['jobs', status, limit] as const,
   job: (id: number) => ['job', id] as const,
@@ -468,6 +470,39 @@ export function usePatchLocation(slug: string) {
   });
 }
 
+/** 出场景图：每张一个任务（不出人物）。engine 不给：设置页场景图这一步 → 项目的图像引擎。 */
+export function useDrawLocationImages(slug: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, count, engine }: { id: number; count: number; engine?: string }) =>
+      api.post<RunOut>(`/api/locations/${id}/images/draw`, { count, ...(engine ? { engine } : {}) }),
+    onSuccess: () => invalidate(qc, keys.locations(slug), ['jobs'], keys.queue),
+  });
+}
+
+/** 上传场景图：新图成为选定的场景图（这个场景的镜头首帧会过期）。 */
+export function useUploadLocationImage(slug: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, file }: { id: number; file: File }) => {
+      const form = new FormData();
+      form.append('file', file);
+      return api.post<Location>(`/api/locations/${id}/image`, form);
+    },
+    onSuccess: () => invalidate(qc, keys.locations(slug), ['episode']),
+  });
+}
+
+/** 选定一张场景图。 */
+export function useUseLocationImage(slug: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, candidateId }: { id: number; candidateId: number }) =>
+      api.post<Location>(`/api/locations/${id}/images/${candidateId}/use`),
+    onSuccess: () => invalidate(qc, keys.locations(slug), ['episode']),
+  });
+}
+
 export function usePutStyle(slug: string) {
   const qc = useQueryClient();
   return useMutation({
@@ -481,6 +516,28 @@ export function usePatchShot(episodeId: number) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ id, ...body }: ShotPatch & { id: number }) => api.patch<ShotDetail>(`/api/shots/${id}`, body),
+    onSuccess: () => invalidate(qc, keys.episode(episodeId)),
+  });
+}
+
+/** 镜头构图参考图：上传一张（每镜最多 2 张）。 */
+export function useUploadShotRef(episodeId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, file }: { id: number; file: File }) => {
+      const form = new FormData();
+      form.append('file', file);
+      return api.post<ShotDetail>(`/api/shots/${id}/refs`, form);
+    },
+    onSuccess: () => invalidate(qc, keys.episode(episodeId)),
+  });
+}
+
+export function useDeleteShotRef(episodeId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, candidateId }: { id: number; candidateId: number }) =>
+      request<ShotDetail>('DELETE', `/api/shots/${id}/refs/${candidateId}`),
     onSuccess: () => invalidate(qc, keys.episode(episodeId)),
   });
 }
@@ -541,6 +598,42 @@ export function usePatchExport(episodeId: number) {
     mutationFn: ({ id, is_final }: { id: number; is_final: boolean }) =>
       api.patch<ExportRow>(`/api/exports/${id}`, { is_final }),
     onSuccess: () => invalidate(qc, keys.exports(episodeId), ['episode']),
+  });
+}
+
+/** 这一集的配乐（没有时 null） */
+export function useBgm(episodeId: number) {
+  return useQuery({
+    queryKey: keys.bgm(episodeId),
+    queryFn: () => api.get<Bgm | null>(`/api/episodes/${episodeId}/bgm`),
+    enabled: episodeId > 0,
+  });
+}
+
+/** 上传 / 替换配乐 */
+export function useUploadBgm(episodeId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (file: File) => {
+      const form = new FormData();
+      form.append('file', file);
+      return api.post<Bgm>(`/api/episodes/${episodeId}/bgm`, form);
+    },
+    onSuccess: (data) => {
+      qc.setQueryData(keys.bgm(episodeId), data);
+      return invalidate(qc, keys.bgm(episodeId));
+    },
+  });
+}
+
+export function useDeleteBgm(episodeId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.del(`/api/episodes/${episodeId}/bgm`),
+    onSuccess: () => {
+      qc.setQueryData(keys.bgm(episodeId), null);
+      return invalidate(qc, keys.bgm(episodeId));
+    },
   });
 }
 

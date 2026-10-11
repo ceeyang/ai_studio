@@ -1,6 +1,6 @@
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { errorText } from '../../api/client';
-import { useEngines, usePatchShot, useProject, useSelectCandidate } from '../../api/queries';
+import { useDeleteShotRef, useEngines, usePatchShot, useProject, useSelectCandidate, useUploadShotRef } from '../../api/queries';
 import { type DialogueLine, type EngineRow, type ShotDetail, type ShotPatch, TRANSITIONS, type Transition } from '../../api/types';
 import { useConfirm } from '../../components/ConfirmDialog';
 import { confirmDiscard } from '../../components/confirmDiscard';
@@ -8,7 +8,7 @@ import { EditableFields, type FieldSpec, type FieldValues, type FieldsState, use
 import { engineLabel } from '../../format';
 import { CandidateGrid } from './CandidateGrid';
 import { DialogueEditor } from './DialogueEditor';
-import { type GenStage, CELL, activeJob, activeText, failedJob, firstFrameReady, genLabel, hasSelected } from './shotStatus';
+import { type GenStage, CELL, activeJob, activeText, failedJob, firstFrameReady, genLabel, hasSelected, waitsPrevVideo } from './shotStatus';
 import { SLOT_LABEL } from './slots';
 
 const TRANSITION_LABEL: Record<Transition, string> = {
@@ -64,6 +64,97 @@ export function toShotPatch(changed: FieldValues): ShotPatch {
   return out;
 }
 
+/** 「接上一镜」开关：首帧取上一镜选定视频的最后一帧，背景、人物位置接得上。第一镜不能开。 */
+function ContinueToggle({ shot, saving, onChange }: { shot: ShotDetail; saving: boolean; onChange(on: boolean): void }) {
+  const first = shot.order === 0;
+  const cp = shot.continue_prev;
+  return (
+    <section className="shot-continue" aria-label="接上一镜">
+      <label title={first ? '第一镜没有上一镜可接' : '首帧不出图，直接取上一镜选定视频的最后一帧'}>
+        <input
+          type="checkbox"
+          aria-label="接上一镜"
+          checked={shot.continue_from_prev}
+          disabled={saving || (first && !shot.continue_from_prev)}
+          onChange={(ev) => onChange(ev.target.checked)}
+        />{' '}
+        接上一镜
+      </label>
+      {shot.continue_from_prev && cp && (
+        <p className={`small${cp.has_video ? ' muted' : ' warn'}`} data-testid="continue-hint">
+          {cp.has_video
+            ? `首帧取 ${cp.code} 选定视频的最后一帧；${cp.code} 换了视频，这一镜的首帧会过期重取。`
+            : `等上一镜视频：${cp.code} 还没有选定视频，先出 ${cp.code} 的视频（一起出视频时会自动按顺序接上）。`}
+        </p>
+      )}
+      {shot.continue_from_prev && !cp && <p className="small warn">这是第一镜，没有上一镜可接，关掉这个开关。</p>}
+    </section>
+  );
+}
+
+/** 构图参考：每镜最多 2 张构图 / 动作参考图，首帧参考图里排在场景图后面；引擎不吃参考图时提示用不上。 */
+function ShotRefs({ shot, episodeId }: { shot: ShotDetail; episodeId: number }) {
+  const upload = useUploadShotRef(episodeId);
+  const del = useDeleteShotRef(episodeId);
+  const refs = shot.shot_refs ?? [];
+  const full = refs.length >= MAX_SHOT_REFS;
+  const error = upload.error ?? del.error;
+  return (
+    <section className="shot-refs" aria-label="构图参考">
+      <h4>构图参考</h4>
+      <p className="muted small">上传 1–2 张构图或动作参考图（比如同样机位的剧照），出首帧时排在场景图后面一起给引擎。</p>
+      {shot.image_max_refs === 0 && (
+        <p className="warn small" data-testid="refs-unsupported">
+          这个镜头的图像引擎不吃参考图，构图参考用不上；要用就在下面「图像引擎」换成 H3 图像或 ChatGPT / Gemini 网页。
+        </p>
+      )}
+      {shot.continue_from_prev && shot.continue_prev && <p className="muted small">开了「接上一镜」：首帧直接取上一镜尾帧，构图参考用不上。</p>}
+      {refs.length > 0 && (
+        <div className="shot-ref-list" role="list" aria-label="构图参考图">
+          {refs.map((c, i) => (
+            <figure key={c.id} role="listitem" className="shot-ref">
+              <a href={c.url} target="_blank" rel="noreferrer">
+                <img src={c.url} alt={`构图参考 ${i + 1}`} loading="lazy" />
+              </a>
+              <figcaption>
+                <span className="muted small">构图参考 {i + 1}</span>
+                <button
+                  type="button"
+                  className="sm ghost"
+                  aria-label={`删除构图参考 ${i + 1}`}
+                  disabled={del.isPending}
+                  onClick={() => del.mutate({ id: shot.id, candidateId: c.id })}
+                >
+                  删除
+                </button>
+              </figcaption>
+            </figure>
+          ))}
+        </div>
+      )}
+      <label className={`btn sm${upload.isPending || full ? ' is-disabled' : ''}`} title={full ? `每镜最多 ${MAX_SHOT_REFS} 张，先删一张` : undefined}>
+        {upload.isPending ? '上传中…' : full ? `已有 ${MAX_SHOT_REFS} 张` : '上传构图参考'}
+        <input
+          type="file"
+          accept="image/png,image/jpeg,image/webp"
+          aria-label="上传构图参考"
+          hidden
+          disabled={upload.isPending || full}
+          onChange={(ev) => {
+            const f = ev.target.files?.[0];
+            ev.target.value = '';
+            if (f) upload.mutate({ id: shot.id, file: f });
+          }}
+        />
+      </label>
+      {error && <p className="error small">{errorText(error)}</p>}
+    </section>
+  );
+}
+
+/** 每镜最多几张构图参考图（和后端 domain/refs.py 的 MAX_SHOT_REFS 一致） */
+export const MAX_SHOT_REFS = 2;
+
 export interface ShotDrawerProps {
   shot: ShotDetail;
   episodeId: number;
@@ -108,6 +199,7 @@ export function ShotDrawer({
   const patch = usePatchShot(episodeId);
   const patchDialogue = usePatchShot(episodeId);
   const select = useSelectCandidate(episodeId);
+  const patchContinue = usePatchShot(episodeId);
   const confirm = useConfirm();
   const [fields, setFields] = useState<FieldsState | null>(null);
   const [dialogueDirty, setDialogueDirty] = useState(false);
@@ -185,7 +277,10 @@ export function ShotDrawer({
     motion_prompt: shot.motion_prompt,
     audio_prompt: shot.audio_prompt,
   };
-  const slots = [...shot.slots].sort((a, b) => SLOT_ORDER.indexOf(a.kind) - SLOT_ORDER.indexOf(b.kind));
+  const slots = shot.slots
+    .filter((s) => SLOT_ORDER.includes(s.kind))
+    .sort((a, b) => SLOT_ORDER.indexOf(a.kind) - SLOT_ORDER.indexOf(b.kind));
+  const waiting = waitsPrevVideo(shot);
 
   const failures = STAGES.map((st) => ({ st, job: failedJob(shot, st) })).filter((x) => x.job && !activeJob(shot, x.st));
 
@@ -214,6 +309,14 @@ export function ShotDrawer({
               const label = CELL[st === 'keyframes' ? 'first_frame' : 'video'].label;
               const what = genLabel(shot, st);
               const active = activeJob(shot, st);
+              // 接上一镜、上一镜还没有视频：两格都要等
+              if (!active && waiting) {
+                return (
+                  <button key={st} type="button" className="soft" disabled title="接上一镜：首帧要取上一镜视频的最后一帧，先出上一镜的视频">
+                    等上一镜视频
+                  </button>
+                );
+              }
               // 和镜头卡片一致：首帧缺少或过期时不拿它出视频，视频这一格先去出 / 重拍首帧
               if (st === 'videos' && !active && !firstFrameReady(shot)) {
                 const need = hasSelected(shot, 'keyframes') ? '先重拍首帧' : '先出首帧';
@@ -279,6 +382,11 @@ export function ShotDrawer({
           </section>
         ))}
         {select.error && <p className="error">{errorText(select.error)}</p>}
+
+        <ContinueToggle shot={shot} saving={patchContinue.isPending} onChange={(on) => patchContinue.mutate({ id: shot.id, continue_from_prev: on })} />
+        {patchContinue.error && <p className="error">{errorText(patchContinue.error)}</p>}
+
+        <ShotRefs shot={shot} episodeId={episodeId} />
 
         <section>
           <h4>提示词与参数</h4>

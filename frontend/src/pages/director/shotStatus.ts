@@ -8,10 +8,10 @@ export const STALE_TIP = '提示词、引擎或参考图改过，这个结果是
 
 type CellKind = 'first_frame' | 'video';
 
-/** 格子 → 出它的任务类型和生成阶段 */
-export const CELL: Record<CellKind, { type: string; stage: GenStage; label: string }> = {
-  first_frame: { type: 'image.keyframe', stage: 'keyframes', label: '首帧' },
-  video: { type: 'video.shot', stage: 'videos', label: '视频' },
+/** 格子 → 出它的任务类型（types：会出这一格的全部任务类型，首帧还有「接上一镜」截尾帧）和生成阶段 */
+export const CELL: Record<CellKind, { type: string; types: string[]; stage: GenStage; label: string }> = {
+  first_frame: { type: 'image.keyframe', types: ['image.keyframe', 'image.continue_frame'], stage: 'keyframes', label: '首帧' },
+  video: { type: 'video.shot', types: ['video.shot'], stage: 'videos', label: '视频' },
 };
 
 export const cellOf = (stage: GenStage) => (stage === 'keyframes' ? CELL.first_frame : CELL.video);
@@ -29,14 +29,26 @@ export function genLabel(shot: ShotDetail, stage: GenStage): string {
 
 /** 这个镜头这一格正在排队/生成的任务 */
 export function activeJob(shot: ShotDetail, stage: GenStage): JobBrief | undefined {
-  const type = cellOf(stage).type;
-  return (shot.active_jobs ?? []).find((j) => j.type === type);
+  const types = cellOf(stage).types;
+  return (shot.active_jobs ?? []).find((j) => types.includes(j.type));
 }
 
 /** 这个镜头这一格最近一次失败（之后没出过新的） */
 export function failedJob(shot: ShotDetail, stage: GenStage): JobBrief | undefined {
-  const type = cellOf(stage).type;
-  return (shot.failures ?? []).find((j) => j.type === type);
+  const types = cellOf(stage).types;
+  // 接上一镜的镜头在等上一镜视频时，「上一镜还没有视频」那次失败不算（卡片显示「等上一镜视频」）
+  if (stage === 'keyframes' && waitsPrevVideo(shot)) return undefined;
+  return (shot.failures ?? []).find((j) => types.includes(j.type));
+}
+
+/** 开了「接上一镜」、而且有上一镜（第一镜开了也没用，按普通镜头算） */
+export function continues(shot: ShotDetail): boolean {
+  return !!shot.continue_from_prev && !!shot.continue_prev;
+}
+
+/** 接上一镜、上一镜还没有选定视频：首帧没法取，卡片显示「等上一镜视频」 */
+export function waitsPrevVideo(shot: ShotDetail): boolean {
+  return continues(shot) && !shot.continue_prev!.has_video;
 }
 
 /** 进行中任务的一句话：排队中 / 生成中 42% / 等待输入 */
@@ -87,10 +99,12 @@ export function cutTip(c: Candidate): string {
 
 /** 能拿来出视频的首帧：选定了、而且不过期（过期的先回首帧阶段重拍，不拿旧首帧出视频） */
 export function firstFrameReady(shot: ShotDetail): boolean {
+  // 接上一镜：出视频前后端会先取上一镜的尾帧，只要上一镜有视频就行
+  if (continues(shot)) return shot.continue_prev!.has_video;
   return slotMark(slotOf(shot, 'first_frame')) === 'ok';
 }
 
-export type CardActionKind = 'busy' | 'need_first_frame' | 'retry' | 'redo' | 'generate';
+export type CardActionKind = 'busy' | 'wait_prev' | 'need_first_frame' | 'retry' | 'redo' | 'generate';
 
 export interface CardAction {
   kind: CardActionKind;
@@ -101,12 +115,14 @@ export interface CardAction {
 }
 
 /**
- * 镜头卡片唯一的按钮：进行中「生成中」（禁用）；视频阶段首帧缺少「先出首帧」、过期「先重拍首帧」；失败「重试」（强制）；
+ * 镜头卡片唯一的按钮：进行中「生成中」（禁用）；接上一镜而上一镜还没有视频「等上一镜视频」（禁用）；
+ * 视频阶段首帧缺少「先出首帧」、过期「先重拍首帧」；失败「重试」（强制）；
  * 已有选定结果「重拍…」（强制）；否则「生成…」。
  */
 export function cardAction(shot: ShotDetail, stage: GenStage): CardAction {
   const label = cellOf(stage).label;
   if (activeJob(shot, stage)) return { kind: 'busy', label: '生成中', aria: `${label}生成中` };
+  if (waitsPrevVideo(shot)) return { kind: 'wait_prev', label: '等上一镜视频', aria: '等上一镜视频' };
   if (stage === 'videos' && !firstFrameReady(shot)) {
     const what = hasSelected(shot, 'keyframes') ? '先重拍首帧' : '先出首帧';
     return { kind: 'need_first_frame', label: what, aria: what };

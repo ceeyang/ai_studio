@@ -5,6 +5,8 @@ export const JOB_TYPE_LABEL: Record<string, string> = {
   script: '剧本',
   storyboard: '分镜',
   'image.keyframe': '首帧',
+  'image.continue_frame': '接上一镜尾帧',
+  'image.location': '场景图',
   'video.shot': '视频',
   'export.episode': '合成导出',
   'image.portrait': '定妆照',
@@ -44,6 +46,9 @@ export const ENGINE_LABEL: Record<string, string> = {
   gemini_image: 'Gemini 网页',
   h3_video: 'H3 视频（有声）',
   wan22_i2v: 'Wan2.2 图生视频（无声）',
+  // 不是引擎：候选的来源
+  upload: '上传',
+  continue: '接上一镜尾帧',
 };
 
 /** 引擎名字：传 id 或 /api/engines 的一行都行；没见过的用后端给的 label，再回退到 id

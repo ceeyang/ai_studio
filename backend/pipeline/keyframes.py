@@ -80,6 +80,12 @@ def run_keyframe(ctx, payload: dict) -> dict:
     shot_id = int(payload["shot_id"])
     with sv.db.session() as s:
         shot, ep, proj, style = load_shot(s, shot_id)
+        continuing = bool(shot.continue_from_prev)
+    if continuing:   # 接上一镜：不出图，首帧取上一镜视频的最后一帧
+        from backend.pipeline.continuity import run_continue_frame
+        return run_continue_frame(ctx, payload)
+    with sv.db.session() as s:
+        shot, ep, proj, style = load_shot(s, shot_id)
         engine_name = shot.image_engine or proj.image_engine
         try:
             engine = sv.engines.image(engine_name)

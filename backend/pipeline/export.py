@@ -1,6 +1,6 @@
-"""合成导出：按镜头顺序把选定视频拼成成片；可选按分镜时长裁尾、高棉语配音、双语字幕、片尾卡。
+"""合成导出：按镜头顺序把选定视频拼成成片；可选按分镜时长裁尾、高棉语配音、配乐、双语字幕、片尾卡。
 
-顺序：合成画面（裁尾 + xfade）→ 叠配音（只重编码音轨）→ 烧字幕并接片尾卡（一次编码）。
+顺序：合成画面（裁尾 + xfade）→ 叠配音（只重编码音轨）→ 叠配乐（只重编码音轨）→ 烧字幕并接片尾卡（一次编码）。
 字幕时间 = 台词 start/end + 该镜在成片里的起点（xfade 偏移），起点取合成时实际量到的每镜时长。
 """
 from __future__ import annotations
@@ -9,10 +9,12 @@ import shutil
 from datetime import datetime
 
 from backend.domain.models import Export
+from backend.domain.music import bgm_of
 from backend.pipeline.common import job_services
 from backend.pipeline.post import (OUTPUT_FPS, clip_limits, episode_has_ai_draft, lines_missing_km,
                                    load_cut, load_dub_manifest, mark_exported)
 from backend.post.dub import build_dub_mix_cmd
+from backend.post.music import build_music_mix_cmd, duck_windows
 from backend.post.options import ExportOptions
 from backend.post.render import CardSpec, build_finish_cmd, stage_fonts
 from backend.post.subtitles import (build_endcard_ass, build_subtitles_ass, dub_cues,
@@ -47,6 +49,15 @@ def run_export(ctx, payload: dict) -> dict:
     card = cut.end_card or {}
     if opts.end_card and not any((x.get("text") or "").strip() for x in card.get("lines") or []):
         raise JobError("项目还没有设置片尾卡，先在导演台或 studio project end-card 里填写")
+    music_src = None
+    if opts.music:
+        with sv.db.session() as s:
+            bgm = bgm_of(s, episode_id)
+            music_src = sv.media.abs(bgm.file_path) if bgm is not None else None
+        if music_src is None:
+            raise JobError("这一集还没有上传配乐，先在成片阶段上传背景音乐，或取消勾选「配乐」")
+        if not music_src.is_file():
+            raise JobError(f"配乐文件不见了：{music_src.name}，重新上传一次")
     if cut.flagged:
         ctx.log(f"注意：这些选定的视频出片自检疑似跳切，成片里会有画面突变：{'；'.join(cut.flagged)}"
                 "（不对就到视频阶段重拍或换一条再导出）")
@@ -66,7 +77,8 @@ def run_export(ctx, payload: dict) -> dict:
         cut.slug, f"ep{cut.number:02d}_{variant}{opts.tag()}_{datetime.now():%Y%m%d_%H%M%S}.mp4")
     work = sv.media.run_dir(cut.slug, ctx.job_id) / "work"
     try:
-        post = manifest is not None or not opts.bed or opts.subtitles != "none" or opts.end_card
+        post = (manifest is not None or not opts.bed or opts.subtitles != "none" or opts.end_card
+                or music_src is not None)
         trims = [{"code": c, "clip": round(s, 3), "used": round(lim, 3)}
                  for c, s, lim in zip(cut.codes, secs, limits) if lim]
         if trims:
@@ -97,6 +109,23 @@ def run_export(ctx, payload: dict) -> dict:
                                             bed_db=bed_db, duck_db=sv.cfg.dub.duck_db,
                                             loudness=sv.cfg.dub.loudness if lines else None))
             cur = dubbed
+        if music_src is not None:
+            # 压低窗口跟着实际说话的位置：有配音按配音，否则按台词时间
+            spans = ([(c.start, c.end) for c in dub_cues(rows, asm.starts, cut.dialogue)] if rows
+                     else [(c.start, c.end) for c in timeline_cues(cut.dialogue, asm.starts,
+                                                                   asm.durations)])
+            windows = duck_windows(spans, total=asm.total) if opts.music_duck else []
+            ctx.log(f"叠配乐 {opts.music_db:g} dB，淡入 {opts.music_fade_in:g}s / 淡出 "
+                    f"{opts.music_fade_out:g}s"
+                    + (f"，{len(windows)} 段台词处自动压低" if windows else
+                       ("，不随台词压低" if not opts.music_duck else "")))
+            ctx.check_canceled()
+            scored = work / "music.mp4"
+            sv.ffmpeg.run(build_music_mix_cmd(
+                sv.ffmpeg.ffmpeg, cur, music_src, scored, total=asm.total,
+                volume_db=opts.music_db, fade_in=opts.music_fade_in,
+                fade_out=opts.music_fade_out, windows=windows, has_audio=sv.ffmpeg.has_audio(cur)))
+            cur = scored
         card_seconds = 0.0
         if opts.subtitles != "none" or opts.end_card:
             st = sv.cfg.subtitles

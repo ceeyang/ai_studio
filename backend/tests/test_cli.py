@@ -176,7 +176,7 @@ def test_run_export_with_post_options(cli, api):
     assert types == ["subtitles.translate", "post.dub", "export.episode"]
     assert _jobs(api)[-1][1] == {"episode_id": ep["id"], "options": {
         "subtitles": "zh+km", "dub": "km", "end_card": True, "trim": True, "bed": True,
-        "align": "timeline"}}
+        "align": "timeline", "music": False, "music_db": -18.0, "music_fade_in": 1.0, "music_fade_out": 2.0, "music_duck": True}}
     r = cli("run", "export", "demo", "--subtitles", "fr")
     assert r.exit_code != 0
     r = cli("run", "export", "demo", "--dub", "km", "--align", "lips")
@@ -194,7 +194,7 @@ def test_run_fit_khmer_then_videos_and_export(cli, api):
     assert payload["episode_id"] == ep["id"] and payload["then"] == ["videos", "export"]
     assert len(payload["shot_ids"]) == 1
     assert payload["options"]["export"] == {"subtitles": "zh+km", "dub": "km", "end_card": True,
-                                            "trim": True, "bed": False, "align": "detected"}
+                                            "trim": True, "bed": False, "align": "detected", "music": False, "music_db": -18.0, "music_fade_in": 1.0, "music_fade_out": 2.0, "music_duck": True}
 
 
 def test_subtitles_translate_show_and_set(cli, api):
