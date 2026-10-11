@@ -91,6 +91,10 @@ describe('设置页「API 服务」', () => {
     renderAt(<SettingsPage />, { route: '/settings', path: '/settings' });
     const panel = await screen.findByRole('region', { name: 'API 服务' });
     expect(await within(panel).findByTestId('api-openai')).toBeTruthy();
+    // 默认折叠，标题写已配置几家
+    const fold = panel.querySelector('details.api-services-fold') as HTMLDetailsElement;
+    expect(fold.open).toBe(false);
+    expect(await within(panel).findByText(/^配置 Key（已配置 \d \/ 3）$/)).toBeTruthy();
     expect(within(panel).getByTestId('api-anthropic')).toBeTruthy();
     expect(within(panel).getByTestId('api-gemini')).toBeTruthy();
     expect(within(panel).getByTestId('api-openai-status').textContent).toBe('未配置');
