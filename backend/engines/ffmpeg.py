@@ -272,6 +272,20 @@ class FFmpeg:
         return speech_segments_from_pcm(x, SAMPLE_RATE, min_db=min_db, periodicity=periodicity,
                                         merge_gap=merge_gap, min_len=min_len)
 
+    def voice_pitch(self, path: Path, windows: list[tuple[float, float]]) -> float | None:
+        """音轨在这些时间窗（秒）里人声基频的中位数（Hz），见 post/speech.median_pitch。
+        没有音轨、浊音太少（没人声、太小声）返回 None。"""
+        import numpy as np
+
+        from backend.post.speech import SAMPLE_RATE, build_pcm_cmd, median_pitch
+        if not self.has_audio(path):
+            return None
+        p = self._exec(build_pcm_cmd(self.ffmpeg, path), text=False)
+        if p.returncode != 0:
+            raise FFmpegError(f"解音轨失败：\n{p.stderr.decode('utf-8', 'replace')[-1500:]}")
+        x = np.frombuffer(p.stdout, dtype=np.float32)
+        return median_pitch(x, SAMPLE_RATE, list(windows))
+
     def scene_cuts(self, path: Path, threshold: float = SCENE_THRESHOLD) -> list[float]:
         """视频片段内部的硬切（场景突变）时间点。用来查生成视频中途跳到参考图、换场景这种静默失败。"""
         p = self._exec([self.ffmpeg, "-hide_banner", "-nostats", "-i", str(path), "-an",

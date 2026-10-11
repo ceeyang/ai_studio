@@ -393,6 +393,24 @@ def token_refs(image_prompt: str | None) -> dict[int, str]:
     return out
 
 
+# 分镜 audio / motion 里给人的叫法（「Off-screen voice of the stocky man」）：the + 至多 3 个修饰词 + 人称名词；
+# 修饰词不能是介词、冠词这类虚词（免得把「the counter where the man」整个当成一个叫法）
+_FUNCTION_WORD = (r"(?!(?:the|a|an|of|and|or|to|from|with|in|on|at|by|for|where|who|whose|while|as"
+                  r"|that|which|his|her|their|its|is|are|was)\b)")
+_THE_PERSON = re.compile(r"\bthe\s+((?:" + _FUNCTION_WORD + r"[\w-]+\s+){0,3}?" + _PERSON_NOUN
+                         + r")\b", re.I)
+
+
+def voice_refs(text: str | None) -> list[str]:
+    """一段英文里出现的人的叫法（「the stocky man」「the young woman」），按出现顺序、去重、小写。"""
+    out: list[str] = []
+    for m in _THE_PERSON.finditer(text or ""):
+        ref = "the " + " ".join(m.group(1).split()).lower()
+        if ref not in out:
+            out.append(ref)
+    return out
+
+
 _REF_CUT = re.compile(r",|;|\.|\bwith\b|\bwearing\b|\bwho\b|\band\b", re.I)
 
 
@@ -487,6 +505,27 @@ _LOC_NO_ARTICLE = frozenset(("two three four five six seven eight nine ten sever
 _LOC_LEAD = re.compile(r"^(?:inside|interior of|in|at|within)\s+", re.I)
 
 
+# 场景外观里「空无一人」的写法：视觉设定常把场景写成 completely empty（给场景图用），拼进有人物的视频提示词
+# 就和画面里的人矛盾（第四次实跑 S02–S05），可能是 H3 让人物出画的诱因之一
+_EMPTINESS = re.compile(
+    r"\b(?:(?:completely|totally|entirely|utterly|almost|nearly|mostly|eerily|strangely)\s+)?"
+    r"(?:empty|unoccupied|deserted|vacant|unpeopled)\b"
+    r"|\b(?:with\s+)?(?:no(?:\s+one|body)|no\s+(?:people|person|customers?|staff|patrons?|visitors?"
+    r"|passers-?by|humans?|figures?))(?:\s+(?:around|inside|present|in\s+sight|anywhere))?\b"
+    r"|\bwithout\s+(?:any\s+)?(?:people|anyone|customers|a\s+soul)\b", re.I)
+
+
+def drop_emptiness(text: str) -> str:
+    """去掉「completely empty」「unoccupied」「no people around」这类写空场的词，剩下的分句接好。"""
+    out = []
+    for clause in re.split(r",\s*", _EMPTINESS.sub(" ", text or "")):
+        c = re.sub(r"\s+", " ", clause).strip()
+        c = re.sub(r"^(?:and|or|but)\s+|\s+(?:and|or|but)$", "", c, flags=re.I).strip()
+        if c:
+            out.append(c)
+    return ", ".join(out)
+
+
 def location_summary(visual_prompt: str | None, max_words: int = 30) -> str:
     """场景外观的第一句（最多 max_words 个词），拼进「inside …」；有中文就不用。
 
@@ -498,7 +537,7 @@ def location_summary(visual_prompt: str | None, max_words: int = 30) -> str:
     if not text or _CJK_ANY.search(text):
         return ""
     first = re.split(r"(?<=[.!?])\s+", text)[0].rstrip(" .!?;")
-    first = _LOC_LEAD.sub("", first).strip()
+    first = _LOC_LEAD.sub("", drop_emptiness(first)).strip()
     if not first:
         return ""
     head = first.split()[0]

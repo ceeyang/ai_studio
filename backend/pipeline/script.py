@@ -31,7 +31,8 @@ from backend.queue.handlers import HANDLERS
 #   v4（结构、视觉）：开头的称呼「AI 漫剧」改成「AI 短剧」（真人写实预设不是漫画）
 #   v5（视觉）：只出声、不出镜的角色 visual_prompt 只写性别年龄族裔加 voice only（约 10 词）
 #   v5（结构）：给模型项目里已有的角色表，已有的人沿用原名、不换叫法（换了叫法会新建角色，定妆照接不上）
-STRUCTURE_RULES_VERSION = 5
+#   v6（结构）：只出声、不出镜的角色 description 只写身份、性别年龄、关系和声音，不写外貌服装
+STRUCTURE_RULES_VERSION = 6
 VISUAL_RULES_VERSION = 5
 SCRIPT_RULES_OUTDATED_HINT = "剧本规则已更新，要按新规则重出请强制重跑（会重写段落、牵连镜头）"
 DEFAULT_SHOT_SECONDS = 5.0

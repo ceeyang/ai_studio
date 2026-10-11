@@ -11,7 +11,8 @@ from backend.pipeline.continuity import video_ref_plan
 from backend.pipeline.keyframes import load_shot, ref_labels, run_comfy
 from backend.domain.models import Location, SceneBlock
 from backend.pipeline.prompting import (STAY_IN_FRAME, Speaker, compose_video_prompt,
-                                        entering_clause, gender_of, insert_kind, token_refs, join_negative, location_summary, short_ref,
+                                        entering_clause, gender_of, insert_kind, token_refs, join_negative,
+                                        location_summary, short_ref, voice_refs,
                                         shot_image_prompt, shot_seed, video_input_hash,
                                         video_inputs, with_continuity)
 from backend.queue.errors import JobCanceled, JobError
@@ -34,9 +35,24 @@ def start_note(ssim: float) -> str:
             "接上一镜、场景和人物位置都对不上，建议看一下，不对就重拍")
 
 
+GENDER_ZH = {"male": "男声", "female": "女声"}
+
+
+def voice_note(items: list[dict]) -> str:
+    """qc.voice_mismatch：[{speakers, expected, f0}]。"""
+    parts = []
+    for m in items:
+        who = "、".join(m.get("speakers") or []) or "这句"
+        want = GENDER_ZH.get(m.get("expected"), "")
+        heard = "女声" if m.get("expected") == "male" else "男声"
+        parts.append(f"{who}的台词应是{want}，测到的音高约 {float(m.get('f0') or 0):.0f} Hz（像{heard}）")
+    return ("疑似声音性别不对：" + "；".join(parts)
+            + "，H3 可能把台词给了画面里的人，建议听一下，不对就重拍")
+
+
 def qc_bad(qc: dict | None) -> bool:
-    """出片自检有没有发现问题：疑似跳切，或开头没接上首帧。"""
-    return bool(qc and (qc.get("hard_cuts") or qc.get("start_mismatch")))
+    """出片自检有没有发现问题：疑似跳切、开头没接上首帧，或疑似声音性别不对。"""
+    return bool(qc and (qc.get("hard_cuts") or qc.get("start_mismatch") or qc.get("voice_mismatch")))
 
 
 def qc_note(qc: dict | None) -> str:
@@ -47,6 +63,8 @@ def qc_note(qc: dict | None) -> str:
         parts.append(start_note(float(qc.get("first_frame_ssim") or 0)))
     if qc.get("hard_cuts"):
         parts.append(cut_note(qc["hard_cuts"]))
+    if qc.get("voice_mismatch"):
+        parts.append(voice_note(qc["voice_mismatch"]))
     return "；".join(parts)
 
 
@@ -54,9 +72,55 @@ def _why(e: Exception) -> str:
     return (str(e).strip().splitlines() or [type(e).__name__])[0][:200]
 
 
-def scene_qc(ctx, sv, path, code: str, first=None) -> dict | None:
-    """出片自检：找片段内部的硬切；给了首帧图时再看视频开头是不是从首帧开始。
-    检测本身失败只记日志，不影响出片。"""
+VOICE_PAD = 0.25   # 只有一种性别的台词时，时间窗前后各放宽一点（H3 开口时间和计划常差一点）
+
+
+def voice_lines(dialogue, speakers: dict[str, Speaker]) -> list[dict]:
+    """要查声音性别的台词：说话人性别已知、有时间。[{speaker, gender, start, end}]"""
+    out = []
+    for d in dialogue or []:
+        if not isinstance(d, dict):
+            continue
+        sp = speakers.get(d.get("speaker", ""))
+        try:
+            a, b = float(d.get("start")), float(d.get("end"))
+        except (TypeError, ValueError):
+            continue
+        if sp is not None and sp.gender in GENDER_ZH and b > a:
+            out.append({"speaker": d.get("speaker"), "gender": sp.gender, "start": a, "end": b})
+    return out
+
+
+def _voice_qc(ctx, sv, path, code: str, lines: list[dict]) -> list[dict] | None:
+    """按性别分组，取每组台词时间窗里的基频中位数，明显对不上的列出来；检测失败或没把握返回 None / 不列。"""
+    from backend.post.speech import voice_gender_mismatch
+
+    pitch = getattr(sv.ffmpeg, "voice_pitch", None)
+    if pitch is None or not lines:
+        return None
+    groups: dict[str, list[dict]] = {}
+    for ln in lines:
+        groups.setdefault(ln["gender"], []).append(ln)
+    pad = VOICE_PAD if len(groups) == 1 else 0.0
+    bad = []
+    for gender, items in groups.items():
+        windows = [(max(0.0, x["start"] - pad), x["end"] + pad) for x in items]
+        try:
+            f0 = pitch(path, windows)
+        except JobCanceled:
+            raise
+        except Exception as e:
+            ctx.log(f"视频 {code}：声音性别检测没跑成，跳过（{_why(e)}）")
+            return None
+        if voice_gender_mismatch(f0, gender):
+            names = list(dict.fromkeys(x["speaker"] for x in items))
+            bad.append({"speakers": names, "expected": gender, "f0": round(float(f0), 1)})
+    return bad
+
+
+def scene_qc(ctx, sv, path, code: str, first=None, voices: list[dict] | None = None) -> dict | None:
+    """出片自检：找片段内部的硬切；给了首帧图时再看视频开头是不是从首帧开始；给了台词（voices，见
+    voice_lines）时粗查说话人的声音性别（基频）对不对。检测本身失败只记日志，不影响出片。"""
     qc: dict = {}
     detect = getattr(sv.ffmpeg, "scene_cuts", None)
     if detect is not None:
@@ -83,6 +147,10 @@ def scene_qc(ctx, sv, path, code: str, first=None) -> dict | None:
             qc["start_mismatch"] = v < START_SSIM_MIN
             if qc["start_mismatch"]:
                 ctx.log(f"视频 {code}：{start_note(v)}")
+    bad_voice = _voice_qc(ctx, sv, path, code, voices or [])
+    if bad_voice:
+        qc["voice_mismatch"] = bad_voice
+        ctx.log(f"视频 {code}：{voice_note(bad_voice)}")
     return qc or None
 
 
@@ -94,17 +162,51 @@ def clean_selection(s, shot_id: int, fresh_hashes) -> bool:
     return not qc_bad((cur.params or {}).get("qc"))
 
 
-def _speakers(proj, shot) -> dict[str, Speaker]:
-    """说话人叫法：画面里的人用分镜在 image_prompt 里给他的简短指代（和 motion 里的叫法一致），
-    没有时用外貌简称；性别从外貌第一句看（画外音要说清男声女声）。只露手 / 腰的插入镜头里没人露脸，
+def _speakers(proj, shot, episode_shots=()) -> dict[str, Speaker]:
+    """说话人叫法：画面里的人用分镜在 image_prompt 里给他的简短指代（和 motion 里的叫法一致）。
+    不在画面里的说话人（画外音、只出声的角色）：用本镜 audio / motion 里给他的叫法（「Off-screen voice of
+    the stocky man」，按性别对上、没被画面里的人占用、同性别的画外说话人只有一个时才用），再看本集其他镜头
+    占位符后的指代，最后才用外貌简称——一条提示词里同一个人只有一个叫法（第四次实跑 S04 店长被叫成
+    「the stocky man」和「the Chinese man in his early fifties」两个名字）。
+    性别从外貌第一句看，看不出来时看叫法（画外音要说清男声女声）。只露手 / 腰的插入镜头里没人露脸，
     都按不在画面里算（不加视线句，说话就是画外音）。"""
     on = {c.get("character_id") for c in shot.cast or [] if isinstance(c, dict)}
     if insert_kind(shot.image_prompt or "", getattr(shot, "shot_size", "") or "") in ("hands", "body"):
         on = set()
     refs = token_refs(shot.image_prompt)
-    return {c.name: Speaker(refs.get(c.id) or short_ref(c.visual_prompt), c.id in on,
-                            gender_of(c.visual_prompt))
-            for c in proj.characters}
+    ep_refs: dict[int, str] = {}
+    for other in episode_shots or ():
+        for cid, ref in token_refs(getattr(other, "image_prompt", "")).items():
+            ep_refs.setdefault(cid, ref)
+    genders = {c.id: gender_of(c.visual_prompt) for c in proj.characters}
+    taken = {refs[c.id] for c in proj.characters if c.id in refs}
+    # 本镜文字里的叫法：audio 优先（画外音一般写在这里），再看 motion
+    heard = voice_refs(" ".join(x for x in (getattr(shot, "audio_prompt", "") or "",
+                                            getattr(shot, "motion_prompt", "") or "") if x))
+    talkers = {d.get("speaker") for d in getattr(shot, "dialogue", None) or [] if isinstance(d, dict)}
+    off_talkers = [c for c in proj.characters
+                   if c.name in talkers and c.id not in refs and c.id not in on]
+
+    out: dict[str, Speaker] = {}
+    for c in proj.characters:
+        ref = refs.get(c.id) or ""
+        g = genders.get(c.id) or ""
+        if not ref and c in off_talkers:
+            same = [o for o in off_talkers
+                    if (genders.get(o.id) or gender_of(ep_refs.get(o.id, ""))) == g] if g else []
+            if g and len(same) == 1:
+                ref = next((r for r in heard if r not in taken and gender_of(r) == g), "")
+        if not ref:
+            ref = ep_refs.get(c.id) or short_ref(c.visual_prompt)
+        if not g:
+            g = gender_of(ref)
+            if not g and c in off_talkers and len(off_talkers) == 1:
+                # 外貌没写：本镜只有这一个画外说话人，叫法里有性别就用它
+                found = next((r for r in heard if r not in taken and gender_of(r)), "")
+                if found:
+                    ref, g = found, gender_of(found)
+        out[c.name] = Speaker(ref, c.id in on, g)
+    return out
 
 
 def _shot_location(s, shot) -> str:
@@ -137,10 +239,11 @@ def run_video(ctx, payload: dict) -> dict:
             raise JobError(str(e)) from None
         has_audio = engine.caps.has_audio
         # 发给引擎的版本：说话人用英文简称、画外音写明；输入哈希仍按老写法算（见 compose_video_prompt）
+        speakers = _speakers(proj, shot, ep.shots)
         prompt = compose_video_prompt(shot.motion_prompt, shot_image_prompt(shot, proj),
                                       shot.audio_prompt,
                                       shot.dialogue, anchor=style.anchor_text if style else "",
-                                      has_audio=has_audio, speakers=_speakers(proj, shot))
+                                      has_audio=has_audio, speakers=speakers)
         negative = join_negative(proj.negative, style.negative if style else "")
         old_pack = legacy_video_refs(s, shot)   # 以前每人带定妆照 + 三视图格（审查 P1-9 之前）
         legacy = old_pack[:engine.caps.max_refs]   # 更早的规则：不管首帧，一律带定妆照 / 三视图
@@ -194,6 +297,8 @@ def run_video(ctx, payload: dict) -> dict:
         if on_screen and ep.shots and ep.shots[-1].id == shot.id:
             extra.append(STAY_IN_FRAME)   # 全集最后一镜：人留在画面里，结尾的压迫感不散
         auto_retry = bool(getattr(proj, "auto_retry_video", False))
+        # 有声引擎才查台词的声音性别（第四次实跑 S04：画外男声被念成画面里女人的声音）
+        voices = voice_lines(shot.dialogue, speakers) if has_audio else []
         base_seed, taken = proj.seed, len(slot.candidates)
     cids: list[int] = []
     retry_of: int | None = None
@@ -220,7 +325,7 @@ def run_video(ctx, payload: dict) -> dict:
         shutil.copyfile(video, dst)
         canceled: JobCanceled | None = None
         try:
-            qc = scene_qc(ctx, sv, dst, code, first)
+            qc = scene_qc(ctx, sv, dst, code, first, voices)
         except JobCanceled as e:
             # 视频已经出好了：先登记成候选（没做自检），再把取消报上去，GPU 的活不白干
             qc, canceled = None, e

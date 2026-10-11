@@ -47,12 +47,16 @@ def time_phrase(time_of_day: str) -> str:
 
 _TIME_TERMS = re.compile(r"\b(?:night|nighttime|day|daytime|dawn|dusk|morning|evening|midnight"
                          r"|noon|midday|afternoon|sunset|sunrise|twilight)\b", re.I)
-_SKIN = re.compile(r"\bskin\b|\bpores?\b|complexion", re.I)
+# 写人物的成像词：皮肤、唇色、妆容、五官、头发、身材比例……空场景里没有人，留着会把人招进画面
+_PERSON_STYLE = re.compile(r"\bskin\b|\bpores?\b|complexion|\blips?\b|lipstick|make-?up|cosmetic"
+                           r"|\bproportions?\b|anatomy|\bfaces?\b|facial|\beyes?\b|eyelash|\bhair\b"
+                           r"|freckles?|wrinkles?|\bbody\b|\bbodies\b|\bexpressions?\b|\bteeth\b", re.I)
 
 
 def location_style(anchor: str) -> str:
-    """场景图的风格句：风格锚里的成像词（photo_style），再去掉写皮肤的分句——空场景里没有人。"""
-    clauses = [c for c in photo_style(anchor).split(", ") if c and not _SKIN.search(c)]
+    """场景图的风格句：风格锚里的成像词（photo_style），再去掉写人物的分句（皮肤、唇色、妆容、身材比例）
+    ——空场景里没有人。"""
+    clauses = [c for c in photo_style(anchor).split(", ") if c and not _PERSON_STYLE.search(c)]
     if clauses:
         clauses[0] = clauses[0][:1].upper() + clauses[0][1:]
     return ", ".join(clauses)
