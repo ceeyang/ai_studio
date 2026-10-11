@@ -68,19 +68,23 @@ export function onSite(url, spec) {
 }
 
 /**
- * 出图用哪个标签页（只排序，忙不忙由调用方再探一下页面）：
- * 1. 扩展上次出图用过、还开着并且还在这个网站上的那个；
+ * 出图、写文本用哪个标签页（只排序，忙不忙由调用方再探一下页面）。写文本和出图共用标签页（studio 那边同一网站
+ * 同时只跑一件事），尽量不新开：
+ * 1. 扩展上次用过（studioTabIds 按优先顺序：这次用途上次用的、另一种用途上次用的）、还开着并且还在这个网站上的；
  * 2. reuseUserTabs 时：用户开着的这个网站的其他标签页，不是当前窗口正在看的那个，最久没碰过的优先；
- * 都没有就由调用方在后台新开一个。
+ * 都没有就由调用方在后台新开一个。studioTabId 是只有一个时的老写法。
  */
-export function rankTabs(tabs, spec, { studioTabId = null, reuseUserTabs = true } = {}) {
+export function rankTabs(tabs, spec, { studioTabId = null, studioTabIds = null, reuseUserTabs = true } = {}) {
+  const ids = (studioTabIds || (studioTabId != null ? [studioTabId] : [])).filter((x) => x != null);
   const mine = tabs.filter((t) => t.url && onSite(t.url, spec));
   const out = [];
-  const studio = mine.find((t) => t.id === studioTabId);
-  if (studio) out.push(studio);
+  for (const id of ids) {
+    const t = mine.find((x) => x.id === id);
+    if (t && !out.includes(t)) out.push(t);
+  }
   if (reuseUserTabs) {
     const others = mine
-      .filter((t) => t.id !== studioTabId && !t.active)
+      .filter((t) => !ids.includes(t.id) && !t.active)
       .sort((a, b) => (a.lastAccessed || 0) - (b.lastAccessed || 0));
     out.push(...others);
   }

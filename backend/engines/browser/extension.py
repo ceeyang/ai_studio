@@ -28,7 +28,7 @@ browser-extension/ 是一个 MV3 扩展，装在用户日常用的 Chrome/Edge �
     status_request {}
     open     {urls}                                           在用户浏览器里打开这些网址（登录用）
     rpc      {id, method, params}                             网页文本模型一步步驱动页面（v0.2 起）：
-             acquire_tab {site} → {tab_id, fresh, how}        专门写文本的标签页（不用出图的那个）
+             acquire_tab {site} → {tab_id, fresh, how}        写文本用的标签页（v0.4.1 起和出图共用，尽量不新开）
              goto {tab_id, url} → url / url {tab_id} → url
              dom {tab_id, op, args} → content/dom.js 的 op 的返回值（只许 RPC_DOM_OPS 里那些）
              cookie_names {url} → [名字]

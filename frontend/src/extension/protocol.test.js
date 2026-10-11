@@ -55,6 +55,10 @@ describe('extension protocol helpers', () => {
     expect(rankTabs(tabs, CHATGPT, { studioTabId: 2, reuseUserTabs: false }).map((t) => t.id)).toEqual([2]);
     expect(rankTabs(tabs, CHATGPT, { reuseUserTabs: false })).toEqual([]);
     expect(rankTabs(tabs, GEMINI, {}).map((t) => t.id)).toEqual([4]);
+    // 写文本和出图共用标签页：按给的顺序先用 studio 用过的（这次用途的、另一种用途的），再借用户闲着的
+    expect(rankTabs(tabs, CHATGPT, { studioTabIds: [2, 1] }).map((t) => t.id)).toEqual([2, 1, 3]);
+    expect(rankTabs(tabs, CHATGPT, { studioTabIds: [99, 1] }).map((t) => t.id)).toEqual([1, 3, 2]);   // 99 关掉了
+    expect(rankTabs(tabs, CHATGPT, { studioTabIds: [1, 1] }).map((t) => t.id)).toEqual([1, 3, 2]);    // 两种用途是同一个
   });
 
   it('登录判断：登录按钮优先，其次 cookie 或页面输入框', () => {

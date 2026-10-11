@@ -13,7 +13,7 @@
  * 4. 出视频（v0.4 起）：job.kind = 'video' 时在 Gemini / Muse 上用首帧出视频，原视频（mp4）同样分块传回。
  *    续接会话（v0.3 起）：出图任务带 conversation_url 时在那条之前的对话里接着出图（打不开就新开），
  *    结果里报回对话地址，studio 按角色 / 镜头 / 场景 / 道具记下来，下次重新生成时续接。
- * 5. rpc（v0.2 起，网页文本模型）：studio 一步步驱动页面——开一个专门写文本的标签页（不用出图的那个）、
+ * 5. rpc（v0.2 起，网页文本模型）：studio 一步步驱动页面——要一个标签页（v0.4.1 起和出图共用，尽量不新开）、
  *    跳转、调 content/dom.js 的函数（只许 lib/protocol.js 的 RPC_DOM_OPS 里那些）。流程和选择器都在 studio
  *    那边（backend/engines/browser/chat.py），改了不用重新加载扩展。
  *
@@ -325,23 +325,33 @@ async function rememberTab(key, tabId) {
   }
 }
 
-async function acquireTab(spec, opts) {
+/**
+ * 出图（purpose = image）、写文本（text）用的标签页。两种用途共用：先用扩展上次用过的（这次用途的、另一种用途的），
+ * 再借你开着、没在看、没在生成、输入框里没写东西的这个网站的标签页（会切到新对话），只有这个网站一个能用的标签页
+ * 都没有时才在后台新开一个。选中的标签页同时记成两种用途的，下次两边都先用它。
+ */
+async function acquireSiteTab(spec, opts, purpose) {
   const all = await studioTabs();
-  const mineId = all[spec.key];
-  // 专门写文本的标签页（rpc）不拿来出图
-  const textIds = new Set(textTabIds(all));
-  const tabs = (await chrome.tabs.query({})).filter((t) => !textIds.has(t.id));
-  const ranked = rankTabs(tabs, spec, { studioTabId: mineId ?? null, reuseUserTabs: opts.reuse_user_tabs !== false });
+  const slots = purpose === 'text' ? [`${spec.key}:text`, spec.key] : [spec.key, `${spec.key}:text`];
+  const ids = slots.map((k) => all[k]).filter((x) => x != null);
+  const tabs = await chrome.tabs.query({});
+  const ranked = rankTabs(tabs, spec, { studioTabIds: ids, reuseUserTabs: opts.reuse_user_tabs !== false });
+  const remember = async (id) => {
+    for (const k of slots) await rememberTab(k, id);
+  };
   for (const t of ranked) {
-    const isMine = t.id === mineId;
+    const isMine = ids.includes(t.id);
     if (!t.discarded && t.status === 'complete') {
       const p = await probeTab(t.id, spec);
       if (!p) continue; // 注入不了（比如停在别的域名的登录页上）
       if (p.busy) continue; // 正在生成
       if (!isMine && p.draft) continue; // 你在输入框里写了一半
     }
-    await rememberTab(spec.key, t.id);
-    return { tabId: t.id, fresh: false, how: isMine ? '用上次出图的那个标签页' : '借用你开着的一个标签页（会切到新对话）' };
+    await remember(t.id);
+    return {
+      tabId: t.id, fresh: false,
+      how: isMine ? `用上次 studio 用过的那个 ${spec.label} 标签页` : `借用你开着的一个 ${spec.label} 标签页（会切到新对话）`,
+    };
   }
   const tab = await chrome.tabs.create({ url: spec.new_chat_url, active: !!opts.activate_tab });
   try {
@@ -349,9 +359,13 @@ async function acquireTab(spec, opts) {
   } catch (_e) {
     /* 老版本浏览器没有这个选项 */
   }
-  await rememberTab(spec.key, tab.id);
+  await remember(tab.id);
   await waitTabComplete(tab.id);
-  return { tabId: tab.id, fresh: true, how: `没有空闲的 ${spec.label} 标签页，在后台新开了一个` };
+  return { tabId: tab.id, fresh: true, how: `没有能用的 ${spec.label} 标签页（都在用或没开），在后台新开了一个` };
+}
+
+function acquireTab(spec, opts) {
+  return acquireSiteTab(spec, opts, 'image');
 }
 
 // ---------------------------------------------------------------- rpc（网页文本模型）
@@ -359,29 +373,10 @@ function textTabIds(all) {
   return Object.entries(all).filter(([k]) => k.endsWith(':text')).map(([, v]) => v);
 }
 
-/** 写文本用的标签页：上次写文本用过、还开着、还在这个网站上的那个；没有就在后台新开一个。不借用你开着的标签页。 */
+/** 写文本用的标签页：和出图共用（见 acquireSiteTab），尽量不新开。 */
 async function acquireTextTab(spec, opts) {
-  const slot = `${spec.key}:text`;
-  const mineId = (await studioTabs())[slot];
-  if (mineId != null) {
-    try {
-      const t = await chrome.tabs.get(mineId);
-      if (t && !t.discarded && t.url && onSite(t.url, spec)) {
-        return { tab_id: t.id, fresh: false, how: `用上次写文本的那个 ${spec.label} 标签页` };
-      }
-    } catch (_e) {
-      /* 关掉了，新开一个 */
-    }
-  }
-  const tab = await chrome.tabs.create({ url: spec.new_chat_url, active: !!opts.activate_tab });
-  try {
-    await chrome.tabs.update(tab.id, { autoDiscardable: false });
-  } catch (_e) {
-    /* 老版本浏览器没有这个选项 */
-  }
-  await rememberTab(slot, tab.id);
-  await waitTabComplete(tab.id);
-  return { tab_id: tab.id, fresh: true, how: `在后台新开了一个 ${spec.label} 标签页（专门写文本，不动出图用的那个）` };
+  const { tabId, fresh, how } = await acquireSiteTab(spec, opts, 'text');
+  return { tab_id: tabId, fresh, how };
 }
 
 const RPC = {

@@ -1,6 +1,7 @@
 """网页文本模型：在用户自己浏览器里已登录的 ChatGPT / Gemini / Claude / Muse 网页上问（免费额度，不用 API Key）。
 
-走浏览器扩展（browser-extension，v0.2 起有 rpc）：在专门写文本的标签页里（不用出图的那个）开一个新对话，
+走浏览器扩展（browser-extension，v0.2 起有 rpc）：在一个这个网站的标签页里开一个新对话（v0.4.1 起和出图共用标签页：
+先用 studio 用过的，再借你开着、闲着的，都没有才新开），
 归属到某集某一步的调用（剧本、分镜每段、推荐角色）重新生成时续接上次那条对话（backend/engines/browser/
 conversations.py；超过 20 轮、对话打不开、设置里关掉时新开）。把 system 和对话拼成一条提示词发出去，
 等回复写完、文字稳定，读这次新增的那条回复的全文；json_mode 时要求「只输出 JSON，放在 ```json 代码块里」，解析交给网关（extract_json，不合格按网关的重试）。页面流程见
