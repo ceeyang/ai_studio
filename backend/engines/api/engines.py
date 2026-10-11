@@ -1,5 +1,5 @@
 """官方 API 的出图 / 视频引擎：OpenAI 图像（gpt-image-1）、Gemini 图像（gemini-2.5-flash-image）、
-Google Veo（Gemini API）、OpenAI Sora。
+Google Veo（Gemini API）、OpenAI Sora、Seedance（火山方舟 / BytePlus）、可灵（可灵开放平台）。
 
 build() 只把请求拼成「API 调用请求」（EngineCall.runner="api"，workflow 里是服务、操作、模型、提示词、
 画幅、参考图 / 首帧的本机路径），执行交给 ApiRunner（engines/api/runner.py）。workflow 会原样写进任务目录的
@@ -159,23 +159,42 @@ class _ApiVideoEngine(_ApiEngine):
         raise NotImplementedError
 
     def build(self, req: VideoRequest) -> EngineCall:
+        """尾帧：caps.supports_end_frame 时带上（workflow 里有 end_frame 键），否则记进 dropped_refs；
+        参考图：caps.max_refs > 0 时最多带 max_refs 张（D3 参考图直出用），其余和不支持时都记进 dropped_refs。
+        Veo / Sora 两个都是 0 / False，行为和以前一样（多了一条：给了尾帧会记成没带上）。"""
         w, h = size_for(self.caps.sizes, req.aspect)
         model = self.model()
         seconds = self._seconds(req, model)
         out_seconds = float(seconds or self.caps.default_seconds)
+        keep = list(req.refs[: self.caps.max_refs]) if self.caps.max_refs > 0 else []
+        dropped = [str(p) for p in req.refs[len(keep):]]
+        end = req.end_frame if (req.end_frame and self.caps.supports_end_frame) else None
+        if req.end_frame and end is None:
+            dropped.append(str(req.end_frame))
         request = {"runner": RUNTIME, "service": self.service, "op": "video", "model": model,
                    "prompt": " ".join((req.prompt or "").split()), "aspect": req.aspect,
                    "size": f"{w}x{h}", "first_frame": str(req.first_frame), "seconds": seconds,
-                   "timeout": self.timeout(), **self._request(req, seconds)}
-        dropped = [str(p) for p in req.refs]   # 这两家的图生视频只吃首帧，参考图用不上
+                   "timeout": self.timeout()}
+        if end is not None:
+            request["end_frame"] = str(end)
+        if keep:
+            request["refs"] = [str(p) for p in keep]
+        request.update(self._request(req, seconds))
         meta = {"prompt": req.prompt, "service": self.service, "model": model, "seed": None,
                 "nondeterministic": True, "size": [w, h], "seconds": out_seconds,
                 "frames": self.frames_for(out_seconds), "fps": self.caps.fps,
-                "first_frame": str(req.first_frame), "refs": []}
+                "first_frame": str(req.first_frame), "refs": [str(p) for p in keep]}
+        if end is not None:
+            meta["end_frame"] = str(end)
         if req.negative and "negative" not in request:
             meta["negative_ignored"] = req.negative
+        meta.update(self._meta(request))
         return EngineCall(self.name, request, "video", self.family, meta=meta, dropped_refs=dropped,
                           runner="api")
+
+    def _meta(self, request: dict) -> dict:
+        """子类往 meta 里补的（比如可灵为了尾帧改成 pro 模式）。"""
+        return {}
 
 
 class VeoEngine(_ApiVideoEngine):
@@ -214,6 +233,148 @@ class SoraEngine(_ApiVideoEngine):
         return {}
 
 
-API_ENGINES = (OpenAIImageEngine, GeminiApiImageEngine, VeoEngine, SoraEngine)
+def _ceil_seconds(want: float, lo: int, hi: int) -> int:
+    """要的秒数往上取整到整秒（台词不能被截），夹在 [lo, hi]。"""
+    n = int(want) if abs(want - round(want)) < 1e-6 else int(want) + 1
+    return max(lo, min(hi, n))
+
+
+# ---------------------------------------------------------------- Seedance（火山方舟 / BytePlus ModelArk）
+# 720p 输出尺寸：9:16 = 720×1280、16:9 = 1280×720（第三方实测报告，2026-10）；1:1 按 1.x 文档的 960×960（未实测）
+SEEDANCE_SIZES = {"9:16": (720, 1280), "16:9": (1280, 720), "1:1": (960, 960)}
+SEEDANCE_SECONDS = tuple(range(4, 16))       # 2.0 / 2.5：4–15 秒整数
+
+
+def seedance_seconds_range(model: str) -> tuple[int, int]:
+    """各代 Seedance 的 duration 范围：2.x 是 4–15；1.5 pro 是 4–12；1.0 是 2–12。"""
+    if "seedance-2" in model:
+        return 4, 15
+    if "seedance-1-5" in model:
+        return 4, 12
+    return 2, 12
+
+
+def seedance_has_audio(model: str) -> bool:
+    """generate_audio 只有 1.5 pro 和 2.x 认（1.0 没有声音，不传这个参数）。"""
+    return "seedance-2" in model or "seedance-1-5" in model
+
+
+class SeedanceEngine(_ApiVideoEngine):
+    """Seedance（火山方舟 Ark / 海外 BytePlus ModelArk）：首帧（+ 尾帧）图生视频，有声。
+
+    接口（2026-10-12 核对；官方文档页是 JS 渲染的，抓不到原文，以下来自第三方转述的 Ark 原生格式和 SDK 示例，
+    未用真实 Key 跑过，见 docs/specs/2026-10-12-seedance-kling-video-design.md §4）：
+    - POST {base}/contents/generations/tasks，Bearer API Key。body：model、content（[{type: text, text},
+      {type: image_url, image_url: {url: data URI}, role: first_frame}, {…, role: last_frame}]）、
+      ratio（16:9 / 9:16 / 1:1 / 4:3 / 3:4 / 21:9 / adaptive）、duration（2.x：4–15 整数秒）、
+      resolution（480p / 720p；1080p 只有 2.0 标准版和 2.5，fast / mini 最高 720p）、generate_audio（默认 true）、
+      watermark（默认 false，这里明确传 false）；
+    - 返回 {id}；GET {base}/contents/generations/tasks/{id}：status = queued / running / succeeded / failed /
+      expired，成功时 content.video_url（24 小时有效，拿到马上下载），失败时 error.{code, message}；
+    - 模型 id：doubao-seedance-2-0-260128（默认）、doubao-seedance-2-0-fast-260128、doubao-seedance-2-5-260628、
+      doubao-seedance-1-5-pro-251215；mini 版 id 要在控制台确认。用之前要在控制台「开通管理」里开通。
+    - 输出 24fps；没有负面提示词（丢掉，meta 记 negative_ignored）；有 seed 参数但这里不传（同一 seed 也不保证一样）。
+
+    caps 按默认模型（2.0）写：时长 4–15 秒、有声。换成 1.x 模型时 _seconds 按那一代的范围夹，1.0 不传 generate_audio。
+    params：resolution（默认 720p）、generate_audio（默认 true）。
+    """
+    name = "seedance_video"
+    family = "seedance_api"
+    label = "Seedance（火山方舟 API）"
+    service = "ark"
+    caps = VideoCaps(max_refs=0, supports_end_frame=True, has_audio=True, fps=24, sizes=SEEDANCE_SIZES,
+                     default_seconds=5.0, max_seconds=15.0, duration_control="param",
+                     allowed_seconds=SEEDANCE_SECONDS)
+
+    def _seconds(self, req, model) -> int:
+        lo, hi = seedance_seconds_range(model)
+        return _ceil_seconds(max(req.seconds, req.min_seconds), lo, hi)
+
+    def _request(self, req, seconds) -> dict:
+        model = self.model()
+        audio = bool(self.overrides.get("generate_audio", True)) if seedance_has_audio(model) else None
+        return {"resolution": str(self.overrides.get("resolution") or "720p"), "generate_audio": audio}
+
+
+# ---------------------------------------------------------------- 可灵（可灵开放平台）
+# std 模式 720p、pro 模式 1080p；图生视频的画幅跟着首帧走（接口没有 aspect_ratio），首帧已经是要的画幅。
+# 1:1 的尺寸未实测（按 720 / 1080 方形写）
+KLING_SIZES = {"9:16": (720, 1280), "16:9": (1280, 720), "1:1": (720, 720)}
+KLING_PRO_SIZES = {"9:16": (1080, 1920), "16:9": (1920, 1080), "1:1": (1080, 1080)}
+KLING_V3_SECONDS = tuple(range(3, 16))       # kling-v3：3–15 秒
+KLING_OLD_SECONDS = (5, 10)                   # v2.x 及更早：只有 "5" / "10"
+KLING_PROMPT_MAX = 2500                       # 官方文档：prompt / negative_prompt 不超过 2500 字符
+
+
+def kling_is_v3(model: str) -> bool:
+    return model.startswith("kling-v3")
+
+
+def kling_has_audio(model: str) -> bool:
+    """sound 参数（on / off）只有 kling-v2-6 和 v3 认，更早的不传。"""
+    return kling_is_v3(model) or model.startswith("kling-v2-6")
+
+
+class KlingEngine(_ApiVideoEngine):
+    """可灵开放平台 API：首帧（+ 尾帧）图生视频，有声（v2.6 / v3）。
+
+    接口（2026-10-12 核对；官方文档 app.klingai.com / kling.ai 的 document-api 是 JS 渲染的，抓不到原文，
+    以下来自第三方转述的官方字段表、ComfyUI 官方节点文档和公开 SDK，未用真实 Key 跑过）：
+    - 地址：国内 https://api-beijing.klingai.com，海外 https://api-singapore.klingai.com；
+    - 认证：API Key（Bearer），或 AccessKey + SecretKey 签 HS256 JWT（iss=AK，exp=now+1800，nbf=now-5），
+      每个请求现签（backend/llm/api_http.py）；
+    - POST /v1/videos/image2video：model_name、image（base64，不带 data: 前缀）、image_tail（尾帧，同样）、
+      prompt、negative_prompt（各 ≤ 2500 字符）、mode（std / pro）、duration（字符串；v3 是 "3"–"15"，
+      v2.x 及更早只有 "5" / "10"）、sound（"on" / "off"，v2.6 / v3）、cfg_scale（0–1，v2.x 不支持，只在 params
+      里写了才传）。图生视频没有 aspect_ratio（画幅跟首帧走），所以不传；
+    - 返回 {code: 0, data: {task_id, task_status}}；GET /v1/videos/image2video/{task_id}：task_status =
+      submitted / processing / succeed / failed，失败原因在 task_status_msg，成功时 data.task_result.videos[0].url；
+      业务错误是 HTTP 4xx/200 + 顶层 code（1101 欠费、1102 资源包用完、1301 内容审核…），见 api_http.KLING_HINTS；
+    - 尾帧（image_tail）：老文档写明只有 pro 模式支持（v1.x 的 std 有个别例外），v2.1 起的首尾帧也都是 pro；
+      v3 std 是否支持没查到确切说法。所以带尾帧时一律用 pro 模式（meta 里记 mode_forced），宁可贵一点也不失败。
+    - 模型：kling-v3（默认）、kling-v2-6、kling-v2-5-turbo、kling-v2-1。输出 24fps（未实测）。
+
+    caps 按默认模型（v3）写：时长 3–15 秒、有声、std 720p。
+    params：mode（默认 std）、sound（默认 true）、cfg_scale（默认不传）。
+    """
+    name = "kling_video"
+    family = "kling_api"
+    label = "可灵（API）"
+    service = "kling"
+    caps = VideoCaps(max_refs=0, supports_end_frame=True, has_audio=True, fps=24, sizes=KLING_SIZES,
+                     default_seconds=5.0, max_seconds=15.0, duration_control="param",
+                     allowed_seconds=KLING_V3_SECONDS)
+
+    def _seconds(self, req, model) -> int:
+        want = max(req.seconds, req.min_seconds)
+        if kling_is_v3(model):
+            return _ceil_seconds(want, 3, 15)
+        return next((s for s in KLING_OLD_SECONDS if s >= want - 1e-6), KLING_OLD_SECONDS[-1])
+
+    def _request(self, req, seconds) -> dict:
+        model = self.model()
+        mode = str(self.overrides.get("mode") or "std")
+        out: dict = {"mode": mode,
+                     "negative": (req.negative or "")[:KLING_PROMPT_MAX] or None,
+                     "sound": (("on" if self.overrides.get("sound", True) else "off")
+                               if kling_has_audio(model) else None)}
+        if req.end_frame and mode != "pro":
+            out["mode"] = "pro"
+            out["mode_forced"] = f"带尾帧要 pro 模式（设置的是 {mode}）"
+        if self.overrides.get("cfg_scale") is not None:
+            out["cfg_scale"] = float(self.overrides["cfg_scale"])
+        return out
+
+    def _meta(self, request: dict) -> dict:
+        out: dict = {"mode": request["mode"]}
+        if request.get("mode_forced"):
+            out["mode_forced"] = request["mode_forced"]
+        if request["mode"] == "pro":
+            w, h = size_for(KLING_PRO_SIZES, request["aspect"])
+            out["size"] = [w, h]
+        return out
+
+
+API_ENGINES = (OpenAIImageEngine, GeminiApiImageEngine, VeoEngine, SoraEngine, SeedanceEngine, KlingEngine)
 # 队列给每个 API 引擎族开一条串行通道（不走 GPU worker）
 API_FAMILIES: tuple[str, ...] = tuple(e.family for e in API_ENGINES)

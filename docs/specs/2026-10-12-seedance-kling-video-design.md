@@ -1,6 +1,6 @@
 # 视频引擎：Seedance（即梦 / 火山方舟）与可灵，网页 + API 两种调用，首帧与参考图直出两种模式
 
-日期：2026-10-12　状态：设计已确认，待写实施计划
+日期：2026-10-12　状态：设计已确认；D2（API 版）已实现，待用真实 Key 实跑（见 4.5）
 
 ## 1. 目标
 
@@ -137,6 +137,36 @@
 
 假 HTTP transport 测请求结构、轮询、失败（内容审核、额度不足、401）、超时、Key / 签名不进文件和日志；
 JWT 签名单测；最后用作者的 Key 各实跑一条。
+
+### 4.5 实施记录（2026-10-12，D2 已实现，待用真实 Key 实跑）
+
+官方文档页（火山方舟 volcengine.com/docs/82379、可灵 app.klingai.com / kling.ai 的 document-api）都是 JS 渲染，
+抓不到原文；以下按第三方转述的官方字段表（apiyi、cometapi、laozhang 等）、ComfyUI 官方节点文档和公开 SDK 交叉核对。
+**还没用真实 Key 跑过**：等作者给 Key 后各实跑一条 5 秒视频，不对的地方回写这里和引擎 docstring。
+
+和上面设计不一样 / 补充的地方：
+
+- **Seedance 模型 id**：默认 `doubao-seedance-2-0-260128`；可选 `doubao-seedance-2-0-fast-260128`、
+  `doubao-seedance-2-5-260628`（2026 年中新出的 2.5）、`doubao-seedance-1-5-pro-251215`。用之前要在方舟控制台开通。
+- **Seedance 时长**：2.x 是 4–15 秒整数（1.5 pro 4–12，1.0 2–12），按镜头时长往上取整；`resolution` 默认 720p
+  （1080p 只有 2.0 标准版和 2.5，fast / mini 最高 720p，params 里可改）；`generate_audio` 只给 1.5 / 2.x 传；
+  明确传 `watermark: false`。输出 720p：9:16 = 720×1280、16:9 = 1280×720，24fps；1:1 按 960×960（未实测）。
+- **可灵图生视频没有 `aspect_ratio`**（只有文生视频有），画幅跟着首帧走，所以不传。
+- **可灵时长**：kling-v3 是 "3"–"15"；v2.x 及更早只有 "5" / "10"。`sound`（on / off）只给 v2.6 / v3 传。
+  `prompt` / `negative_prompt` 截到 2500 字符。
+- **可灵尾帧（image_tail）**：老文档写明只有 pro 模式支持，v2.1 起的首尾帧也是 pro，v3 std 是否支持查不到确切说法：
+  带尾帧时一律改用 pro（日志和 meta `mode_forced` 写明），不带尾帧时用设置的模式（默认 std）。
+- **可灵错误**：HTTP 4xx 或 200 + 顶层 `code ≠ 0`。1000–1004 鉴权（1003 / 1004 多半是本机时钟不准），1101 欠费，
+  1102 资源包用完，1301 内容审核，1302 / 1303 限流；任务失败原因在 `task_status_msg`。方舟的失败在 `error.code`：
+  `AccountOverdueError`（欠费）、`ModelNotOpen`（没开通）、`*SensitiveContentDetected`（审核）等。都翻成中文说怎么办。
+- **测试连接**：两家都没有用这个 Key 能调的「列模型」接口，改调「查询任务列表」（只读、不扣费）。
+- **设置**：`api:ark` / `api:kling` 行多存 `region`（cn / intl）；可灵多存 `access_key` / `secret_key`
+  （填了 API Key 优先用 API Key；「清除」把两种一起删）。环境变量：`ARK_API_KEY`、`KLING_API_KEY`，
+  或 `KLING_ACCESS_KEY` + `KLING_SECRET_KEY`；`ARK_BASE_URL` / `KLING_BASE_URL` 可覆盖地址。
+- **不落盘**：JWT 每个请求现签（httpx Auth），只在请求头；`scrub()` 掩掉 API Key、AK、SK，并把像 JWT 的串整个隐藏；
+  任务调用明细（trace）同样掩掉 AK / SK / JWT。
+- `_ApiVideoEngine.build`：`supports_end_frame` 时 workflow 带 `end_frame`，否则尾帧记进 `dropped_refs`；
+  `max_refs > 0` 时带参考图（D3 用，现在两家都是 0）。
 
 ## 5. D3：参考图直出
 

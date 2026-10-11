@@ -203,6 +203,8 @@ def check_connection(service_id: str, creds: Creds, *,
     if not creds.configured:
         from backend.domain.api_keys import no_key_hint
         return {"ok": False, "message": no_key_hint(service_id)}
+    if service_id in TASK_LIST:
+        return _check_task_list(service_id, creds, transport)
     path, params = {"openai": ("/models", None), "anthropic": ("/v1/models", {"limit": 100}),
                     "gemini": ("/v1beta/models", {"pageSize": 1000})}[service_id]
     try:
@@ -225,3 +227,28 @@ def check_connection(service_id: str, creds: Creds, *,
     if missing:
         msg += f"；列表里没看到 {'、'.join(missing)}（模型名可能写错，或这个 Key 没有权限）"
     return {"ok": True, "message": msg}
+
+
+# 火山方舟、可灵没有「列模型」接口（方舟的模型列表在管控面，要另一套 AK/SK）：
+# 改调「查询视频生成任务列表」，只读、不生成内容、不扣费，能验证 Key / 签名和区域地址。
+TASK_LIST = {"ark": ("/contents/generations/tasks", {"page_num": 1, "page_size": 1}),
+             "kling": ("/v1/videos/image2video", {"pageNum": 1, "pageSize": 1})}
+
+
+def _check_task_list(service_id: str, creds: Creds, transport) -> dict:
+    path, params = TASK_LIST[service_id]
+    try:
+        with client(creds, timeout=20.0, transport=transport) as http:
+            r = http.get(path, params=params)
+    except httpx.HTTPError as e:
+        return {"ok": False, "message": transport_error_text(service_id, creds, e)}
+    if r.status_code >= 400:
+        return {"ok": False, "message": http_error_text(service_id, r, creds)}
+    try:
+        d = r.json()
+    except ValueError:
+        return {"ok": False, "message": "返回的不是 JSON：Base URL 可能指到了网页而不是 API"}
+    if service_id == "kling" and isinstance(d, dict) and d.get("code") not in (None, 0):
+        return {"ok": False, "message": http_error_text(service_id, r, creds)}
+    how = "AccessKey / SecretKey 签名" if creds.aksk else "API Key"
+    return {"ok": True, "message": f"连接成功（{how} 有效，能查询任务列表）· {creds.base_url}"}

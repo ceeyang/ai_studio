@@ -4,7 +4,8 @@ import { errorText } from '../../api/client';
 import { useApiServices, useSaveApiService, useTestApiService } from '../../api/queries';
 import type { ApiModelKind, ApiService, ApiServiceIn } from '../../api/types';
 
-/** 设置页「API 服务」：OpenAI（GPT）、Anthropic（Claude）、Google（Gemini）的 Key、Base URL、模型名。
+/** 设置页「API 服务」：OpenAI（GPT）、Anthropic（Claude）、Google（Gemini）、火山方舟（Seedance）、可灵的
+ *  Key、Base URL、区域（国内 / 海外）、模型名。可灵还能填 AccessKey + SecretKey（没填 API Key 时用它们签名）。
  *  后端只回掩码（sk-…abcd），这里也从不显示明文；Key 输入框留空 = 不改。 */
 
 const KINDS: ApiModelKind[] = ['text', 'image', 'video'];
@@ -13,12 +14,17 @@ const USES: Record<string, string> = {
   openai: '文本模型（GPT，能看图）· 出图（gpt-image-1，文生图 / 参考图）· 视频（Sora，首帧图生视频）',
   anthropic: '文本模型（Claude，能看图）。Claude 没有出图、视频',
   gemini: '文本模型（Gemini，能看图）· 出图（Gemini 图像，文生图 / 参考图）· 视频（Veo，首帧图生视频）',
+  ark: '视频（Seedance，首帧 / 首尾帧图生视频，有声）。国内是火山方舟，海外是 BytePlus ModelArk，Key 两边不通用',
+  kling: '视频（可灵，首帧 / 首尾帧图生视频，有声）。API Key 和 AccessKey + SecretKey 填一种就行，两种都填时用 API Key',
 };
 
 interface Draft {
   key: string;
   base: string;
   models: Partial<Record<ApiModelKind, string>>;
+  region?: string;
+  ak?: string;
+  sk?: string;
 }
 
 function draftOf(s: ApiService): Draft {
@@ -26,13 +32,22 @@ function draftOf(s: ApiService): Draft {
     key: '',
     base: s.base_url ?? '',
     models: Object.fromEntries(KINDS.filter((k) => s.models[k]).map((k) => [k, s.models[k]?.value ?? ''])),
+    region: s.region ?? '',
+    ak: '',
+    sk: '',
   };
 }
 
-/** 只把改过的字段变成 PUT 体：Key 空 = 不改；Base URL / 模型名清空 = 恢复默认（发空串） */
+/** 只把改过的字段变成 PUT 体：Key 空 = 不改；Base URL / 模型名清空 = 恢复默认（发空串）；
+ *  区域只在有区域选项、选的和现在的不一样时发；AccessKey / SecretKey 填了才发 */
 export function servicePatch(s: ApiService, d: Draft): ApiServiceIn {
   const out: ApiServiceIn = {};
   if (d.key.trim()) out.api_key = d.key.trim();
+  if (s.regions?.length && d.region && d.region !== (s.region ?? '')) out.region = d.region;
+  if (s.aksk) {
+    if (d.ak?.trim()) out.access_key = d.ak.trim();
+    if (d.sk?.trim()) out.secret_key = d.sk.trim();
+  }
   if (d.base.trim() !== (s.base_url ?? '')) out.base_url = d.base.trim();
   const models: Partial<Record<ApiModelKind, string>> = {};
   for (const k of KINDS) {
@@ -46,7 +61,16 @@ export function servicePatch(s: ApiService, d: Draft): ApiServiceIn {
 function sourceText(s: ApiService): string {
   if (!s.configured) return '未配置';
   const where = s.source === 'settings' ? '设置页填的' : `环境变量 ${s.env_name ?? ''}`;
-  return `已配置 · ${where} · ${s.masked ?? ''}`;
+  const how = s.auth === 'aksk' ? ' · AccessKey + SecretKey 签名' : '';
+  return `已配置 · ${where}${how} · ${s.masked ?? ''}`;
+}
+
+/** AccessKey / SecretKey 只填了一个、另一个也没存过：保存不了 */
+export function akskIncomplete(s: ApiService, d: Draft): boolean {
+  if (!s.aksk) return false;
+  const ak = (d.ak ?? '').trim() !== '';
+  const sk = (d.sk ?? '').trim() !== '';
+  return ak !== sk && !s.has_saved_aksk;
 }
 
 function ServiceCard({ s }: { s: ApiService }) {
@@ -63,6 +87,9 @@ function ServiceCard({ s }: { s: ApiService }) {
   }, [sig]);
   const patch = servicePatch(s, draft);
   const dirty = Object.keys(patch).length > 0;
+  const halfPair = akskIncomplete(s, draft);
+  const regions = s.regions ?? [];
+  const defaultBase = regions.find((r) => r.id === (draft.region || s.region))?.base_url ?? s.default_base_url;
   const edit = (d: Partial<Draft>) => {
     setJustSaved(false);
     setDraft({ ...draft, ...d });
@@ -83,6 +110,19 @@ function ServiceCard({ s }: { s: ApiService }) {
       </div>
       <p className="muted small">{USES[s.id] ?? ''}</p>
       <div className="api-fields">
+        {regions.length > 0 && (
+          <label className="field">
+            <span>区域</span>
+            <select aria-label={`${s.label} 区域`} value={draft.region || s.region || regions[0].id} onChange={(e) => edit({ region: e.target.value })}>
+              {regions.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.label}
+                </option>
+              ))}
+            </select>
+            <small className="muted">决定默认的 Base URL；下面自己填了 Base URL 时以填的为准</small>
+          </label>
+        )}
         <label className="field">
           <span>API Key</span>
           <span className="api-key-row">
@@ -99,18 +139,52 @@ function ServiceCard({ s }: { s: ApiService }) {
               {show ? '隐藏' : '显示'}
             </button>
             {s.has_saved_key && (
-              <button type="button" onClick={onClear} disabled={busy} title="删掉设置页存的 Key（环境变量里的照样能用）">
+              <button
+                type="button"
+                onClick={onClear}
+                disabled={busy}
+                title={s.aksk ? '删掉设置页存的 API Key 和 AccessKey / SecretKey（环境变量里的照样能用）' : '删掉设置页存的 Key（环境变量里的照样能用）'}
+              >
                 清除
               </button>
             )}
           </span>
         </label>
+        {s.aksk && (
+          <>
+            <label className="field">
+              <span>AccessKey（不填 API Key 时用）</span>
+              <input
+                type={show ? 'text' : 'password'}
+                aria-label={`${s.label} AccessKey`}
+                autoComplete="off"
+                spellCheck={false}
+                placeholder={s.has_saved_aksk ? '已保存，留空不改' : `粘贴 AccessKey（或设环境变量 ${s.env_aksk?.[0] ?? ''}）`}
+                value={draft.ak ?? ''}
+                onChange={(e) => edit({ ak: e.target.value })}
+              />
+            </label>
+            <label className="field">
+              <span>SecretKey</span>
+              <input
+                type={show ? 'text' : 'password'}
+                aria-label={`${s.label} SecretKey`}
+                autoComplete="off"
+                spellCheck={false}
+                placeholder={s.has_saved_aksk ? '已保存，留空不改' : `粘贴 SecretKey（或设环境变量 ${s.env_aksk?.[1] ?? ''}）`}
+                value={draft.sk ?? ''}
+                onChange={(e) => edit({ sk: e.target.value })}
+              />
+              <small className="muted">用 AccessKey + SecretKey 时，每次请求现签一个 30 分钟有效的令牌，不存盘</small>
+            </label>
+          </>
+        )}
         <label className="field">
           <span>Base URL（可选）</span>
           <input
             type="text"
             aria-label={`${s.label} Base URL`}
-            placeholder={s.default_base_url}
+            placeholder={defaultBase}
             value={draft.base}
             onChange={(e) => edit({ base: e.target.value })}
           />
@@ -141,10 +215,10 @@ function ServiceCard({ s }: { s: ApiService }) {
         })}
       </div>
       <div className="row api-actions">
-        <button type="button" disabled={!dirty || busy} onClick={onSave}>
+        <button type="button" disabled={!dirty || busy || halfPair} onClick={onSave}>
           {save.isPending ? '保存中…' : '保存'}
         </button>
-        <button type="button" disabled={busy || !s.configured} onClick={() => test.mutate(s.id)} title={s.configured ? '调这家的「列模型」接口，不生成内容、不扣费' : '先填 Key'}>
+        <button type="button" disabled={busy || !s.configured} onClick={() => test.mutate(s.id)} title={s.configured ? '调这家的只读接口（列模型 / 查任务列表），不生成内容、不扣费' : '先填 Key'}>
           {test.isPending ? '测试中…' : '测试连接'}
         </button>
         <span role="status" aria-live="polite" className="small" data-testid={`${id}-result`}>
@@ -152,6 +226,8 @@ function ServiceCard({ s }: { s: ApiService }) {
             <span className="error">{errorText(save.error)}</span>
           ) : test.error ? (
             <span className="error">{errorText(test.error)}</span>
+          ) : halfPair ? (
+            <span className="error">AccessKey 和 SecretKey 要一起填</span>
           ) : dirty ? (
             <span className="muted">有改动，还没保存</span>
           ) : justSaved ? (
@@ -177,7 +253,7 @@ export function ApiServicesPanel() {
       meta={q.data && `已配置 ${q.data.services.filter((s) => s.configured).length} / ${q.data.services.length}`}
     >
       <p className="muted small">
-        用 OpenAI、Anthropic、Google 的官方 API（按量计费）：填了 Key，对应的文本模型就能在上面「默认模型」里选（各步骤也能单独选），
+        用 OpenAI、Anthropic、Google、火山方舟、可灵的官方 API（按量计费）：填了 Key，对应的文本模型就能在上面「默认模型」里选（各步骤也能单独选），
         出图 / 视频引擎（标「API」）能在项目和镜头里选。Key 只存在本机数据库里，页面上只显示掩码；没填时用环境变量。
       </p>
       {q.error && (

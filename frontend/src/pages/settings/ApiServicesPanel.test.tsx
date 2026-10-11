@@ -38,7 +38,12 @@ function svc(id: string, over: Partial<ApiService> = {}): ApiService {
   };
 }
 
-const SAVED = svc('openai', { configured: true, source: 'settings', masked: 'sk-…abcd', has_saved_key: true });
+const ARK_REGIONS = [
+  { id: 'cn', label: '国内（火山方舟 · 北京）', base_url: 'https://ark.cn-beijing.volces.com/api/v3' },
+  { id: 'intl', label: '海外（BytePlus ModelArk · 新加坡）', base_url: 'https://ark.ap-southeast.bytepluses.com/api/v3' },
+];
+
+const SAVED = svc('openai',{ configured: true, source: 'settings', masked: 'sk-…abcd', has_saved_key: true });
 
 function settings(): AppSettings {
   return {
@@ -213,6 +218,92 @@ describe('设置页「API 服务」', () => {
     expect((within(step).getByRole('option', { name: 'OpenAI GPT（API · gpt-4.1）（先在 API 服务里填 Key）' }) as HTMLOptionElement).disabled).toBe(true);
     // API 引擎没 Key 不在默认模型下面一条条列
     expect(screen.queryByText(/OpenAI 图像（API）：不能用/)).toBeNull();
+  });
+
+  it('火山方舟：区域下拉（国内 / 海外），换区域只发 region，Base URL 占位跟着区域变', async () => {
+    const ark = svc('ark', {
+      label: '火山方舟（Seedance）',
+      env_keys: ['ARK_API_KEY'],
+      models: { video: { value: null, effective: 'doubao-seedance-2-0-260128', default: 'doubao-seedance-2-0-260128', label: '视频模型', suggestions: ['doubao-seedance-2-0-260128'] } },
+      default_base_url: 'https://ark.cn-beijing.volces.com/api/v3',
+      effective_base_url: 'https://ark.cn-beijing.volces.com/api/v3',
+      regions: ARK_REGIONS,
+      region: 'cn',
+      aksk: false,
+      llm_provider: '',
+    });
+    const calls = base({
+      'GET /api/api-services': { services: [svc('openai'), ark] },
+      'PUT /api/api-services/ark': { ...ark, region: 'intl', default_base_url: ARK_REGIONS[1].base_url },
+    });
+    renderAt(<SettingsPage />, { route: '/settings', path: '/settings' });
+    const card = await screen.findByTestId('api-ark');
+    // 没有区域的服务没有下拉；火山方舟没有 AccessKey 输入框
+    expect(within(screen.getByTestId('api-openai')).queryByLabelText('OpenAI（GPT） 区域')).toBeNull();
+    expect(within(card).queryByLabelText('火山方舟（Seedance） AccessKey')).toBeNull();
+    const region = within(card).getByLabelText('火山方舟（Seedance） 区域') as HTMLSelectElement;
+    expect(region.value).toBe('cn');
+    const baseInput = within(card).getByLabelText('火山方舟（Seedance） Base URL') as HTMLInputElement;
+    expect(baseInput.placeholder).toBe('https://ark.cn-beijing.volces.com/api/v3');
+    const user = userEvent.setup();
+    await user.selectOptions(region, 'intl');
+    expect(baseInput.placeholder).toBe('https://ark.ap-southeast.bytepluses.com/api/v3');
+    await user.click(within(card).getByRole('button', { name: '保存' }));
+    await waitFor(() => expect(calls.some((c) => c.method === 'PUT')).toBe(true));
+    expect(calls.find((c) => c.method === 'PUT')?.body).toEqual({ region: 'intl' });
+  });
+
+  it('可灵：API Key 或 AccessKey + SecretKey；只填一半不让存；一起填只发这两个；AK/SK 生效时状态写明', async () => {
+    const kling = svc('kling', {
+      label: '可灵（Kling）',
+      env_keys: ['KLING_API_KEY'],
+      models: { video: { value: null, effective: 'kling-v3', default: 'kling-v3', label: '视频模型', suggestions: ['kling-v3'] } },
+      default_base_url: 'https://api-beijing.klingai.com',
+      regions: [
+        { id: 'cn', label: '国内（可灵开放平台 · 北京）', base_url: 'https://api-beijing.klingai.com' },
+        { id: 'intl', label: '海外（Kling AI 国际版 · 新加坡）', base_url: 'https://api-singapore.klingai.com' },
+      ],
+      region: 'cn',
+      aksk: true,
+      env_aksk: ['KLING_ACCESS_KEY', 'KLING_SECRET_KEY'],
+      llm_provider: '',
+    });
+    const saved = { ...kling, configured: true, source: 'settings' as const, auth: 'aksk' as const, masked: 'AKk…6789', has_saved_key: true, has_saved_aksk: true };
+    const calls = base({
+      'GET /api/api-services': { services: [kling] },
+      'PUT /api/api-services/kling': saved,
+    });
+    renderAt(<SettingsPage />, { route: '/settings', path: '/settings' });
+    const card = await screen.findByTestId('api-kling');
+    const ak = within(card).getByLabelText('可灵（Kling） AccessKey') as HTMLInputElement;
+    const sk = within(card).getByLabelText('可灵（Kling） SecretKey') as HTMLInputElement;
+    expect(ak.type).toBe('password');
+    expect(sk.type).toBe('password');
+    expect(ak.placeholder).toContain('KLING_ACCESS_KEY');
+    const user = userEvent.setup();
+    await user.type(ak, 'AKkling-access-0123456789');
+    const save = within(card).getByRole('button', { name: '保存' }) as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+    expect(within(card).getByTestId('api-kling-result').textContent).toBe('AccessKey 和 SecretKey 要一起填');
+    await user.type(sk, 'SKkling-secret-9876543210');
+    expect(save.disabled).toBe(false);
+    await user.click(save);
+    await waitFor(() => expect(calls.some((c) => c.method === 'PUT')).toBe(true));
+    expect(calls.find((c) => c.method === 'PUT')?.body).toEqual({ access_key: 'AKkling-access-0123456789', secret_key: 'SKkling-secret-9876543210' });
+    await waitFor(() => expect(screen.getByTestId('api-kling-status').textContent).toBe('已配置 · 设置页填的 · AccessKey + SecretKey 签名 · AKk…6789'));
+    // 保存后输入框清空、不回显明文；存过了只改一个也行
+    expect(ak.value).toBe('');
+    expect(document.body.textContent).not.toContain('SKkling-secret');
+    await user.type(sk, 'SKkling-secret-new-000000');
+    expect(save.disabled).toBe(false);
+  });
+
+  it('servicePatch：区域没变不发；AccessKey / SecretKey 只对收 AK/SK 的服务发', () => {
+    const ark = svc('ark', { regions: ARK_REGIONS, region: 'cn', aksk: false });
+    const d = { key: '', base: '', models: { text: '', image: '', video: '' }, region: 'cn', ak: 'a', sk: 'b' };
+    expect(servicePatch(ark, d)).toEqual({});
+    expect(servicePatch(ark, { ...d, region: 'intl' })).toEqual({ region: 'intl' });
+    expect(servicePatch({ ...ark, aksk: true }, d)).toEqual({ access_key: 'a', secret_key: 'b' });
   });
 
   it('servicePatch：没改动是空对象；清空 Base URL / 模型名发空串（恢复默认）', () => {
