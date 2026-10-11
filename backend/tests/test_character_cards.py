@@ -146,10 +146,12 @@ def test_portrait_draw_needs_prompt_and_character(tmp_path, db):
     assert runner.calls == []
 
 
-def test_portrait_draw_zimage_gets_negative(tmp_path, db):
+def test_portrait_draw_zimage_negative_is_recorded_but_not_sent(tmp_path, db):
+    """zimage 是 cfg 1，负面提示词不起作用：工作流里写空，原文记在 negative_ignored。"""
     ctx, runner, ids = setup(tmp_path, db, image_engine="zimage")
     run_portrait(ctx, {"character_id": ids["char"]})
-    assert "cartoon" in runner.calls[0].meta["negative"]
+    assert "cartoon" in runner.calls[0].meta["negative_ignored"]
+    assert runner.calls[0].workflow["6"]["inputs"]["text"] == ""
     assert runner.calls[0].engine == "zimage"
 
 

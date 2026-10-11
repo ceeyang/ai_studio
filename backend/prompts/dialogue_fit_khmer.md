@@ -4,7 +4,7 @@
 要求：
 - 意思不变：信息、语气、人物关系都和原句一致；可以加自然的口语成分（"那个""就是说""您放心"之类）、
   补足宾语、把短句说完整，也可以压缩啰嗦的地方。不要加新的信息、价格、承诺或人名。
-- 必须是自然的普通话口语，像真人在修车行里说话；不要书面语，不要凑字的重复。
+- 必须是自然的普通话口语，像剧中这个人物在这场戏里说话（参考说话人和每句标的场景）；不要书面语，不要凑字的重复。
 - 长度：每句都给了目标字数（target_chars，按这句原文的实测语速估算的）和高棉语时长，尽量接近目标字数。
   tries 里是之前试过的版本和普通话 TTS 实测秒数：比高棉语短就加长，长就缩短，按比例调整字数。
 - 英文品牌（如 Telegram）保持原样。标点照常用中文标点。
@@ -18,7 +18,7 @@
 第 {{ round }} 轮改写，允许误差 ±{{ "%d"|format(tol * 100) }}%。
 
 台词：
-{% for l in lines %}- id={{ l.id }}｜说话人={{ l.speaker }}｜原句={{ l.zh_original }}
+{% for l in lines %}- id={{ l.id }}｜说话人={{ l.speaker }}{% if l.scene is defined and l.scene %}｜场景={{ l.scene }}{% endif %}｜原句={{ l.zh_original }}
   高棉语={{ l.km }}（念 {{ "%.2f"|format(l.km_seconds) }} 秒）｜目标字数≈{{ l.target_chars }}
   已试：{% for t in l.tries %}「{{ t.zh }}」{{ "%.2f"|format(t.seconds) }}s{% if not loop.last %}；{% endif %}{% endfor %}
 {% endfor %}

@@ -206,3 +206,16 @@ def test_trim_silence_cmd_strips_both_ends():
     one = "silenceremove=start_periods=1:start_threshold=-45dB:start_silence=0.03"
     assert af == f"{one},areverse,{one},areverse"   # 先剪开头，倒过来再剪一次就是结尾
     assert cmd[-1] == "line.wav" and "48000" in cmd
+
+
+def test_subtitles_show_the_original_line_not_the_length_fitted_rewrite():
+    """按高棉语时长改写的中文只为对嘴型（凑长了），中文字幕显示原句。"""
+    from backend.post.subtitles import dub_cues, timeline_cues
+
+    dlg = [[{"speaker": "a", "zh": "那个，就是说，先让我看看吧", "zh_original": "先让我看看。",
+             "km": "សុំមើលសិន។", "start": 0.5, "end": 3.0}],
+           [{"speaker": "b", "zh": "好。", "start": 0.5, "end": 1.0}]]
+    cues = timeline_cues(dlg, [0.0, 4.0], [4.0, 3.0])
+    assert [c.zh for c in cues] == ["先让我看看。", "好。"]
+    rows = [{"shot": 0, "index": 0, "offset": 0.5, "seconds": 1.2}]
+    assert dub_cues(rows, [0.0, 4.0], dlg)[0].zh == "先让我看看。"

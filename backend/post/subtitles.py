@@ -45,6 +45,12 @@ def wrap_zh(text: str, max_chars: int) -> str:
     return head + ("\\N" + wrap_zh(tail, max_chars) if tail else "")
 
 
+def subtitle_zh(d: dict) -> str:
+    """中文字幕显示原句：按高棉语时长改写过的中文（zh）只是为了让嘴型对上配音，凑长了（「那个、就是说」），
+    观众要看的是原意（zh_original）。"""
+    return (d.get("zh_original") or d.get("zh") or "").strip()
+
+
 def timeline_cues(shots_dialogue: list[list[dict]], starts: list[float],
                   durations: list[float]) -> list[Cue]:
     """把每镜的台词（相对本镜开头）换算到成片时间轴：加上本镜起点，end 不超过本镜结尾，相邻两条不重叠。"""
@@ -55,7 +61,7 @@ def timeline_cues(shots_dialogue: list[list[dict]], starts: list[float],
             b = start + min(float(d.get("end") or 0), dur)
             if b - a < 0.05:
                 continue
-            cues.append(Cue(a, b, (d.get("zh") or "").strip(), (d.get("km") or "").strip(),
+            cues.append(Cue(a, b, subtitle_zh(d), (d.get("km") or "").strip(),
                             d.get("speaker") or ""))
     cues.sort(key=lambda c: c.start)
     for cur, nxt in zip(cues, cues[1:]):
@@ -73,7 +79,7 @@ def dub_cues(rows: list[dict], starts: list[float], shots_dialogue: list[list[di
         d = dlg[r["index"]] if r["index"] < len(dlg) else {}
         a = starts[r["shot"]] + float(r["offset"])
         b = a + max(float(r["seconds"]) + tail, min_seconds)
-        cues.append(Cue(a, b, (d.get("zh") or "").strip(), (d.get("km") or "").strip(),
+        cues.append(Cue(a, b, subtitle_zh(d), (d.get("km") or "").strip(),
                         d.get("speaker") or ""))
     cues.sort(key=lambda c: c.start)
     for cur, nxt in zip(cues, cues[1:]):

@@ -45,17 +45,19 @@ class ZImageEngine(_ComfyEngine):
     name = "zimage"
     family = "zimage"
     template_name = "zimage"
-    caps = ImageCaps(max_refs=0, supports_negative=True,
+    # KSampler 是 cfg 1.0：负面提示词不起作用（ComfyUI 直接跳过），caps 不声明支持，免得界面引导用户写负面词；
+    # 工作流里负面写空，原文记在 meta 里（首帧输入哈希照旧含负面词，已有首帧不过期）
+    caps = ImageCaps(max_refs=0, supports_negative=False,
                      sizes={"9:16": (768, 1344), "16:9": (1344, 768), "1:1": (1024, 1024),
                             "21:9": (1792, 768), "3:4": (864, 1152)})
 
     def build(self, req: ImageRequest) -> EngineCall:
         w, h = size_for(self.caps.sizes, req.aspect)
-        wf = self._render({"prompt": req.prompt, "negative": req.negative, "width": w,
+        wf = self._render({"prompt": req.prompt, "negative": "", "width": w,
                            "height": h, "seed": req.seed, "prefix": req.prefix})
         return EngineCall(self.name, wf, "image", self.family,
-                          meta={"prompt": req.prompt, "negative": req.negative, "seed": req.seed,
-                                "size": [w, h]},
+                          meta={"prompt": req.prompt, "seed": req.seed, "size": [w, h],
+                                **({"negative_ignored": req.negative} if req.negative else {})},
                           dropped_refs=[str(p) for p in req.refs])
 
 

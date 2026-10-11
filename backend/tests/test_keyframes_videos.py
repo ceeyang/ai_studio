@@ -47,7 +47,8 @@ def test_keyframe_creates_selected_candidate(tmp_path, db):
     res = run_keyframe(ctx, {"shot_id": shot_id})
     call = runner.calls[0]
     assert call.workflow["5"]["inputs"]["text"] == "ANCHOR " + IMG
-    assert call.workflow["6"]["inputs"]["text"] == "blurry, cartoon"
+    assert call.workflow["6"]["inputs"]["text"] == ""          # cfg 1：负面词不起作用，写空
+    assert call.meta["negative_ignored"] == "blurry, cartoon"
     assert call.workflow["10"]["inputs"]["filename_prefix"] == "studio/demo/kf_S01"
     with db.session() as s:
         c = selected_candidate(s, "shot", shot_id, "first_frame")

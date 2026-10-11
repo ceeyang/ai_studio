@@ -109,6 +109,35 @@ def test_fit_khmer_translates_measures_rewrites_and_retimes(tmp_path, db, monkey
     assert "高棉语 3.20s" in log and "S01 时长 4.5s → 5.2s" in log
 
 
+def test_fit_khmer_prompt_uses_the_episode_scene_not_a_fixed_one(tmp_path, db, monkeypatch):
+    """改写模板以前写死「像真人在修车行里说话」：现在每句带上它所在的场景，让模型按这场戏说话。"""
+    from backend.domain.models import Episode, Location, SceneBlock
+
+    gw, prov = make_gateway([
+        {"lines": [{"id": "S02.1", "km": "ប្ដូរ?"}]},
+        {"lines": [{"id": "S01.1", "zh": "师傅，别人都说这个零件得换掉。"}, {"id": "S02.1", "zh": "换？要换吗"}]},
+        {"lines": [{"id": "S02.1", "zh": "换？要换吗"}]},
+        {"lines": [{"id": "S02.1", "zh": "换？要换吗"}]},
+    ])
+    sv = make_services(tmp_path, db, llm=gw, ffmpeg=TimedFFmpeg())
+    ep_id, ids = seed(db)
+    with db.session() as s:
+        ep = s.get(Episode, ep_id)
+        loc = Location(project_id=ep.project_id, name="老街鞋摊", time_of_day="黄昏", atmosphere="安静")
+        s.add(loc)
+        s.flush()
+        blk = SceneBlock(episode_id=ep_id, order=0, location_id=loc.id, text="x")
+        s.add(blk)
+        s.flush()
+        for sid in ids:
+            s.get(Shot, sid).scene_block_id = blk.id
+    save, _ = fake_tts()
+    monkeypatch.setattr("backend.pipeline.post.edge_tts_save", save)
+    run_fit_khmer(FakeCtx(sv), {"episode_id": ep_id})
+    assert "修车行" not in prov.calls[1]["system"] and "这场戏" in prov.calls[1]["system"]
+    assert "id=S01.1｜说话人=小雨｜场景=老街鞋摊（黄昏，安静）｜原句=" in prov.calls[1]["messages"][0]["content"]
+
+
 def test_fit_khmer_rerun_keeps_lines_that_still_fit(tmp_path, db, monkeypatch):
     gw, prov = make_gateway([
         {"lines": [{"id": "S02.1", "km": "ប្ដូរ?"}]},

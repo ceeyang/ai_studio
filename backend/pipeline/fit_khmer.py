@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import re
 
-from backend.domain.models import Shot
+from backend.domain.models import Location, SceneBlock, Shot
 from backend.llm.schemas import FitOut
 from backend.pipeline.common import continue_chain, load_episode
 from backend.pipeline.post import KHMER, _tts, speakers_without_voice, translate_lines
@@ -21,6 +21,16 @@ from backend.queue.handlers import HANDLERS
 
 FIT_TASK = "dialogue.fit_khmer"
 HAN = re.compile(r"[㐀-鿿]")
+
+
+def _scene_of(s, sh) -> str:
+    """这一镜所在的场景（中文）：「老街修鞋摊（黄昏，安静、怀旧）」，给改写台词的模型当语境。"""
+    blk = s.get(SceneBlock, sh.scene_block_id) if sh.scene_block_id else None
+    loc = s.get(Location, blk.location_id) if blk is not None and blk.location_id else None
+    if loc is None:
+        return ""
+    extra = "，".join(x for x in (loc.time_of_day, loc.atmosphere) if x)
+    return f"{loc.name}（{extra}）" if extra else loc.name
 
 
 def _load(sv, episode_id: int, wanted: set[int]):
@@ -43,7 +53,7 @@ def _load(sv, episode_id: int, wanted: set[int]):
                 raise JobError(str(e)) from None
             shots.append({"id": sh.id, "code": sh.code, "duration": float(sh.duration),
                           "dialogue": [dict(d) for d in sh.dialogue], "audio": sh.audio_prompt or "",
-                          "max_seconds": float(max_seconds)})
+                          "max_seconds": float(max_seconds), "scene": _scene_of(s, sh)})
         return proj.slug, proj.title, {c.name: c.voice for c in proj.characters}, shots
 
 
@@ -69,12 +79,14 @@ def _translate_missing(ctx, slug, title, shots, payload, episode_id) -> None:
         sh["dialogue"][j].update(km=km[t["id"]], km_review="ai_draft")
 
 
-def _rewriter(ctx, slug: str, title: str, tol: float, payload: dict, episode_id: int):
+def _rewriter(ctx, slug: str, title: str, tol: float, payload: dict, episode_id: int,
+              scenes: dict[str, str] | None = None):
     sv = ctx.services
 
     def rewrite(rnd: int, todo: list[dict]) -> dict[str, str]:
+        lines = [{**t, "scene": (scenes or {}).get(t["id"].split(".")[0], "")} for t in todo]
         system, user = sv.prompts(slug).render("dialogue_fit_khmer", title=title, round=rnd,
-                                               tol=tol, lines=todo)
+                                               tol=tol, lines=lines)
         want = [t["id"] for t in todo]
 
         def check(out: FitOut) -> None:
@@ -155,8 +167,9 @@ def run_fit_khmer(ctx, payload: dict) -> dict:
         return _tts(sv, cache, text, voice, 0)[1]
 
     if lines:
-        fit_lines(lines, measure, _rewriter(ctx, slug, title, tol, payload, episode_id), tol=tol,
-                  rounds=int(cfg.fit_rounds), log=ctx.log)
+        scenes = {sh["code"]: sh.get("scene", "") for sh in shots}
+        fit_lines(lines, measure, _rewriter(ctx, slug, title, tol, payload, episode_id, scenes),
+                  tol=tol, rounds=int(cfg.fit_rounds), log=ctx.log)
 
     report, changed = [], []
     for ln in lines:

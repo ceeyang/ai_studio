@@ -43,7 +43,8 @@ def test_zimage_build(reg):
     call = reg.image("zimage").build(ImageRequest(prompt="a cat", negative="blurry", aspect="16:9",
                                                   seed=42, prefix="studio/demo/kf_S01"))
     wf = call.workflow
-    assert wf["5"]["inputs"]["text"] == "a cat" and wf["6"]["inputs"]["text"] == "blurry"
+    # zimage 是 cfg 1：负面提示词不起作用，工作流里写空，原文记在 meta
+    assert wf["5"]["inputs"]["text"] == "a cat" and wf["6"]["inputs"]["text"] == ""
     assert (wf["7"]["inputs"]["width"], wf["7"]["inputs"]["height"]) == (1344, 768)
     assert wf["8"]["inputs"]["seed"] == 42
     assert wf["10"]["inputs"]["filename_prefix"] == "studio/demo/kf_S01"

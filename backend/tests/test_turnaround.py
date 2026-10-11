@@ -275,7 +275,7 @@ def test_body_sheet_zimage_text_only_and_cropped(tmp_path, db):
     call = runner.calls[0]
     assert call.engine == "zimage" and call.dropped_refs == []
     assert call.meta["size"] == [1792, 768]
-    assert FULL in call.meta["prompt"] and "cartoon" in call.meta["negative"]
+    assert FULL in call.meta["prompt"] and "cartoon" in call.meta["negative_ignored"]
     with db.session() as s:
         ch = s.get(Character, ids["chen"])
         sel, is_stale = sheet_state(s, ch, "body")
