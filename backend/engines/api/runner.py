@@ -13,7 +13,7 @@
 - Sora：POST {base}/videos（multipart：model、prompt、seconds、size、input_reference=首帧，首帧先裁缩到 size），
   轮询 GET {base}/videos/{id} 到 status=completed，下载 GET {base}/videos/{id}/content。
 - Seedance（火山方舟）：POST {base}/contents/generations/tasks（JSON：model、content = 文本 + image_url
-  （首帧 role=first_frame、尾帧 role=last_frame，data URI）、ratio、duration、resolution、generate_audio、
+  （首帧 role=first_frame、尾帧 role=last_frame；参考图直出时每张 role=reference_image，data URI）、ratio、duration、resolution、generate_audio、
   watermark=false），轮询 GET {base}/contents/generations/tasks/{id} 到 succeeded / failed / expired，
   马上下载 content.video_url（24 小时有效，CDN 地址，不带 Key）。
 - 可灵：POST {base}/v1/videos/image2video（JSON：model_name、image / image_tail 是不带 data: 前缀的 base64、
@@ -407,6 +407,12 @@ class ApiRunner:
                 mt, data = _b64_file(Path(req[key]))
                 content.append({"type": "image_url", "image_url": {"url": f"data:{mt};base64,{data}"},
                                 "role": role})
+        # 参考图直出（没有首帧）：多模态参考，每张 role=reference_image；和首尾帧互斥，有首帧时不发
+        refs = [] if req.get("first_frame") else list(req.get("refs") or [])
+        for p in refs:
+            mt, data = _b64_file(Path(p))
+            content.append({"type": "image_url", "image_url": {"url": f"data:{mt};base64,{data}"},
+                            "role": "reference_image"})
         body: dict = {"model": model, "content": content, "ratio": req.get("aspect"), "watermark": False}
         if req.get("seconds"):
             body["duration"] = int(req["seconds"])
@@ -424,7 +430,8 @@ class ApiRunner:
             emit(f"Seedance 任务 {tid} 已提交：{model} · {body['ratio']} · {body.get('duration', '?')} 秒"
                  f"{' · ' + body['resolution'] if body.get('resolution') else ''}"
                  f"{' · 有声' if body.get('generate_audio') else ''}"
-                 f"{' · 带尾帧' if req.get('end_frame') else ''}")
+                 f"{' · 带尾帧' if req.get('end_frame') else ''}"
+                 f"{f' · 参考图直出 {len(refs)} 张' if refs else ''}")
             last = {"status": None}
 
             def state(d):

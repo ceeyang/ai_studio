@@ -196,7 +196,8 @@ def test_build_end_frame_and_refs(tmp_path):
     assert call.meta["negative_ignored"] == "blur" and call.model_family == "seedance_api"
     call = s.build(VideoRequest(prompt="walk", first_frame=ff, end_frame=ef, refs=[ref], seconds=20))
     assert call.workflow["end_frame"] == str(ef) and call.meta["end_frame"] == str(ef)
-    assert call.workflow["seconds"] == 15 and call.dropped_refs == [str(ref)]   # max_refs=0：参考图不带
+    # 参考图和首帧互斥（refs_exclusive）：有首帧时参考图不带
+    assert call.workflow["seconds"] == 15 and call.dropped_refs == [str(ref)] and "refs" not in call.workflow
     assert s.build(VideoRequest(prompt="x", first_frame=ff, seconds=2)).workflow["seconds"] == 4
     old = SeedanceEngine({"model": "doubao-seedance-1-0-pro-250528"}, creds=creds_fn({"ark": {"api_key": ARK_KEY}}))
     assert old.build(VideoRequest(prompt="x", first_frame=ff, seconds=2)).workflow["generate_audio"] is None
@@ -278,6 +279,54 @@ def test_seedance_runner_request_poll_download(tmp_path, with_end):
     assert polls["n"] == 3 and prog == [100]
     assert any("排队中" in m for m in logs) and any("生成中" in m for m in logs)
     assert ARK_KEY not in files_text(tmp_path / "run") and ARK_KEY not in " ".join(logs)
+
+
+def test_seedance_ref_mode_build(tmp_path):
+    """参考图直出：caps.ref_mode、最多 9 张；没有首帧时只带参考图，尾帧不带（要跟首帧一起）。"""
+    refs = [png(tmp_path / f"r{i}.png") for i in range(11)]
+    ef = png(tmp_path / "ef.png")
+    s = SeedanceEngine(creds=creds_fn({"ark": {"api_key": ARK_KEY}}))
+    assert s.caps.ref_mode is True and s.caps.max_refs == 9
+    call = s.build(VideoRequest(prompt="two people talk", first_frame=None, refs=refs, end_frame=ef, seconds=5))
+    w = call.workflow
+    assert w["first_frame"] is None and w["refs"] == [str(p) for p in refs[:9]] and "end_frame" not in w
+    assert call.dropped_refs == [str(refs[9]), str(refs[10]), str(ef)]
+    assert call.meta["first_frame"] is None and call.meta["refs"] == w["refs"]
+    # 可灵没开参考图直出：没有首帧时报清楚
+    with pytest.raises(ValueError, match="不支持参考图直出"):
+        KlingEngine(creds=creds_fn({"kling": {"api_key": KLING_KEY}})).build(
+            VideoRequest(prompt="x", first_frame=None, refs=refs[:1]))
+
+
+def test_seedance_runner_reference_images(tmp_path):
+    refs = [png(tmp_path / "a.png", color=(1, 2, 3)), png(tmp_path / "b.png", color=(9, 9, 9))]
+    rec = Recorder(seedance_handler({"n": 0}))
+    creds = creds_fn({"ark": {"api_key": ARK_KEY}})
+    runner = ApiRunner(creds, transport=rec.transport(), poll_interval=0)
+    logs: list[str] = []
+    call = SeedanceEngine(creds=creds).build(VideoRequest(prompt="go", first_frame=None, refs=refs, seconds=5))
+    files = runner.run(call, run_dir=tmp_path / "run", cancel=threading.Event(), log=logs.append)
+    assert files[0].read_bytes() == VIDEO
+    body = json.loads(rec.requests[0].content)
+    imgs = body["content"][1:]
+    assert [i["role"] for i in imgs] == ["reference_image", "reference_image"]
+    assert [base64.b64decode(i["image_url"]["url"].split(",", 1)[1]) for i in imgs] == [p.read_bytes() for p in refs]
+    assert all(i["type"] == "image_url" for i in imgs)
+    assert any("参考图直出 2 张" in m for m in logs)
+    assert ARK_KEY not in files_text(tmp_path / "run")
+
+
+def test_seedance_runner_first_frame_ignores_refs(tmp_path):
+    """首帧模式下就算 workflow 里有 refs（手写的老任务），也只发首帧：三种输入方式互斥。"""
+    ff, r = png(tmp_path / "ff.png"), png(tmp_path / "r.png")
+    rec = Recorder(seedance_handler({"n": 0}))
+    creds = creds_fn({"ark": {"api_key": ARK_KEY}})
+    call = SeedanceEngine(creds=creds).build(VideoRequest(prompt="go", first_frame=ff, seconds=5))
+    call.workflow["refs"] = [str(r)]
+    ApiRunner(creds, transport=rec.transport(), poll_interval=0).run(
+        call, run_dir=tmp_path / "run", cancel=threading.Event())
+    body = json.loads(rec.requests[0].content)
+    assert [i["role"] for i in body["content"][1:]] == ["first_frame"]
 
 
 def test_seedance_region_intl(tmp_path):

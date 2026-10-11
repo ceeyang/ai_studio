@@ -1263,3 +1263,48 @@ export interface ScriptReview {
   /** 最近一次体检任务 */
   job: { id: number; status: JobStatus; error: string | null } | null;
 }
+
+/** 按镜头推荐视频引擎：某个引擎满不满足这一镜的硬性要求（有声 / 尾帧 / 参考图直出 / 时长） */
+export interface EngineCheck {
+  engine: string;
+  label: string;
+  /** strong：强模型（大动作、多人更稳）；standard：简单镜头够用 */
+  tier: 'strong' | 'standard';
+  runtime: string;
+  ready: boolean;
+  note: string | null;
+  ok: boolean;
+  problems: string[];
+}
+
+export interface EngineRecommendation {
+  engine: string;
+  label: string;
+  why: string;
+}
+
+/** GET /api/shots/{id}/engine-advice：只是建议，不会自动换引擎 */
+export interface ShotEngineAdvice {
+  shot_id: number;
+  code: string;
+  difficulty: 'easy' | 'medium' | 'hard';
+  score: number;
+  reasons: string[];
+  requirements: string[];
+  /** 镜头实际要用的引擎（镜头上选的，没选就是项目的） */
+  current_engine: string | null;
+  current_ok: boolean;
+  current_problems: string[];
+  /** 能用、满足要求的引擎，好的在前（简单镜头先便宜的，难镜头先强的），最多 3 个 */
+  recommended: EngineRecommendation[];
+  suggest_switch: boolean;
+  switch_reason: string | null;
+  checks: EngineCheck[];
+}
+
+/** GET /api/episodes/{id}/engine-advice：一集所有镜头；switch_count = 建议换引擎的镜头数 */
+export interface EpisodeEngineAdvice {
+  episode_id: number;
+  shots: ShotEngineAdvice[];
+  switch_count: number;
+}

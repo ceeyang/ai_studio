@@ -148,6 +148,8 @@ class GeminiApiImageEngine(_ApiImageEngine):
 class _ApiVideoEngine(_ApiEngine):
     model_kind = "video"
     default_timeout = 1200.0
+    # 参考图只能在没有首帧时用（参考图直出），不能和首帧 / 尾帧一起发
+    refs_exclusive = False
 
     def frames_for(self, seconds: float) -> int:
         return max(1, round(seconds * self.caps.fps))
@@ -160,21 +162,26 @@ class _ApiVideoEngine(_ApiEngine):
 
     def build(self, req: VideoRequest) -> EngineCall:
         """尾帧：caps.supports_end_frame 时带上（workflow 里有 end_frame 键），否则记进 dropped_refs；
-        参考图：caps.max_refs > 0 时最多带 max_refs 张（D3 参考图直出用），其余和不支持时都记进 dropped_refs。
+        参考图：caps.max_refs > 0 时最多带 max_refs 张（D3 参考图直出用），其余和不支持时都记进 dropped_refs；
+        refs_exclusive 的引擎（Seedance）有首帧时参考图一律不带。没有首帧（参考图直出）时尾帧也不带。
         Veo / Sora 两个都是 0 / False，行为和以前一样（多了一条：给了尾帧会记成没带上）。"""
         require_first_frame(req, self)   # 没有首帧（参考图直出）而引擎不支持 ref_mode 时报清楚
         w, h = size_for(self.caps.sizes, req.aspect)
         model = self.model()
         seconds = self._seconds(req, model)
         out_seconds = float(seconds or self.caps.default_seconds)
-        keep = list(req.refs[: self.caps.max_refs]) if self.caps.max_refs > 0 else []
+        first = str(req.first_frame) if req.first_frame is not None else None
+        # refs_exclusive：参考图和首尾帧不能一起发（Seedance 三种输入方式互斥）→ 有首帧时参考图一律不带
+        take_refs = self.caps.max_refs > 0 and not (self.refs_exclusive and first is not None)
+        keep = list(req.refs[: self.caps.max_refs]) if take_refs else []
         dropped = [str(p) for p in req.refs[len(keep):]]
-        end = req.end_frame if (req.end_frame and self.caps.supports_end_frame) else None
+        # 没有首帧（参考图直出）时也不带尾帧：尾帧要跟首帧一起
+        end = req.end_frame if (req.end_frame and self.caps.supports_end_frame and first is not None) else None
         if req.end_frame and end is None:
             dropped.append(str(req.end_frame))
         request = {"runner": RUNTIME, "service": self.service, "op": "video", "model": model,
                    "prompt": " ".join((req.prompt or "").split()), "aspect": req.aspect,
-                   "size": f"{w}x{h}", "first_frame": str(req.first_frame), "seconds": seconds,
+                   "size": f"{w}x{h}", "first_frame": first, "seconds": seconds,
                    "timeout": self.timeout()}
         if end is not None:
             request["end_frame"] = str(end)
@@ -184,7 +191,7 @@ class _ApiVideoEngine(_ApiEngine):
         meta = {"prompt": req.prompt, "service": self.service, "model": model, "seed": None,
                 "nondeterministic": True, "size": [w, h], "seconds": out_seconds,
                 "frames": self.frames_for(out_seconds), "fps": self.caps.fps,
-                "first_frame": str(req.first_frame), "refs": [str(p) for p in keep]}
+                "first_frame": first, "refs": [str(p) for p in keep]}
         if end is not None:
             meta["end_frame"] = str(end)
         if req.negative and "negative" not in request:
@@ -276,16 +283,24 @@ class SeedanceEngine(_ApiVideoEngine):
       doubao-seedance-1-5-pro-251215；mini 版 id 要在控制台确认。用之前要在控制台「开通管理」里开通。
     - 输出 24fps；没有负面提示词（丢掉，meta 记 negative_ignored）；有 seed 参数但这里不传（同一 seed 也不保证一样）。
 
-    caps 按默认模型（2.0）写：时长 4–15 秒、有声。换成 1.x 模型时 _seconds 按那一代的范围夹，1.0 不传 generate_audio。
+    参考图直出（多模态参考，2026-10-12 核对：apiyi 的 Seedance 原生接口文档、DataCamp 用 BytePlus Ark SDK 的教程
+    两处一致）：content 里每张图 {type: image_url, image_url: {url}, role: reference_image}，2.0 系列 1–9 张
+    （2.5 更多，这里按 9 张）；三种输入方式互斥——首帧、首尾帧、多模态参考不能混用，所以有首帧时不带参考图
+    （refs_exclusive），没有首帧时只发参考图、不发尾帧。2.0 系列对真人人脸参考图有限制（真人照片可能被拒），
+    1.x 模型不支持多模态参考（换 1.x 时别用参考图直出）。未用真实 Key 跑过。
+
+    caps 按默认模型（2.0）写：时长 4–15 秒、有声、参考图直出最多 9 张。换成 1.x 模型时 _seconds 按那一代的范围夹，
+    1.0 不传 generate_audio。
     params：resolution（默认 720p）、generate_audio（默认 true）。
     """
     name = "seedance_video"
     family = "seedance_api"
     label = "Seedance（火山方舟 API）"
     service = "ark"
-    caps = VideoCaps(max_refs=0, supports_end_frame=True, has_audio=True, fps=24, sizes=SEEDANCE_SIZES,
+    refs_exclusive = True
+    caps = VideoCaps(max_refs=9, supports_end_frame=True, has_audio=True, fps=24, sizes=SEEDANCE_SIZES,
                      default_seconds=5.0, max_seconds=15.0, duration_control="param",
-                     allowed_seconds=SEEDANCE_SECONDS)
+                     allowed_seconds=SEEDANCE_SECONDS, ref_mode=True)
 
     def _seconds(self, req, model) -> int:
         lo, hi = seedance_seconds_range(model)

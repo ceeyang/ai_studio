@@ -1261,6 +1261,10 @@ div.error.banner.job-notice a { color: #ffd0d1; text-decoration: underline; }
 /* 右上「本集角色」条：头像 + 名字 + 有几个有定妆照，点了去角色页 */
 /* 下拉选「其他（手填）」时出现的输入框 */
 .field-custom { margin-top: calc(var(--s-3) * -1 + 4px); }
+/* 字段下面的附加说明（视频引擎下面的引擎建议）：贴着上面的字段 */
+.field-extra { margin-top: calc(var(--s-3) * -1 + 4px); }
+.field-extra p { margin: 2px 0; }
+.engine-advice .sm { margin-left: 6px; }
 /* 看图 / 看视频弹窗（MediaViewer）：深色遮罩铺满，图片适应窗口或原始大小拖动查看 */
 .modal-scrim.media-viewer-scrim { padding: var(--s-4); background: rgba(0, 0, 0, 0.84); }
 .modal.media-viewer {

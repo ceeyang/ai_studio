@@ -265,9 +265,12 @@ def test_engine_without_ref_mode_refused_in_job(tmp_path, db):
 
 def test_engine_build_without_first_frame_raises_for_non_ref_engines(tmp_path, db):
     sv = make_services(tmp_path, db, comfy=FakeRunner())
+    # 目前只有 Seedance API 打开了 ref_mode（多模态参考，见 SeedanceEngine docstring）
+    assert {n for n in sv.engines.names("video") if sv.engines.video(n).caps.ref_mode} == {"seedance_video"}
     for name in sv.engines.names("video"):
         eng = sv.engines.video(name)
-        assert eng.caps.ref_mode is False   # 这一支没有引擎打开 ref_mode
+        if eng.caps.ref_mode:
+            continue
         with pytest.raises(ValueError, match="不支持参考图直出"):
             eng.build(VideoRequest(prompt="x", first_frame=None, aspect="9:16"))
 

@@ -27,6 +27,7 @@ import type {
   Engines,
   Episode,
   EpisodeDetail,
+  EpisodeEngineAdvice,
   EpisodeIn,
   EpisodePatch,
   ExportRow,
@@ -97,6 +98,8 @@ export const keys = {
   archivedCandidates: (episodeId: number) => ['episode', episodeId, 'archived'] as const,
   // 挂在 ['episode', id] 下：任何任务结束（成功或失败）、选定候选变了都跟着刷新
   takeStats: (episodeId: number) => ['episode', episodeId, 'take-stats'] as const,
+  // 挂在 ['episode', id] 下：改了镜头（引擎、台词、尾帧…）跟着刷新
+  engineAdvice: (episodeId: number) => ['episode', episodeId, 'engine-advice'] as const,
   // 挂在 ['episode', id] 下：体检任务结束、分镜改了都跟着刷新
   scriptReview: (episodeId: number) => ['episode', episodeId, 'script-review'] as const,
   rerunImpact: (episodeId: number, stage: string, blockIds: number[] | null) => ['rerunImpact', episodeId, stage, blockIds] as const,
@@ -867,6 +870,15 @@ export function useTakeStats(episodeId: number, enabled = true) {
   return useQuery({
     queryKey: keys.takeStats(episodeId),
     queryFn: () => api.get<TakeStats>(`/api/episodes/${episodeId}/take-stats`),
+    enabled: enabled && episodeId > 0,
+  });
+}
+
+/** 一集所有镜头的视频引擎建议（只是建议，不自动换）；enabled=false 时不请求 */
+export function useEngineAdvice(episodeId: number, enabled = true) {
+  return useQuery({
+    queryKey: keys.engineAdvice(episodeId),
+    queryFn: () => api.get<EpisodeEngineAdvice>(`/api/episodes/${episodeId}/engine-advice`),
     enabled: enabled && episodeId > 0,
   });
 }

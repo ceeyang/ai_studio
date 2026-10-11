@@ -889,3 +889,45 @@ class AutopilotOut(BaseModel):
     job_ids: list[int]
     skipped: list[str] = Field(default_factory=list)
     warnings: list[str] = Field(default_factory=list)
+
+
+class EngineCheckOut(ORM):
+    """某个视频引擎满不满足这一镜的硬性要求（有声 / 尾帧 / 参考图直出 / 时长），见 backend/domain/engine_advice.py。"""
+    engine: str
+    label: str
+    tier: Literal["strong", "standard"]
+    runtime: str
+    ready: bool
+    note: str | None
+    ok: bool
+    problems: list[str]
+
+
+class EngineRecommendationOut(ORM):
+    engine: str
+    label: str
+    why: str
+
+
+class ShotEngineAdviceOut(ORM):
+    """按镜头推荐视频引擎（GET /api/shots/{id}/engine-advice）：只是建议，不会自动换。"""
+    shot_id: int
+    code: str
+    difficulty: Literal["easy", "medium", "hard"]
+    score: int
+    reasons: list[str]
+    requirements: list[str]
+    current_engine: str | None
+    current_ok: bool
+    current_problems: list[str]
+    recommended: list[EngineRecommendationOut]
+    suggest_switch: bool
+    switch_reason: str | None
+    checks: list[EngineCheckOut]
+
+
+class EpisodeEngineAdviceOut(ORM):
+    """一集所有镜头的引擎建议（GET /api/episodes/{id}/engine-advice）；switch_count = 建议换引擎的镜头数。"""
+    episode_id: int
+    shots: list[ShotEngineAdviceOut]
+    switch_count: int

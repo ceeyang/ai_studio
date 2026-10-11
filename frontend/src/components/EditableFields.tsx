@@ -1,4 +1,4 @@
-import { type FormEvent, useContext, useEffect, useRef, useState } from 'react';
+import { type FormEvent, type ReactNode, useContext, useEffect, useRef, useState } from 'react';
 import { UNSAFE_DataRouterContext, useBlocker } from 'react-router-dom';
 import { useConfirm } from './ConfirmDialog';
 import { confirmDiscard } from './confirmDiscard';
@@ -59,6 +59,10 @@ export interface EditableFieldsProps {
   onValuesChange?: (state: FieldsState) => void;
   /** 「高级」折叠一开始就展开 */
   advancedOpen?: boolean;
+  /** 某个字段后面再放点东西（如视频引擎下面的引擎建议），键是字段名 */
+  extras?: Record<string, ReactNode>;
+  /** 从外面改草稿（不保存）：seq 变了就把 values 写进当前编辑内容（如引擎建议的「用这个」） */
+  assign?: { values: FieldValues; seq: number } | null;
 }
 
 const CUSTOM = '__custom__';
@@ -93,6 +97,8 @@ export function EditableFields({
   onDirtyChange,
   onValuesChange,
   advancedOpen = false,
+  extras,
+  assign,
 }: EditableFieldsProps) {
   // 用内容做比较，而不是对象身份：WebSocket 触发的重新拉取若内容没变，不会冲掉正在编辑的内容
   const initialKey = JSON.stringify(initial);
@@ -104,6 +110,16 @@ export function EditableFields({
     baseRef.current = next;
     setValues((prev) => mergeFieldValues(prev, oldBase, next));
   }, [initialKey]);
+
+  // 外面要改草稿：只在 seq 变了时写一次（之后用户还能接着改）
+  const assignSeq = assign?.seq;
+  const assignRef = useRef(assign);
+  assignRef.current = assign;
+  useEffect(() => {
+    const a = assignRef.current;
+    if (assignSeq === undefined || !a) return;
+    setValues((prev) => ({ ...prev, ...a.values }));
+  }, [assignSeq]);
 
   const base = JSON.parse(initialKey) as FieldValues;
   const changed = changedValues(values, base);
@@ -203,6 +219,7 @@ export function EditableFields({
           />,
         ]
       : []),
+    ...(extras?.[f.name] ? [<div key={`${f.name}-extra`} className="field-extra">{extras[f.name]}</div>] : []),
   ];
   const basic = fields.filter((f) => !f.advanced);
   const advanced = fields.filter((f) => f.advanced);

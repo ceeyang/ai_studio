@@ -9,7 +9,8 @@ from sqlalchemy import func, select, update
 from backend.app.deps import get_or_404, manager, project_by_slug, read_upload, services
 from backend.app.schemas import (BgmOut, EpisodeDetail, EpisodeIdeaIn, EpisodeIdeaOut, EpisodeIn,
                                  EpisodeOut, EpisodePatch, ExportOut, ExportPatch, RunOut,
-                                 SceneBlockOut, SceneBlockPatch, ScriptReviewOut, TakeStatsOut)
+                                 SceneBlockOut, SceneBlockPatch, ScriptReviewOut, TakeStatsOut,
+                                 EpisodeEngineAdviceOut)
 from backend.app.views import candidate_out, episode_detail, export_out
 from backend.domain.models import Episode, Export, Job, SceneBlock, Shot
 from backend.domain.music import bgm_of, clear_bgm, set_bgm
@@ -147,6 +148,21 @@ def get_take_stats(episode_id: int, request: Request):
     with services(request).db.session() as s:
         get_or_404(s, Episode, episode_id, "剧集")
         return TakeStatsOut.model_validate(episode_take_stats(s, episode_id))
+
+
+@router.get("/episodes/{episode_id}/engine-advice", response_model=EpisodeEngineAdviceOut)
+def get_engine_advice(episode_id: int, request: Request):
+    """一集所有镜头的视频引擎建议（一次查完）；switch_count = 建议换引擎的镜头数。只是建议，不会自动换。"""
+    from backend.app.routes.system import video_engine_infos
+    from backend.domain.engine_advice import advise_episode
+
+    sv = services(request)
+    infos = video_engine_infos(sv)
+    with sv.db.session() as s:
+        ep = get_or_404(s, Episode, episode_id, "剧集")
+        shots = s.scalars(select(Shot).where(Shot.episode_id == episode_id).order_by(Shot.order, Shot.id)).all()
+        adv = advise_episode(episode_id, shots, infos, ep.project.video_engine)
+        return EpisodeEngineAdviceOut.model_validate(adv)
 
 
 # ------------------------------------------------------------ 剧本体检

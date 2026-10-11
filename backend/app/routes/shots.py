@@ -4,7 +4,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Request, Response
 
 from backend.app.deps import check_engines, get_or_404, manager, read_upload, services
-from backend.app.schemas import ReorderIn, ShotDetail, ShotFields, ShotIn, ShotOut
+from backend.app.schemas import ReorderIn, ShotDetail, ShotEngineAdviceOut, ShotFields, ShotIn, ShotOut
 from backend.app.views import shot_detail
 from backend.domain.archive import archive_and_delete_slots
 from backend.domain.models import Episode, Shot
@@ -47,6 +47,21 @@ def get_shot(shot_id: int, request: Request):
     sv = services(request)
     with sv.db.session() as s:
         return _detail(s, sv, get_or_404(s, Shot, shot_id, "镜头"), manager(request).progress)
+
+
+@router.get("/shots/{shot_id}/engine-advice", response_model=ShotEngineAdviceOut)
+def get_shot_engine_advice(shot_id: int, request: Request):
+    """按镜头推荐视频引擎：难度、原因、满足硬性要求的引擎排好序（简单镜头先便宜的，难镜头先强的）。只是建议。"""
+    from backend.app.routes.system import video_engine_infos
+    from backend.domain.engine_advice import advise_shot
+
+    sv = services(request)
+    infos = video_engine_infos(sv)
+    with sv.db.session() as s:
+        shot = get_or_404(s, Shot, shot_id, "镜头")
+        ep = s.get(Episode, shot.episode_id)
+        adv = advise_shot(shot, infos, shot.video_engine or ep.project.video_engine)
+        return ShotEngineAdviceOut.model_validate(adv)
 
 
 @router.post("/episodes/{episode_id}/shots", status_code=201, response_model=ShotDetail)

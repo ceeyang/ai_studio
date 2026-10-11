@@ -89,6 +89,21 @@ def engine_note_fn(sv):
     return note
 
 
+def video_engine_infos(sv) -> list:
+    """按镜头推荐视频引擎用：已注册的视频引擎（能力、运行方式、现在能不能用），能不能用和引擎下拉同一套判断。"""
+    from backend.domain.engine_advice import EngineInfo
+
+    reg = sv.engines
+    note = engine_note_fn(sv)
+    out = []
+    for name in reg.names("video"):
+        e = reg.get(name)
+        n = note(e)
+        out.append(EngineInfo(name=name, label=getattr(e, "label", None) or name, runtime=runtime_of(e),
+                              caps=e.caps, ready=n is None, note=n))
+    return out
+
+
 def engine_hint(note: str | None) -> str | None:
     """引擎下拉框括号里的短说明（前端没有对应写法时用）：扩展太老 →「扩展需要重新加载」。"""
     if note and note.startswith("浏览器扩展需要重新加载"):
