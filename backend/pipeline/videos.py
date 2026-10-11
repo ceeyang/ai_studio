@@ -9,7 +9,8 @@ from backend.engines.base import VideoRequest
 from backend.pipeline.common import job_services
 from backend.pipeline.keyframes import load_shot, ref_labels, run_comfy
 from backend.domain.models import Location, SceneBlock
-from backend.pipeline.prompting import (Speaker, compose_video_prompt, join_negative,
+from backend.pipeline.prompting import (Speaker, compose_video_prompt, first_frame_locked_face,
+                                        join_negative,
                                         location_summary, short_ref, shot_seed, video_input_hash,
                                         video_inputs, with_continuity)
 from backend.queue.errors import JobCanceled, JobError
@@ -53,6 +54,13 @@ def _shot_location(s, shot) -> str:
     return location_summary(loc.visual_prompt) if loc is not None else ""
 
 
+def image_max_refs(engines, name: str) -> int:
+    try:
+        return engines.image(name).caps.max_refs
+    except KeyError:
+        return 0
+
+
 @HANDLERS.register("video.shot", gpu=True)
 def run_video(ctx, payload: dict) -> dict:
     sv = job_services(ctx)
@@ -74,15 +82,25 @@ def run_video(ctx, payload: dict) -> dict:
                                       has_audio=has_audio, speakers=_speakers(proj, shot))
         negative = join_negative(proj.negative, style.negative if style else "")
         packed = shot_refs(s, shot)
+        legacy = packed[:engine.caps.max_refs]   # 以前的规则：不管首帧，一律带定妆照 / 三视图
+        locked = first_frame_locked_face(ff.params, image_max_refs(sv.engines, ff.engine))
+        if not locked:
+            if packed:
+                ctx.log(f"视频 {shot.code}：首帧是 {ff.engine} 文生图，没用定妆照锁脸，身份以首帧为准，"
+                        f"不带{'、'.join(r.label for r in packed)}（免得首帧和参考图两张脸打架）")
+            packed = []
         refs = [sv.media.abs(r.file_path) for r in packed]
         labels = ref_labels(packed, refs)
         used = packed[:engine.caps.max_refs]
         h = video_input_hash(shot, proj, style, ff.id, engine_name, has_audio,
                              [r.candidate_id for r in used])
+        # 按以前规则出的视频（输入哈希按当时带的参考图算）不算过期，不白跑 GPU
+        h_legacy = video_input_hash(shot, proj, style, ff.id, engine_name, has_audio,
+                                    [r.candidate_id for r in legacy])
         inputs = video_inputs(shot, proj, style, ff.id, engine_name, has_audio, used)
         if not payload.get("force"):
             cur = selected_candidate(s, "shot", shot.id, "video")
-            if cur is not None and cur.input_hash == h:  # hash 里含首帧候选 id
+            if cur is not None and cur.input_hash in (h, h_legacy):  # hash 里含首帧候选 id
                 ctx.log(f"视频 {shot.code}：输入没变，跳过（要重出用 --force）")
                 return {"skipped": True, "candidate_ids": []}
         slot = get_or_create_slot(s, "shot", shot.id, "video")
@@ -115,6 +133,7 @@ def run_video(ctx, payload: dict) -> dict:
     with sv.db.session() as s:
         slot = get_or_create_slot(s, "shot", shot_id, "video")
         params = {**call.meta, "first_frame_candidate_id": ff.id,
+                  "identity": "refs" if locked else "first_frame",
                   "workflow": sv.media.rel(run_dir / "workflow.api.json"), "inputs": inputs}
         if qc is not None:
             params["qc"] = qc

@@ -57,6 +57,31 @@ def upper_body_look(visual_prompt: str) -> str:
     return " ".join(kept) if kept else (visual_prompt or "").strip()
 
 
+_STILL_WORDS = re.compile(r"\b(?:cinematic\s+)?(?:still(?:\s+(?:image|frame|photo(?:graph)?))?"
+                          r"|photograph|photo)s?\b", re.I)
+VIDEO_STYLE_WORDS = 25
+
+
+def video_style(anchor: str, max_words: int = VIDEO_STYLE_WORDS) -> str:
+    """视频提示词里的风格：一句短的成像风格（photo_style 再把 still / photograph 这类静帧词换成
+    footage，最多 max_words 个词），放在动作后面。画风已经由首帧决定，整段静态风格锚放在视频提示词
+    前面只会喧宾夺主（「cinematic still」暗示静帧，锚里的雨、灯泡、工具会被当成要出现、要动的东西）。"""
+    style = _STILL_WORDS.sub("footage", photo_style(anchor))
+    style = re.sub(r"\bfootage(?:[\s,]+footage)+\b", "footage", style)
+    kept: list[str] = []
+    for clause in (c.strip() for c in style.split(",")):
+        if clause and len(" ".join(kept + [clause]).split()) <= max_words:
+            kept.append(clause)
+        elif kept:
+            break
+    if not kept:
+        return ""
+    text = ", ".join(kept).rstrip(" ,;:.")
+    if not text[1:2].isupper():
+        text = text[:1].lower() + text[1:]
+    return f"Visual style: {text}."
+
+
 def compose_image_prompt(image_prompt: str, anchor: str) -> str:
     p, a = (image_prompt or "").strip(), (anchor or "").strip()
     return p if not a or a in p else f"{a} {p}"
@@ -100,7 +125,11 @@ def compose_video_prompt(motion_prompt: str, image_prompt: str, audio_prompt: st
                          speakers: dict[str, Speaker] | None = None) -> str:
     """speakers 给了（发给引擎时）：画面里的说话人用英文简称，不在画面里的写成画外音、画面里的人闭嘴；
     不给（算输入哈希、inputs 摘要时）：沿用老写法。"""
-    text = compose_image_prompt((motion_prompt or "").strip() or image_prompt, anchor)
+    body = (motion_prompt or "").strip() or (image_prompt or "").strip()
+    if speakers is None:   # 老写法（算输入哈希、inputs 摘要）：风格锚整段在前，保持一字不差
+        text = compose_image_prompt(body, anchor)
+    else:                  # 发给引擎：动作在前，后面一句短的成像风格
+        text = f"{body} {video_style(anchor)}".strip()
     if not has_audio:
         return text
     audio = (audio_prompt or "").strip()
@@ -118,25 +147,30 @@ _CJK_ANY = re.compile(r"[⺀-鿿가-힯豈-﫿＀-￯]")
 
 
 def location_summary(visual_prompt: str | None, max_words: int = 30) -> str:
-    """场景外观的第一句（最多 max_words 个词），句首冠词小写，拼进「inside …」；有中文就不用。"""
+    """场景外观的第一句（最多 max_words 个词），拼进「inside …」：句首小写（缩写不动），没有冠词就补
+    a / an（「inside Narrow suburban …」→「inside a narrow suburban …」）；有中文就不用。"""
     text = (visual_prompt or "").strip()
     if not text or _CJK_ANY.search(text):
         return ""
     first = re.split(r"(?<=[.!?])\s+", text)[0].rstrip(" .!?;")
+    if not first:
+        return ""
+    if not first[1:2].isupper():   # 「LED」「TV」这种缩写开头不动
+        first = first[0].lower() + first[1:]
+    if not re.match(r"(a|an|the|this|one)\b", first, re.I):
+        first = ("an " if first[0].lower() in "aeiou" else "a ") + first
     words = first.split()
     if len(words) > max_words:
         first = " ".join(words[:max_words]).rstrip(",;")
-    if re.match(r"(A|An|The)\b", first):
-        first = first[0].lower() + first[1:]
     return first
 
 
 def continuity_clause(location: str = "") -> str:
     if location:
         return (f"One continuous take inside {location}; the background stays this same place for "
-                "the whole clip, matching the first frame. No cut.")
+                "the whole clip, matching the first frame, as a single uninterrupted shot.")
     return ("One continuous take; the background stays the same place shown in the first frame "
-            "for the whole clip. No cut.")
+            "for the whole clip, as a single uninterrupted shot.")
 
 
 def with_continuity(video_prompt: str, location: str = "") -> str:
@@ -171,6 +205,18 @@ def keyframe_input_hash(shot, project, style, engine_name: str, ref_ids=()) -> s
     """ref_ids：引擎实际用到的定妆照候选 id，换了定妆照首帧就过期。"""
     return input_hash("first_frame", compose_image_prompt(shot.image_prompt, _anchor(style)),
                       _negative(project, style), engine_name, project.aspect, **_refs(ref_ids))
+
+
+def first_frame_locked_face(ff_params: dict | None, image_max_refs: int) -> bool:
+    """选定的首帧是不是带定妆照锁过脸。首帧候选的 inputs["refs"] 记着引擎实际用到的参考图；
+    老候选没有 inputs 时按出图引擎能不能吃参考图估计（引擎不存在、上传的首帧按没锁脸算）。
+
+    没锁脸（zimage / krea2 文生图）时，首帧里的脸是文字画出来的，和定妆照不是同一张脸：
+    视频再带定妆照，H3 会在两张脸之间折中或中途「跳」到参考图。这种镜头视频身份以首帧为准。"""
+    inputs = (ff_params or {}).get("inputs")
+    if isinstance(inputs, dict) and "refs" in inputs:
+        return bool(inputs["refs"])
+    return image_max_refs > 0
 
 
 def video_input_hash(shot, project, style, first_frame_candidate_id: int, engine_name: str,

@@ -90,7 +90,8 @@ def test_h3_video_prompt_has_audio_and_uses_selected_frame(tmp_path, db):
     res = run_video(ctx, {"shot_id": shot_id})
     call = runner.calls[-1]
     prompt = call.workflow["6"]["inputs"]["prompt"]
-    assert prompt.startswith("ANCHOR she looks up slowly ")
+    # 发给引擎的视频提示词：动作在前；「ANCHOR」里没有成像词，不加风格句
+    assert prompt.startswith("she looks up slowly ") and "ANCHOR" not in prompt
     assert "\nAudio: quiet hum" in prompt
     assert "词被改了" in prompt
     with db.session() as s:
@@ -255,11 +256,17 @@ def test_continuity_clause_is_positive_and_names_the_location():
                    "a rolling steel shutter half open")
     c = continuity_clause(loc)
     assert c == (f"One continuous take inside {loc}; the background stays this same place for the "
-                 "whole clip, matching the first frame. No cut.")
+                 "whole clip, matching the first frame, as a single uninterrupted shot.")
+    assert "no " not in c.lower().replace("not", "")
     low = c.lower()
     assert "studio" not in low and "portrait" not in low and "reference" not in low
     assert continuity_clause("") == ("One continuous take; the background stays the same place "
-                                     "shown in the first frame for the whole clip. No cut.")
+                                     "shown in the first frame for the whole clip, as a single "
+                                     "uninterrupted shot.")
+    # 没冠词、句首大写的场景外观：补冠词、小写
+    assert location_summary("Narrow suburban Chinese e-bike repair shop at night, shutter down.")         == "a narrow suburban Chinese e-bike repair shop at night, shutter down"
+    assert location_summary("Old tea house with lanterns.") == "an old tea house with lanterns"
+    assert location_summary("LED-lit corridor.") == "a LED-lit corridor"
     assert location_summary("直播间") == ""            # 中文的场景名不能进英文提示词
     assert len(location_summary("word " * 80).split()) <= 30
 
@@ -420,3 +427,111 @@ def test_video_job_sends_speaker_refs_but_hash_unchanged(tmp_path, db):
         shot, _, proj, style = load_shot(s, shot_id)
         assert v.input_hash == video_input_hash(shot, proj, style,
                                                 v.params["first_frame_candidate_id"], "h3_video", True)
+
+
+# ---------------------------------------------------------------- 身份来源：首帧没锁脸时视频不带定妆照
+def _with_portrait(db, shot_id, image_engine="zimage"):
+    from backend.domain.characters import add_portrait
+    from backend.domain.models import Character
+
+    with db.session() as s:
+        shot, _, proj, _ = load_shot(s, shot_id)
+        proj.image_engine = image_engine
+        ch = Character(project_id=proj.id, name="老周", visual_prompt="a stocky man in his fifties")
+        s.add(ch)
+        s.flush()
+        add_portrait(s, ch.id, file_path="demo/media/portrait/a.png", engine="zimage", params={},
+                     input_hash="p", job_id=None)
+        shot.cast = [{"character_id": ch.id, "variation_id": None}]
+        return ch.id
+
+
+def test_video_skips_portrait_refs_when_first_frame_was_text_only(tmp_path, db):
+    """zimage 首帧没吃参考图（脸来自文字）：H3 视频不再同时拿到定妆照里的另一张脸，身份以首帧为准。"""
+    ctx, runner, shot_id = setup(tmp_path, db)
+    _with_portrait(db, shot_id, "zimage")
+    run_keyframe(ctx, {"shot_id": shot_id})
+    with db.session() as s:
+        ff = selected_candidate(s, "shot", shot_id, "first_frame")
+        assert ff.params["inputs"]["refs"] == []
+    run_video(ctx, {"shot_id": shot_id})
+    call = runner.calls[-1]
+    assert call.meta["refs"] == [] and not any(k.startswith("ref_") for k in call.workflow)
+    assert any("身份以首帧为准" in m and "老周 定妆照" in m for m in ctx.logs)
+    with db.session() as s:
+        v = selected_candidate(s, "shot", shot_id, "video")
+        assert v.params["identity"] == "first_frame" and v.params["inputs"]["refs"] == []
+
+
+def test_video_keeps_portrait_refs_when_first_frame_locked_face(tmp_path, db):
+    ctx, runner, shot_id = setup(tmp_path, db)
+    _with_portrait(db, shot_id, "h3_image")
+    run_keyframe(ctx, {"shot_id": shot_id})
+    with db.session() as s:
+        assert selected_candidate(s, "shot", shot_id, "first_frame").params["inputs"]["refs"]
+    run_video(ctx, {"shot_id": shot_id})
+    call = runner.calls[-1]
+    assert len(call.meta["refs"]) == 1
+    with db.session() as s:
+        v = selected_candidate(s, "shot", shot_id, "video")
+        assert v.params["identity"] == "refs" and len(v.params["inputs"]["refs"]) == 1
+
+
+def test_legacy_video_made_with_refs_is_not_stale_under_new_policy(tmp_path, db, api=None):
+    """老视频是按「无条件带定妆照」出的：换成新规则后不判过期、不自动重出（GPU 不白跑），重跑时跳过。"""
+    from backend.app.views import shot_detail
+    from backend.domain.slots import add_candidate, get_or_create_slot
+    from backend.pipeline.prompting import video_input_hash
+
+    ctx, runner, shot_id = setup(tmp_path, db)
+    _with_portrait(db, shot_id, "zimage")
+    run_keyframe(ctx, {"shot_id": shot_id})
+    with db.session() as s:
+        shot, _, proj, style = load_shot(s, shot_id)
+        from backend.domain.refs import shot_refs
+        legacy = [r.candidate_id for r in shot_refs(s, shot)]
+        ff = selected_candidate(s, "shot", shot_id, "first_frame")
+        h_old = video_input_hash(shot, proj, style, ff.id, "h3_video", True, legacy)
+        add_candidate(s, get_or_create_slot(s, "shot", shot_id, "video"), file_path="x.mp4",
+                      engine="h3_video", params={}, input_hash=h_old, job_id=None)
+    assert run_video(ctx, {"shot_id": shot_id}) == {"skipped": True, "candidate_ids": []}
+    with db.session() as s:
+        shot, _, proj, style = load_shot(s, shot_id)
+        d = shot_detail(s, ctx.services, shot, proj, style)
+        assert not next(x for x in d.slots if x.kind == "video").stale
+
+
+# ---------------------------------------------------------------- 视频提示词：动作在前、风格一句在后
+ANCHOR6 = ("Photorealistic live-action cinematic still, Chinese urban-fringe drama, shot on a 35mm "
+           "anamorphic lens with shallow depth of field, subtle Kodak Vision3 500T film grain. "
+           "The palette sets warm tungsten amber interiors against cold teal-blue rainy night "
+           "exteriors. Lighting is motivated and practical: bare incandescent bulbs, wet reflections "
+           "on concrete. Skin looks real, with visible pores.")
+
+
+def test_video_style_is_short_and_has_no_still_or_scene_words():
+    from backend.pipeline.prompting import video_style
+
+    v = video_style(ANCHOR6)
+    assert v.startswith("Visual style: ") and v.endswith(".")
+    import re
+    low = v.lower()
+    assert not re.search(r"(still|rain\w*|bulbs?|drama)", low), v
+    assert "35mm" in low and "footage" in low
+    assert len(v.split()) <= 2 + 25
+    assert video_style("") == "" and video_style("ANCHOR") == ""
+
+
+def test_engine_video_prompt_puts_motion_first_and_keeps_hash_version():
+    from backend.pipeline.prompting import Speaker
+
+    dlg = [{"speaker": "林夏", "zh": "词被改了", "start": 0.5, "end": 2}]
+    sent = compose_video_prompt("The young woman looks up slowly. Slow push in.", "img", "hum", dlg,
+                                anchor=ANCHOR6, has_audio=True,
+                                speakers={"林夏": Speaker("the young woman", True)})
+    body = sent.split(chr(10) + "Audio:")[0]
+    assert body.startswith("The young woman looks up slowly. Slow push in. Visual style: ")
+    assert "cinematic still" not in sent and "bulbs" not in sent
+    # 算哈希的老写法不变：锚整段在前
+    old = compose_video_prompt("she looks up", "img", "hum", dlg, anchor=ANCHOR6, has_audio=True)
+    assert old.startswith(ANCHOR6 + " she looks up")
