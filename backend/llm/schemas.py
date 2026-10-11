@@ -216,3 +216,37 @@ class TurnaroundLook(BaseModel):
         if n < 30 or n > 160:
             raise ValueError(f"description 要写 50–130 个英文单词，现在是 {n} 个")
         return " ".join(v.split())
+
+
+# ---------------------------------------------------------------- 剧本体检
+ReviewDimension = Literal["hook", "conflict", "ending", "pacing"]
+REVIEW_DIMENSIONS: dict[str, str] = {"hook": "开场钩子（前 15 秒）", "conflict": "冲突与爽点密度",
+                                     "ending": "结尾卡点", "pacing": "节奏"}
+REVIEW_MAX_SUGGESTIONS = 5
+
+
+class ReviewScore(BaseModel):
+    score: int = Field(ge=0, le=10)
+    reason: str = Field(min_length=1)
+
+
+class ReviewSuggestion(BaseModel):
+    dimension: ReviewDimension
+    ref: str = Field(min_length=1, max_length=20)   # 镜头编号 S03，或「段落 2」
+    problem: str = ""
+    rewrite: str = Field(min_length=1)
+
+
+class ScriptReviewOut(BaseModel):
+    hook: ReviewScore
+    conflict: ReviewScore
+    ending: ReviewScore
+    pacing: ReviewScore
+    summary: str = ""
+    suggestions: list[ReviewSuggestion] = Field(default_factory=list)
+
+    @field_validator("suggestions", mode="before")
+    @classmethod
+    def _at_most(cls, v):
+        # 多给的建议不为这个让模型重写：只留前几条（模板要求按影响从大到小排）
+        return v[:REVIEW_MAX_SUGGESTIONS] if isinstance(v, list) else v

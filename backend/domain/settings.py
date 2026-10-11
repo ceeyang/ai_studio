@@ -28,6 +28,7 @@ LLM_STEPS: dict[str, str] = {
     "episode.idea": "AI 写梗概（新建剧集）",
     "script": "剧本",
     "storyboard": "分镜",
+    "script.review": "剧本体检",
     "character.suggest": "推荐造型",
     "character.recommend": "推荐角色",
     "character.turnaround_look": "三视图全身描述",
