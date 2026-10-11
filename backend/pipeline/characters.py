@@ -30,7 +30,7 @@ PORTRAIT_FRAME = ("Character reference portrait of one single person: front-faci
                   "looking straight into the camera, relaxed neutral expression, arms relaxed at "
                   "the sides, centered in frame.")
 # 外貌后面再说一遍取景（krea2 / zimage 没有负面提示词，构图全靠正面描述）
-PORTRAIT_REMINDER = ("Waist-up crop: he or she stands upright facing the camera, the frame ends at "
+PORTRAIT_REMINDER = ("Waist-up crop: the person stands upright facing the camera, the frame ends at "
                      "the waist.")
 PORTRAIT_BACKDROP = ("Plain seamless neutral light-grey studio backdrop filling the entire "
                      "background, soft even studio lighting, the person alone against the empty "

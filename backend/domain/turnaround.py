@@ -154,7 +154,6 @@ _SHEET_DROP = re.compile(r"depth of field|bokeh|anamorphic|halation|\blens\b|\d+
                          r"|\bshot on\b", re.I)
 # 只去掉这几个词、保留分句（「Photorealistic live-action cinematic style」→「Photorealistic live-action style」）
 _SHEET_WORDS = re.compile(r"\s*\b(?:cinematic|drama|still)\b", re.I)
-_MEDIUM = re.compile(r"photo|realis|live-action|anime|cartoon|illustrat|painted|3d|cg\b", re.I)
 STYLE_WORDS = 25
 
 
@@ -162,7 +161,8 @@ def style_line(anchor: str) -> str:
     """设定图用的风格句：风格锚里只和成像有关的分句（photo_style，去掉场景、天气、光源），再去掉
     浅景深、变形镜头、光晕、焦段这类和「正交、整张清晰」矛盾的分句和 cinematic / drama 这类词，
     没有画风（写实 / 动漫）时补上默认的写实，最后写明全部清晰。"""
-    from backend.pipeline.prompting import photo_style  # 包 backend.pipeline 会反过来导入本模块
+    # 包 backend.pipeline 会反过来导入本模块
+    from backend.pipeline.prompting import MEDIUM_TERMS, photo_style
 
     kept: list[str] = []
     for clause in (_SHEET_WORDS.sub("", c).strip() for c in photo_style(anchor).split(",")):
@@ -171,7 +171,7 @@ def style_line(anchor: str) -> str:
             kept.append(clause)
     if not kept:
         return DEFAULT_STYLE
-    if not _MEDIUM.search(kept[0]):
+    if not any(MEDIUM_TERMS.search(c) for c in kept):   # 锚里写了画风（动漫、三维、漫画…）就不补写实
         kept.insert(0, "Photorealistic live-action photography")
     text = ", ".join(kept).rstrip(" .")
     return text[:1].upper() + text[1:] + ", everything in sharp focus."

@@ -268,7 +268,7 @@ def test_continuity_clause_is_positive_and_names_the_location():
     loc1 = location_summary("Narrow suburban Chinese e-bike repair shop at night, shutter down.")
     assert loc1 == "a narrow suburban Chinese e-bike repair shop at night, shutter down"
     assert location_summary("Old tea house with lanterns.") == "an old tea house with lanterns"
-    assert location_summary("LED-lit corridor.") == "a LED-lit corridor"
+    assert location_summary("LED-lit corridor.") == "this location: LED-lit corridor"
     # 第二次样片：「inside Corner of a narrow old Chinese street…」
     loc2 = location_summary("Corner of a narrow old Chinese street at dusk, a cobbler's stall.")
     assert loc2 == "a corner of a narrow old Chinese street at dusk, a cobbler's stall"
@@ -581,7 +581,7 @@ def test_video_frames_keep_last_dialogue_line(tmp_path, db):
 
 def test_engine_video_prompt_keeps_eyes_off_the_lens():
     """第二次样片 S03：人物抬头被 H3 理解成看镜头。画面里有人时写明视线，剧本让他看镜头时不写。"""
-    from backend.pipeline.prompting import GAZE_LINE, Speaker
+    from backend.pipeline.prompting import GAZE_ONE as GAZE_LINE, Speaker
 
     on = {"林夏": Speaker("the young woman", True)}
     off = {"林夏": Speaker("the young woman", False)}
@@ -633,3 +633,74 @@ def test_run_warns_about_missing_portraits_but_submits(api):
     with sv.db.session() as s:
         s.get(Episode, ep_id).project.image_engine = "zimage"   # 不锁脸的引擎：不提醒
     assert api.post(f"/api/episodes/{ep_id}/run", json={"stage": "keyframes"}).json()["warnings"] == []
+
+
+# ---------------------------------------------------------------- 复审：画风、场景摘要、多人外貌
+@pytest.mark.parametrize("anchor,medium", [
+    ("Anime cel shading, bold outlines, soft pastel palette.", "anime cel shading"),
+    ("Stylized 3D animation render, Pixar-like soft lighting, vibrant colors.", "3D animation render"),
+    ("Comic book line art with heavy ink outlines and halftone shading.", "comic book line art"),
+])
+def test_non_photo_anchor_keeps_its_medium(anchor, medium):
+    """动漫 / 三维 / 漫画风格锚：视频风格句和三视图风格句都保留画风，不补「写实」。"""
+    from backend.domain.turnaround import style_line
+    from backend.pipeline.prompting import photo_style, video_style
+
+    for s in (video_style(anchor), style_line(anchor), photo_style(anchor)):
+        assert medium.lower() in s.lower(), s
+        assert "photorealistic" not in s.lower(), s
+
+
+def test_location_summary_review_examples():
+    from backend.pipeline.prompting import continuity_clause, location_summary
+
+    assert location_summary("Inside a narrow repair shop, tools on the wall.") == \
+        "a narrow repair shop, tools on the wall"
+    assert location_summary("Rows of rusty bicycles under a tin roof.") == \
+        "rows of rusty bicycles under a tin roof"
+    assert location_summary("Two old shophouses facing a canal.") == "two old shophouses facing a canal"
+    assert location_summary("Shanghai alley at night.") == "this location: Shanghai alley at night"
+    assert continuity_clause(location_summary("Shanghai alley at night.")).startswith(
+        "One continuous take inside this location: Shanghai alley at night;")
+
+
+def test_two_people_get_upper_body_looks_and_long_prompts_are_capped():
+    from backend.pipeline.prompting import MAX_RESOLVED_WORDS, resolve_char_tokens
+
+    a = "Chinese man in his fifties. Navy jacket. Black trousers and boots."
+    b = "Chinese woman in her twenties. Yellow rider jacket. White sneakers."
+    one = resolve_char_tokens("wide. {{char:1}} He waits.", {1: a, 2: b}, "全景")
+    assert "boots" in one
+    two = resolve_char_tokens("wide. {{char:1}} {{char:2}} They talk.", {1: a, 2: b}, "全景")
+    assert "boots" not in two and "sneakers" not in two and "Yellow rider jacket" in two
+    long_look = "Chinese man in his fifties. " + " ".join(["Faded navy jacket with patches."] * 60)
+    notes: list = []
+    capped = resolve_char_tokens("wide. {{char:1}} He waits.", {1: long_look}, "全景", notes)
+    assert len(capped.split()) < MAX_RESOLVED_WORDS and notes
+
+
+def test_face_look_strips_lower_body_inside_one_sentence():
+    from backend.pipeline.prompting import face_look
+
+    look = ("Chinese man in his fifties with grey stubble, navy jacket, black trousers, "
+            "a canvas tool bag, worn boots")
+    f = face_look(look)
+    assert "stubble" in f and "trousers" not in f and "bag" not in f and "boots" not in f
+
+
+def test_gaze_line_is_singular_for_one_person():
+    from backend.pipeline.prompting import GAZE_ONE, Speaker
+
+    v = compose_video_prompt("The young woman glances up.", "img", "", [], anchor="",
+                             has_audio=False, speakers={"林夏": Speaker("the young woman", True)})
+    assert GAZE_ONE in v and "people" not in v
+
+
+def test_scene_terms_are_whole_words():
+    from backend.pipeline.prompting import _SCENE_TERMS
+
+    for ok in ("fine film grain", "soft background blur", "metallic sheen", "rust-toned palette",
+               "daylight-balanced color"):
+        assert not _SCENE_TERMS.search(ok), ok
+    for bad in ("rainy night", "faint atmospheric haze", "neon signs"):
+        assert _SCENE_TERMS.search(bad), bad

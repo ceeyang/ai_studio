@@ -131,8 +131,8 @@ class H3VideoEngine(_ComfyEngine):
         fps = self.caps.fps
         n = seconds * fps
         k = math.floor((n - 5) / 17 + 0.5)
-        f = max(5, 17 * k + 5)
         top = max(5, 17 * math.floor((self.caps.max_seconds * fps - 5) / 17) + 5)
+        f = min(max(5, 17 * k + 5), top)   # 10s 取最近是 243 帧，超过引擎上限 240 帧
         while f / fps < min_seconds and f + 17 <= top:
             f += 17
         return f

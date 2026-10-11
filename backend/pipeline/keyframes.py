@@ -86,7 +86,8 @@ def run_keyframe(ctx, payload: dict) -> dict:
         except KeyError as e:
             raise JobError(str(e)) from None
         anchor = style.anchor_text if style else ""
-        prompt = compose_image_prompt(shot_image_prompt(shot, proj), anchor)
+        notes: list[str] = []
+        prompt = compose_image_prompt(shot_image_prompt(shot, proj, notes), anchor)
         negative = join_negative(proj.negative, style.negative if style else "")
         packed = shot_refs(s, shot)
         no_portrait = missing_portraits(s, shot) if engine.caps.max_refs > 0 else []
@@ -111,6 +112,8 @@ def run_keyframe(ctx, payload: dict) -> dict:
     seed_text = "无种子（网页出图每次不同）" if call.runner == "browser" else f"seed {seed}"
     ctx.log(f"首帧 {code} · {engine_name} · {seed_text} · 参考图 {len(refs)} 张"
             f"{'：' + '、'.join(labels.values()) if labels else ''}")
+    for n in notes:
+        ctx.log(f"首帧 {code}：{n}")
     if no_portrait:
         ctx.log(f"首帧 {code}：{'、'.join(no_portrait)} 还没有定妆照，{engine_name} 只能按文字出脸；"
                 "补了定妆照之后这张首帧会过期重出")

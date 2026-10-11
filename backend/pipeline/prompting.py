@@ -15,19 +15,29 @@ _PHOTO_TERMS = re.compile(
     r"|grain|halation|kodak|fuji|anamorphic|focus|saturat|contrast|palette|colou?r|grading"
     r"|\btones?\b|tonal|shadow|highlight|skin|pores?\b|wrinkle|imperfection|texture|detail"
     r"|sharp|resolution|proportion|\blight(ing)?\b|exposure|dynamic range", re.I)
+# 整词匹配（以前子串匹配会误伤：「grain」里有 rain、「metallic sheen」里有 metal）。不含 background、
+# metal、rust、daylight——风格锚要写材质真实感、虚化背景，这些词不该让整句被丢
 _SCENE_TERMS = re.compile(
-    r"\brain|\bwet\b|damp|puddle|night|dawn|dusk|sunset|sunrise|sunlight|sunny|morning|evening"
-    r"|noon|midday|daylight|\bday\b|interior|exterior|indoor|outdoor|street|city|urban|alley"
-    r"|\brooms?\b|workshop|garage|\bshops?\b|office|kitchen|forest|\bsea\b|beach|snow|fog|mist"
-    r"|storm|\bsky|cloud|concrete|reflection|bulb|lamp|neon|fluorescent|\btubes?\b|candle"
-    r"|window|lantern|torch|\bfire|\btools?\b|rust|metal|\bsteel|building|road|\bcars?\b"
-    r"|vehicle|landscape|scene|location|background|backdrop|environment|atmosphere|weather"
-    r"|practical|motivated|across frames"
+    r"\b(?:rain\w*|wet|damp|puddles?|night\w*|dawn|dusk|sunsets?|sunrise|sunlight|sunny|morning"
+    r"|evening|noon|midday|day|interiors?|exteriors?|indoors?|outdoors?|streets?|city|cities|urban"
+    r"|alleys?|rooms?|workshops?|garages?|shops?|offices?|kitchens?|forests?|sea|beach\w*|snow\w*"
+    r"|fog\w*|mist\w*|storm\w*|sky|skies|clouds?|cloudy|concrete|reflections?|bulbs?|lamps?|neon"
+    r"|fluorescent|tubes?|candles?|candlelit|windows?|lanterns?|torch\w*|fire\w*|tools?|steel"
+    r"|buildings?|roads?|cars?|vehicles?|landscapes?|scenes?|locations?|backdrops?|environments?"
+    r"|weather|practical|motivated|across frames"
     # 氛围和时段光：定妆照的灰背景上会画出烟雾、暖色偏色（第二次样片的「atmospheric haze」）
-    r"|haze|hazy|smok|\bdust|steam|atmospher|backlit|rim light|golden.hour|sidelight|sunlit", re.I)
+    r"|haze|hazy|smok\w*|dust\w*|steam\w*|atmospher\w*|backlit|rim light|golden.hour|sidelight"
+    r"|sunlit)\b", re.I)
+# 画风 / 媒介（动漫、三渲二、插画、漫画、水彩……）：不是写实时这句最要紧，不能被当成非成像词丢掉
+MEDIUM_TERMS = re.compile(
+    r"\b(?:anime|manga|manhua|cel[- ]?shad\w*|cel|illustrat\w*|cartoon\w*|painted|painting|painterly"
+    r"|3d|cgi|cg|render\w*|line[- ]art|comic\w*|ink|watercolou?r|gouache|pixar|chibi|stylized"
+    r"|stylised|2d|animation|animated|claymation|pixel[- ]art|outlines?|linework|flat colou?rs?"
+    r"|shading|photo\w*|realis\w*|live-action)\b",
+    re.I)
 # 句中不该改成小写的专有名词（胶片、相机、镜头品牌）
 _PROPER = re.compile(r"(?:Kodak|Fuji|Fujifilm|ARRI|Alexa|RED|Cooke|Zeiss|Leica|Canon|Sony|Panavision"
-                     r"|Ektachrome|Portra|CineStill|Cinestill|Vision3|Ilford)\b")
+                     r"|Ektachrome|Portra|CineStill|Cinestill|Vision3|Ilford|Pixar|Ghibli)\b")
 
 
 def _clauses(text: str) -> list[str]:
@@ -42,7 +52,8 @@ def _clauses(text: str) -> list[str]:
 
 def photo_style(anchor: str) -> str:
     """风格锚里只和成像有关的分句（画质、镜头、胶片颗粒、色彩、皮肤质感），去掉场景、时间、天气、光源。"""
-    keep = [c for c in _clauses(anchor) if _PHOTO_TERMS.search(c) and not _SCENE_TERMS.search(c)]
+    keep = [c for c in _clauses(anchor)
+            if (_PHOTO_TERMS.search(c) or MEDIUM_TERMS.search(c)) and not _SCENE_TERMS.search(c)]
     keep = [c if i == 0 or c[1:2].isupper() or _PROPER.match(c) else c[:1].lower() + c[1:]
             for i, c in enumerate(keep)]
     return ", ".join(keep)
@@ -123,11 +134,19 @@ def char_token(char_id: int) -> str:
     return "{{char:%d}}" % char_id
 
 
+_ACCESSORY = re.compile(r"\b(?:bags?|backpacks?|purses?|handbags?|watch|wristwatch|bracelets?|belts?"
+                        r"|helmets?|umbrellas?|phones?|briefcases?)\b", re.I)
+
+
 def face_look(visual_prompt: str) -> str:
-    """特写用的外貌：第一句（性别、年龄、族裔）加上写脸、头发、皮肤、眼镜这些的句子。"""
+    """特写用的外貌：第一句（性别、年龄、族裔）加上写脸、头发、皮肤、眼镜这些的句子。
+    外貌只有一句时，在句子里去掉下半身、手、随身物件这些分句（特写里看不见）。"""
     sentences = [x for x in re.split(r"(?<=[.!?])\s+", (visual_prompt or "").strip()) if x]
     if not sentences:
         return ""
+    if len(sentences) == 1:
+        drop = re.compile(f"{_LOWER_BODY.pattern}|{_HAND_DETAIL.pattern}|{_ACCESSORY.pattern}", re.I)
+        return _strip_clauses(sentences[0], drop, _FACE) or sentences[0]
     kept = [sentences[0]] + [x for x in sentences[1:] if _FACE.search(x)]
     return " ".join(kept)
 
@@ -141,14 +160,32 @@ def look_for_size(visual_prompt: str, shot_size: str = "") -> str:
     return (visual_prompt or "").strip()
 
 
-def resolve_char_tokens(text: str, looks: dict[int, str], shot_size: str = "") -> str:
+# 填好外貌后整段提示词的上限（词）：Z-Image / umt5 这类编码器 512 token 左右，前面还要拼风格锚
+MAX_RESOLVED_WORDS = 200
+
+
+def resolve_char_tokens(text: str, looks: dict[int, str], shot_size: str = "",
+                        notes: list | None = None) -> str:
     """把 {{char:<id>}} 换成该角色按景别取舍后的外貌（句末补句号）；没有占位符时原样返回。
-    找不到的角色（删了）或外貌是空的、或是中文的，占位符直接去掉（中文进英文提示词会被画成字）。"""
+    找不到的角色（删了）或外貌是空的、或是中文的，占位符直接去掉（中文进英文提示词会被画成字）。
+    同框两人及以上时每人只用上半身外貌；填完超过 MAX_RESOLVED_WORDS 个词时都退成只写脸，
+    notes 里记一句（任务日志用）。"""
     if not text or "{{" not in text:
         return text or ""
+    people = {int(x) for x in CHAR_TOKEN.findall(text)}
+    multi = len(people) >= 2 and shot_size not in FACE_SIZES
+    out = _resolve(text, looks, lambda look: upper_body_look(look) if multi
+                   else look_for_size(look, shot_size))
+    if len(out.split()) > MAX_RESOLVED_WORDS and shot_size not in FACE_SIZES:
+        out = _resolve(text, looks, face_look)
+        if notes is not None:
+            notes.append(f"填好外貌后超过 {MAX_RESOLVED_WORDS} 个词，外貌改成只写脸")
+    return out
 
+
+def _resolve(text: str, looks: dict[int, str], pick) -> str:
     def sub(m: re.Match) -> str:
-        look = look_for_size(looks.get(int(m.group(1)), "") or "", shot_size).strip()
+        look = pick(looks.get(int(m.group(1)), "") or "").strip()
         tail = m.group(2) or ""   # 占位符后面紧跟的标点（替换旧外貌留下的）：用它代替句号
         if not look or _CJK_ANY.search(look):
             return ""
@@ -164,12 +201,12 @@ def project_looks(project) -> dict[int, str]:
     return {c.id: c.visual_prompt or "" for c in getattr(project, "characters", None) or []}
 
 
-def shot_image_prompt(shot, project) -> str:
+def shot_image_prompt(shot, project, notes: list | None = None) -> str:
     """镜头的 image_prompt，占位符换成角色当前的外貌（按这一镜的景别取舍）。"""
     text = shot.image_prompt or ""
     if "{{" not in text:
         return text
-    return resolve_char_tokens(text, project_looks(project), shot.shot_size or "")
+    return resolve_char_tokens(text, project_looks(project), shot.shot_size or "", notes)
 
 
 _STILL_WORDS = re.compile(r"\b(?:cinematic\s+)?(?:still(?:\s+(?:image|frame|photo(?:graph)?))?"
@@ -237,6 +274,8 @@ def _dialogue_line(d: dict, speakers: dict[str, Speaker] | None, anyone_on_scree
 
 GAZE_LINE = ("The people on screen keep their eyes on each other and on what they are doing, "
              "looking away from the camera.")
+GAZE_ONE = ("The person on screen keeps their eyes on what they are doing, looking away from the "
+            "camera.")
 _AT_CAMERA = re.compile(r"\b(?:into|at|toward|towards|to)\s+(?:the\s+)?(?:camera|lens|viewer)\b", re.I)
 
 
@@ -251,8 +290,9 @@ def compose_video_prompt(motion_prompt: str, image_prompt: str, audio_prompt: st
     else:                  # 发给引擎：动作在前，后面一句短的成像风格
         text = f"{body} {video_style(anchor)}".strip()
         # 第二次样片 S03：motion 写 glancing up，H3 理解成看镜头。画面里有人、剧本没让他看镜头时写明视线
-        if any(sp.on_screen for sp in speakers.values()) and not _AT_CAMERA.search(body):
-            text = f"{text} {GAZE_LINE}"
+        n_on = sum(1 for sp in speakers.values() if sp.on_screen)
+        if n_on and not _AT_CAMERA.search(body):
+            text = f"{text} {GAZE_ONE if n_on == 1 else GAZE_LINE}"
     if not has_audio:
         return text
     audio = (audio_prompt or "").strip()
@@ -269,19 +309,46 @@ def compose_video_prompt(motion_prompt: str, image_prompt: str, audio_prompt: st
 _CJK_ANY = re.compile(r"[⺀-鿿가-힯豈-﫿＀-￯]")
 
 
+# 场景外观第一句的开头：这些常见词可以放心改小写、补冠词；不在表里的（可能是地名、店名）不动大小写，
+# 改用「this location: …」接，不猜冠词
+_LOC_COMMON = frozenset((
+    "a an the this one narrow small large big tiny old dim dark bright cramped crowded quiet busy "
+    "empty cluttered run-down rundown shabby modern cozy cosy spacious tidy messy worn rustic "
+    "traditional simple long wide rainy abandoned deserted roadside suburban rural local cobbled "
+    "tiled wooden weathered dusty humble low-ceilinged open-air outdoor indoor tight compact "
+    "corner room shop street alley kitchen bedroom living office corridor hallway courtyard rooftop "
+    "studio garage workshop cafe restaurant classroom hospital market park bus train car apartment "
+    "house hotel bar lobby stairwell warehouse field beach riverside bridge temple back front "
+    "repair stall booth counter village town lane").split())
+_LOC_NO_ARTICLE = frozenset(("two three four five six seven eight nine ten several many some "
+                             "rows stacks piles shelves lines dozens racks").split())
+_LOC_LEAD = re.compile(r"^(?:inside|interior of|in|at|within)\s+", re.I)
+
+
 def location_summary(visual_prompt: str | None, max_words: int = 30) -> str:
-    """场景外观的第一句（最多 max_words 个词），拼进「inside …」：句首小写（缩写不动），没有冠词就补
-    a / an（「inside Narrow suburban …」→「inside a narrow suburban …」）；有中文就不用。"""
+    """场景外观的第一句（最多 max_words 个词），拼进「inside …」；有中文就不用。
+
+    去掉开头的 inside / interior of / in / at；第一个词是常见词时改小写、没冠词就补 a / an
+    （「Narrow suburban …」→「a narrow suburban …」）；复数和数词开头不补冠词
+    （「Rows of rusty bicycles」→「rows of rusty bicycles」）；其他（可能是地名，「Shanghai alley」）
+    不改大小写，写成「this location: Shanghai alley」。"""
     text = (visual_prompt or "").strip()
     if not text or _CJK_ANY.search(text):
         return ""
     first = re.split(r"(?<=[.!?])\s+", text)[0].rstrip(" .!?;")
+    first = _LOC_LEAD.sub("", first).strip()
     if not first:
         return ""
-    if not first[1:2].isupper():   # 「LED」「TV」这种缩写开头不动
-        first = first[0].lower() + first[1:]
-    if not re.match(r"(a|an|the|this|one)\b", first, re.I):
-        first = ("an " if first[0].lower() in "aeiou" else "a ") + first
+    head = first.split()[0]
+    low = head.lower().strip(",;:")
+    if re.match(r"\d", head) or low in _LOC_NO_ARTICLE:
+        first = first[:1].lower() + first[1:] if low in _LOC_NO_ARTICLE else first
+    elif low in _LOC_COMMON and not head[1:2].isupper():
+        first = first[:1].lower() + first[1:]
+        if low not in ("a", "an", "the", "this", "one"):
+            first = ("an " if low[0] in "aeiou" else "a ") + first
+    else:
+        first = "this location: " + first
     words = first.split()
     if len(words) > max_words:
         first = " ".join(words[:max_words]).rstrip(",;")

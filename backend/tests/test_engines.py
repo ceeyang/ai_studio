@@ -101,7 +101,7 @@ def test_h3_video_frames_round_to_nearest_grid_point(reg):
     assert eng.frames_for(5.5) == 124 and eng.frames_for(6.5) == 158
     assert eng.frames_for(0) == 5 and eng.frames_for(0.3) == 5
     assert eng.frames_for(4.1) == 90       # 98 帧：离 90 差 8，离 107 差 9
-    for s in (0.5, 1, 2.2, 3.7, 4.5, 7.3, 9.9):
+    for s in (0.5, 1, 2.2, 3.7, 4.5, 7.3, 9.2):
         f = eng.frames_for(s)
         assert f >= 5 and (f - 5) % 17 == 0
         assert abs(f - s * 24) <= 8.5      # 离目标帧数不超过半个网格
@@ -187,3 +187,8 @@ def test_krea2_drops_refs_and_steps_override(tmp_path):
     call = reg.image("krea2").build(ImageRequest(prompt="p", refs=[tmp_path / "a.png"]))
     assert call.dropped_refs == [str(tmp_path / "a.png")]
     assert call.workflow["8"]["inputs"]["steps"] == 6
+
+
+def test_h3_video_10s_is_clamped_to_engine_max(reg):
+    eng = reg.video("h3_video")
+    assert eng.frames_for(10) == 226 and eng.frames_for(10) / 24 <= eng.caps.max_seconds
