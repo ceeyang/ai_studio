@@ -65,8 +65,10 @@ def _prev_has_video(s, chain: "Chain") -> set[int]:
 def _waits_prev_video(sid: int, chain: "Chain", stages: list[str], ready: set[int]) -> bool:
     """只跑首帧（不连视频）时，接上一镜而上一镜既没有选定视频、也没有视频任务在排队的镜头：
     截尾帧注定失败（第三次样片 job 217），提交时跳过，等上一镜出了视频再说。"""
+    # 第一镜没有上一镜：不跳过，照常提交，让任务报「第一镜，关掉接上一镜」
     return ("keyframes" in stages and "videos" not in stages and sid in chain.cont
-            and sid not in ready and chain.prev.get(sid) not in chain.pending_video)
+            and sid in chain.prev and sid not in ready
+            and chain.prev.get(sid) not in chain.pending_video)
 
 
 def _chain_of(s, ep) -> "Chain":

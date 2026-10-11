@@ -93,7 +93,7 @@ def test_h3_video_prompt_has_audio_and_uses_selected_frame(tmp_path, db):
     prompt = call.workflow["6"]["inputs"]["prompt"]
     # 发给引擎的视频提示词：动作在前；「ANCHOR」里没有成像词，不加风格句
     assert prompt.startswith("she looks up slowly ") and "ANCHOR" not in prompt
-    assert "\nAudio: quiet hum" in prompt
+    assert "\nAudio: Quiet hum." in prompt   # 发给引擎：音频分句首字母大写、补句号
     assert "词被改了" in prompt
     with db.session() as s:
         ff = selected_candidate(s, "shot", shot_id, "first_frame")
@@ -736,6 +736,38 @@ def test_diegetic_audio_drops_music_clauses():
         "The young woman whispers, low and tense. Heavy rain outside."
     assert diegetic_audio("Rain on the window, no music.") == "Rain on the window."
     assert diegetic_audio("Soft piano music.") == ""
+
+
+@pytest.mark.parametrize("audio", [
+    "Footsteps echo in a musical instrument shop, a clerk hums.",
+    "A piano lid slams shut.",
+    "Synthetic jacket rustles.",
+    "A street musician strums a guitar.",
+    "The young man tugs a string of fairy lights.",
+])
+def test_diegetic_audio_keeps_on_screen_sounds(audio):
+    """评审：画面里真实发出的声音（乐器店、琴盖、合成面料、街头艺人、彩灯串）不能当成配乐删掉。"""
+    from backend.pipeline.prompting import diegetic_audio
+
+    assert diegetic_audio(audio) == audio
+
+
+@pytest.mark.parametrize("audio,kept", [
+    ("Rain outside, soft piano music underneath.", "Rain outside."),
+    ("Traffic hum, gentle strings.", "Traffic hum."),
+    ("Wind, background music low.", "Wind."),
+    ("Door creaks, ambient music.", "Door creaks."),
+    ("Tense score building, a phone buzzes.", "A phone buzzes."),
+    ("Music swells as she turns, footsteps.", "Footsteps."),
+    ("Cars pass, emotional piano.", "Cars pass."),
+    ("Kettle whistles, melancholic soundtrack.", "Kettle whistles."),
+    ("Rain, bgm.", "Rain."),
+    ("a low sustained string tone rising, then a door opens.", "Then a door opens."),
+])
+def test_diegetic_audio_drops_score_phrasing(audio, kept):
+    from backend.pipeline.prompting import diegetic_audio
+
+    assert diegetic_audio(audio) == kept
 
 
 def test_video_audio_sent_without_music_but_hash_unchanged(tmp_path, db):

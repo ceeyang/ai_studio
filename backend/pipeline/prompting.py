@@ -395,9 +395,24 @@ STAY_IN_FRAME = ("Everyone on screen stays inside the frame until the very last 
 
 # 第三次样片：分镜 audio_prompt 写了钢琴、弦乐，H3 自己配了一层音乐，和成片配乐叠在一起，持续音高还让
 # 浊音检测把整条判成「在说话」。发给引擎时只留画面里真实存在的声音，结尾写明不要配乐。
-_MUSIC = re.compile(r"\b(?:music\w*|musical|piano|strings?|violins?|cellos?|orchestra\w*|score|"
-                    r"soundtrack|melod\w*|chords?|synth\w*|choir|guitar|bgm)\b", re.I)
+# 只认「配乐式」写法（非画面内的音乐）：形容词 + 钢琴 / 弦乐 / 音乐、background / ambient music、score、
+# soundtrack、bgm、music swells / plays / fades、no music。光出现 piano、string、musical 不算——
+# 「a piano lid slams shut」「a string of fairy lights」「musical instrument shop」都是画面里的声音。
+_INSTR = r"(?:piano|strings?(?!\s+of\b)|music|cello|violins?|orchestra)"
+_MUSIC = re.compile(
+    r"\b(?:soft|gentle|tense|melancholic|swelling|low|sad|warm|emotional|haunting|eerie|ominous"
+    r"|sustained|faint|subtle|quiet|single)\b(?:[\s-]+[a-z]+){0,3}?[\s-]+" + _INSTR + r"\b"
+    r"|\b(?:background|ambient|underscore)\s+music\b|\bscore\b|\bsoundtrack\b|\bbgm\b"
+    r"|\bmusic\s+(?:swells?|plays?|fades?|rises?|builds?|starts?|kicks?\s+in)\b"
+    r"|\b(?:no|without)\s+(?:background\s+)?music\b", re.I)
+# 有人或物在画面里发出动作的分句保留（街头艺人弹吉他、琴盖砸下）
+_PHYSICAL = re.compile(r"\b(?:slams?|strums?|plucks?|taps?|hits?|knocks?|tugs?|bangs?|drops?|"
+                       r"lifts?|opens?|closes?|rustles?|tunes?|presses?)\b", re.I)
 NO_MUSIC = "No background music."
+
+
+def _is_score(clause: str) -> bool:
+    return bool(_MUSIC.search(clause)) and not _PHYSICAL.search(clause)
 
 
 def diegetic_audio(audio: str) -> str:
@@ -409,9 +424,10 @@ def diegetic_audio(audio: str) -> str:
             continue
         end = sentence[-1] if sentence[-1] in ".!?" else "."
         parts = [p.strip() for p in sentence.rstrip(".;!? ").split(",") if p.strip()]
-        parts = [p for p in parts if not _MUSIC.search(p)]
+        parts = [p for p in parts if not _is_score(p)]
         if parts:
-            kept.append(", ".join(parts) + end)
+            text = ", ".join(parts)
+            kept.append(text[:1].upper() + text[1:] + end)
     return " ".join(kept)
 
 

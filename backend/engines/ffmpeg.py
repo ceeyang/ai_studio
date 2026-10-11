@@ -94,14 +94,23 @@ _SHOWINFO_PTS = re.compile(r"Parsed_showinfo.*?\bpts_time:\s*(-?[\d.]+)")
 
 
 SSIM_SIZE = (32, 32)
-_SSIM_ALL = re.compile(r"SSIM\b.*?All:\s*([0-9.]+)")
+_SSIM_LINE = re.compile(r"SSIM\s+(Y:.*)")
+_SSIM_CH = re.compile(r"\b([YUV]):\s*([0-9.]+)")
+_SSIM_ALL = re.compile(r"All:\s*([0-9.]+)")
 
 
 def parse_ssim(log: str) -> float | None:
-    """ffmpeg ssim 滤镜的汇总行「SSIM Y:… All:0.91 (…)」里的 All 值。"""
-    m = _SSIM_ALL.findall(log or "")
+    """ffmpeg ssim 滤镜的汇总行「SSIM Y:… U:… V:… All:… (…)」：取 Y / U / V 里最低的一个
+    （只看亮度时纯红和纯绿几乎一样；颜色变了 U / V 会掉下来）。没有分通道时退回 All。"""
+    lines = _SSIM_LINE.findall(log or "")
+    if not lines:
+        return None
     try:
-        return float(m[-1]) if m else None
+        chans = [float(v) for _, v in _SSIM_CH.findall(lines[-1])]
+        if chans:
+            return min(chans)
+        m = _SSIM_ALL.search(lines[-1])
+        return float(m.group(1)) if m else None
     except ValueError:
         return None
 
@@ -276,12 +285,16 @@ class FFmpeg:
         return hard_cuts(parse_scene_cuts(p.stderr), dur)
 
     def first_frame_ssim(self, video: Path, image: Path) -> float:
-        """视频第 0 帧和给的首帧图有多像（SSIM，0–1）。两张都缩到 SSIM_SIZE、转灰度再比，
+        """视频第 0 帧和给的首帧图有多像（SSIM，0–1，取 Y / U / V 里最低的）。两张都缩到 SSIM_SIZE 再比，
         分辨率、画幅不同也能比。缩得很小是故意的：只看构图，轻微推拉、平移和编码噪声不算。
-        第三次样片实测（32×32）：正常 0.94–0.96，开头轻微放大平移 0.70，H3 没从首帧开始（重新构图）0.11–0.18。"""
+        结果再和平均颜色的相似度取较小的（见 _mean_color_similarity）。
+        第三次样片实测（32×32、yuv444p、取 Y/U/V 最低、再和平均颜色取小）：正常 0.97–0.99，开头轻微放大平移 0.76，
+        H3 没从首帧开始（重新构图）0.13–0.20；阈值 0.6 见 pipeline/videos.START_SSIM_MIN。"""
         w, h = SSIM_SIZE
-        graph = (f"[0:v]trim=end_frame=1,setpts=PTS-STARTPTS,scale={w}:{h},format=gray[a];"
-                 f"[1:v]setpts=PTS-STARTPTS,scale={w}:{h},format=gray[b];[a][b]ssim")
+        # 两张直接缩成同样大小再比：假定首帧图和视频画幅一致（视频就是从这张首帧按项目画幅出的）；
+        # 画幅不一致时两边一起被拉伸，构图仍能比，只是数值偏低。yuv444p：色度不降采样，U / V 也能比
+        graph = (f"[0:v]trim=end_frame=1,setpts=PTS-STARTPTS,scale={w}:{h},format=yuv444p[a];"
+                 f"[1:v]setpts=PTS-STARTPTS,scale={w}:{h},format=yuv444p[b];[a][b]ssim")
         p = self._exec([self.ffmpeg, "-hide_banner", "-nostats", "-i", str(video), "-i", str(image),
                         "-an", "-filter_complex", graph, "-frames:v", "1", "-f", "null", "-"])
         if p.returncode != 0:
@@ -289,7 +302,23 @@ class FFmpeg:
         v = parse_ssim(p.stderr)
         if v is None:
             raise FFmpegError("首帧相似度检测没有结果")
-        return v
+        # 第二个信号：整体平均颜色。大块纯色区域的 SSIM 对颜色不敏感（纯红对纯绿 U / V 仍有 0.6），
+        # 平均色差大就按色差算
+        return min(v, self._mean_color_similarity(video, image))
+
+    def _mean_color_similarity(self, video: Path, image: Path) -> float:
+        """两张图各缩成 1×1 像素（平均颜色）比 RGB 距离：1 = 一样，0 = 黑对白。"""
+        graph = ("[0:v]trim=end_frame=1,setpts=PTS-STARTPTS,scale=1:1:flags=area,format=rgb24[a];"
+                 "[1:v]setpts=PTS-STARTPTS,scale=1:1:flags=area,format=rgb24[b];[a][b]hstack=2")
+        p = self._exec([self.ffmpeg, "-hide_banner", "-nostats", "-loglevel", "error", "-i", str(video),
+                        "-i", str(image), "-an", "-filter_complex", graph, "-frames:v", "1",
+                        "-f", "rawvideo", "-pix_fmt", "rgb24", "-"], text=False)
+        if p.returncode != 0 or len(p.stdout or b"") < 6:
+            err = (p.stderr or b"").decode("utf-8", "replace")[-1500:]
+            raise FFmpegError(f"首帧颜色比对失败：{err}")
+        a, b = p.stdout[:3], p.stdout[3:6]
+        dist = sum((x - y) ** 2 for x, y in zip(a, b)) ** 0.5 / (255 * 3 ** 0.5)
+        return max(0.0, 1.0 - dist)
 
     def trim_silence(self, src: Path, dst: Path) -> Path:
         """剪掉音频首尾静音（配音用）。"""

@@ -39,57 +39,74 @@ def _cast_ids(shot) -> list[int]:
             if isinstance(c, dict) and c.get("character_id") is not None]
 
 
-def _continue_locked(s, ff, image_max_refs: Callable[[str], int], depth: int = 0) -> bool:
-    """接上一镜的首帧（上一镜视频的尾帧）里的脸有没有按定妆照锁过：沿用上一镜视频的锁脸状态。
-    上一镜视频 params["identity"]：refs = 带了全部出场角色的定妆照；first_frame / entering = 没有
-    （entering 只锁了新入画的人，保守按没锁算）。老视频没记 identity 时看它用的首帧（可能又是接上一镜的）。"""
+def _tail_locked(s, ff, image_max_refs: Callable[[str], int], depth: int = 0) -> set[int]:
+    """接上一镜的首帧（上一镜视频的尾帧）里，哪些角色的脸是按定妆照锁过的。看上一镜视频：
+    params["locked_chars"] 记着锁过脸的角色（新视频都记）；老视频只有 identity：refs = 上一镜出场角色全锁，
+    first_frame / entering = 都没锁（entering 没记名单时保守按没锁算）；连 identity 都没有的看它用的首帧
+    （可能又是接上一镜的）。"""
     vid = s.get(Candidate, (ff.params or {}).get("prev_video_candidate_id") or 0)
     if vid is None:
-        return False
-    ident = (vid.params or {}).get("identity")
+        return set()
+    vp = vid.params or {}
+    if isinstance(vp.get("locked_chars"), list):
+        return {int(x) for x in vp["locked_chars"]}
+    prev = s.get(Shot, (ff.params or {}).get("prev_shot_id") or 0)
+    everyone = set(_cast_ids(prev)) if prev is not None else set()
+    ident = vp.get("identity")
     if ident:
-        return ident == "refs"
-    pff = s.get(Candidate, (vid.params or {}).get("first_frame_candidate_id") or 0)
+        return everyone if ident == "refs" else set()
+    pff = s.get(Candidate, vp.get("first_frame_candidate_id") or 0)
     if pff is None:
-        return False
+        return set()
     if pff.engine == CONTINUE_ENGINE:
-        return depth < 8 and _continue_locked(s, pff, image_max_refs, depth + 1)
-    return first_frame_locked_face(pff.params, image_max_refs(pff.engine))
+        if depth >= 8 or not _tail_locked(s, pff, image_max_refs, depth + 1) >= everyone:
+            return set()
+        return everyone
+    return everyone if first_frame_locked_face(pff.params, image_max_refs(pff.engine)) else set()
 
 
 @dataclass
 class VideoRefPlan:
     """视频要带哪些参考图（还没按视频引擎上限截断）。
-    identity 记进视频候选：refs = 首帧锁过脸、带全部出场角色；entering = 接上一镜、只带新入画角色；
-    first_frame = 不带，身份以首帧为准。"""
+    identity 记进视频候选：refs = 出场角色的脸都锁过、都带；entering = 接上一镜、只带部分角色（新入画的、
+    尾帧里本来就锁过脸的）；first_frame = 不带，身份以首帧为准。locked_chars 也记进候选，下一镜接这一镜时用。"""
     refs: list[Ref]
     locked: bool
     identity: str
     continued: bool = False
     entering: list[int] = field(default_factory=list)   # 接上一镜：这一镜新入画的角色 id
     dropped: list[Ref] = field(default_factory=list)    # 没带的（日志用）
+    locked_chars: list[int] = field(default_factory=list)   # 这条视频里脸按定妆照锁过的角色
+
+
+def _ref_chars(refs: list[Ref]) -> list[int]:
+    return sorted({r.character_id for r in refs if r.character_id is not None})
 
 
 def video_ref_plan(s, shot, ff, image_max_refs: Callable[[str], int]) -> VideoRefPlan:
     """选定首帧 ff 下视频带哪些参考图。videos.run_video 和 views.shot_detail（过期判断）共用。
 
     - 普通首帧：锁过脸（带了定妆照 / 三视图）就带全部出场角色的定妆照，没锁就一张不带（两张脸会打架）；
-    - 接上一镜的首帧：锁脸状态沿用上一镜；这一镜 cast 里有、上一镜 cast 里没有的角色（从画外进来，尾帧里
-      还没有这个人）总要带上定妆照——不然 H3 会自己编一张脸（第三次样片 S06）。"""
+    - 接上一镜的首帧：尾帧里锁过脸的角色接着带（沿用上一镜）；这一镜 cast 里有、上一镜 cast 里没有的角色
+      （从画外进来，尾帧里还没有这个人）总要带上定妆照——不然 H3 会自己编一张脸（第三次样片 S06）。"""
     packed = shot_refs(s, shot, video=True)
     if ff is None or ff.engine != CONTINUE_ENGINE:
         locked = ff is not None and first_frame_locked_face(ff.params,
                                                             image_max_refs(ff.engine))
         return VideoRefPlan(packed if locked else [], locked, "refs" if locked else "first_frame",
-                            dropped=[] if locked else packed)
+                            dropped=[] if locked else packed,
+                            locked_chars=_ref_chars(packed) if locked else [])
     prev = s.get(Shot, (ff.params or {}).get("prev_shot_id") or 0) or prev_shot(s, shot)
     before = set(_cast_ids(prev)) if prev is not None else set()
-    entering = [cid for cid in dict.fromkeys(_cast_ids(shot)) if cid not in before]
-    if _continue_locked(s, ff, image_max_refs):
-        return VideoRefPlan(packed, True, "refs", continued=True, entering=entering)
-    refs = [r for r in packed if r.character_id in entering]
-    return VideoRefPlan(refs, False, "entering" if refs else "first_frame", continued=True,
-                        entering=entering, dropped=[r for r in packed if r not in refs])
+    cast = list(dict.fromkeys(_cast_ids(shot)))
+    entering = [cid for cid in cast if cid not in before]
+    keep = set(entering) | _tail_locked(s, ff, image_max_refs)
+    refs = [r for r in packed if r.character_id in keep]
+    with_refs = {r.character_id for r in packed}
+    full = bool(refs) and all(cid in keep for cid in cast if cid in with_refs)
+    identity = "refs" if full else "entering" if refs else "first_frame"
+    return VideoRefPlan(refs, full, identity, continued=True, entering=entering,
+                        dropped=[r for r in packed if r not in refs], locked_chars=_ref_chars(refs))
 
 
 def waiting_reason(code: str, prev) -> str:

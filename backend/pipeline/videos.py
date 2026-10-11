@@ -206,7 +206,7 @@ def run_video(ctx, payload: dict) -> dict:
     with sv.db.session() as s:
         slot = get_or_create_slot(s, "shot", shot_id, "video")
         params = {**call.meta, "first_frame_candidate_id": ff.id,
-                  "identity": plan.identity,
+                  "identity": plan.identity, "locked_chars": plan.locked_chars,
                   "workflow": sv.media.rel(run_dir / "workflow.api.json"), "inputs": inputs}
         if qc is not None:
             params["qc"] = qc

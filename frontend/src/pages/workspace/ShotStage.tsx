@@ -140,7 +140,8 @@ export function ShotStage({
         warns.push(...(r.warnings ?? []).filter((w) => !warns.includes(w)));
         notes.push(...(r.notes ?? []).filter((n) => !notes.includes(n)));
       }
-      notice.track(ids, text);
+      // 全部跳过（如接上一镜的镜头都在等上一镜视频）：没有任务可跟踪，只显示说明
+      if (ids.length > 0) notice.track(ids, text);
       setRunWarnings(warns);
       setRunNotes(notes);
       return true;

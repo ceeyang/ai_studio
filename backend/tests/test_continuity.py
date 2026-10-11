@@ -374,3 +374,40 @@ def test_forced_continue_reuses_same_tail_frame(tmp_path, db):
     run_continue_frame(ctx, {"shot_id": ids[1]})
     assert run_continue_frame(ctx, {"shot_id": ids[1], "force": True})["skipped"] is True
     assert len(ff.calls) == 1
+
+
+def test_entering_lock_carries_to_next_continue_shot(tmp_path, db):
+    """评审：S02 接上一镜时苏晴是新入画、带定妆照锁了脸（identity=entering）；S03 再接 S02，苏晴已在尾帧里，
+    她的脸是锁过的，要接着带她的定妆照；阿杰一直没锁，仍以尾帧为准。"""
+    from backend.pipeline.videos import run_video
+
+    ctx, runner, _, _, ids = setup(tmp_path, db, cont=(1, 2))
+    sv = ctx.services
+    chars = _cast_with_portraits(db, ids)
+    with db.session() as s:
+        s.get(Shot, ids[2]).cast = [{"character_id": chars["阿杰"], "variation_id": None},
+                                    {"character_id": chars["苏晴"], "variation_id": None}]
+    _prev_video(sv, ids[0], "first_frame")
+    run_continue_frame(ctx, {"shot_id": ids[1]})
+    run_video(ctx, {"shot_id": ids[1]})
+    with db.session() as s:
+        v = selected_candidate(s, "shot", ids[1], "video")
+        assert v.params["identity"] == "entering" and v.params["locked_chars"] == [chars["苏晴"]]
+    ctx.job_id += 1
+    run_continue_frame(ctx, {"shot_id": ids[2]})
+    run_video(ctx, {"shot_id": ids[2]})
+    with db.session() as s:
+        v = selected_candidate(s, "shot", ids[2], "video")
+        assert v.params["identity"] == "entering"
+        assert [r["label"] for r in v.params["inputs"]["refs"]] == ["苏晴 定妆照"]
+        assert v.params["locked_chars"] == [chars["苏晴"]]
+
+
+def test_first_shot_continue_still_fails_with_reason_in_keyframes_only(tmp_path, db, manager):
+    """第一镜开了接上一镜：不当成「等上一镜视频」悄悄跳过，照常提交并报「第一镜，关掉接上一镜」。"""
+    from backend.pipeline.runs import continue_wait_notes
+
+    ctx, _, _, ep_id, ids = setup(tmp_path, db, cont=(0,))
+    submit_chain(manager, db, ctx.services.engines, ep_id, ["keyframes"], RunOptions(shots=["S01"]))
+    assert [(r[1], r[2]) for r in jobs(db)] == [("image.continue_frame", ids[0])]
+    assert continue_wait_notes(db, ep_id, ["keyframes"]) == []

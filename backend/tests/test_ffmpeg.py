@@ -256,3 +256,25 @@ def test_first_frame_ssim_bad_file_raises(tmp_path):
     bad.write_bytes(b"x")
     with pytest.raises(FFmpegError):
         FFmpeg().first_frame_ssim(bad, bad)
+
+
+def test_parse_ssim_takes_lowest_channel():
+    from backend.engines.ffmpeg import parse_ssim
+
+    log = "[Parsed_ssim_4 @ 01] SSIM Y:0.994000 (22.2) U:0.300000 (1.5) V:0.410000 (2.2) All:0.70 (5.2)"
+    assert parse_ssim(log) == pytest.approx(0.3)
+
+
+@needs_ffmpeg
+def test_first_frame_ssim_sees_color_change(tmp_path):
+    """评审：只看灰度时纯红和纯绿 SSIM 0.994。同样构图、颜色完全不同要判成不像。"""
+    clip = tmp_path / "red.mp4"
+    subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=red:s=320x240:d=1", "-c:v", "libx264",
+                    "-pix_fmt", "yuv420p", str(clip)], check=True, capture_output=True)
+    red, green = tmp_path / "red.png", tmp_path / "green.png"
+    for c, out in (("red", red), ("green", green)):
+        subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", f"color=c={c}:s=320x240:d=1", "-frames:v", "1",
+                        str(out)], check=True, capture_output=True)
+    ff = FFmpeg()
+    assert ff.first_frame_ssim(clip, red) > 0.9
+    assert ff.first_frame_ssim(clip, green) < 0.6
