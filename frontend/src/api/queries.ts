@@ -38,6 +38,7 @@ import type {
   ShotIn,
   ShotPatch,
   Style,
+  StylePreset,
   SystemHealth,
   FitKhmerIn,
   TranslateIn,
@@ -50,6 +51,7 @@ export const keys = {
   projectsAll: ['projects', 'all'] as const,
   project: (slug: string) => ['project', slug] as const,
   engines: ['engines'] as const,
+  stylePresets: ['style-presets'] as const,
   episodes: (slug: string) => ['episodes', slug] as const,
   episode: (id: number) => ['episode', id] as const,
   // 挂在 ['episode'] 前缀下：任何任务结束（首帧、成片落地）都会让封面和统计刷新
@@ -95,6 +97,15 @@ export function useProject(slug: string) {
 
 export function useEngines() {
   return useQuery({ queryKey: keys.engines, queryFn: () => api.get<Engines>('/api/engines'), staleTime: Infinity });
+}
+
+/** 风格预设和它推荐的引擎（新建项目对话框预选用） */
+export function useStylePresets() {
+  return useQuery({
+    queryKey: keys.stylePresets,
+    queryFn: () => api.get<StylePreset[]>('/api/style-presets'),
+    staleTime: Infinity,
+  });
 }
 
 export function useEpisodes(slug: string) {

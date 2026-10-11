@@ -3,7 +3,7 @@ import type { Candidate, EpisodeDetail, Job, Project, ShotDetail, Slot } from '.
 export function makeProject(p: Partial<Project> = {}): Project {
   return {
     id: 1, slug: 'demo', title: 'demo', aspect: '9:16', image_engine: 'zimage',
-    video_engine: 'h3_video', seed: 12345, negative: '', style_bible_id: null, archived: false,
+    video_engine: 'h3_video', seed: 12345, negative: '', style_preset: 'live_action', style_bible_id: null, archived: false,
     created_at: '2026-10-08T10:00:00', ...p,
   };
 }

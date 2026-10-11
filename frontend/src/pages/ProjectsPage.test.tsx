@@ -49,7 +49,67 @@ describe('ProjectsPage', () => {
       aspect: '9:16',
       image_engine: 'zimage',
       video_engine: 'h3_video',
+      style_preset: 'live_action',
     });
+  });
+
+  it('新建项目：选风格预设会预选它推荐的引擎，用户还能改', async () => {
+    const preset = (key: string, image: string | null, video: string | null) => ({
+      key, label: key, description: '', negative: '', image_engines: [], video_engines: [],
+      has_storyboard_guidance: false, image_engine: image, video_engine: video,
+    });
+    const calls = installFetch({
+      'GET /api/projects': [],
+      'GET /api/engines': ENGINES,
+      'GET /api/style-presets': [preset('live_action', 'zimage', 'h3_video'), preset('anime', 'h3_image', 'wan22_i2v'),
+        preset('commercial', 'gpt_image', null)],
+      'POST /api/projects': makeProject({ id: 2, slug: '动漫', title: '动漫', style_preset: 'anime' }),
+    });
+    renderAt(<ProjectsPage />, { route: '/', path: '/' });
+    const user = userEvent.setup();
+    await user.click((await screen.findAllByRole('button', { name: '新建项目' }))[0]);
+    await screen.findByRole('option', { name: 'Z-Image 快速' });
+    const group = screen.getByRole('group', { name: '风格预设' });
+    expect((within(group).getByRole('radio', { name: /真人写实/ }) as HTMLInputElement).checked).toBe(true);
+    expect(within(group).getAllByRole('radio')).toHaveLength(6);
+    expect(within(group).getByText(/赛璐璐/)).toBeTruthy();
+    // 推荐的引擎不可用（gpt_image 没启用）：不动原来的选择
+    await waitFor(() => expect(calls.some((c) => c.url.endsWith('/api/style-presets'))).toBe(true));
+    await user.click(within(group).getByRole('radio', { name: /商业广告/ }));
+    expect((screen.getByLabelText('图像引擎') as HTMLSelectElement).value).toBe('zimage');
+    await user.click(within(group).getByRole('radio', { name: /日系动漫/ }));
+    expect((screen.getByLabelText('图像引擎') as HTMLSelectElement).value).toBe('h3_image');
+    expect((screen.getByLabelText('视频引擎') as HTMLSelectElement).value).toBe('wan22_i2v');
+    await user.selectOptions(screen.getByLabelText('视频引擎'), 'h3_video');
+    await user.type(screen.getByLabelText('项目标题'), '动漫');
+    await user.click(screen.getByRole('button', { name: '创建项目' }));
+    await waitFor(() => expect(where()).toBe('/projects/动漫'));
+    expect(calls.find((c) => c.method === 'POST')?.body).toEqual({
+      title: '动漫', aspect: '9:16', image_engine: 'h3_image', video_engine: 'h3_video', style_preset: 'anime',
+    });
+  });
+
+  it('项目设置：改风格预设，提示要重新生成剧本才会按新预设写', async () => {
+    const calls = installFetch({
+      'GET /api/projects': [makeProject()],
+      'GET /api/projects/demo/overview': { episode_count: 0, cover_url: null, episodes: [] },
+      'PATCH /api/projects/demo': makeProject({ style_preset: 'guofeng' }),
+    });
+    renderAt(<ProjectsPage />, { route: '/', path: '/' });
+    const user = userEvent.setup();
+    const card = await screen.findByTestId('project-demo');
+    expect(card.textContent).toContain('真人写实');
+    await user.click(within(card).getByRole('button', { name: '更多操作 demo' }));
+    await user.click(screen.getByRole('menuitem', { name: '项目设置' }));
+    const dialog = screen.getByRole('dialog', { name: '项目设置' });
+    const save = within(dialog).getByRole('button', { name: '保存' }) as HTMLButtonElement;
+    expect(save.disabled).toBe(true);
+    expect(within(dialog).queryByRole('note')).toBeNull();
+    await user.click(within(dialog).getByRole('radio', { name: /国风漫画/ }));
+    expect(within(dialog).getByRole('note').textContent).toContain('重新生成剧本');
+    await user.click(save);
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({ style_preset: 'guofeng' });
   });
 
   it('新建项目：引擎默认按设置页「新项目的图片/视频来源」；设置没加载完不能提交', async () => {

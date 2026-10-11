@@ -3,6 +3,22 @@
 
 export type Aspect = '9:16' | '16:9';
 
+/** 风格预设（backend/domain/style_presets.py） */
+export type StylePresetKey = 'live_action' | 'cg_realistic' | 'anime' | 'guofeng' | 'western_comic' | 'commercial';
+
+/** GET /api/style-presets 的一项：image_engine / video_engine 是推荐引擎里第一个可用的（只是建议） */
+export interface StylePreset {
+  key: StylePresetKey;
+  label: string;
+  description: string;
+  negative: string;
+  image_engines: string[];
+  video_engines: string[];
+  has_storyboard_guidance: boolean;
+  image_engine: string | null;
+  video_engine: string | null;
+}
+
 export interface Project {
   id: number;
   slug: string;
@@ -12,6 +28,8 @@ export interface Project {
   video_engine: string;
   seed: number;
   negative: string;
+  /** 风格预设；老项目是 live_action（真人写实） */
+  style_preset: StylePresetKey;
   style_bible_id: number | null;
   /** 归档了的项目默认不在项目中心显示（GET /api/projects?archived=1 才带上） */
   archived: boolean;
@@ -22,6 +40,8 @@ export interface Project {
 export interface ProjectPatch {
   title?: string;
   archived?: boolean;
+  /** 改风格预设：负面词还是旧预设的默认值时跟着换；风格锚和外观要重新生成视觉设定才变 */
+  style_preset?: StylePresetKey;
 }
 
 export interface ProjectIn {
@@ -30,6 +50,7 @@ export interface ProjectIn {
   aspect: Aspect;
   image_engine: string;
   video_engine: string;
+  style_preset: StylePresetKey;
 }
 
 export interface EngineRow {
