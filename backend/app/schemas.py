@@ -335,6 +335,28 @@ class CandidateOut(ORM):
     created_at: datetime
 
 
+class ArchivedCandidateOut(ORM):
+    """历史候选：重跑分镜删掉的镜头留下的首帧/视频候选。"""
+    id: int
+    episode_id: int
+    shot_code: str
+    kind: str
+    file_path: str
+    url: str = ""
+    engine: str
+    params: dict
+    note: str
+    was_selected: bool
+    shot_snapshot: dict
+    reason: str
+    created_at: datetime
+    archived_at: datetime
+
+
+class RestoreArchivedIn(BaseModel):
+    shot_id: int
+
+
 class ExportOut(ORM):
     id: int
     episode_id: int

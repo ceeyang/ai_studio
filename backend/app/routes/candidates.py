@@ -3,13 +3,16 @@ from __future__ import annotations
 
 import json
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
+from sqlalchemy import select as sa_select
 
 from backend.app.deps import get_or_404, services
-from backend.app.schemas import CandidateOut, CandidatePatch, SlotOut
-from backend.app.views import candidate_out
-from backend.domain.models import Candidate
+from backend.app.schemas import (ArchivedCandidateOut, CandidateOut, CandidatePatch, RestoreArchivedIn,
+                                 SlotOut)
+from backend.app.views import archived_out, candidate_out
+from backend.domain.archive import restore_archived
+from backend.domain.models import ArchivedCandidate, Candidate, Episode
 from backend.domain.slots import select_candidate, slots_for
 from backend.engines.comfyui.errors import ComfyError
 from backend.engines.comfyui.export_ui import info_lookup, to_ui_graph
@@ -71,6 +74,36 @@ def comfy_workflow(candidate_id: int, request: Request):
     graph = to_ui_graph(api_wf, info_lookup(info))
     name = f"{engine}_{candidate_id}.json"
     return JSONResponse(graph, headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
+# ------------------------------------------------------------ 历史候选
+@router.get("/api/episodes/{episode_id}/archived-candidates",
+            response_model=list[ArchivedCandidateOut])
+def list_archived(episode_id: int, request: Request, kind: str | None = None):
+    """重跑分镜删掉的镜头留下的候选，新归档的在前。kind 只看首帧（first_frame）或视频（video）。"""
+    with services(request).db.session() as s:
+        get_or_404(s, Episode, episode_id, "剧集")
+        q = sa_select(ArchivedCandidate).where(ArchivedCandidate.episode_id == episode_id)
+        if kind:
+            q = q.where(ArchivedCandidate.kind == kind)
+        rows = s.scalars(q.order_by(ArchivedCandidate.archived_at.desc(),
+                                    ArchivedCandidate.id.desc()))
+        return [archived_out(a) for a in rows]
+
+
+@router.post("/api/archived-candidates/{archived_id}/restore", response_model=CandidateOut)
+def restore(archived_id: int, body: RestoreArchivedIn, request: Request):
+    """恢复到这个镜头同类槽位上（槽位还没选定时就选它），并从历史候选里去掉。"""
+    with services(request).db.session() as s:
+        return candidate_out(restore_archived(s, archived_id, body.shot_id))
+
+
+@router.delete("/api/archived-candidates/{archived_id}", status_code=204)
+def purge_archived(archived_id: int, request: Request):
+    """从历史候选里删掉这条记录（媒体文件留在磁盘上）。"""
+    with services(request).db.session() as s:
+        s.delete(get_or_404(s, ArchivedCandidate, archived_id, "历史候选"))
+    return Response(status_code=204)
 
 
 @router.get("/media/{path:path}")

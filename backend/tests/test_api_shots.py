@@ -135,6 +135,12 @@ def test_deleted_shot_slots_not_inherited(api):
     new = api.post(f"/api/episodes/{ep_id}/shots", json={"action": "新镜头"}).json()
     assert new["id"] not in ids
     assert new["slots"] == []
+    # 手动删的镜头，候选也进「历史候选」，可以恢复到新镜头上
+    arch = api.get(f"/api/episodes/{ep_id}/archived-candidates").json()
+    assert sorted(a["kind"] for a in arch) == ["first_frame", "video"]
+    assert all(a["reason"] == "delete_shot" for a in arch)
+    r = api.post(f"/api/archived-candidates/{arch[0]['id']}/restore", json={"shot_id": new["id"]})
+    assert r.status_code == 200
 
 
 def test_episode_and_project_delete_drop_slots(api):

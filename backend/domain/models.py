@@ -192,6 +192,28 @@ class Candidate(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
+class ArchivedCandidate(Base):
+    """历史候选：重跑分镜删掉镜头时，它槽位里的候选挪到这里（镜头行已经删了，所以带上镜头当时的快照），
+    界面上可以恢复到同一集的别的镜头上。媒体文件一直在磁盘上。"""
+    __tablename__ = "archived_candidates"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(Integer)
+    episode_id: Mapped[int] = mapped_column(ForeignKey("episodes.id", ondelete="CASCADE"),
+                                            index=True)
+    shot_code: Mapped[str] = mapped_column(String(16), default="")
+    kind: Mapped[str] = mapped_column(String(32))
+    file_path: Mapped[str] = mapped_column(String(500))
+    engine: Mapped[str] = mapped_column(String(40), default="")
+    params: Mapped[dict] = mapped_column(JSON, default=dict)
+    input_hash: Mapped[str] = mapped_column(String(64), default="")
+    note: Mapped[str] = mapped_column(Text, default="")
+    was_selected: Mapped[bool] = mapped_column(Boolean, default=False)
+    shot_snapshot: Mapped[dict] = mapped_column(JSON, default=dict)
+    reason: Mapped[str] = mapped_column(String(40), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    archived_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
 class PromptVersion(Base):
     __tablename__ = "prompt_versions"
     id: Mapped[int] = mapped_column(primary_key=True)

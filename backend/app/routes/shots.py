@@ -6,10 +6,10 @@ from fastapi import APIRouter, Request, Response
 from backend.app.deps import check_engines, get_or_404, manager, read_upload, services
 from backend.app.schemas import ReorderIn, ShotDetail, ShotFields, ShotIn, ShotOut
 from backend.app.views import shot_detail
+from backend.domain.archive import archive_and_delete_slots
 from backend.domain.models import Episode, Shot
 from backend.domain.refs import add_shot_ref, remove_shot_ref
 from backend.domain.shots import renumber_shots
-from backend.domain.slots import delete_slots
 from backend.queue.errors import JobError
 
 router = APIRouter(prefix="/api", tags=["shots"])
@@ -91,7 +91,7 @@ def delete_shot(shot_id: int, request: Request):
     with services(request).db.session() as s:
         shot = get_or_404(s, Shot, shot_id, "镜头")
         ep_id = shot.episode_id
-        delete_slots(s, "shot", [shot.id])
+        archive_and_delete_slots(s, [shot.id], "delete_shot")   # 候选进「历史候选」
         s.delete(shot)
         s.flush()
         renumber_shots(s, ep_id)
