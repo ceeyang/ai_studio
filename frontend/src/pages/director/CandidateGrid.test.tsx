@@ -106,6 +106,9 @@ describe('CandidateGrid', () => {
     render(<CandidateGrid slot={slot} onSelect={() => {}} />);
     const bad = within(screen.getByTestId('candidate-301')).getByText('疑似跳切');
     expect(bad.getAttribute('title')).toBe('疑似跳切：2.0s 处画面突变');
+    // 说明不只在悬停提示里：抽屉里直接写出来
+    expect(within(screen.getByTestId('candidate-301')).getByRole('note').textContent).toBe('疑似跳切：2.0s 处画面突变');
+    expect(within(screen.getByTestId('candidate-302')).queryByRole('note')).toBeNull();
     expect(within(screen.getByTestId('candidate-302')).queryByText('疑似跳切')).toBeNull();
   });
 });

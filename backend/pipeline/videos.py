@@ -99,7 +99,13 @@ def run_video(ctx, payload: dict) -> dict:
         raise JobError(f"镜头 {code} 没有产出视频文件：{[f.name for f in files]}")
     dst = sv.media.new_media_path(slug, "video", video.suffix)
     shutil.copyfile(video, dst)
-    qc = scene_qc(ctx, sv, dst, code)
+    canceled: JobCanceled | None = None
+    try:
+        qc = scene_qc(ctx, sv, dst, code)
+    except JobCanceled as e:
+        # 视频已经出好了：先登记成候选（没做自检），再把取消报上去，GPU 的活不白干
+        qc, canceled = None, e
+        ctx.log(f"视频 {code}：跳切检测时任务被取消，视频先登记成候选（没做跳切自检）")
     with sv.db.session() as s:
         slot = get_or_create_slot(s, "shot", shot_id, "video")
         params = {**call.meta, "first_frame_candidate_id": ff.id,
@@ -113,6 +119,8 @@ def run_video(ctx, payload: dict) -> dict:
         if qc and qc["hard_cuts"]:
             c.note = cut_note(qc["hard_cuts"])
         cid = c.id
+    if canceled is not None:
+        raise canceled
     out = {"candidate_ids": [cid], "file": sv.media.rel(dst)}
     if qc is not None:
         out["qc"] = qc

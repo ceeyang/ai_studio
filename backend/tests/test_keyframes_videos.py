@@ -344,3 +344,20 @@ def test_video_qc_failure_does_not_fail_job(tmp_path, db):
         v = selected_candidate(s, "shot", shot_id, "video")
         assert v.note == "" and "qc" not in v.params
     assert any("跳切检测没跑成" in m for m in ctx.logs)
+
+
+def test_video_cancel_during_scene_check_still_registers_candidate(tmp_path, db):
+    """视频已经出好、在做跳切检测时被取消：GPU 的活不能白干，先把视频登记成候选再报取消。"""
+    from backend.queue.errors import JobCanceled
+
+    ctx, runner, shot_id = setup(tmp_path, db)
+    ctx.services.ffmpeg = CutFFmpeg(fail=JobCanceled())
+    run_keyframe(ctx, {"shot_id": shot_id})
+    with pytest.raises(JobCanceled):
+        run_video(ctx, {"shot_id": shot_id})
+    with db.session() as s:
+        video_slot = next(sl for sl in slots_for(s, "shot", shot_id) if sl.kind == "video")
+        assert len(video_slot.candidates) == 1
+        c = video_slot.candidates[0]
+        assert "qc" not in c.params and ctx.services.media.abs(c.file_path).exists()
+    assert any("跳切检测时任务被取消" in m for m in ctx.logs)

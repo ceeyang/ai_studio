@@ -96,9 +96,15 @@ export function CandidateGrid({ slot, onSelect, selecting = false }: CandidateGr
               <span>{engineLabel(c.engine)}</span>
               <span className="muted">{fmtTime(c.created_at)}</span>
               {isVideo && hardCuts(c).length > 0 && (
-                <span className="badge warn" title={cutTip(c)}>
-                  疑似跳切
-                </span>
+                <>
+                  <span className="badge warn" title={cutTip(c)}>
+                    疑似跳切
+                  </span>
+                  {/* 说明直接写出来（悬停提示在触屏上看不到，也容易被忽略） */}
+                  <span className="cand-warn" role="note">
+                    {cutTip(c)}
+                  </span>
+                </>
               )}
               {selected ? (
                 <span className="badge ok">已选定</span>
