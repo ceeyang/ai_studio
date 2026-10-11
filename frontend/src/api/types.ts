@@ -229,15 +229,34 @@ export interface ApiService {
   llm_provider: string;
   engines: string[];
   last_test?: { ok: boolean; message: string } | null;
+  /** 区域（火山方舟、可灵：国内 / 海外），决定默认 Base URL；没有区域选项的服务是空列表 / null */
+  regions?: ApiRegion[];
+  region?: string | null;
+  /** 除了 API Key 还收 AccessKey + SecretKey（可灵）；env_aksk 是两个环境变量名 */
+  aksk?: boolean;
+  env_aksk?: string[];
+  /** 现在生效的认证方式：api_key / aksk（AK/SK 签名）；没配是 null */
+  auth?: 'api_key' | 'aksk' | null;
+  has_saved_aksk?: boolean;
 }
 
-/** PUT /api/api-services/{id}：api_key 空 / 不传 = 不改；clear_key 删掉设置页存的 Key；
- *  base_url 空串 = 恢复默认；models 里空串 = 恢复默认 */
+export interface ApiRegion {
+  id: string;
+  label: string;
+  base_url: string;
+}
+
+/** PUT /api/api-services/{id}：api_key 空 / 不传 = 不改；clear_key 删掉设置页存的所有 Key（含 AK/SK）；
+ *  base_url 空串 = 恢复默认；models 里空串 = 恢复默认；region 空串 = 恢复默认（国内）；
+ *  access_key / secret_key 只有可灵收，要配对 */
 export interface ApiServiceIn {
   api_key?: string;
   clear_key?: boolean;
   base_url?: string;
   models?: Partial<Record<ApiModelKind, string>>;
+  region?: string;
+  access_key?: string;
+  secret_key?: string;
 }
 
 export interface ApiTestOut {

@@ -5,8 +5,8 @@
 - 先 add（发请求前，带上提示词、参数），出结果后 update（回复、耗时、产物），任务跑着时就能看到发了什么。
 - 写库照 append_log 的做法：处理器常在自己没提交的写事务里调用，这时另开连接写库会被自己的写锁卡到
   busy_timeout 报 database is locked，所以用 db.after_session 等这个线程的会话结束后再写。
-- 敏感信息：键名像 api_key / authorization 的值、已配置的 API Key 原文、像 sk-… / AIza… 的串一律换成掩码
-  （复用 API 服务的 mask）。请求头不记。
+- 敏感信息：键名像 api_key / authorization / secret_key 的值、已配置的 API Key（含可灵 AccessKey / SecretKey）
+  原文、像 sk-… / AIza… / JWT（eyJ….eyJ….…）的串一律换成掩码（复用 API 服务的 mask）。请求头不记。
 - 单个字段超过 FIELD_LIMIT 字符：全文落盘到 <data_dir>/jobs/<job_id>/，记录里只留开头一段并注明文件名。
 - 记录失败只写服务日志，绝不影响任务本身。
 """
@@ -33,10 +33,11 @@ TRACE_DIR = "jobs"
 _current: contextvars.ContextVar[JobTracer | None] = contextvars.ContextVar("job_tracer", default=None)
 
 SECRET_FIELD = re.compile(r"^(api[_-]?key|apikey|x-api-key|x-goog-api-key|authorization|"
-                          r"proxy-authorization|secret|client[_-]?secret|password|passwd|"
+                          r"proxy-authorization|secret|client[_-]?secret|secret[_-]?key|access[_-]?key|password|passwd|"
                           r"access[_-]?token|refresh[_-]?token|bearer|cookie|set-cookie|headers)$", re.I)
 SECRET_VALUE = re.compile(r"(sk-[A-Za-z0-9_\-]{16,}|AIza[0-9A-Za-z_\-]{30,}|"
-                          r"Bearer\s+[A-Za-z0-9._\-]{16,})")
+                          r"Bearer\s+[A-Za-z0-9._\-]{16,}|"
+                          r"eyJ[A-Za-z0-9_\-]{8,}\.eyJ[A-Za-z0-9_\-]{8,}\.[A-Za-z0-9_\-]{8,})")
 
 
 def _mask(key: str) -> str:
@@ -88,9 +89,7 @@ def collect_secrets(services: Any) -> list[str]:
         try:
             from backend.domain.api_keys import SERVICES
             for sid in SERVICES:
-                k = keys.resolve(sid).api_key
-                if k:
-                    out.append(k)
+                out.extend(keys.resolve(sid).secrets())
         except Exception as e:  # 读不到 Key 不影响任务
             log.debug("读 API Key 失败：%s", e)
     try:

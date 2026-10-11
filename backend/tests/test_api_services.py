@@ -25,7 +25,8 @@ from backend.queue.errors import JobCanceled
 
 KEY = "sk-test-SECRET-1234567890abcd"
 GKEY = "AIzaSECRETgeminikey9876"
-ENVS = ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY", "OPENAI_BASE_URL",
+ENVS = ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY", "OPENAI_BASE_URL", "ARK_API_KEY",
+        "KLING_API_KEY", "KLING_ACCESS_KEY", "KLING_SECRET_KEY", "ARK_BASE_URL", "KLING_BASE_URL",
         "ANTHROPIC_BASE_URL")
 
 
@@ -117,7 +118,7 @@ def test_public_has_only_mask(db):
 def test_api_routes_never_return_key(api):
     r = api.get("/api/api-services")
     rows = {x["id"]: x for x in r.json()["services"]}
-    assert set(rows) == {"openai", "anthropic", "gemini"}
+    assert set(rows) == {"openai", "anthropic", "gemini", "ark", "kling"}
     assert rows["openai"]["configured"] is False and rows["openai"]["masked"] is None
     r = api.put("/api/api-services/openai", json={"api_key": KEY, "models": {"text": "gpt-5-mini"}})
     assert r.status_code == 200 and KEY not in r.text

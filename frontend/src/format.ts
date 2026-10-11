@@ -57,6 +57,8 @@ export const ENGINE_LABEL: Record<string, string> = {
   gemini_api_image: 'Gemini 图像（API）',
   veo_video: 'Google Veo（API · 有声）',
   sora_video: 'OpenAI Sora（API · 有声）',
+  seedance_video: 'Seedance（火山方舟 API · 有声）',
+  kling_video: '可灵（API · 有声）',
   // 不是引擎：候选的来源
   upload: '上传',
   continue: '接上一镜尾帧',

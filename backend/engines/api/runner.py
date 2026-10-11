@@ -12,8 +12,18 @@
   （同一个域名才带 Key 头）。
 - Sora：POST {base}/videos（multipart：model、prompt、seconds、size、input_reference=首帧，首帧先裁缩到 size），
   轮询 GET {base}/videos/{id} 到 status=completed，下载 GET {base}/videos/{id}/content。
+- Seedance（火山方舟）：POST {base}/contents/generations/tasks（JSON：model、content = 文本 + image_url
+  （首帧 role=first_frame、尾帧 role=last_frame，data URI）、ratio、duration、resolution、generate_audio、
+  watermark=false），轮询 GET {base}/contents/generations/tasks/{id} 到 succeeded / failed / expired，
+  马上下载 content.video_url（24 小时有效，CDN 地址，不带 Key）。
+- 可灵：POST {base}/v1/videos/image2video（JSON：model_name、image / image_tail 是不带 data: 前缀的 base64、
+  prompt、negative_prompt、mode、duration、sound），轮询 GET {base}/v1/videos/image2video/{task_id} 到
+  task_status = succeed / failed（原因在 task_status_msg），下载 data.task_result.videos[0].url。
+  业务错误看响应顶层 code（≠ 0 就是错，HTTP 200 也可能是错）。
+  细节和核对情况见 engines.py 里 SeedanceEngine / KlingEngine 的 docstring。
 
-Key 每次现读（creds 回调），只放请求头；workflow.api.json / call.json 里没有 Key；错误信息都 scrub 过。
+Key 每次现读（creds 回调），只放请求头；可灵 AK/SK 的 JWT 每个请求现签（api_http.KlingJwtAuth），
+也只在请求头里。workflow.api.json / call.json 里没有 Key / SecretKey / JWT；错误信息都 scrub 过。
 """
 from __future__ import annotations
 
@@ -32,13 +42,20 @@ from PIL import Image
 from backend.domain.api_keys import SERVICES, Creds, MissingKey, env_creds, scrub
 from backend.engines.base import EngineCall
 from backend.engines.browser.runner import crop_to_aspect
-from backend.llm.api_http import client, http_error_text, transport_error_text
+from backend.llm.api_http import client, http_error_text, transport_error_text, vendor_hint
 from backend.llm.base import image_media_type
 from backend.queue.errors import JobCanceled
 
 EXT = {"image/png": ".png", "image/jpeg": ".jpg", "image/webp": ".webp", "video/mp4": ".mp4"}
 POLL_RETRIES = 3
 SORA_STATE = {"queued": "排队中", "in_progress": "生成中", "completed": "完成", "failed": "失败"}
+SEEDANCE_STATE = {"queued": "排队中", "running": "生成中", "succeeded": "完成", "failed": "失败",
+                  "expired": "超时过期", "cancelled": "已取消"}
+SEEDANCE_DONE = ("succeeded", "failed", "expired", "cancelled")
+KLING_STATE = {"submitted": "已提交", "processing": "生成中", "succeed": "完成", "failed": "失败"}
+KLING_PROMPT_MAX = 2500
+# 可灵失败原因（task_status_msg）里出现这些词时按内容审核说明
+MODERATION_WORDS = ("risk", "sensitive", "moderation", "安全", "审核", "违规", "敏感")
 
 
 class ApiError(RuntimeError):
@@ -103,7 +120,7 @@ class ApiRunner:
             d = r.json()
         except ValueError:
             raise ApiError(scrub(f"{SERVICES[c.service].vendor} 返回的不是 JSON：{r.text[:300]}",
-                                 c.api_key)) from None
+                                 *c.secrets())) from None
         return d if isinstance(d, dict) else {}
 
     def _download(self, c: Creds, http: httpx.Client, url: str) -> bytes:
@@ -152,6 +169,10 @@ class ApiRunner:
             return [self._veo(req, run_dir, cancel, emit, on_progress)]
         elif (service, op) == ("openai", "video"):
             return [self._sora(req, run_dir, cancel, emit, on_progress)]
+        elif (service, op) == ("ark", "video"):
+            return [self._seedance(req, run_dir, cancel, emit, on_progress)]
+        elif (service, op) == ("kling", "video"):
+            return [self._kling(req, run_dir, cancel, emit, on_progress)]
         else:
             raise ApiError(f"不认识的 API 调用：{service} / {op}")
         return self._save_images(imgs, run_dir, service, req.get("aspect"),
@@ -296,7 +317,7 @@ class ApiRunner:
             op = self._json(c, r)
             name = op.get("name")
             if not name:
-                raise ApiError(f"Veo 没有返回任务名：{scrub(str(op)[:300], c.api_key)}")
+                raise ApiError(f"Veo 没有返回任务名：{scrub(str(op)[:300], *c.secrets())}")
             emit(f"Veo 任务已提交：{model} · {req.get('aspect')}"
                  f"{' · ' + str(params['durationSeconds']) + ' 秒' if 'durationSeconds' in params else ''}")
             seen = {"t": time.monotonic()}
@@ -311,7 +332,7 @@ class ApiRunner:
                            label="Veo 任务", on_state=state)
             if d.get("error"):
                 e = d["error"]
-                raise ApiError(scrub(f"Veo 生成失败：{e.get('message') or e}", c.api_key))
+                raise ApiError(scrub(f"Veo 生成失败：{e.get('message') or e}", *c.secrets()))
             resp = (d.get("response") or {}).get("generateVideoResponse") or d.get("response") or {}
             samples = resp.get("generatedSamples") or resp.get("generatedVideos") or []
             uri = None
@@ -352,7 +373,7 @@ class ApiRunner:
             job = self._json(c, r)
             vid = job.get("id")
             if not vid:
-                raise ApiError(f"Sora 没有返回任务 id：{scrub(str(job)[:300], c.api_key)}")
+                raise ApiError(f"Sora 没有返回任务 id：{scrub(str(job)[:300], *c.secrets())}")
             emit(f"Sora 任务 {vid} 已提交：{model} · {size} · {data.get('seconds', '?')} 秒")
             last = {"status": None}
 
@@ -370,8 +391,131 @@ class ApiRunner:
             if d.get("status") != "completed":
                 err = d.get("error") or {}
                 msg = err.get("message") if isinstance(err, dict) else err
-                raise ApiError(scrub(f"Sora 生成失败（{d.get('status')}）：{msg or '没有给原因'}", c.api_key))
+                raise ApiError(scrub(f"Sora 生成失败（{d.get('status')}）：{msg or '没有给原因'}", *c.secrets()))
             r = self._send(c, http, "GET", f"/videos/{vid}/content")
         dst = run_dir / "sora_00.mp4"
         dst.write_bytes(r.content)
+        return dst
+
+    # ------------------------------------------------------------ Seedance（火山方舟）
+    def _seedance(self, req: dict, run_dir: Path, cancel, emit, on_progress) -> Path:
+        c = self.creds("ark")
+        model = req["model"]
+        content: list[dict] = [{"type": "text", "text": req["prompt"]}]
+        for role, key in (("first_frame", "first_frame"), ("last_frame", "end_frame")):
+            if req.get(key):
+                mt, data = _b64_file(Path(req[key]))
+                content.append({"type": "image_url", "image_url": {"url": f"data:{mt};base64,{data}"},
+                                "role": role})
+        body: dict = {"model": model, "content": content, "ratio": req.get("aspect"), "watermark": False}
+        if req.get("seconds"):
+            body["duration"] = int(req["seconds"])
+        if req.get("resolution"):
+            body["resolution"] = req["resolution"]
+        if req.get("generate_audio") is not None:
+            body["generate_audio"] = bool(req["generate_audio"])
+        timeout = float(req.get("timeout") or 1200)
+        with self._http(c, 120.0) as http:
+            r = self._send(c, http, "POST", "/contents/generations/tasks", model=model, json=body)
+            job = self._json(c, r)
+            tid = job.get("id")
+            if not tid:
+                raise ApiError(f"Seedance 没有返回任务 id：{scrub(str(job)[:300], *c.secrets())}")
+            emit(f"Seedance 任务 {tid} 已提交：{model} · {body['ratio']} · {body.get('duration', '?')} 秒"
+                 f"{' · ' + body['resolution'] if body.get('resolution') else ''}"
+                 f"{' · 有声' if body.get('generate_audio') else ''}"
+                 f"{' · 带尾帧' if req.get('end_frame') else ''}")
+            last = {"status": None}
+
+            def state(d):
+                st = d.get("status")
+                if st != last["status"]:
+                    last["status"] = st
+                    emit(f"Seedance 任务 {tid}：{SEEDANCE_STATE.get(st, st)}")
+
+            d = self._poll(c, lambda: self._json(c, self._send(c, http, "GET", f"/contents/generations/tasks/{tid}")),
+                           lambda d: d.get("status") in SEEDANCE_DONE, cancel=cancel, timeout=timeout,
+                           label=f"Seedance 任务 {tid}", on_state=state)
+            if d.get("status") != "succeeded":
+                err = d.get("error") or {}
+                code = err.get("code") if isinstance(err, dict) else None
+                msg = err.get("message") if isinstance(err, dict) else err
+                hint = vendor_hint("ark", str(code) if code else None)
+                why = "；".join(x for x in (hint, f"{msg}（{code}）" if code and msg else (msg or code)) if x)
+                raise ApiError(scrub(f"Seedance 生成失败（{SEEDANCE_STATE.get(d.get('status'), d.get('status'))}）："
+                                     f"{why or '没有给原因'}", *c.secrets()))
+            url = (d.get("content") or {}).get("video_url")
+            if not url:
+                raise ApiError("Seedance 任务完成了，但没有返回视频地址")
+            emit("Seedance 完成，下载视频（地址 24 小时内有效）")
+            data = self._download(c, http, url)
+        if on_progress:
+            on_progress(100, 100)
+        dst = run_dir / "seedance_00.mp4"
+        dst.write_bytes(data)
+        return dst
+
+    # ------------------------------------------------------------ 可灵
+    def _kling_data(self, c: Creds, r: httpx.Response, model: str | None = None) -> dict:
+        """可灵的响应：{code, message, data}；code ≠ 0 是业务错误（HTTP 200 也可能是）。返回 data。"""
+        d = self._json(c, r)
+        if d.get("code") not in (None, 0, "0"):
+            raise ApiError(http_error_text("kling", r, c, model))
+        data = d.get("data")
+        return data if isinstance(data, dict) else {}
+
+    def _kling(self, req: dict, run_dir: Path, cancel, emit, on_progress) -> Path:
+        c = self.creds("kling")
+        model = req["model"]
+        _, first = _b64_file(Path(req["first_frame"]))
+        body: dict = {"model_name": model, "image": first, "prompt": req["prompt"][:KLING_PROMPT_MAX],
+                      "mode": req.get("mode") or "std"}
+        if req.get("end_frame"):
+            body["image_tail"] = _b64_file(Path(req["end_frame"]))[1]
+        if req.get("negative"):
+            body["negative_prompt"] = req["negative"][:KLING_PROMPT_MAX]
+        if req.get("seconds"):
+            body["duration"] = str(int(req["seconds"]))
+        if req.get("sound"):
+            body["sound"] = req["sound"]
+        if req.get("cfg_scale") is not None:
+            body["cfg_scale"] = float(req["cfg_scale"])
+        timeout = float(req.get("timeout") or 1200)
+        with self._http(c, 120.0) as http:
+            r = self._send(c, http, "POST", "/v1/videos/image2video", model=model, json=body)
+            job = self._kling_data(c, r, model)
+            tid = job.get("task_id")
+            if not tid:
+                raise ApiError(f"可灵没有返回任务 id：{scrub(str(job)[:300], *c.secrets())}")
+            if req.get("mode_forced"):
+                emit(f"可灵：{req['mode_forced']}，这次用 pro")
+            emit(f"可灵任务 {tid} 已提交：{model} · {body['mode']} · {body.get('duration', '?')} 秒"
+                 f"{' · 有声' if body.get('sound') == 'on' else ''}{' · 带尾帧' if 'image_tail' in body else ''}")
+            last = {"status": None}
+
+            def state(d):
+                st = d.get("task_status")
+                if st != last["status"]:
+                    last["status"] = st
+                    emit(f"可灵任务 {tid}：{KLING_STATE.get(st, st)}")
+
+            d = self._poll(c, lambda: self._kling_data(c, self._send(c, http, "GET", f"/v1/videos/image2video/{tid}")),
+                           lambda d: d.get("task_status") in ("succeed", "failed"), cancel=cancel,
+                           timeout=timeout, label=f"可灵任务 {tid}", on_state=state)
+            if d.get("task_status") != "succeed":
+                msg = str(d.get("task_status_msg") or "")
+                hint = ("内容没通过安全审核：改写提示词或换首帧后重试"
+                        if any(w in msg.lower() for w in MODERATION_WORDS) else None)
+                why = "；".join(x for x in (hint, msg) if x)
+                raise ApiError(scrub(f"可灵生成失败：{why or '没有给原因'}", *c.secrets()))
+            videos = ((d.get("task_result") or {}).get("videos") or [])
+            url = next((v.get("url") for v in videos if isinstance(v, dict) and v.get("url")), None)
+            if not url:
+                raise ApiError("可灵任务完成了，但没有返回视频地址")
+            emit("可灵完成，下载视频")
+            data = self._download(c, http, url)
+        if on_progress:
+            on_progress(100, 100)
+        dst = run_dir / "kling_00.mp4"
+        dst.write_bytes(data)
         return dst
