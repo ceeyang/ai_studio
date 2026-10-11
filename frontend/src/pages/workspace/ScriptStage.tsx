@@ -298,7 +298,9 @@ export function ScriptStage({
       if (!im.will_run) {
         notice.info(
           im.rules_outdated
-            ? '输入没变，已经是最新的；分镜规则已更新，要按新规则重出请用「重新生成分镜…」'
+            ? stage === 'script'
+              ? '输入没变，已经是最新的；剧本规则已更新，要按新规则重出请用「重新生成剧本…」'
+              : '输入没变，已经是最新的；分镜规则已更新，要按新规则重出请用「重新生成分镜…」'
             : '输入没变，已经是最新的',
         );
         return;

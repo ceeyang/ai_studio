@@ -13,8 +13,8 @@ from sqlalchemy.orm import Session
 from backend.app.schemas import RerunImpact
 from backend.domain.models import Shot, Slot
 from backend.pipeline.common import check_scene_blocks, clean_note, load_episode
-from backend.pipeline.script import (structure_prompt_fp, visual_chars_and_locations,
-                                     visual_prompt_fp)
+from backend.pipeline.script import (judge_script, structure_inputs, structure_rules,
+                                     visual_chars_and_locations, visual_prompt_fp, visual_rules)
 from backend.pipeline.storyboard import (build_storyboard_plan, edited_shot_ids, judge_block,
                                          storyboard_inputs_fp, storyboard_rules)
 from backend.queue.errors import JobError
@@ -127,14 +127,20 @@ def _episode_edited_ids(s: Session, ep) -> list[int]:
 
 def _script_will_run(s: Session, sv, episode_id: int, force: bool) -> tuple[bool, bool]:
     """(结构会不会重跑, 视觉设定会不会重跑)。"""
+    structure, visual, _ = _script_judge(s, sv, episode_id, force)
+    return structure, visual
+
+
+def _script_judge(s: Session, sv, episode_id: int, force: bool) -> tuple[bool, bool, bool]:
+    """(结构会不会重跑, 视觉设定会不会重跑, 剧本规则是不是更新过)。和 run_script 同一套判断。"""
     ep, proj = load_episode(s, episode_id)
     prompts = sv.prompts(proj.slug)
     stage_hashes = ep.stage_hashes or {}
 
-    _, _, structure_fp = structure_prompt_fp(prompts, proj.title, ep.target_seconds,
-                                             ep.source_text)
-    structure_unchanged = stage_hashes.get("structure") == structure_fp and bool(ep.scene_blocks)
-    structure_will_run = force or not structure_unchanged
+    _, _, structure_fp = structure_inputs(sv, ep, proj)
+    sj = judge_script(stage_hashes.get("structure"), structure_fp, structure_rules(prompts),
+                      bool(ep.scene_blocks))
+    structure_will_run = force or not sj.unchanged
 
     # 注意：这里的角色表/场景表是数据库里现在的样子。如果上面的结构阶段也会重跑，
     # 真正跑的时候结构会先把角色描述/场景氛围改掉，视觉阶段用的就是改过的新值——
@@ -142,14 +148,15 @@ def _script_will_run(s: Session, sv, episode_id: int, force: bool) -> tuple[bool
     chars, locations = visual_chars_and_locations(proj)
     _, _, visual_fp = visual_prompt_fp(prompts, proj.title, chars, locations,
                                        ep.source_text[:4000])
-    visual_unchanged = stage_hashes.get("visual") == visual_fp and bool(proj.style_bible_id)
-    visual_will_run = force or not visual_unchanged
-    return structure_will_run, visual_will_run
+    vj = judge_script(stage_hashes.get("visual"), visual_fp, visual_rules(prompts),
+                      bool(proj.style_bible_id))
+    visual_will_run = force or not vj.unchanged
+    return structure_will_run, visual_will_run, sj.rules_outdated or vj.rules_outdated
 
 
 def _script_impact(s: Session, sv, episode_id: int, force: bool) -> RerunImpact:
     ep, _ = load_episode(s, episode_id)
-    structure_will_run, visual_will_run = _script_will_run(s, sv, episode_id, force)
+    structure_will_run, visual_will_run, outdated = _script_judge(s, sv, episode_id, force)
 
     shot_ids: list[int] = []
     edited: list[int] = []
@@ -169,7 +176,7 @@ def _script_impact(s: Session, sv, episode_id: int, force: bool) -> RerunImpact:
     return RerunImpact(stage="script", will_run=structure_will_run or visual_will_run, blocks=[],
                        shots_deleted=len(shot_ids), selected_first_frames=first_sel,
                        selected_videos=video_sel, manual_kept=_manual_kept(s, episode_id),
-                       overwrites=overwrites, edited_shots=len(edited))
+                       overwrites=overwrites, edited_shots=len(edited), rules_outdated=outdated)
 
 
 def rerun_impact(s: Session, sv, episode_id: int, stage: str, force: bool, *,

@@ -201,7 +201,8 @@ def impact_line(im: dict) -> str:
         if im.get("overwrites"):
             line += f"；会覆盖{'、'.join(im['overwrites'])}"
     if im.get("rules_outdated"):
-        line += "；分镜规则已更新，要按新规则重出请加 --force"
+        what = "剧本" if im.get("stage") == "script" else "分镜"
+        line += f"；{what}规则已更新，要按新规则重出请加 --force"
     return line
 
 

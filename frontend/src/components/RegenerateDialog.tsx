@@ -15,6 +15,7 @@ export function impactLosesWork(im: RerunImpact): boolean {
 }
 
 export const RULES_OUTDATED_NOTE = '分镜规则已更新，现有镜头是按旧规则出的；这次重新生成会按新规则出';
+export const SCRIPT_RULES_OUTDATED_NOTE = '剧本规则已更新，现有剧本是按旧规则出的；这次重新生成会按新规则出';
 
 /** 重跑影响写成一句话：「将重建段落 3、5 的镜头：删除 12 个镜头（其中 8 个有选定视频），保留 2 个手工镜头；会覆盖角色描述、场景氛围」 */
 export function impactText(im: RerunImpact): string {
@@ -135,7 +136,9 @@ function RegenerateDialogBody({
           />
         </label>
         {impactView}
-        {im?.rules_outdated && <p className="muted">{RULES_OUTDATED_NOTE}</p>}
+        {im?.rules_outdated && (
+          <p className="muted">{stage === 'script' ? SCRIPT_RULES_OUTDATED_NOTE : RULES_OUTDATED_NOTE}</p>
+        )}
         {unsavedNote && <p className="warn">{unsavedNote}</p>}
         {error && <p className="error">{error}</p>}
         <div className="modal-foot">

@@ -12,7 +12,8 @@ from backend.domain.models import Episode, Shot
 from backend.domain.shots import renumber_shots
 from backend.domain.slots import delete_slots
 from backend.llm.schemas import StoryboardOut
-from backend.pipeline.common import clean_note, continue_chain, load_episode, render_with_note
+from backend.pipeline.common import (clean_note, continue_chain, load_episode, render_with_note,
+                                     template_rules)
 from backend.queue.errors import JobError
 from backend.queue.handlers import HANDLERS
 
@@ -222,13 +223,7 @@ SHOT_CONTENT_FIELDS = ("shot_size", "camera_move", "action", "dialogue", "cast",
 
 def storyboard_rules(prompts) -> str:
     """这次用的分镜规则：内置模板就是版本号；项目目录里有覆盖模板时再带上覆盖模板的内容哈希。"""
-    source = getattr(prompts, "source", None)
-    if source is None:
-        return str(STORYBOARD_RULES_VERSION)
-    src, overridden = source("storyboard")
-    if not overridden:
-        return str(STORYBOARD_RULES_VERSION)
-    return f"{STORYBOARD_RULES_VERSION}+{input_hash('storyboard-template', src)[:8]}"
+    return template_rules(prompts, "storyboard", STORYBOARD_RULES_VERSION)
 
 
 def storyboard_inputs_fp(anchor, characters, location, text, count, shot_seconds, max_seconds,

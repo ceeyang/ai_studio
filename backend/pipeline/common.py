@@ -42,6 +42,20 @@ def prompt_fp(kind: str, system: str, user: str) -> str:
     return input_hash(kind, system, user)
 
 
+def template_rules(prompts, name: str, version: int) -> str:
+    """这次用的模板规则：内置模板就是版本号；项目目录里有覆盖模板时再带上覆盖模板的内容哈希。
+
+    指纹只算数据，模板文字的变化由这个版本号单独记：版本不同只提示「规则已更新」、不自动重跑——
+    否则每改一次模板，所有剧集下一次整集运行都会重写剧本 / 分镜，删光镜头和选定的首帧、视频。"""
+    source = getattr(prompts, "source", None)
+    if source is None:
+        return str(version)
+    src, overridden = source(name)
+    if not overridden:
+        return str(version)
+    return f"{version}+{input_hash(name + '-template', src)[:8]}"
+
+
 def render_with_note(prompts, name: str, note: str | None, extra_note_vars: dict | None = None,
                      **variables) -> tuple[str, str, str, str]:
     """渲染提示词两遍：不带修改意见的基础版（算指纹用）和这次真正要发的版本（有意见时带上意见和 extra_note_vars）。
