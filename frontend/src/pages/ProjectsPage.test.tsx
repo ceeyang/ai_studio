@@ -455,6 +455,29 @@ describe('ProjectsPage', () => {
     expect(container.querySelector('.stat-tiles')?.textContent).toContain('剧集2');
   });
 
+  it('新建项目：展开「从已有项目导入资产」选了源项目，画幅和预设跟着源项目，提交带上 import_from', async () => {
+    const calls = installFetch({
+      'GET /api/projects': [makeProject({ slug: 's1', title: '第一季', aspect: '16:9', style_preset: 'anime', archived: true })],
+      'GET /api/engines': ENGINES,
+      'POST /api/projects': makeProject({ id: 2, slug: 's2', title: '第二季' }),
+    });
+    renderAt(<ProjectsPage />, { route: '/', path: '/' });
+    const user = userEvent.setup();
+    await user.click((await screen.findAllByRole('button', { name: '新建项目' }))[0]);
+    const dialog = screen.getByRole('dialog', { name: '新建项目' });
+    await user.type(within(dialog).getByLabelText('项目标题'), '第二季');
+    await user.click(await within(dialog).findByText(/从已有项目导入资产/));
+    await user.selectOptions(within(dialog).getByLabelText('源项目'), 's1');
+    expect((within(dialog).getByLabelText('画幅') as HTMLSelectElement).value).toBe('16:9');
+    await user.click(within(dialog).getByRole('checkbox', { name: '道具' }));
+    await user.click(within(dialog).getByRole('button', { name: '创建项目' }));
+    await waitFor(() => expect(where()).toBe('/projects/s2'));
+    const body = calls.find((c) => c.method === 'POST')?.body as Record<string, unknown>;
+    expect(body.aspect).toBe('16:9');
+    expect(body.style_preset).toBe('anime');
+    expect(body.import_from).toEqual({ source: 's1', kinds: ['character', 'location'], with_style: true });
+  });
+
   it('新建项目对话框：Esc 关闭', async () => {
     installFetch({ 'GET /api/projects': [], 'GET /api/engines': ENGINES });
     renderAt(<ProjectsPage />, { route: '/', path: '/' });

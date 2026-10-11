@@ -16,9 +16,10 @@ import {
   useProjects,
   keys,
 } from '../api/queries';
-import type { Aspect, Episode, EpisodeIdeaIn, EpisodeIdeaOut, EpisodeStats, Project, ProjectOverview, StylePresetKey } from '../api/types';
+import type { Aspect, AssetKindKey, Episode, EpisodeIdeaIn, EpisodeIdeaOut, EpisodeStats, Project, ProjectOverview, StylePresetKey } from '../api/types';
 import { useConfirm } from '../components/ConfirmDialog';
 import { Dialog } from '../components/Dialog';
+import { ImportAssetsButton } from '../components/ImportAssetsDialog';
 import { ProjectSettingsDialog } from '../components/ProjectSettingsDialog';
 import { Menu, type MenuItem } from '../components/Menu';
 import { EngineNotes, EngineSelects, useEngineChoice } from '../components/EngineChoice';
@@ -60,6 +61,12 @@ function StatusPill({ status }: { status: string }) {
 
 // ------------------------------------------------------------ 新建项目
 
+const IMPORT_KINDS: [AssetKindKey, string][] = [
+  ['character', '角色'],
+  ['location', '场景'],
+  ['prop', '道具'],
+];
+
 function NewProjectDialog({ onClose }: { onClose: () => void }) {
   const create = useCreateProject();
   const navigate = useNavigate();
@@ -70,10 +77,31 @@ function NewProjectDialog({ onClose }: { onClose: () => void }) {
   const engine = useEngineChoice(preset);
   const { image, video, settingsLoading } = engine;
 
+  // 续季：从已有项目导入资产（折叠起来，不选源项目就和以前一样）
+  const allProjects = useProjects(true);
+  const [importSource, setImportSource] = useState('');
+  const [importKinds, setImportKinds] = useState<AssetKindKey[]>(['character', 'location', 'prop']);
+  const [importStyle, setImportStyle] = useState(true);
+  const chooseImportSource = (slug: string) => {
+    setImportSource(slug);
+    // 续季一般画幅和风格预设都沿用上一季：跟着源项目预选，可以再改
+    const src = (allProjects.data ?? []).find((p) => p.slug === slug);
+    if (src) {
+      setAspect(src.aspect);
+      setPreset(src.style_preset);
+    }
+  };
+  const toggleKind = (k: AssetKindKey) =>
+    setImportKinds((prev) => (prev.includes(k) ? prev.filter((x) => x !== k) : [...prev, k]));
+
   const submit = (e: FormEvent) => {
     e.preventDefault();
+    const import_from =
+      importSource && (importKinds.length > 0 || importStyle)
+        ? { source: importSource, kinds: importKinds, with_style: importStyle }
+        : undefined;
     create.mutate(
-      { title: title.trim(), aspect, image_engine: image, video_engine: video, style_preset: preset },
+      { title: title.trim(), aspect, image_engine: image, video_engine: video, style_preset: preset, import_from },
       { onSuccess: (p) => navigate(`/projects/${enc(p.slug)}`) },
     );
   };
@@ -97,6 +125,44 @@ function NewProjectDialog({ onClose }: { onClose: () => void }) {
           <EngineSelects choice={engine} />
         </div>
         <EngineNotes choice={engine} />
+        {(allProjects.data ?? []).length > 0 && (
+          <details className="new-project-import">
+            <summary>从已有项目导入资产（续季）{importSource ? '：已选' : ''}</summary>
+            <div className="fields">
+              <label className="field">
+                <span>源项目</span>
+                <select value={importSource} onChange={(e) => chooseImportSource(e.target.value)}>
+                  <option value="">不导入</option>
+                  {(allProjects.data ?? []).map((p) => (
+                    <option key={p.slug} value={p.slug}>
+                      {p.title}
+                      {p.archived ? '（已归档）' : ''}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {importSource && (
+                <div className="engine-chips">
+                  {IMPORT_KINDS.map(([k, label]) => (
+                    <label key={k} className="check">
+                      <input type="checkbox" checked={importKinds.includes(k)} onChange={() => toggleKind(k)} />
+                      {label}
+                    </label>
+                  ))}
+                  <label className="check">
+                    <input type="checkbox" checked={importStyle} onChange={(e) => setImportStyle(e.target.checked)} />
+                    沿用源项目的风格设定
+                  </label>
+                </div>
+              )}
+              {importSource && (
+                <p className="muted small">
+                  全部复制过来（每个位置只带选定的那张图），之后两个项目互不影响；要挑着导入，建好后在项目页点「从其他项目导入」。
+                </p>
+              )}
+            </div>
+          </details>
+        )}
         {create.error && <p className="error">{errorText(create.error)}</p>}
         <div className="modal-foot">
           <button type="button" className="ghost" onClick={onClose}>
@@ -527,6 +593,9 @@ function ProjectBible({ slug }: { slug: string }) {
   const st = style.data;
   return (
     <aside className="bible" aria-label="项目设定">
+      <div className="bible-actions">
+        <ImportAssetsButton slug={slug} className="sm ghost" />
+      </div>
       <div className="bible-block">
         <h4>
           角色 <span className="muted">{chars.length}</span>

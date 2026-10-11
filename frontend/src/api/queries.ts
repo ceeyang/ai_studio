@@ -9,6 +9,9 @@ import type {
   AppSettingsIn,
   AutopilotOut,
   ArchivedCandidate,
+  AssetImportIn,
+  AssetImportOut,
+  AssetSummary,
   Bgm,
   BrowserConversations,
   BrowserLoginOut,
@@ -83,6 +86,8 @@ export const keys = {
   // 挂在 ['episode', id] 下：任何任务结束、镜头候选变了都跟着刷新
   assets: (episodeId: number) => ['episode', episodeId, 'assets'] as const,
   style: (slug: string) => ['style', slug] as const,
+  // 导入对话框里列源项目的资产
+  assetSummary: (slug: string) => ['asset-summary', slug] as const,
   endCard: (slug: string) => ['endCard', slug] as const,
   exports: (episodeId: number) => ['exports', episodeId] as const,
   bgm: (episodeId: number) => ['bgm', episodeId] as const,
@@ -384,6 +389,34 @@ export function useCreateProject() {
   return useMutation({
     mutationFn: (body: ProjectIn) => api.post<Project>('/api/projects', body),
     onSuccess: () => invalidate(qc, keys.projects),
+  });
+}
+
+/** 一个项目的全部角色 / 场景 / 道具（带缩略图），导入对话框勾选用；slug 为空时不查 */
+export function useAssetSummary(slug: string) {
+  return useQuery({
+    queryKey: keys.assetSummary(slug),
+    queryFn: () => api.get<AssetSummary>(`/api/projects/${enc(slug)}/asset-summary`),
+    enabled: !!slug,
+  });
+}
+
+/** 从别的项目导入角色 / 场景 / 道具（续季）：本项目的角色、场景、道具、风格都刷新 */
+export function useImportAssets(slug: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: AssetImportIn) => api.post<AssetImportOut>(`/api/projects/${enc(slug)}/import-assets`, body),
+    onSuccess: () =>
+      invalidate(
+        qc,
+        keys.characters(slug),
+        keys.locations(slug),
+        keys.props(slug),
+        keys.style(slug),
+        keys.assetSummary(slug),
+        keys.project(slug),
+        ['episode'],
+      ),
   });
 }
 
