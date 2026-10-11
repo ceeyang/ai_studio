@@ -10,3 +10,6 @@ frontend/test-results/
 frontend/playwright-report/
 .playwright-mcp/
 browser-profile/
+
+# 子代理的隔离工作区
+.claude/worktrees/
