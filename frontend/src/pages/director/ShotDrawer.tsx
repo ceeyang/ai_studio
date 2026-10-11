@@ -6,7 +6,7 @@ import { type DialogueLine, type EngineRow, type ShotDetail, type ShotPatch, TRA
 import { useConfirm } from '../../components/ConfirmDialog';
 import { confirmDiscard } from '../../components/confirmDiscard';
 import { EditableFields, type FieldSpec, type FieldValues, type FieldsState, useUnsavedGuard } from '../../components/EditableFields';
-import { engineLabel } from '../../format';
+import { engineLabel, engineOptionDisabled, engineOptionText } from '../../format';
 import { ArchivedCandidates } from './ArchivedCandidates';
 import { CandidateGrid } from './CandidateGrid';
 import { DialogueEditor } from './DialogueEditor';
@@ -27,7 +27,7 @@ const TEXT_FIELDS = ['action', 'shot_size', 'camera_move', 'image_prompt', 'moti
 /** 留空 = 跟项目的引擎；知道项目现在用哪个时写成「默认（Z-Image 快速）」 */
 function engineOptions(rows: EngineRow[] | undefined, current?: string) {
   const label = current ? `默认（${engineLabel(rows?.find((r) => r.name === current) ?? current)}）` : '项目默认';
-  return [{ value: '', label }, ...(rows ?? []).map((r) => ({ value: r.name, label: engineLabel(r) }))];
+  return [{ value: '', label }, ...(rows ?? []).map((r) => ({ value: r.name, label: engineOptionDisabled(r) ? engineOptionText(r) : engineLabel(r) }))];
 }
 
 function shotFields(

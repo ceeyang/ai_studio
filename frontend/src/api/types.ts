@@ -70,9 +70,15 @@ export interface EngineRow {
   label?: string;
   family: string;
   /** comfyui：本机显卡；browser：驱动已登录的 ChatGPT / Gemini 网页出图（不占显卡、没有种子）；
-   *  runninghub：RunningHub 云端 */
-  runtime?: 'comfyui' | 'browser' | 'runninghub';
+   *  runninghub：RunningHub 云端；api：OpenAI / Gemini 官方 API（Key 在设置页「API 服务」里填） */
+  runtime?: 'comfyui' | 'browser' | 'runninghub' | 'api';
   caps: Record<string, unknown>;
+  /** false：现在提交会被拒绝（比如 API 引擎没配 Key），原因在 note */
+  ready?: boolean;
+  note?: string | null;
+  /** API 引擎：用哪家的 Key（openai / gemini）、现在用的模型名 */
+  service?: string;
+  model?: string;
 }
 
 /** GET /api/settings 的一项：value 是设置值（null = 跟随默认），effective 是现在实际生效的 */
@@ -105,12 +111,16 @@ export interface LlmChoice {
   label: string;
   kind: string;
   model?: string | null;
+  /** false：API 文本模型还没配 Key（下拉里禁用），原因在 note */
+  ready?: boolean;
+  note?: string | null;
+  service?: string;
 }
 
 export interface EngineChoice {
   name: string;
   label: string;
-  runtime: 'comfyui' | 'browser' | 'runninghub';
+  runtime: 'comfyui' | 'browser' | 'runninghub' | 'api';
   family: string;
   enabled: boolean;
   /** false：现在提交会被拒绝（比如 RunningHub 没有 API key），原因在 note */
@@ -126,6 +136,52 @@ export interface AppSettings {
   /** 带了 ?project= 时：图片/视频步骤的生效值按这个项目算 */
   project: string | null;
   choices: { llm: LlmChoice[]; image: EngineChoice[]; video: EngineChoice[] };
+}
+
+/** GET /api/api-services 的一项：一家 API 服务。只有掩码（sk-…abcd），没有明文 Key */
+export type ApiModelKind = 'text' | 'image' | 'video';
+
+export interface ApiModelSetting {
+  value: string | null;
+  effective: string;
+  default: string;
+  label: string;
+  suggestions: string[];
+}
+
+export interface ApiService {
+  id: 'openai' | 'anthropic' | 'gemini' | string;
+  label: string;
+  configured: boolean;
+  /** settings：设置页填的；env：环境变量（env_name）；null：没配 */
+  source: 'settings' | 'env' | null;
+  env_name: string | null;
+  env_keys: string[];
+  masked: string | null;
+  has_saved_key: boolean;
+  base_url: string | null;
+  effective_base_url: string;
+  default_base_url: string;
+  base_hint: string;
+  models: Partial<Record<ApiModelKind, ApiModelSetting>>;
+  llm_provider: string;
+  engines: string[];
+  last_test?: { ok: boolean; message: string } | null;
+}
+
+/** PUT /api/api-services/{id}：api_key 空 / 不传 = 不改；clear_key 删掉设置页存的 Key；
+ *  base_url 空串 = 恢复默认；models 里空串 = 恢复默认 */
+export interface ApiServiceIn {
+  api_key?: string;
+  clear_key?: boolean;
+  base_url?: string;
+  models?: Partial<Record<ApiModelKind, string>>;
+}
+
+export interface ApiTestOut {
+  ok: boolean;
+  message: string;
+  service: ApiService;
 }
 
 /** PUT /api/settings：只传要改的；null = 跟随默认 */

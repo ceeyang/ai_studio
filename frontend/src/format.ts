@@ -47,10 +47,26 @@ export const ENGINE_LABEL: Record<string, string> = {
   gemini_image: 'Gemini 网页',
   h3_video: 'H3 视频（有声）',
   wan22_i2v: 'Wan2.2 图生视频（无声）',
+  // 官方 API（Key 在设置页「API 服务」里填）
+  openai_image: 'OpenAI 图像（API）',
+  gemini_api_image: 'Gemini 图像（API）',
+  veo_video: 'Google Veo（API · 有声）',
+  sora_video: 'OpenAI Sora（API · 有声）',
   // 不是引擎：候选的来源
   upload: '上传',
   continue: '接上一镜尾帧',
 };
+
+/** 下拉框里引擎的写法：API 引擎没配 Key 时后面写明（同时 disabled），别的不可用写「现在不可用」 */
+export function engineOptionText(e: { name: string; runtime?: string; label?: string; ready?: boolean }): string {
+  if (e.ready !== false) return engineLabel(e);
+  return `${engineLabel(e)}${e.runtime === 'api' ? '（先在 API 服务里填 Key）' : '（现在不可用）'}`;
+}
+
+/** 没配 Key 的 API 引擎在下拉框里禁用（别的不可用引擎照旧能选，提交时再报原因） */
+export function engineOptionDisabled(e: { runtime?: string; ready?: boolean }): boolean {
+  return e.runtime === 'api' && e.ready === false;
+}
 
 /** 引擎名字：传 id 或 /api/engines 的一行都行；没见过的用后端给的 label，再回退到 id
  *  （浏览器引擎标上「浏览器」，RunningHub 云端引擎标上「RunningHub 云端」）。 */

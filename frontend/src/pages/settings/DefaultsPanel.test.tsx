@@ -53,6 +53,7 @@ function base(extra: Record<string, unknown> = {}) {
     'GET /api/engines': { image: [], video: [] },
     'GET /api/config': {},
     'GET /api/settings': settings(),
+    'GET /api/api-services': { services: [] },
     ...extra,
   });
 }

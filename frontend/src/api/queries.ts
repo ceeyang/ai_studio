@@ -2,6 +2,9 @@
 import { type QueryClient, type QueryKey, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, enc, request } from './client';
 import type {
+  ApiService,
+  ApiServiceIn,
+  ApiTestOut,
   AppSettings,
   AppSettingsIn,
   ArchivedCandidate,
@@ -76,6 +79,8 @@ export const keys = {
   health: ['health'] as const,
   // 设置页「默认模型」；带项目时图片/视频步骤的生效值按项目算
   settings: (project?: string) => ['settings', project ?? ''] as const,
+  // 设置页「API 服务」：OpenAI / Anthropic / Gemini 的 Key（只有掩码）、Base URL、模型名
+  apiServices: ['apiServices'] as const,
 };
 
 function invalidate(qc: QueryClient, ...list: QueryKey[]): Promise<void[]> {
@@ -278,6 +283,42 @@ export function useSaveSettings() {
       qc.setQueryData(keys.settings(), data);
       return invalidate(qc, ['settings']);
     },
+  });
+}
+
+export function useApiServices() {
+  return useQuery({
+    queryKey: keys.apiServices,
+    queryFn: () => api.get<{ services: ApiService[] }>('/api/api-services'),
+    staleTime: 30000,
+    retry: false,
+  });
+}
+
+function putService(qc: QueryClient, svc: ApiService) {
+  qc.setQueryData<{ services: ApiService[] }>(keys.apiServices, (old) =>
+    old ? { services: old.services.map((s) => (s.id === svc.id ? svc : s)) } : old,
+  );
+}
+
+/** 保存一家 API 服务；Key 变了，文本模型下拉、引擎列表（能不能选）也跟着刷新 */
+export function useSaveApiService() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: ApiServiceIn }) => api.put<ApiService>(`/api/api-services/${enc(id)}`, body),
+    onSuccess: (svc) => {
+      putService(qc, svc);
+      return invalidate(qc, ['settings'], keys.engines);
+    },
+  });
+}
+
+/** 测试连接：调这家最便宜的「列模型」接口 */
+export function useTestApiService() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.post<ApiTestOut>(`/api/api-services/${enc(id)}/test`),
+    onSuccess: (out) => putService(qc, out.service),
   });
 }
 

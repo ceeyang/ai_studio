@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import { errorText } from '../../api/client';
 import { useAppSettings, useSaveSettings } from '../../api/queries';
 import type { AppSettings, AppSettingsIn, EngineChoice, LlmChoice, SettingKind, SettingValue } from '../../api/types';
-import { engineLabel } from '../../format';
+import { engineLabel, engineOptionDisabled, engineOptionText } from '../../format';
 
 /** 设置页「默认模型」：默认文本模型 / 新项目的图片来源 / 新项目的视频来源，按步骤单独设置。
  *  null（空串）= 跟随默认。规则：设置页只管默认，项目和镜头上选的总是优先。 */
@@ -77,8 +77,8 @@ function Options({ kind, data }: { kind: SettingKind; data: AppSettings }) {
     return (
       <>
         {data.choices.llm.map((c) => (
-          <option key={c.id} value={c.id}>
-            {c.label}
+          <option key={c.id} value={c.id} disabled={c.ready === false} title={c.note ?? undefined}>
+            {c.ready === false ? `${c.label}（先在 API 服务里填 Key）` : c.label}
           </option>
         ))}
       </>
@@ -88,8 +88,8 @@ function Options({ kind, data }: { kind: SettingKind; data: AppSettings }) {
   return (
     <>
       {rows.map((e) => (
-        <option key={e.name} value={e.name}>
-          {`${engineLabel(e)}${e.ready ? '' : '（现在不可用）'}`}
+        <option key={e.name} value={e.name} disabled={engineOptionDisabled(e)} title={e.note ?? undefined}>
+          {engineOptionText(e)}
         </option>
       ))}
     </>
@@ -155,7 +155,8 @@ export function DefaultsPanel() {
     save.mutate(patch, { onSuccess: () => setJustSaved(true) });
   };
   const overridden = data.steps.filter((s) => s.value).length;
-  const bad = [...data.choices.image, ...data.choices.video].filter((e) => !e.ready && e.note);
+  // API 引擎没配 Key 不在这里一条条列（下拉里禁用并写明，「API 服务」那块说清楚）
+  const bad = [...data.choices.image, ...data.choices.video].filter((e) => !e.ready && e.note && e.runtime !== 'api');
   const stateText = save.isPending ? '保存中…' : dirty ? '有改动，还没保存' : justSaved ? '已保存，马上生效' : '';
   const nameOf = (kind: SettingKind, id: string | null | undefined) =>
     kind === 'llm' ? llmName(data.choices.llm, id) : engineName(kind === 'image' ? data.choices.image : data.choices.video, id);

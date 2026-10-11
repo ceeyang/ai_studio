@@ -189,7 +189,8 @@ describe('EpisodeWorkspace', () => {
     expect(where()).toBe('/projects/demo/episodes/4?stage=videos&shot=12');
     expect(screen.getByRole('dialog', { name: '镜头 S02 详情' })).toBeTruthy();
     await user.click(within(stageBar()).getByRole('button', { name: /剧本/ }));
-    expect(where()).toBe('/projects/demo/episodes/4?stage=script');
+    // 切阶段要先异步问一下镜头抽屉有没有没保存的修改，满载跑全部测试时地址会晚一拍才变
+    await waitFor(() => expect(where()).toBe('/projects/demo/episodes/4?stage=script'));
     expect(document.querySelector('[role="dialog"]')).toBeNull();
     await user.keyboard('{Escape}');
     expect(screen.queryByRole('dialog')).toBeNull();

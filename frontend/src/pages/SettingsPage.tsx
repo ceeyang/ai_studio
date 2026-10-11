@@ -2,6 +2,7 @@ import { errorText } from '../api/client';
 import { useConfig, useDoctor, useEngines } from '../api/queries';
 import type { DoctorCheck, EngineRow } from '../api/types';
 import { engineLabel } from '../format';
+import { ApiServicesPanel } from './settings/ApiServicesPanel';
 import { BrowserPanel } from './settings/BrowserPanel';
 import { DefaultsPanel } from './settings/DefaultsPanel';
 
@@ -17,10 +18,13 @@ function summary(rows: DoctorCheck[]): string {
 function capsText(kind: 'image' | 'video', e: EngineRow): string {
   const c = e.caps;
   const sizes = Object.keys((c.sizes as Record<string, unknown> | undefined) ?? {}).join(' / ');
+  const api = e.runtime === 'api' ? `${e.model ? ` · 模型 ${e.model}` : ''} · 没有种子，每次结果不同 · 按次计费 · 不占显卡` : '';
   if (kind === 'video') {
-    return `${c.has_audio ? '有声' : '无声'} · ${c.fps} fps · 默认 ${c.default_seconds} 秒 / 最长 ${c.max_seconds} 秒 · 参考图上限 ${c.max_refs}`;
+    const v = `${c.has_audio ? '有声' : '无声'} · ${c.fps} fps · 默认 ${c.default_seconds} 秒 / 最长 ${c.max_seconds} 秒 · 参考图上限 ${c.max_refs}`;
+    return e.runtime === 'api' ? `首帧图生视频 · ${v} · 画幅 ${sizes}${api}` : v;
   }
   const base = `参考图上限 ${c.max_refs} · ${c.supports_negative ? '支持' : '不支持'}负面提示词 · 画幅 ${sizes}`;
+  if (e.runtime === 'api') return `${base}${api}`;
   return e.runtime === 'browser' ? `${base}（写进提示词）· 没有种子，每次结果不同 · 不占显卡` : base;
 }
 
@@ -43,6 +47,8 @@ export function SettingsPage() {
       </header>
       <div className="settings-layout">
         <DefaultsPanel />
+
+        <ApiServicesPanel />
 
         <section className="panel area-doctor">
           <div className="page-head">
@@ -111,8 +117,12 @@ export function SettingsPage() {
                     {e.family}
                     {e.runtime === 'browser' && <span className="pill">浏览器</span>}
                     {e.runtime === 'runninghub' && <span className="pill">云端</span>}
+                    {e.runtime === 'api' && <span className="pill">API</span>}
                   </td>
-                  <td>{capsText(kind, e)}</td>
+                  <td>
+                    {capsText(kind, e)}
+                    {e.ready === false && e.note && <small className="error engine-note">{e.note}</small>}
+                  </td>
                 </tr>
               ))}
             </tbody>

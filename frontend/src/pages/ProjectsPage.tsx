@@ -25,7 +25,7 @@ import { Dialog } from '../components/Dialog';
 import { ProjectSettingsDialog } from '../components/ProjectSettingsDialog';
 import { Menu, type MenuItem } from '../components/Menu';
 import { StylePresetPicker, stylePresetLabel } from '../components/StylePresetPicker';
-import { EPISODE_STATUS_LABEL, engineLabel } from '../format';
+import { EPISODE_STATUS_LABEL, engineLabel, engineOptionDisabled, engineOptionText } from '../format';
 import { forgetEpisode, readLastEpisode } from '../lastEpisode';
 import { workspacePath } from './workspace/urls';
 
@@ -37,7 +37,8 @@ function pickDefault(rows: EngineRow[] | undefined, preferred: string): string {
 /** 视频引擎的名字：中文名里没写有声 / 无声时补上 */
 function videoEngineText(r: EngineRow): string {
   const label = engineLabel(r);
-  return label.includes('声') ? label : `${label}${r.caps.has_audio ? '（有声）' : '（无声）'}`;
+  const text = label.includes('声') ? label : `${label}${r.caps.has_audio ? '（有声）' : '（无声）'}`;
+  return engineOptionDisabled(r) ? `${text}（先在 API 服务里填 Key）` : text;
 }
 
 function statusLabel(s: string): string {
@@ -147,8 +148,8 @@ function NewProjectDialog({ onClose }: { onClose: () => void }) {
             <span>图像引擎</span>
             <select value={image} onChange={(e) => setImageEngine(e.target.value)} title="选了风格预设会预选推荐的引擎，可以改">
               {(engines.data?.image ?? []).map((r) => (
-                <option key={r.name} value={r.name}>
-                  {engineLabel(r)}
+                <option key={r.name} value={r.name} disabled={engineOptionDisabled(r)} title={r.note ?? undefined}>
+                  {engineOptionText(r)}
                 </option>
               ))}
             </select>
@@ -157,7 +158,7 @@ function NewProjectDialog({ onClose }: { onClose: () => void }) {
             <span>视频引擎</span>
             <select value={video} onChange={(e) => setVideoEngine(e.target.value)}>
               {(engines.data?.video ?? []).map((r) => (
-                <option key={r.name} value={r.name}>
+                <option key={r.name} value={r.name} disabled={engineOptionDisabled(r)} title={r.note ?? undefined}>
                   {videoEngineText(r)}
                 </option>
               ))}
