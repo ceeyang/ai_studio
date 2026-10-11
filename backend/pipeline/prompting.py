@@ -1,7 +1,58 @@
 """把镜头字段拼成最终提示词，并算输入哈希（用于判断候选是否过期）。"""
 from __future__ import annotations
 
+import re
+
 from backend.domain.hashing import input_hash
+
+# ------------------------------------------------------------ 定妆照用的风格词
+# 风格锚是给镜头用的，里面混着场景、时间、天气、光源（雨夜、灯泡、积水……）。定妆照要的是干净的
+# 身份参考：只留画质 / 镜头胶片 / 色彩 / 皮肤质感这类词，按分句过滤——分句里有场景词就整句丢。
+_PHOTO_TERMS = re.compile(
+    r"photo|realis|live-action|cinematic still|\blens\b|\d+\s?mm\b|depth of field|bokeh|\bfilm\b"
+    r"|grain|halation|kodak|fuji|anamorphic|focus|saturat|contrast|palette|colou?r|grading"
+    r"|\btones?\b|tonal|shadow|highlight|skin|pores?\b|wrinkle|imperfection|texture|detail"
+    r"|sharp|resolution|proportion|\blight(ing)?\b|exposure|dynamic range", re.I)
+_SCENE_TERMS = re.compile(
+    r"\brain|\bwet\b|damp|puddle|night|dawn|dusk|sunset|sunrise|sunlight|sunny|morning|evening"
+    r"|noon|midday|daylight|\bday\b|interior|exterior|indoor|outdoor|street|city|urban|alley"
+    r"|\brooms?\b|workshop|garage|\bshops?\b|office|kitchen|forest|\bsea\b|beach|snow|fog|mist"
+    r"|storm|\bsky|cloud|concrete|reflection|bulb|lamp|neon|fluorescent|\btubes?\b|candle"
+    r"|window|lantern|torch|\bfire|\btools?\b|rust|metal|\bsteel|building|road|\bcars?\b"
+    r"|vehicle|landscape|scene|location|background|backdrop|environment|atmosphere|weather"
+    r"|practical|motivated|across frames", re.I)
+
+
+def _clauses(text: str) -> list[str]:
+    out = []
+    for sentence in re.split(r"[.!?;。；]+", text or ""):
+        for part in re.split(r"[,:，：]", sentence):
+            part = part.strip()
+            if part:
+                out.append(part)
+    return out
+
+
+def photo_style(anchor: str) -> str:
+    """风格锚里只和成像有关的分句（画质、镜头、胶片颗粒、色彩、皮肤质感），去掉场景、时间、天气、光源。"""
+    keep = [c for c in _clauses(anchor) if _PHOTO_TERMS.search(c) and not _SCENE_TERMS.search(c)]
+    keep = [c if i == 0 or c[1:2].isupper() else c[:1].lower() + c[1:] for i, c in enumerate(keep)]
+    return ", ".join(keep)
+
+
+_LOWER_BODY = re.compile(r"trousers|pants|jeans|shorts|skirt|\bboots?\b|shoes?\b|sneakers?|sandals?"
+                         r"|heels|socks|stockings|leggings|\bfeet\b|\blegs?\b|\bknees?\b", re.I)
+_UPPER_BODY = re.compile(r"face|hair|eyes?\b|jacket|shirt|coat|sweater|hoodie|blouse|vest|collar"
+                         r"|sleeve|neck|shoulder|chest|hands?\b|wrist|\barms?\b|beard|stubble"
+                         r"|glasses|earring|\bhat\b|\bcap\b|scarf|windbreaker|cardigan|\btop\b", re.I)
+
+
+def upper_body_look(visual_prompt: str) -> str:
+    """半身照用的外貌：去掉只写下半身（裤子、鞋）的整句，免得模型为了画靴子把镜头拉成全身。
+    一句里同时写了上身的不动。"""
+    sentences = re.split(r"(?<=[.!?])\s+", (visual_prompt or "").strip())
+    kept = [x for x in sentences if not (_LOWER_BODY.search(x) and not _UPPER_BODY.search(x))]
+    return " ".join(kept) if kept else (visual_prompt or "").strip()
 
 
 def compose_image_prompt(image_prompt: str, anchor: str) -> str:

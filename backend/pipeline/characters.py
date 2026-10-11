@@ -16,22 +16,33 @@ from backend.domain.turnaround import (SHEETS, crop_cells, look_of,
 from backend.llm.schemas import CharacterRecommendations, DesignOptions, TurnaroundLook
 from backend.pipeline.common import load_episode
 from backend.pipeline.keyframes import run_comfy
-from backend.pipeline.prompting import compose_image_prompt, join_negative, shot_seed
+from backend.pipeline.prompting import join_negative, photo_style, shot_seed, upper_body_look
 from backend.queue.errors import JobError
 from backend.queue.handlers import HANDLERS
 
 PORTRAIT_ASPECT = "9:16"
-PORTRAIT_FRAME = ("Character reference portrait of one single person: front-facing half-body shot "
-                  "from the waist up, standing upright and looking straight into the camera, "
-                  "relaxed neutral expression, arms down at the sides, centered in frame.")
-PORTRAIT_BACKDROP = ("Plain seamless neutral light-grey studio backdrop, soft even studio lighting, "
+PORTRAIT_FRAME = ("Character reference portrait of one single person: front-facing medium shot "
+                  "framed from the waist up (head, shoulders and torso only, legs out of frame), "
+                  "standing upright and looking straight into the camera, relaxed neutral "
+                  "expression, arms down at the sides, centered in frame.")
+PORTRAIT_BACKDROP = ("Plain seamless neutral light-grey studio backdrop filling the entire "
+                     "background, soft even studio lighting, isolated subject, no environment, "
                      "no props, no other people, no text, no watermark.")
+PORTRAIT_NEGATIVE = ("full body, legs, feet, shoes, outdoor scene, room interior, street, rain, "
+                     "scenery, props, multiple people")
 LLM_TASK = "character"
 
 
 def portrait_prompt(visual_prompt: str, anchor: str) -> str:
-    return compose_image_prompt(f"{PORTRAIT_FRAME} {visual_prompt.strip()} {PORTRAIT_BACKDROP}",
-                                anchor)
+    """定妆照提示词：构图（正面、腰部以上）→ 上半身外貌 → 中性影棚背景 → 风格锚里的成像词。
+
+    不整段拼风格锚：锚里的雨夜、灯泡、积水会和「纯色影棚背景」打架，出来的是挂在场景里的背景布，
+    这张图再当参考图喂给视频模型时会被剪进镜头。"""
+    style = photo_style(anchor)
+    parts = [PORTRAIT_FRAME, upper_body_look(visual_prompt), PORTRAIT_BACKDROP]
+    if style:
+        parts.append(f"Photographic style: {style}.")
+    return " ".join(parts)
 
 
 def seed_label(call, seed: int) -> str:
@@ -67,7 +78,7 @@ def run_portrait(ctx, payload: dict) -> dict:
         except KeyError as e:
             raise JobError(str(e)) from None
         prompt = portrait_prompt(vp, style.anchor_text if style else "")
-        negative = join_negative(proj.negative, style.negative if style else "")
+        negative = join_negative(proj.negative, style.negative if style else "", PORTRAIT_NEGATIVE)
         seed = shot_seed(proj.seed, char_id, ctx.job_id)
         slug, name = proj.slug, ch.name
     call = engine.build(ImageRequest(prompt=prompt, negative=negative, aspect=PORTRAIT_ASPECT,

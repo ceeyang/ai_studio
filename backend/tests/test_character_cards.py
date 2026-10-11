@@ -1,4 +1,6 @@
 """角色卡：本地 AI 抽定妆照（image.portrait）、切换角色造型、AI 推荐造型和按剧本推荐角色。"""
+import re
+
 import pytest
 
 from backend.domain.characters import set_portrait, use_portrait
@@ -49,8 +51,11 @@ def test_portrait_draw_uses_visual_prompt_anchor_and_9_16(tmp_path, db):
     out = run_portrait(ctx, {"character_id": ids["char"]})
     call = runner.calls[0]
     prompt = call.meta["prompt"]
-    assert prompt.startswith(ANCHOR)
-    assert LOOK in prompt and "half-body" in prompt and "front" in prompt
+    # 景别放最前面；风格锚只取画质 / 胶片 / 色彩词，接在最后
+    assert prompt.startswith("Character reference portrait")
+    assert "Photorealistic live-action commercial photography" in prompt
+    assert "fine film grain" in prompt
+    assert LOOK in prompt and "waist up" in prompt and "front" in prompt
     assert "neutral" in prompt.lower() or "grey" in prompt.lower()
     assert call.meta["size"] == [768, 1344]
     assert call.meta["refs"] == []  # 抽新造型不带旧定妆照
@@ -77,6 +82,55 @@ def test_portrait_draw_does_not_replace_selected(tmp_path, db):
     assert runner.calls[0].meta["seed"] != runner.calls[1].meta["seed"]
     with db.session() as s:
         assert s.get(Character, ids["char"]).visual_prompt == LOOK  # 抽卡不改角色提示词
+
+
+E2E_ANCHOR = (
+    "Photorealistic live-action cinematic still, Chinese urban-fringe drama, shot on a 35mm "
+    "anamorphic lens with shallow depth of field, subtle Kodak Vision3 500T film grain and gentle "
+    "halation around light sources. The palette sets warm tungsten amber interiors against cold "
+    "teal-blue rainy night exteriors. Colors are slightly desaturated, with deep but detailed "
+    "shadows. Lighting is motivated and practical: bare incandescent bulbs, fluorescent tubes, wet "
+    "reflections on concrete and rim light catching raindrops. Skin looks real, with visible pores, "
+    "fine wrinkles, natural imperfections and a sheen of rain. Materials are tactile: greasy steel "
+    "tools, worn denim, damp cotton, rusted metal and oil-stained concrete. Quiet, intimate, "
+    "melancholic yet warm atmosphere, natural proportions, consistent characters across frames.")
+E2E_LOOK = (
+    "Chinese man in his mid-fifties with a weathered square face, deep forehead lines, a strong jaw "
+    "and grey stubble. Short-cropped salt-and-pepper hair, receding at the temples. Stocky, "
+    "broad-shouldered build with thick forearms. Faded navy-blue cotton work jacket over a grey "
+    "crew-neck undershirt, sleeves rolled to the elbows. Dark canvas work trousers and scuffed black "
+    "leather work boots, all smeared with old engine grease. Large calloused hands, knuckles and "
+    "fingernails permanently stained black with motor oil. Signature detail: an old steel "
+    "wristwatch with a scratched face and a greasy off-white shop rag tucked into his back pocket.")
+
+
+def test_portrait_prompt_keeps_only_photographic_style_terms():
+    """实跑里风格锚的雨夜、灯泡、积水和「纯色影棚背景」拼在一起，出来的是挂在修车铺里的背景布。
+    定妆照只取风格锚里的画质 / 胶片 / 皮肤质感词，场景、时间、天气、光源一律不要。"""
+    from backend.pipeline.characters import portrait_prompt
+
+    p = portrait_prompt(E2E_LOOK, E2E_ANCHOR)
+    low = p.lower()
+    for bad in ("rain", "night", "bulb", "fluorescent", "concrete", "interior", "exterior",
+                "urban", "reflection", "practical", "tools", "atmosphere"):
+        assert not re.search(rf"\b{bad}", low), bad   # 「grain」不算 rain
+    for good in ("photorealistic", "35mm", "film grain", "desaturated", "pores", "wrinkles",
+                 "natural proportions"):
+        assert good in low, good
+    # 构图写在最前面，明确正面、腰部以上；背景是中性纯色影棚
+    assert p.startswith("Character reference portrait")
+    assert "front-facing" in low and "waist up" in low
+    assert "light-grey studio backdrop" in low
+    # 半身照：只写下半身的句子（裤子、靴子）去掉，脸、上衣、手表都保留
+    assert "trousers" not in low and "boots" not in low
+    assert "weathered square face" in p and "work jacket" in p and "wristwatch" in p
+
+
+def test_portrait_prompt_without_anchor():
+    from backend.pipeline.characters import portrait_prompt
+
+    p = portrait_prompt(LOOK, "")
+    assert LOOK in p and "Photographic style" not in p
 
 
 def test_portrait_draw_needs_prompt_and_character(tmp_path, db):
