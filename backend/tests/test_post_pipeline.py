@@ -187,7 +187,7 @@ def test_chain_export_with_dub_and_km_subtitles(tmp_path, db, manager):
     assert tr[2] == {"episode_id": ep_id}
     assert dub[3] == [tr[0]] and exp[3] == [tr[0], dub[0]]
     assert exp[2]["options"] == {"subtitles": "zh+km", "dub": "km", "end_card": True, "trim": True,
-                                    "bed": True, "align": "timeline"}
+                                    "bed": True, "align": "timeline", "music": False, "music_db": -18.0, "music_fade_in": 1.0, "music_fade_out": 2.0, "music_duck": True}
 
 
 def test_chain_export_skips_translate_when_all_lines_have_km(tmp_path, db, manager):

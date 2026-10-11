@@ -392,7 +392,19 @@ def _refs_reason(old: list, new: list) -> str | None:
 
 def stale_reason(old, new: dict) -> str:
     """选定候选过期的原因，按 参考图 → 提示词 → 引擎 → 画幅 → 时长 → 首帧 取第一条。
-    old：候选 params["inputs"]（老候选没有）；new：按镜头当前状态算的同结构摘要。"""
+    old：候选 params["inputs"]（老候选没有）；new：按镜头当前状态算的同结构摘要。
+    接上一镜的首帧（pipeline/continuity.py）摘要里有 prev_video：按上一镜的视频比对。"""
+    o = old if isinstance(old, dict) else {}
+    if "prev_video" in new or "prev_video" in o:
+        if "prev_video" not in new:
+            return "关掉了「接上一镜」"
+        if not new["prev_video"]:
+            return f"上一镜 {new.get('prev_shot') or ''} 还没有选定视频".replace("  ", " ")
+        if "prev_video" not in o:
+            return "改成了接上一镜"
+        if o["prev_video"] != new["prev_video"]:
+            return f"上一镜 {new.get('prev_shot')} 的视频换了"
+        return "输入已变化"
     if not isinstance(old, dict) or not old:
         return LEGACY_STALE
     r = _refs_reason(old.get("refs") or [], new.get("refs") or [])

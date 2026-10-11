@@ -6,11 +6,12 @@ import logging
 from fastapi import APIRouter, HTTPException, Request, Response
 from sqlalchemy import func, select, update
 
-from backend.app.deps import get_or_404, manager, project_by_slug, services
-from backend.app.schemas import (EpisodeDetail, EpisodeIn, EpisodeOut, EpisodePatch, ExportOut,
+from backend.app.deps import get_or_404, manager, project_by_slug, read_upload, services
+from backend.app.schemas import (BgmOut, EpisodeDetail, EpisodeIn, EpisodeOut, EpisodePatch, ExportOut,
                                  ExportPatch, SceneBlockOut, SceneBlockPatch)
-from backend.app.views import episode_detail, export_out
+from backend.app.views import candidate_out, episode_detail, export_out
 from backend.domain.models import Episode, Export, Job, SceneBlock, Shot
+from backend.domain.music import bgm_of, clear_bgm, set_bgm
 from backend.domain.slots import delete_slots
 from backend.queue.manager import ACTIVE
 
@@ -82,6 +83,7 @@ def delete_episode(episode_id: int, request: Request):
             raise HTTPException(409, "这一集还有排队或执行中的任务，先取消任务再删除")
         number, project_id = ep.number, ep.project_id
         delete_slots(s, "shot", shot_ids)
+        delete_slots(s, "episode", [ep.id])   # 配乐
         # exports 表对 episode_id 有外键 ON DELETE CASCADE，删集时自动一并删掉，成片文件留在磁盘上
         s.delete(ep)
     log.info("删除第 %s 集（项目 %s，episode_id=%s），连带 %d 个镜头",
@@ -119,3 +121,38 @@ def patch_scene_block(block_id: int, body: SceneBlockPatch, request: Request):
             setattr(blk, k, v)
         s.flush()
         return SceneBlockOut.model_validate(blk)
+
+
+# ------------------------------------------------------------ 配乐
+def _bgm_out(c) -> BgmOut | None:
+    if c is None:
+        return None
+    return BgmOut(candidate_id=c.id, url=candidate_out(c).url,
+                  filename=str((c.params or {}).get("source") or c.file_path.rsplit("/", 1)[-1]),
+                  created_at=c.created_at)
+
+
+@router.get("/episodes/{episode_id}/bgm", response_model=BgmOut | None)
+def get_bgm(episode_id: int, request: Request):
+    with services(request).db.session() as s:
+        get_or_404(s, Episode, episode_id, "剧集")
+        return _bgm_out(bgm_of(s, episode_id))
+
+
+@router.post("/episodes/{episode_id}/bgm", response_model=BgmOut)
+async def upload_bgm(episode_id: int, request: Request):
+    """上传 / 替换这一集的配乐（multipart 的 file 字段：mp3 / wav / m4a / aac / ogg / flac）。"""
+    data, name = await read_upload(request)
+    sv = services(request)
+    with sv.db.session() as s:
+        ep = get_or_404(s, Episode, episode_id, "剧集")
+        return _bgm_out(set_bgm(s, sv.media, ep, data, name))
+
+
+@router.delete("/episodes/{episode_id}/bgm", status_code=204)
+def delete_bgm(episode_id: int, request: Request):
+    """去掉配乐（文件留在磁盘上）。之后导出不能再勾「配乐」。"""
+    with services(request).db.session() as s:
+        get_or_404(s, Episode, episode_id, "剧集")
+        clear_bgm(s, episode_id)
+    return Response(status_code=204)

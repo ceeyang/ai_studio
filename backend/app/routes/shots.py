@@ -3,10 +3,11 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Request, Response
 
-from backend.app.deps import check_engines, get_or_404, manager, services
+from backend.app.deps import check_engines, get_or_404, manager, read_upload, services
 from backend.app.schemas import ReorderIn, ShotDetail, ShotFields, ShotIn, ShotOut
 from backend.app.views import shot_detail
 from backend.domain.models import Episode, Shot
+from backend.domain.refs import add_shot_ref, remove_shot_ref
 from backend.domain.shots import renumber_shots
 from backend.domain.slots import delete_slots
 
@@ -107,3 +108,25 @@ def split_shot(shot_id: int, request: Request):
         ids.insert(ids.index(shot.id) + 1, new.id)
         renumber_shots(s, shot.episode_id, ids)
         return [ShotOut.model_validate(shot), ShotOut.model_validate(new)]
+
+
+@router.post("/shots/{shot_id}/refs", response_model=ShotDetail)
+async def upload_shot_ref(shot_id: int, request: Request):
+    """上传一张构图 / 动作参考图（multipart 的 file 字段，每镜最多 2 张），首帧参考图里排在场景图后面。"""
+    data, name = await read_upload(request)
+    sv = services(request)
+    with sv.db.session() as s:
+        shot = get_or_404(s, Shot, shot_id, "镜头")
+        slug = s.get(Episode, shot.episode_id).project.slug
+        add_shot_ref(s, sv.media, shot, slug, data, name)
+        return _detail(s, sv, shot)
+
+
+@router.delete("/shots/{shot_id}/refs/{candidate_id}", response_model=ShotDetail)
+def delete_shot_ref(shot_id: int, candidate_id: int, request: Request):
+    """去掉一张构图参考图（文件留在磁盘上）。用过它的首帧按哈希规则变过期。"""
+    sv = services(request)
+    with sv.db.session() as s:
+        shot = get_or_404(s, Shot, shot_id, "镜头")
+        remove_shot_ref(s, shot_id, candidate_id)
+        return _detail(s, sv, shot)

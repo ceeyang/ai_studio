@@ -90,7 +90,7 @@ def run_video(ctx, payload: dict) -> dict:
                                       shot.dialogue, anchor=style.anchor_text if style else "",
                                       has_audio=has_audio, speakers=_speakers(proj, shot))
         negative = join_negative(proj.negative, style.negative if style else "")
-        packed = shot_refs(s, shot)
+        packed = shot_refs(s, shot, video=True)
         legacy = packed[:engine.caps.max_refs]   # 以前的规则：不管首帧，一律带定妆照 / 三视图
         locked = first_frame_locked_face(ff.params, image_max_refs(sv.engines, ff.engine))
         if not locked:

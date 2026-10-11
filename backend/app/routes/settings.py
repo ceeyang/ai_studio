@@ -3,7 +3,7 @@
 规则：设置页只管默认，项目和镜头上选的总是优先（见 backend/domain/settings.py）。
 GET 返回每一项的设置值（null = 跟随默认）、现在实际生效的值、改回跟随默认后会用的值和可选项；
 设置值已经失效（provider / 引擎不在了）时 invalid=true，生效值是退回去用的那个。
-带 ?project=<slug> 时定妆照/三视图按这个项目算（工作台里引擎下拉框的「默认（…）」用）。
+带 ?project=<slug> 时定妆照/三视图/场景图按这个项目算（工作台里引擎下拉框的「默认（…）」用）。
 PUT 只改传了的字段，null = 跟随默认。改完立即生效，不用重启。
 """
 from __future__ import annotations
@@ -16,7 +16,8 @@ from pydantic import BaseModel, ConfigDict
 
 from backend.app.deps import project_by_slug, services
 from backend.domain.settings import (GLOBAL_KEYS, STEP_KIND, STEP_LABEL, AppSettings,
-                                     default_image_engine, default_video_engine, portrait_engine,
+                                     default_image_engine, default_video_engine, location_engine,
+                                     portrait_engine,
                                      sheet_engine)
 from backend.engines.registry import runtime_of
 from backend.queue.errors import JobError
@@ -84,6 +85,8 @@ def build_settings_out(sv, st: AppSettings, project=None) -> dict[str, Any]:
     def image_eff(key, x):
         if key == "portrait":
             return portrait_engine(sv, proj_image, st=x)
+        if key == "location":
+            return location_engine(sv, proj_image, st=x)
         return sheet_engine(sv, proj_image, st=x)
 
     steps = []

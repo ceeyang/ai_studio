@@ -217,6 +217,17 @@ class LocationOut(ORM):
     time_of_day: str
     atmosphere: str
     visual_prompt: str
+    # 场景图（不出人物的环境参考图，首帧参考图里排第一）：选定的那张和全部候选
+    image_candidate_id: int | None = None
+    image_url: str | None = None
+    images: list[CandidateOut] = Field(default_factory=list)
+    active_jobs: list[JobBrief] = Field(default_factory=list)   # 排队 / 生成中的场景图任务
+    last_failure: JobBrief | None = None                        # 最近一次出场景图失败（之后没出过新的）
+
+
+class LocationDrawIn(BaseModel):
+    count: int = Field(2, ge=1, le=4)
+    engine: str | None = None
 
 
 class LocationPatch(BaseModel):
@@ -303,6 +314,14 @@ class ExportOut(ORM):
     created_at: datetime
 
 
+class BgmOut(BaseModel):
+    """剧集配乐（GET/POST /api/episodes/{id}/bgm）。"""
+    candidate_id: int
+    url: str
+    filename: str
+    created_at: datetime
+
+
 class ExportPatch(BaseModel):
     is_final: bool
 
@@ -380,6 +399,12 @@ class ShotOut(ORM):
     origin: str = "llm"        # llm = 分镜生成的；manual = 手工添加（含拆分出来的）
 
 
+class ContinuePrevOut(BaseModel):
+    shot_id: int
+    code: str
+    has_video: bool
+
+
 class ShotDetail(ShotOut):
     slots: list[SlotOut] = Field(default_factory=list)
     active_jobs: list[JobBrief] = Field(default_factory=list)   # 排队 / 运行 / 等输入的首帧、视频任务
@@ -388,6 +413,12 @@ class ShotDetail(ShotOut):
     first_frame_refs_unused: list[str] = Field(default_factory=list)
     # image_prompt 里有外貌占位符 {{char:<id>}} 时，出图实际用的文字（占位符按景别换成角色当前外貌）
     image_prompt_resolved: str | None = None
+    # 镜头构图参考图（最多 2 张，首帧参考图里排在场景图后面）
+    shot_refs: list[CandidateOut] = Field(default_factory=list)
+    # 首帧引擎最多吃几张参考图（0 = 不吃参考图，构图参考、场景图都用不上）；引擎不存在时为空
+    image_max_refs: int | None = None
+    # 开了「接上一镜」时：上一镜是哪个、有没有选定视频（没有就「等上一镜视频」）；第一镜或没开时为空
+    continue_prev: ContinuePrevOut | None = None
 
 
 class EpisodeDetail(EpisodeOut):
@@ -473,3 +504,4 @@ class InputIn(BaseModel):
 TurnaroundSheetOut.model_rebuild()
 TurnaroundOut.model_rebuild()
 CharacterOut.model_rebuild()  # portraits / turnaround 引用了后面定义的 CandidateOut
+LocationOut.model_rebuild()  # images 引用了后面定义的 CandidateOut

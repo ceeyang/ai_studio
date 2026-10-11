@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 SubtitleMode = Literal["none", "zh", "zh+km"]
 DubMode = Literal["off", "km"]
@@ -17,6 +17,12 @@ class ExportOptions(BaseModel):
     trim: bool = True                  # 按分镜时长裁掉台词说完后的多余尾巴
     bed: bool = True                   # 保留原声底：False = H3 原音轨整条静音（只剩配音）
     align: AlignMode = "timeline"      # detected：配音放到 H3 音轨里实际开口的位置
+    # 配乐（剧集上传的背景音乐，post/music.py）：音量、淡入淡出、有台词时自动压低
+    music: bool = False
+    music_db: float = Field(-18.0, ge=-40.0, le=6.0)
+    music_fade_in: float = Field(1.0, ge=0.0, le=10.0)
+    music_fade_out: float = Field(2.0, ge=0.0, le=10.0)
+    music_duck: bool = True
 
     @property
     def needs_km(self) -> bool:
@@ -33,6 +39,8 @@ class ExportOptions(BaseModel):
             parts.append("nobed")
         if self.align == "detected":
             parts.append("aligned")
+        if self.music:
+            parts.append("bgm")
         if self.end_card:
             parts.append("card")
         return "".join(f"_{p}" for p in parts)
@@ -43,7 +51,7 @@ SUBTITLE_LABELS = {"zh": "中文字幕", "zh+km": "中高字幕"}
 
 
 def export_label(variant: str, settings: dict) -> str:
-    """导出列表用的可读标签，如「9:16 · 中高字幕 · 高棉语配音 · 无原声底 · 片尾卡 · 37.1 秒」。
+    """导出列表用的可读标签，如「9:16 · 中高字幕 · 高棉语配音 · 无原声底 · 配乐 · 片尾卡 · 37.1 秒」。
 
     拼法照抄前端 ExportsPanel 的 exportTags（同文件 25-35 行）：画幅在最前，其余按条件追加，
     用「 · 」连接——这样导出页之后展示的标签和导演台现有成片列表看到的一致。
@@ -58,6 +66,8 @@ def export_label(variant: str, settings: dict) -> str:
         parts.append("无原声底")
     if settings.get("align") == "detected":
         parts.append("配音对齐说话")
+    if settings.get("music") is True:
+        parts.append("配乐")
     if settings.get("end_card") is True:
         parts.append("片尾卡")
     duration = settings.get("duration")

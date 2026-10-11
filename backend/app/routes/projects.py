@@ -10,7 +10,7 @@ from sqlalchemy import func, select
 
 from backend.app.deps import check_engines, get_or_404, manager, project_by_slug, services
 from backend.app.schemas import (CharacterIn, CharacterOut, CharacterPatch, EndCardIO,
-                                 EpisodeStats, LocationOut, LocationPatch, PortraitPathIn, ProjectIn, ProjectOut,
+                                 EpisodeStats, PortraitPathIn, ProjectIn, ProjectOut,
                                  ProjectOverview, ProjectPatch, StyleIO, TurnaroundCellOut,
                                  TurnaroundOut, TurnaroundSheetOut)
 from backend.domain.characters import portrait_ext, portrait_of, set_portrait
@@ -18,7 +18,7 @@ from backend.domain.settings import default_image_engine, default_video_engine, 
 from backend.domain.turnaround import (DEFAULT_SHEET_ENGINE, SHEETS, VIEW_KEYS, VIEW_LABELS,
                                        VIEW_SHEET, cell_state, crop_method, sheet_slot_kind,
                                        sheet_state)
-from backend.domain.models import (Candidate, Character, Episode, Export, Job, Location, Project,
+from backend.domain.models import (Candidate, Character, Episode, Export, Job, Project,
                                    Shot, Slot, StyleBible)
 from backend.app.views import candidate_out, job_brief, owner_jobs
 from backend.domain.slots import delete_slots, slots_for
@@ -122,6 +122,8 @@ def delete_project(slug: str, request: Request):
         delete_slots(s, "shot", s.scalars(select(Shot.id).join(Episode, Shot.episode_id == Episode.id)
                                           .where(Episode.project_id == p.id)).all())
         delete_slots(s, "character", [c.id for c in p.characters])
+        delete_slots(s, "location", [x.id for x in p.locations])
+        delete_slots(s, "episode", [e.id for e in p.episodes])
         s.delete(p)
     return Response(status_code=204)
 
@@ -231,22 +233,6 @@ async def upload_portrait(char_id: int, request: Request):
         c = get_or_404(s, Character, char_id, "角色")
         set_portrait(s, sv.media, c, data, name)
         return character_out(s, c, sv=services(request))
-
-
-@router.get("/projects/{slug}/locations", response_model=list[LocationOut])
-def list_locations(slug: str, request: Request):
-    with services(request).db.session() as s:
-        return [LocationOut.model_validate(l) for l in project_by_slug(s, slug).locations]
-
-
-@router.patch("/locations/{loc_id}", response_model=LocationOut)
-def patch_location(loc_id: int, body: LocationPatch, request: Request):
-    with services(request).db.session() as s:
-        loc = get_or_404(s, Location, loc_id, "场景")
-        for k, v in body.model_dump(exclude_unset=True).items():
-            setattr(loc, k, v)
-        s.flush()
-        return LocationOut.model_validate(loc)
 
 
 @router.get("/projects/{slug}/style", response_model=StyleIO | None)

@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass, field, replace
 
 from sqlalchemy import select
 
@@ -20,6 +20,7 @@ LLM_STAGES = ("script", "storyboard")
 FIT_STAGE = "fit_khmer"
 EXTRA_STAGES = (FIT_STAGE,)
 FIT_TASK = "dialogue.fit_khmer"
+CONTINUE_TASK = "image.continue_frame"   # pipeline/continuity.py：接上一镜，取上一镜视频的尾帧
 
 
 @dataclass
@@ -31,6 +32,16 @@ class RunOptions:
     export: dict | None = None   # ExportOptions 的字段：subtitles / dub / end_card / trim
     scene_block_ids: list[int] | None = None   # 只重写这些段落的分镜（只对 storyboard 有效）
     note: str | None = None      # 修改意见：写进 script / storyboard 提示词，非空时等同 force
+
+
+@dataclass
+class Chain:
+    """接上一镜：开了 continue_from_prev 的镜头 id，以及每个镜头的上一镜 id（按集内顺序）。"""
+    cont: set[int] = field(default_factory=set)
+    prev: dict[int, int] = field(default_factory=dict)
+    order: list[int] = field(default_factory=list)
+    # 镜头 id → 它排队 / 正在跑的视频任务（最新的那个）：上一镜的视频还在出时，截尾帧排在它后面
+    pending_video: dict[int, int] = field(default_factory=dict)
 
 
 @dataclass
@@ -77,10 +88,23 @@ def _uses_comfy(engines, kind: str, names) -> bool:
 
 
 def _run_precheck(check: Precheck, engines, stages: list[str], picked, codes: dict[int, str],
-                  selected: set[tuple[int, str]]) -> None:
-    """缺首帧就出视频、缺视频就导出、要用的引擎跑在 ComfyUI 上而 ComfyUI 连不上：提交前直接拒绝。"""
+                  selected: set[tuple[int, str]], chain: "Chain | None" = None) -> None:
+    """缺首帧就出视频、缺视频就导出、要用的引擎跑在 ComfyUI 上而 ComfyUI 连不上：提交前直接拒绝。
+    接上一镜的镜头出视频前会先取上一镜的尾帧：上一镜有视频、或这一批里会出上一镜的视频就不算缺首帧。"""
+    chain = chain or Chain()
     if "videos" in stages and "keyframes" not in stages:
-        missing = [codes[sid] for sid, _, _ in picked if (sid, "first_frame") not in selected]
+        batch = {sid for sid, _, _ in picked}
+        missing = []
+        for sid, _, _ in picked:
+            if sid in chain.cont:
+                pv = chain.prev.get(sid)
+                if pv is not None and ((pv, "video") in selected or pv in batch
+                                       or pv in chain.pending_video):
+                    continue
+                missing.append(f"{codes[sid]}（接上一镜，上一镜"
+                               f"{' ' + codes[pv] if pv in codes else ''} 还没有视频）")
+            elif (sid, "first_frame") not in selected:
+                missing.append(codes[sid])
         if missing:
             raise JobError(f"{'、'.join(missing)} 还没有选定首帧，先生成首帧")
     if "export" in stages and "videos" not in stages and "keyframes" not in stages:
@@ -89,7 +113,8 @@ def _run_precheck(check: Precheck, engines, stages: list[str], picked, codes: di
             raise JobError(f"以下镜头还没有选定视频：{', '.join(missing)}")
     if check.comfy is None:
         return
-    need = (("keyframes" in stages and _uses_comfy(engines, "image", [ie for _, ie, _ in picked]))
+    need = (("keyframes" in stages
+             and _uses_comfy(engines, "image", [ie for sid, ie, _ in picked if sid not in chain.cont]))
             or ("videos" in stages and _uses_comfy(engines, "video", [ve for _, _, ve in picked])))
     if need:
         ok, url = check.comfy()
@@ -126,6 +151,8 @@ def portrait_warnings(db: Database, engines, episode_id: int, stages: list[str],
         locking: dict[int, set[str]] = {}   # 角色 id → 要锁脸的图像引擎
         if picked:
             for sh in picked:
+                if sh.continue_from_prev:
+                    continue   # 接上一镜：首帧是上一镜的尾帧，不出图
                 eng = sh.image_engine or proj.image_engine
                 if max_refs(eng) > 0:
                     for c in sh.cast or []:
@@ -176,6 +203,20 @@ def submit_chain(manager, db: Database, engines, episode_id: int, stages: list[s
         codes = [sh.code for sh in ep.shots]
         voices = {c.name: c.voice for c in proj.characters}
         shot_codes = {sh.id: sh.code for sh in ep.shots}
+        if "export" in stages and (opts.export or {}).get("music"):
+            from backend.domain.music import bgm_of
+            if bgm_of(s, episode_id) is None:   # 在提交任何任务之前就拦下，免得前面的任务成了孤儿
+                raise JobError("这一集还没有上传配乐，先在成片阶段上传背景音乐，或取消勾选「配乐」")
+        order = [sh.id for sh in ep.shots]
+        chain = Chain(cont={sh.id for sh in ep.shots if sh.continue_from_prev},
+                      prev={b: a for a, b in zip(order, order[1:])}, order=order)
+        if chain.cont:
+            from backend.domain.models import Job
+            from backend.queue.manager import ACTIVE
+            for oid, jid in s.execute(select(Job.owner_id, Job.id).where(
+                    Job.type == "video.shot", Job.owner_type == "shot",
+                    Job.owner_id.in_(order), Job.status.in_(ACTIVE)).order_by(Job.id)):
+                chain.pending_video[oid] = jid
         selected: set[tuple[int, str]] = set()
         if precheck is not None and stages[0] not in LLM_STAGES and shot_codes:
             selected = {(oid, kind) for oid, kind in s.execute(
@@ -184,7 +225,7 @@ def submit_chain(manager, db: Database, engines, episode_id: int, stages: list[s
                     Slot.selected_candidate_id.is_not(None)))}
 
     if precheck is not None and stages[0] not in LLM_STAGES:
-        _run_precheck(precheck, engines, stages, picked, shot_codes, selected)
+        _run_precheck(precheck, engines, stages, picked, shot_codes, selected, chain)
 
     first = stages[0]
     if first == FIT_STAGE:
@@ -217,7 +258,8 @@ def submit_chain(manager, db: Database, engines, episode_id: int, stages: list[s
     vid_fam: dict[int, str] = {}
     if "keyframes" in stages:
         for sid, image_engine, _ in picked:
-            img_fam[sid] = _family(engines, "image", image_engine)
+            if sid not in chain.cont:   # 接上一镜的不出图，不用图像引擎
+                img_fam[sid] = _family(engines, "image", image_engine)
     if "videos" in stages:
         for sid, _, video_engine in picked:
             vid_fam[sid] = _family(engines, "video", video_engine)
@@ -227,6 +269,15 @@ def submit_chain(manager, db: Database, engines, episode_id: int, stages: list[s
     vids: list[int] = []
     if "keyframes" in stages:
         for sid, _, _ in picked:
+            if sid in chain.cont:
+                # 接上一镜：取上一镜视频的尾帧（CPU 任务）。同时出视频时放到视频循环里，排在上一镜视频之后
+                if "videos" not in stages:
+                    pv = chain.prev.get(sid)
+                    wait = [chain.pending_video[pv]] if pv in chain.pending_video else []
+                    ids.append(manager.submit(CONTINUE_TASK, {"shot_id": sid, "force": opts.force},
+                                              owner_type="shot", owner_id=sid,
+                                              depends_on=deps + wait, **common))
+                continue
             fam = img_fam[sid]
             kf_payload = {"shot_id": sid, "force": opts.force, "candidates": max(1, opts.candidates)}
             kf[sid] = [manager.submit("image.keyframe", kf_payload, owner_type="shot",
@@ -234,11 +285,27 @@ def submit_chain(manager, db: Database, engines, episode_id: int, stages: list[s
                        for _ in range(max(1, opts.candidates))]
             ids += kf[sid]
     if "videos" in stages:
-        for sid, _, _ in picked:
+        vid_of: dict[int, int] = {}
+        todo = [sid for sid, _, _ in picked]
+        if any(sid in chain.cont for sid in todo):   # 有接上一镜的：按集内顺序排，上一镜的视频先提交
+            todo.sort(key=chain.order.index)
+        for sid in todo:
             fam = vid_fam[sid]
+            before = kf.get(sid, [])
+            if sid in chain.cont:
+                pv = chain.prev.get(sid)
+                cj = manager.submit(CONTINUE_TASK, {"shot_id": sid, "force": opts.force},
+                                    owner_type="shot", owner_id=sid,
+                                    depends_on=deps + ([vid_of[pv]] if pv in vid_of else
+                                                       [chain.pending_video[pv]]
+                                                       if pv in chain.pending_video else []),
+                                    **common)
+                ids.append(cj)
+                before = [cj]
             jid = manager.submit("video.shot", {"shot_id": sid, "force": opts.force},
                                  owner_type="shot", owner_id=sid,
-                                 model_family=fam, depends_on=deps + kf.get(sid, []), **common)
+                                 model_family=fam, depends_on=deps + before, **common)
+            vid_of[sid] = jid
             vids.append(jid)
             ids.append(jid)
     if "export" in stages:
