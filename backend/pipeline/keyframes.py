@@ -108,6 +108,9 @@ def run_keyframe(ctx, payload: dict) -> dict:
                           params={**call.meta, "workflow": sv.media.rel(run_dir / "workflow.api.json"),
                                   "inputs": inputs},
                           input_hash=h, job_id=ctx.job_id,
-                          force_select=bool(payload.get("force")))  # 重拍：新的一条直接选中
+                          # 重拍一张：新的一条直接选中；一次出多张就不抢选定（不然最后完成的那张随机胜出），
+                          # 让用户看「N 张新候选」自己挑
+                          force_select=bool(payload.get("force"))
+                          and int(payload.get("candidates") or 1) == 1)
         cid = c.id
     return {"candidate_ids": [cid], "file": sv.media.rel(dst)}

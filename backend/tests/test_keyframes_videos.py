@@ -185,6 +185,16 @@ def test_keyframe_force_retake_selects_new_candidate_even_with_same_input(tmp_pa
         assert selected_candidate(s, "shot", shot_id, "first_frame").id == new
 
 
+def test_keyframe_force_with_several_candidates_keeps_selection(tmp_path, db):
+    """force 一次出多张候选：不抢选定（否则最后完成的那张随机胜出），靠「N 张新候选」角标让用户自己挑。"""
+    ctx, runner, shot_id = setup(tmp_path, db)
+    first = run_keyframe(ctx, {"shot_id": shot_id})["candidate_ids"][0]
+    run_keyframe(ctx, {"shot_id": shot_id, "force": True, "candidates": 2})
+    run_keyframe(ctx, {"shot_id": shot_id, "force": True, "candidates": 2})
+    with db.session() as s:
+        assert selected_candidate(s, "shot", shot_id, "first_frame").id == first
+
+
 def test_keyframe_non_forced_extra_candidate_keeps_selection(tmp_path, db):
     ctx, runner, shot_id = setup(tmp_path, db)
     first = run_keyframe(ctx, {"shot_id": shot_id})["candidate_ids"][0]
