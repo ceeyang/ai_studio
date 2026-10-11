@@ -85,7 +85,9 @@ def _strip_clauses(text: str, drop: re.Pattern, keep: re.Pattern | None) -> str:
                     pieces.append((sep if pieces else "") + frag)
             if pieces and keep.search("".join(pieces)):
                 kept.append("".join(pieces).strip())
-        if kept:
+        if kept == re.split(r",\s*", body):   # 这一句没动：原样保留
+            out.append(sentence)
+        elif kept:
             first = re.sub(r"^(?:and|with)\s+", "", kept[0].strip(), flags=re.I)
             out.append(", ".join([first[:1].upper() + first[1:]] + kept[1:]) + end)
     return " ".join(out)
