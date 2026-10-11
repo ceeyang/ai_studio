@@ -5,6 +5,7 @@ import { VOICES, engineLabel, engineOptionText, fmtDuration, fmtShortTime, fmtTi
 const BACKEND_JOB_TYPES = [
   'script',
   'storyboard',
+  'script.review',
   'image.keyframe',
   'video.shot',
   'export.episode',

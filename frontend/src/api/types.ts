@@ -1095,3 +1095,48 @@ export interface TakeStats {
   engines: EngineTakes[];
   archived_takes: Record<string, number>;
 }
+
+// ---- 剧本体检（GET/POST /api/episodes/{id}/script-review）
+
+export type ReviewSeverity = 'ok' | 'info' | 'warn' | 'error';
+export type ReviewDimension = 'hook' | 'conflict' | 'ending' | 'pacing';
+
+/** 规则检查的一条结论（不调 LLM，按分镜现算） */
+export interface ReviewFinding {
+  key: string;
+  severity: ReviewSeverity;
+  title: string;
+  detail: string;
+  /** 涉及的镜头编号 */
+  shots: string[];
+}
+
+export interface ReviewScore {
+  score: number;
+  reason: string;
+}
+
+export interface ReviewSuggestion {
+  dimension: ReviewDimension;
+  /** 镜头编号 S03 或「段落 2」 */
+  ref: string;
+  problem: string;
+  rewrite: string;
+}
+
+export interface ScriptReviewLLM extends Record<ReviewDimension, ReviewScore> {
+  summary: string;
+  suggestions: ReviewSuggestion[];
+  created_at: string | null;
+  job_id: number | null;
+  /** 体检之后分镜或段落改过了 */
+  stale: boolean;
+}
+
+export interface ScriptReview {
+  episode_id: number;
+  rules: { total_seconds: number; shot_count: number; target_seconds: number; findings: ReviewFinding[] };
+  review: ScriptReviewLLM | null;
+  /** 最近一次体检任务 */
+  job: { id: number; status: JobStatus; error: string | null } | null;
+}

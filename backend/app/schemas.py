@@ -361,6 +361,59 @@ class EpisodeIdeaOut(BaseModel):
     mode: Literal["new", "expand", "continue"]
 
 
+# ---- 剧本体检：规则检查现算；LLM 打分存在 episodes.script_review
+class ReviewFindingOut(BaseModel):
+    key: str
+    severity: Literal["ok", "info", "warn", "error"]
+    title: str
+    detail: str = ""
+    shots: list[str] = Field(default_factory=list)
+
+
+class ReviewRulesOut(BaseModel):
+    total_seconds: float
+    shot_count: int
+    target_seconds: float
+    findings: list[ReviewFindingOut]
+
+
+class ReviewScoreOut(BaseModel):
+    score: int
+    reason: str
+
+
+class ReviewSuggestionOut(BaseModel):
+    dimension: Literal["hook", "conflict", "ending", "pacing"]
+    ref: str
+    problem: str = ""
+    rewrite: str
+
+
+class ScriptReviewLLMOut(BaseModel):
+    hook: ReviewScoreOut
+    conflict: ReviewScoreOut
+    ending: ReviewScoreOut
+    pacing: ReviewScoreOut
+    summary: str = ""
+    suggestions: list[ReviewSuggestionOut] = Field(default_factory=list)
+    created_at: str | None = None
+    job_id: int | None = None
+    stale: bool = False             # 体检之后分镜（时长、动作、台词）或段落改过了
+
+
+class ReviewJobOut(BaseModel):
+    id: int
+    status: str
+    error: str | None = None
+
+
+class ScriptReviewOut(BaseModel):
+    episode_id: int
+    rules: ReviewRulesOut
+    review: ScriptReviewLLMOut | None = None
+    job: ReviewJobOut | None = None   # 最近一次体检任务（排队中 / 运行中 / 失败时界面要显示）
+
+
 class EpisodePatch(BaseModel):
     title: str | None = None
     source_text: str | None = None

@@ -4,6 +4,7 @@ import type { JobStatus } from './api/types';
 export const JOB_TYPE_LABEL: Record<string, string> = {
   script: '剧本',
   storyboard: '分镜',
+  'script.review': '剧本体检',
   'image.keyframe': '首帧',
   'image.continue_frame': '接上一镜尾帧',
   'image.location': '场景图',

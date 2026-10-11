@@ -8,14 +8,17 @@ from sqlalchemy import func, select, update
 
 from backend.app.deps import get_or_404, manager, project_by_slug, read_upload, services
 from backend.app.schemas import (BgmOut, EpisodeDetail, EpisodeIdeaIn, EpisodeIdeaOut, EpisodeIn,
-                                 EpisodeOut, EpisodePatch, ExportOut, ExportPatch, SceneBlockOut,
-                                 SceneBlockPatch, TakeStatsOut)
+                                 EpisodeOut, EpisodePatch, ExportOut, ExportPatch, RunOut,
+                                 SceneBlockOut, SceneBlockPatch, ScriptReviewOut, TakeStatsOut)
 from backend.app.views import candidate_out, episode_detail, export_out
 from backend.domain.models import Episode, Export, Job, SceneBlock, Shot
 from backend.domain.music import bgm_of, clear_bgm, set_bgm
 from backend.domain.slots import delete_slots
 from backend.domain.take_stats import episode_take_stats
 from backend.pipeline.episode_idea import IdeaFailed, write_episode_idea
+from backend.pipeline.script_review import TASK as REVIEW_TASK
+from backend.pipeline.script_review import rules_view, stored_review
+from backend.queue.errors import JobError
 from backend.queue.manager import ACTIVE
 
 router = APIRouter(prefix="/api", tags=["episodes"])
@@ -144,6 +147,40 @@ def get_take_stats(episode_id: int, request: Request):
     with services(request).db.session() as s:
         get_or_404(s, Episode, episode_id, "剧集")
         return TakeStatsOut.model_validate(episode_take_stats(s, episode_id))
+
+
+# ------------------------------------------------------------ 剧本体检
+def _review_job(s, episode_id: int):
+    return s.scalar(select(Job).where(Job.type == REVIEW_TASK, Job.owner_type == "episode",
+                                      Job.owner_id == episode_id).order_by(Job.id.desc()).limit(1))
+
+
+@router.get("/episodes/{episode_id}/script-review", response_model=ScriptReviewOut)
+def get_script_review(episode_id: int, request: Request):
+    """剧本体检：规则检查按现在的分镜现算（不调 LLM）；review 是最近一次 LLM 体检的打分和改写建议
+    （分镜改过之后 stale=true）；job 是最近一次体检任务（排队、运行中、失败时界面要显示）。"""
+    with services(request).db.session() as s:
+        ep = get_or_404(s, Episode, episode_id, "剧集")
+        j = _review_job(s, episode_id)
+        return ScriptReviewOut(
+            episode_id=ep.id, rules=rules_view(ep), review=stored_review(ep),
+            job=None if j is None else {"id": j.id, "status": j.status, "error": j.error})
+
+
+@router.post("/episodes/{episode_id}/script-review", response_model=RunOut)
+def run_script_review(episode_id: int, request: Request):
+    """提交 LLM 剧本体检（script.review）。已经有排队 / 运行中的体检时不重复提交，返回那一个。"""
+    with services(request).db.session() as s:
+        ep = get_or_404(s, Episode, episode_id, "剧集")
+        if not ep.shots:
+            raise JobError("这一集还没有分镜，先生成分镜再做剧本体检")
+        project_id = ep.project_id
+        j = _review_job(s, episode_id)
+        if j is not None and j.status in ACTIVE:
+            return RunOut(job_ids=[j.id], notes=["这一集的剧本体检已经在排队或运行中"])
+    jid = manager(request).submit(REVIEW_TASK, {"episode_id": episode_id}, project_id=project_id,
+                                  owner_type="episode", owner_id=episode_id)
+    return RunOut(job_ids=[jid])
 
 
 # ------------------------------------------------------------ 配乐

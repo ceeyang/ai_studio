@@ -48,6 +48,7 @@ import type {
   RunOut,
   SceneBlock,
   SceneBlockPatch,
+  ScriptReview,
   Shot,
   ShotDetail,
   ShotIn,
@@ -89,6 +90,8 @@ export const keys = {
   archivedCandidates: (episodeId: number) => ['episode', episodeId, 'archived'] as const,
   // 挂在 ['episode', id] 下：任何任务结束（成功或失败）、选定候选变了都跟着刷新
   takeStats: (episodeId: number) => ['episode', episodeId, 'take-stats'] as const,
+  // 挂在 ['episode', id] 下：体检任务结束、分镜改了都跟着刷新
+  scriptReview: (episodeId: number) => ['episode', episodeId, 'script-review'] as const,
   rerunImpact: (episodeId: number, stage: string, blockIds: number[] | null) => ['rerunImpact', episodeId, stage, blockIds] as const,
   jobs: (status: string, limit: number) => ['jobs', status, limit] as const,
   job: (id: number) => ['job', id] as const,
@@ -959,6 +962,28 @@ export function useRunStage(episodeId: number) {
   return useMutation({
     mutationFn: (body: RunIn) => api.post<RunOut>(`/api/episodes/${episodeId}/run`, body),
     onSuccess: () => invalidate(qc, ['jobs'], keys.queue),
+  });
+}
+
+/** 剧本体检：规则检查（现算）+ 最近一次 LLM 打分；体检任务没结束时每 5 秒刷新一次 */
+export function useScriptReview(episodeId: number, enabled = true) {
+  return useQuery({
+    queryKey: keys.scriptReview(episodeId),
+    queryFn: () => api.get<ScriptReview>(`/api/episodes/${episodeId}/script-review`),
+    enabled: enabled && episodeId > 0,
+    refetchInterval: (q) => {
+      const st = q.state.data?.job?.status;
+      return st === 'queued' || st === 'running' ? 5000 : false;
+    },
+  });
+}
+
+/** 提交 LLM 剧本体检（script.review） */
+export function useRunScriptReview(episodeId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post<RunOut>(`/api/episodes/${episodeId}/script-review`),
+    onSuccess: () => invalidate(qc, keys.scriptReview(episodeId), ['jobs'], keys.queue),
   });
 }
 

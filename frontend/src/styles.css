@@ -982,6 +982,21 @@ pre.error { background: rgba(255, 90, 95, 0.06); border-color: rgba(255, 90, 95,
 .block-row[aria-expanded="true"] .chev { transform: rotate(45deg); }
 .block-edit { padding: var(--s-3) 12px 12px; border-top: 1px solid var(--divider); }
 
+/* 剧本体检：规则检查 + AI 打分，默认收起 */
+.script-pane .review-box { margin-top: var(--s-3); }
+.review-box .block-no::before { background: var(--warn); }
+.review-h { margin: var(--s-3) 0 var(--s-2); font-size: 13px; }
+.review-h:first-child { margin-top: 0; }
+.review-h .muted { font-weight: 400; font-size: 12px; }
+.review-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; font-size: 13px; line-height: 1.5; }
+.rv { display: flex; gap: 8px; align-items: baseline; }
+.rv-tag { flex: none; min-width: 40px; text-align: center; font-size: 12px; border-radius: var(--r-pill); padding: 1px 8px; background: var(--surface-3); color: var(--text-2); font-variant-numeric: tabular-nums; }
+.rv-ok .rv-tag { background: var(--ok-soft); color: var(--ok); }
+.rv-warn .rv-tag { background: var(--warn-soft); color: var(--warn); }
+.rv-error .rv-tag { background: var(--danger-soft); color: var(--danger); }
+.review-sugs { margin: var(--s-3) 0 0; padding-left: 20px; display: flex; flex-direction: column; gap: 8px; font-size: 13px; line-height: 1.5; }
+.review-actions { display: flex; justify-content: flex-end; margin-top: var(--s-3); }
+
 .tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--divider); margin: calc(var(--s-5) * -1) calc(var(--s-5) * -1) var(--s-4); padding: 0 var(--s-4); position: sticky; top: calc(var(--s-5) * -1); background: var(--surface-1); z-index: 2; border-radius: var(--r-lg) var(--r-lg) 0 0; }
 .tabs [role="tab"] {
   height: 44px; padding: 0 14px; background: transparent; border: 0; border-radius: 0;

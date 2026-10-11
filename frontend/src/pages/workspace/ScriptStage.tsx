@@ -24,6 +24,7 @@ import { EpisodeLoadError, nextActionProps, useNextAction } from '../../componen
 import { EditableFields, type FieldSpec, type FieldValues, type FieldsState, useUnsavedGuard } from '../../components/EditableFields';
 import { useJobNotice } from '../../components/JobNotice';
 import { EPISODE_STATUS_LABEL } from '../../format';
+import { ScriptReviewPanel } from './ScriptReviewPanel';
 import { workspacePath } from './urls';
 
 const EPISODE_FIELDS: FieldSpec[] = [
@@ -470,6 +471,8 @@ export function ScriptStage({
             );
           })}
         </div>
+        {/* 剧本体检：有了分镜才能按镜头时长查开场、结尾（花首帧 / 视频额度之前看一眼） */}
+        {hasShots && <ScriptReviewPanel episodeId={id} />}
       </section>
 
       <RegenerateDialog

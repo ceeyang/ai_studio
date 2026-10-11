@@ -125,6 +125,8 @@ class Episode(Base):
     target_seconds: Mapped[float] = mapped_column(Float, default=60.0)
     status: Mapped[str] = mapped_column(String(20), default="draft")
     stage_hashes: Mapped[dict] = mapped_column(JSON, default=dict)
+    # 剧本体检（script.review）的 LLM 打分和改写建议，连同当时的输入指纹（分镜改了就标「已过期」）；没体检过是 null
+    script_review: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
     project: Mapped[Project] = relationship(back_populates="episodes")
     scene_blocks: Mapped[list[SceneBlock]] = relationship(

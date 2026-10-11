@@ -207,7 +207,7 @@ def test_api_get_defaults(api):
     assert "手动" in tm["effective_label"] and tm["fallback_label"] == tm["effective_label"]
     assert d["image_engine"]["effective"] == "zimage" and d["video_engine"]["effective"] == "h3_video"
     steps = {x["key"]: x for x in d["steps"]}
-    assert set(steps) == {"episode.idea", "script", "storyboard", "character.suggest", "character.recommend",
+    assert set(steps) == {"episode.idea", "script", "storyboard", "script.review", "character.suggest", "character.recommend",
                           "character.turnaround_look", "character.from_photo", "dialogue.fit_khmer",
                           "subtitles.translate", "portrait", "turnaround", "location", "prop"}           # 首帧/视频跟项目走，没有步骤设置
     assert all(x["invalid"] is False for x in d["steps"])
