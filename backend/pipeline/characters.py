@@ -20,17 +20,26 @@ from backend.pipeline.prompting import join_negative, photo_style, shot_seed, up
 from backend.queue.errors import JobError
 from backend.queue.handlers import HANDLERS
 
-PORTRAIT_ASPECT = "9:16"
-PORTRAIT_FRAME = ("Character reference portrait of one single person: front-facing medium shot "
-                  "framed from the waist up (head, shoulders and torso only, legs out of frame), "
-                  "standing upright and looking straight into the camera, relaxed neutral "
-                  "expression, arms down at the sides, centered in frame.")
+# 定妆照优先出 3:4（比 9:16 矮，画面里放不下腿）；引擎没有 3:4 才退回 9:16
+PORTRAIT_ASPECTS = ("3:4", "9:16")
+# 默认的 zimage 是 cfg 1，负面提示词不起作用：构图全靠正面描述，只写要什么、不写「不要什么」
+# （「legs out of frame」「no props」这类否定词在 cfg 1 下反而会把腿、道具招进画面）
+PORTRAIT_FRAME = ("Character reference portrait of one single person: front-facing tight medium "
+                  "shot cropped at the waist, the bottom edge of the frame cuts across the belt; "
+                  "head, shoulders, chest and both arms fill the frame, standing upright and "
+                  "looking straight into the camera, relaxed neutral expression, arms relaxed at "
+                  "the sides, centered in frame.")
 PORTRAIT_BACKDROP = ("Plain seamless neutral light-grey studio backdrop filling the entire "
-                     "background, soft even studio lighting, isolated subject, no environment, "
-                     "no props, no other people, no text, no watermark.")
+                     "background, soft even studio lighting, the person alone against the empty "
+                     "grey backdrop.")
 PORTRAIT_NEGATIVE = ("full body, legs, feet, shoes, outdoor scene, room interior, street, rain, "
                      "scenery, props, multiple people")
 LLM_TASK = "character"
+
+
+def portrait_aspect(engine) -> str:
+    sizes = getattr(getattr(engine, "caps", None), "sizes", None) or {}
+    return next((a for a in PORTRAIT_ASPECTS if a in sizes), PORTRAIT_ASPECTS[-1])
 
 
 def portrait_prompt(visual_prompt: str, anchor: str) -> str:
@@ -81,7 +90,7 @@ def run_portrait(ctx, payload: dict) -> dict:
         negative = join_negative(proj.negative, style.negative if style else "", PORTRAIT_NEGATIVE)
         seed = shot_seed(proj.seed, char_id, ctx.job_id)
         slug, name = proj.slug, ch.name
-    call = engine.build(ImageRequest(prompt=prompt, negative=negative, aspect=PORTRAIT_ASPECT,
+    call = engine.build(ImageRequest(prompt=prompt, negative=negative, aspect=portrait_aspect(engine),
                                      seed=seed, prefix=f"studio/{slug}/portrait_{char_id}"))
     ctx.log(f"定妆照 {name} · {engine_name} · {seed_label(call, seed)}")
     files, run_dir = run_comfy(ctx, call, slug)

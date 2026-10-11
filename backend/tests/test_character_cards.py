@@ -46,7 +46,7 @@ def portrait_slot(db, char_id):
 
 
 # ---------------------------------------------------------------- image.portrait
-def test_portrait_draw_uses_visual_prompt_anchor_and_9_16(tmp_path, db):
+def test_portrait_draw_uses_visual_prompt_anchor_and_3_4(tmp_path, db):
     ctx, runner, ids = setup(tmp_path, db)
     out = run_portrait(ctx, {"character_id": ids["char"]})
     call = runner.calls[0]
@@ -55,9 +55,10 @@ def test_portrait_draw_uses_visual_prompt_anchor_and_9_16(tmp_path, db):
     assert prompt.startswith("Character reference portrait")
     assert "Photorealistic live-action commercial photography" in prompt
     assert "fine film grain" in prompt
-    assert LOOK in prompt and "waist up" in prompt and "front" in prompt
+    assert LOOK in prompt and "cropped at the waist" in prompt and "front" in prompt
     assert "neutral" in prompt.lower() or "grey" in prompt.lower()
-    assert call.meta["size"] == [768, 1344]
+    # 引擎有 3:4 就用 3:4（比 9:16 短，留不下腿）：zimage 864×1152
+    assert call.meta["size"] == [864, 1152]
     assert call.meta["refs"] == []  # 抽新造型不带旧定妆照
     sel, cands = portrait_slot(db, ids["char"])
     assert out["candidate_ids"] == [cands[0][0]]
@@ -119,8 +120,11 @@ def test_portrait_prompt_keeps_only_photographic_style_terms():
         assert good in low, good
     # 构图写在最前面，明确正面、腰部以上；背景是中性纯色影棚
     assert p.startswith("Character reference portrait")
-    assert "front-facing" in low and "waist up" in low
+    assert "front-facing" in low and "cropped at the waist" in low
+    assert "bottom edge of the frame cuts across the belt" in low
     assert "light-grey studio backdrop" in low
+    # zimage 是 cfg 1，负面词不起作用：正面提示词里只写要什么，不写「腿不入画」「no props」这类否定
+    assert not re.search(r"legs?|no (props|environment|other people)", low)
     # 半身照：只写下半身的句子（裤子、靴子）去掉，脸、上衣、手表都保留
     assert "trousers" not in low and "boots" not in low
     assert "weathered square face" in p and "work jacket" in p and "wristwatch" in p
@@ -311,3 +315,12 @@ def test_api_suggest_and_recommend_submit_jobs(api):
     assert jobs(api, "character.recommend")[0][:4] == (
         "character.recommend", "episode", ep_id, {"episode_id": ep_id, "count": 3})
     assert api.post("/api/episodes/999/characters/recommend", json={}).status_code == 404
+
+
+def test_portrait_aspect_falls_back_to_9_16_when_engine_has_no_3_4():
+    from types import SimpleNamespace as NS
+
+    from backend.pipeline.characters import portrait_aspect
+
+    assert portrait_aspect(NS(caps=NS(sizes={"9:16": (1, 2), "3:4": (3, 4)}))) == "3:4"
+    assert portrait_aspect(NS(caps=NS(sizes={"9:16": (1, 2), "16:9": (2, 1)}))) == "9:16"

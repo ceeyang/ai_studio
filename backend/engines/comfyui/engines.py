@@ -47,7 +47,7 @@ class ZImageEngine(_ComfyEngine):
     template_name = "zimage"
     caps = ImageCaps(max_refs=0, supports_negative=True,
                      sizes={"9:16": (768, 1344), "16:9": (1344, 768), "1:1": (1024, 1024),
-                            "21:9": (1792, 768)})
+                            "21:9": (1792, 768), "3:4": (864, 1152)})
 
     def build(self, req: ImageRequest) -> EngineCall:
         w, h = size_for(self.caps.sizes, req.aspect)
@@ -70,7 +70,7 @@ class Krea2Engine(_ComfyEngine):
     template_name = "krea2"
     caps = ImageCaps(max_refs=0, supports_negative=False,
                      sizes={"9:16": (768, 1344), "16:9": (1344, 768), "1:1": (1024, 1024),
-                            "21:9": (1792, 768)})
+                            "21:9": (1792, 768), "3:4": (864, 1152)})
 
     def build(self, req: ImageRequest) -> EngineCall:
         w, h = size_for(self.caps.sizes, req.aspect)
@@ -91,7 +91,7 @@ class H3ImageEngine(_ComfyEngine):
     template_name = "h3_image"
     caps = ImageCaps(max_refs=9, supports_negative=False,
                      sizes={"9:16": (768, 1344), "16:9": (1344, 768), "1:1": (960, 960),
-                            "21:9": (1792, 768)})
+                            "21:9": (1792, 768), "3:4": (864, 1152)})
 
     def build(self, req: ImageRequest) -> EngineCall:
         w, h = size_for(self.caps.sizes, req.aspect)
