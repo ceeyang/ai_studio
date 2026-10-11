@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { FoldPanel } from './FoldPanel';
 import { errorText } from '../../api/client';
 import { useBrowserStatus, useOpenBrowserLogin } from '../../api/queries';
 import type { BrowserSiteStatus, BrowserStatus } from '../../api/types';
@@ -153,12 +154,16 @@ export function BrowserPanel() {
   const status = useBrowserStatus();
   const st = status.data;
   return (
-    <section className="panel area-browser" data-testid="browser-panel">
-      <h2>网页出图（{st?.transport === 'cdp' ? 'studio 管的浏览器' : '浏览器扩展'}）</h2>
+    <FoldPanel
+      id="browser"
+      className="area-browser"
+      testId="browser-panel"
+      title={`网页出图（${st?.transport === 'cdp' ? 'studio 管的浏览器' : '浏览器扩展'}）`}
+    >
       {status.error && <p className="error">读浏览器状态失败：{errorText(status.error)}</p>}
       {!st && !status.error && <p className="muted">读取中…</p>}
       {st?.transport === 'extension' && <ExtensionBody st={st} />}
       {st?.transport === 'cdp' && <CdpBody st={st} />}
-    </section>
+    </FoldPanel>
   );
 }

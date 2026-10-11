@@ -1,6 +1,6 @@
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ApiService, AppSettings } from '../../api/types';
 import { installFetch, json } from '../../test/fetch';
 import { renderAt } from '../../test/render';
@@ -86,15 +86,23 @@ function base(extra: Record<string, unknown> = {}) {
 }
 
 describe('设置页「API 服务」', () => {
+  // 这块默认折叠；下面的用例先记成展开，第一条单独测默认折叠
+  beforeEach(() => window.localStorage.setItem('studio:settings-fold:api', '1'));
+  afterEach(() => window.localStorage.clear());
+
   it('三家各一块；没配的写「未配置」；Key 输入框是 password，可显示 / 隐藏；整页仍只有一个主按钮', async () => {
+    window.localStorage.removeItem('studio:settings-fold:api');
     base();
     renderAt(<SettingsPage />, { route: '/settings', path: '/settings' });
     const panel = await screen.findByRole('region', { name: 'API 服务' });
+    // 默认折叠，标题旁写已配置几家；点标题展开，并记住
+    const toggle = within(panel).getByRole('button', { name: 'API 服务' });
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    expect(await within(panel).findByText(/^已配置 \d \/ 3$/)).toBeTruthy();
+    await userEvent.setup().click(toggle);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    expect(window.localStorage.getItem('studio:settings-fold:api')).toBe('1');
     expect(await within(panel).findByTestId('api-openai')).toBeTruthy();
-    // 默认折叠，标题写已配置几家
-    const fold = panel.querySelector('details.api-services-fold') as HTMLDetailsElement;
-    expect(fold.open).toBe(false);
-    expect(await within(panel).findByText(/^配置 Key（已配置 \d \/ 3）$/)).toBeTruthy();
     expect(within(panel).getByTestId('api-anthropic')).toBeTruthy();
     expect(within(panel).getByTestId('api-gemini')).toBeTruthy();
     expect(within(panel).getByTestId('api-openai-status').textContent).toBe('未配置');
@@ -112,7 +120,7 @@ describe('设置页「API 服务」', () => {
     expect(within(screen.getByTestId('api-openai')).queryByRole('button', { name: '清除' })).toBeNull();
     expect(document.querySelectorAll('button.primary')).toHaveLength(1);
     // 引擎表：API 标签、模型名、没 Key 的原因
-    expect(await screen.findByText('API')).toBeTruthy();
+    expect(await screen.findByText('API', { selector: '.pill' })).toBeTruthy();
     expect(screen.getByText(/模型 gpt-image-1 · 没有种子/)).toBeTruthy();
     expect(screen.getByText('OpenAI 图像（API）不能用：还没有配置 Key')).toBeTruthy();
   });

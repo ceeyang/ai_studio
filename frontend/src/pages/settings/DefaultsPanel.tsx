@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { FoldPanel } from './FoldPanel';
 import { useSearchParams } from 'react-router-dom';
 import { errorText } from '../../api/client';
 import { useAppSettings, useSaveSettings } from '../../api/queries';
@@ -122,22 +123,20 @@ export function DefaultsPanel() {
 
   if (settings.error) {
     return (
-      <section className="panel area-defaults" aria-label="默认模型">
-        <h2>默认模型</h2>
+      <FoldPanel id="defaults" className="area-defaults" ariaLabel="默认模型" title="默认模型">
         <p className="error" role="alert">
           {errorText(settings.error)}
         </p>
-      </section>
+      </FoldPanel>
     );
   }
   if (!data || !draft || !saved) {
     return (
-      <section className="panel area-defaults" aria-label="默认模型">
-        <h2>默认模型</h2>
+      <FoldPanel id="defaults" className="area-defaults" ariaLabel="默认模型" title="默认模型">
         <p className="muted" role="status">
           加载中…
         </p>
-      </section>
+      </FoldPanel>
     );
   }
 
@@ -162,10 +161,14 @@ export function DefaultsPanel() {
     kind === 'llm' ? llmName(data.choices.llm, id) : engineName(kind === 'image' ? data.choices.image : data.choices.video, id);
 
   return (
-    <section className="panel area-defaults" aria-label="默认模型">
-      <div className="page-head">
-        <h2>默认模型</h2>
-        <div className="row">
+    <FoldPanel
+      id="defaults"
+      className="area-defaults"
+      ariaLabel="默认模型"
+      title="默认模型"
+      forceOpen={!!focusStep}
+      actions={
+        <>
           {/* 状态一直在 DOM 里，读屏软件才会念出变化 */}
           <span
             role="status"
@@ -178,8 +181,9 @@ export function DefaultsPanel() {
           <button type="button" className="primary" disabled={!dirty || save.isPending} onClick={onSave}>
             保存
           </button>
-        </div>
-      </div>
+        </>
+      }
+    >
       <p className="muted small">设置页只管默认，项目和镜头上选的总是优先。改了马上生效，不用重启。</p>
       {save.error && (
         <p className="error" role="alert">
@@ -268,6 +272,6 @@ export function DefaultsPanel() {
           首帧、视频没有单独设置：跟项目和镜头上选的引擎走。
         </p>
       </details>
-    </section>
+    </FoldPanel>
   );
 }

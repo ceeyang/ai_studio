@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { FoldPanel } from './FoldPanel';
 import { errorText } from '../../api/client';
 import { useApiServices, useSaveApiService, useTestApiService } from '../../api/queries';
 import type { ApiModelKind, ApiService, ApiServiceIn } from '../../api/types';
@@ -167,8 +168,14 @@ function ServiceCard({ s }: { s: ApiService }) {
 export function ApiServicesPanel() {
   const q = useApiServices();
   return (
-    <section className="panel area-api" aria-label="API 服务">
-      <h2>API 服务</h2>
+    <FoldPanel
+      id="api"
+      className="area-api"
+      ariaLabel="API 服务"
+      title="API 服务"
+      defaultOpen={false}
+      meta={q.data && `已配置 ${q.data.services.filter((s) => s.configured).length} / ${q.data.services.length}`}
+    >
       <p className="muted small">
         用 OpenAI、Anthropic、Google 的官方 API（按量计费）：填了 Key，对应的文本模型就能在上面「默认模型」里选（各步骤也能单独选），
         出图 / 视频引擎（标「API」）能在项目和镜头里选。Key 只存在本机数据库里，页面上只显示掩码；没填时用环境变量。
@@ -183,19 +190,11 @@ export function ApiServicesPanel() {
           加载中…
         </p>
       )}
-      {/* 默认折叠：Key 填一次就不常动，展开才看三家的配置 */}
-      <details className="api-services-fold">
-        <summary>
-          {q.data
-            ? `配置 Key（已配置 ${q.data.services.filter((s) => s.configured).length} / ${q.data.services.length}）`
-            : '配置 Key'}
-        </summary>
-        <div className="api-services">
-          {(q.data?.services ?? []).map((s) => (
-            <ServiceCard key={s.id} s={s} />
-          ))}
-        </div>
-      </details>
-    </section>
+      <div className="api-services">
+        {(q.data?.services ?? []).map((s) => (
+          <ServiceCard key={s.id} s={s} />
+        ))}
+      </div>
+    </FoldPanel>
   );
 }
