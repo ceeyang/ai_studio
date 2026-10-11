@@ -26,6 +26,7 @@ class Services:
     comfy: Any = None        # ComfyRunner
     comfy_client: Any = None  # ComfyClient
     browser: Any = None      # BrowserRunner（gpt_image / gemini_image）
+    runninghub: Any = None   # RunningHubRunner（config 里配了 runninghub 才有）
 
     def prompts(self, slug: str) -> PromptLibrary:
         return PromptLibrary(BUILTIN_DIR, self.media.project_dir(slug) / "prompts")
@@ -37,6 +38,9 @@ def build_services(cfg: Config, db: Database, manager: Any) -> Services:
     from backend.engines.browser.session import BrowserSession
     from backend.engines.comfyui.client import ComfyClient
     from backend.engines.comfyui.runner import ComfyRunner
+    from backend.engines.runninghub.client import RunningHubClient
+    from backend.engines.runninghub.engines import FAMILY as RH_FAMILY
+    from backend.engines.runninghub.runner import RunningHubRunner
     from backend.llm.gateway import LLMGateway
     from backend.llm.providers import build_providers
 
@@ -57,7 +61,14 @@ def build_services(cfg: Config, db: Database, manager: Any) -> Services:
     manager.on_gpu_idle = on_gpu_idle
     # 网页出图每个网站一条串行通道，不占 GPU worker、不触发换模型族/释放显存
     manager.lanes = BROWSER_FAMILIES
+    rh = None
+    if cfg.runninghub is not None:
+        # 云端任务不占本机显卡：单独一条串行通道
+        manager.lanes = (*BROWSER_FAMILIES, RH_FAMILY)
+        rh = RunningHubRunner(RunningHubClient(cfg.runninghub.base_url, cfg.runninghub.api_key(),
+                                               api_key_env=cfg.runninghub.api_key_env,
+                                               poll_interval=cfg.runninghub.poll_interval))
     return Services(cfg=cfg, db=db, media=MediaStore(cfg.data_dir), engines=EngineRegistry(cfg),
                     llm=llm, ffmpeg=FFmpeg(cfg.ffmpeg.ffmpeg, cfg.ffmpeg.ffprobe),
                     comfy=runner, comfy_client=client,
-                    browser=BrowserRunner(BrowserSession(cfg.browser)))
+                    browser=BrowserRunner(BrowserSession(cfg.browser)), runninghub=rh)

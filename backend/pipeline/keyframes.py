@@ -7,6 +7,7 @@ from backend.domain.refs import shot_refs
 from backend.domain.models import Shot
 from backend.domain.slots import add_candidate, get_or_create_slot, selected_candidate
 from backend.engines.base import ImageRequest
+from backend.engines.runninghub.client import RunningHubError
 from backend.pipeline.common import load_episode
 from backend.pipeline.prompting import (compose_image_prompt, join_negative, keyframe_input_hash,
                                         keyframe_inputs, shot_seed)
@@ -24,18 +25,28 @@ def load_shot(s, shot_id: int):
 
 def run_comfy(ctx, call, slug: str, ref_labels: dict[str, str] | None = None):
     """执行引擎调用：ComfyUI 工作流交给 ComfyRunner，网页出图（call.runner == "browser"）交给
-    BrowserRunner。两者都把产物下载到任务目录，返回文件列表和任务目录。"""
+    BrowserRunner，RunningHub 云端（call.runner == "runninghub"）交给 RunningHubRunner。
+    都把产物下载到任务目录，返回文件列表和任务目录。"""
     sv = ctx.services
-    browser = getattr(call, "runner", "comfyui") == "browser"
+    kind = getattr(call, "runner", "comfyui")
+    browser = kind == "browser"
     if browser and getattr(sv, "browser", None) is None:
         raise JobError("网页出图的浏览器没有配置")
-    if not browser and sv.comfy is None:
+    if kind == "runninghub" and getattr(sv, "runninghub", None) is None:
+        raise JobError("RunningHub 没有配置（config.yaml 的 runninghub）")
+    if kind == "comfyui" and sv.comfy is None:
         raise JobError("ComfyUI 未配置")
     labels = ref_labels or {}
     for ref in call.dropped_refs:
         ctx.log(f"超出引擎参考图上限，已丢弃：{labels.get(ref, ref)}")
     run_dir = sv.media.run_dir(slug, ctx.job_id)
-    if browser:
+    if kind == "runninghub":
+        try:
+            files = sv.runninghub.run(call, run_dir=run_dir, cancel=ctx.cancel_event,
+                                      on_progress=ctx.progress, log=ctx.log)
+        except RunningHubError as e:
+            raise JobError(str(e)) from None
+    elif browser:
         files = sv.browser.run(call, run_dir=run_dir, cancel=ctx.cancel_event,
                                on_progress=ctx.progress, log=ctx.log)
     else:

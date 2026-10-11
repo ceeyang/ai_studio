@@ -1,6 +1,7 @@
 """引擎注册表：按 config.yaml 的 engines.<name>.enabled 加载。
 
-ComfyUI 引擎带工作流模板（template_name），网页引擎（gpt_image / gemini_image）没有模板。"""
+ComfyUI 引擎带工作流模板（template_name），网页引擎（gpt_image / gemini_image）没有模板；
+RunningHub 云端引擎只在 config.yaml 的 runninghub.engines 里配了才有。"""
 from __future__ import annotations
 
 from typing import Any
@@ -11,14 +12,24 @@ from backend.engines.browser.engines import BROWSER_ENGINES
 from backend.engines.comfyui.engines import (H3ImageEngine, H3VideoEngine, Krea2Engine,
                                              Wan22I2VEngine, ZImageEngine)
 from backend.engines.comfyui.template import WorkflowTemplate
+from backend.engines.runninghub.engines import load_runninghub_engines
+from backend.queue.errors import JobError
 
 ENGINE_CLASSES = {cls.name: cls for cls in (ZImageEngine, Krea2Engine, H3ImageEngine, H3VideoEngine,
                                             Wan22I2VEngine, *BROWSER_ENGINES)}
 
 
 def runtime_of(engine: Any) -> str:
-    """comfyui（本机显卡）或 browser（驱动已登录的网页）。"""
+    """comfyui（本机显卡）、browser（驱动已登录的网页）或 runninghub（云端）。"""
     return getattr(engine, "runtime", "comfyui")
+
+
+def check_ready(engine: Any) -> None:
+    """提交任务前的检查（比如 RunningHub 没有 API key）：不行就抛 JobError，信息给用户看。"""
+    pre = getattr(engine, "preflight", None)
+    msg = pre() if callable(pre) else None
+    if msg:
+        raise JobError(msg)
 
 
 class EngineRegistry:
@@ -33,6 +44,7 @@ class EngineRegistry:
                 self._engines[name] = cls(tpl, ec.params)
             else:
                 self._engines[name] = cls(ec.params)
+        self._engines.update(load_runninghub_engines(cfg, set(ENGINE_CLASSES)))
 
     def get(self, name: str) -> Any:
         try:

@@ -120,6 +120,26 @@ def _check_extension(used: dict, browser) -> list[Check]:
     return out
 
 
+def check_runninghub(cfg: Config, engines) -> list[Check]:
+    """RunningHub 云端引擎：有没有 API key、配了哪些引擎（不联网、不扣费）。没配 runninghub 就不报。"""
+    rh = cfg.runninghub
+    used = {n: e for n, e in engines.all().items() if runtime_of(e) == "runninghub"}
+    if rh is None or not used:
+        return []
+    out: list[Check] = []
+    if rh.api_key():
+        out.append(Check("RunningHub", "API key", "ok", f"已从环境变量 {rh.api_key_env} 读到 · {rh.base_url}"))
+    else:
+        out.append(Check("RunningHub", "API key", "warn",
+                         f"没有设置 RunningHub API key（环境变量 {rh.api_key_env}），"
+                         f"{'、'.join(sorted(used))} 用不了：在 .env 里写上 {rh.api_key_env}=你的 key 后重启 studio"))
+    for name, e in sorted(used.items()):
+        target = f"工作流 {e.cfg.workflow_id}" if e.cfg.workflow_id else f"AI 应用 {e.cfg.webapp_id}"
+        kind = "图像" if e.cfg.kind == "image" else "视频"
+        out.append(Check("RunningHub", name, "ok", f"{e.label} · {kind} · {target}"))
+    return out
+
+
 def run_doctor(cfg: Config, engines, comfy, ffmpeg, *, browser=None,
                http_get: Callable[[str], Any] = _http_get,
                which: Callable[[str], str | None] = shutil.which) -> list[Check]:
@@ -162,6 +182,7 @@ def run_doctor(cfg: Config, engines, comfy, ffmpeg, *, browser=None,
                              "缺少：" + "、".join(miss) if miss else f"{len(files)} 个模型文件都在"))
 
     out += check_browser(engines, browser)
+    out += check_runninghub(cfg, engines)
 
     for p in cfg.llm.providers:
         if p.kind == "openai":

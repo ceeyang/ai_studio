@@ -12,6 +12,7 @@ from backend.domain.characters import portrait_of, use_portrait
 from backend.domain.turnaround import (SHEETS, crop_cells, look_of, select_sheet,
                                        sheet_slot_kind)
 from backend.domain.models import Candidate, Character, Episode, Slot
+from backend.engines.registry import check_ready
 from backend.pipeline.characters import sheet_engine_name
 from backend.queue.errors import JobError
 
@@ -31,9 +32,12 @@ def draw_portraits(char_id: int, body: PortraitDrawIn, request: Request):
     if body.engine:
         check_engines(sv, body.engine, None)
     try:
-        family = sv.engines.image(engine_name).family
+        eng = sv.engines.image(engine_name)
     except KeyError:
         family = None
+    else:
+        check_ready(eng)
+        family = eng.family
     payload: dict = {"character_id": char_id}
     if vp:
         payload["visual_prompt"] = vp
@@ -119,6 +123,7 @@ def turnaround_generate(char_id: int, body: TurnaroundGenerateIn, request: Reque
             engine = sv.engines.image(engine_name)
         except KeyError as e:
             raise JobError(str(e)) from None
+        check_ready(engine)
         if not look_of(c):
             raise JobError(f"角色 {c.name} 还没有外貌提示词，先写一个或用 AI 推荐造型")
         if engine.caps.max_refs > 0 and portrait_of(s, char_id) is None:

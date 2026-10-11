@@ -8,7 +8,7 @@ from sqlalchemy import select
 
 from backend.domain.db import Database
 from backend.domain.models import Episode, Slot
-from backend.engines.registry import runtime_of
+from backend.engines.registry import check_ready, runtime_of
 from backend.pipeline.common import check_scene_blocks, clean_note
 from backend.pipeline.post import lines_missing_km, speakers_without_voice
 from backend.post.options import ExportOptions
@@ -58,9 +58,11 @@ def _pick_shots(shots, wanted: list[str] | None):
 
 def _family(engines, kind: str, name: str) -> str:
     try:
-        return (engines.image(name) if kind == "image" else engines.video(name)).family
+        eng = engines.image(name) if kind == "image" else engines.video(name)
     except KeyError as e:
         raise JobError(str(e)) from None
+    check_ready(eng)
+    return eng.family
 
 
 def _uses_comfy(engines, kind: str, names) -> bool:

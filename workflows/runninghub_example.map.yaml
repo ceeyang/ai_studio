@@ -1,0 +1,17 @@
+# RunningHub 云端引擎的映射文件示例（只有在 config.yaml 的 runninghub.engines 里配了引擎才会用到）。
+# 文件名约定：runninghub_<引擎名>.map.yaml；也可以在引擎配置里用 map: 指定。
+# 节点 id 和字段名在 RunningHub 网页里打开工作流 → 节点右上角看 id，字段名就是节点输入的名字。
+params:                      # 我们的参数 → [节点 id, 字段名]，没写的参数不改（用云端工作流自己的值）
+  prompt: [["6", "text"]]
+  negative: [["7", "text"]]
+  width: [["5", "width"]]
+  height: [["5", "height"]]
+  seed: [["3", "seed"]]
+  # 视频引擎还可以用：first_frame（首帧，自动上传）、end_frame、frames、seconds、fps
+  # 参考图：refs: [["20", "image"], ["21", "image"]]，按顺序填，多的丢弃
+defaults:                    # 每次固定写进去的值：[节点 id, 字段名, 值]
+  steps: [["3", "steps", 20]]
+caps:
+  supports_negative: true
+  sizes: {"9:16": [720, 1280], "16:9": [1280, 720]}
+  # 视频：fps: 16, max_seconds: 5, has_audio: false

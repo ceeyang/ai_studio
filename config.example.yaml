@@ -46,6 +46,16 @@ engines:
   gpt_image: {enabled: true, params: {timeout: 420, fit_aspect: true}}
   gemini_image: {enabled: true, params: {timeout: 300, fit_aspect: true}}
 
+# RunningHub 云端 ComfyUI（可选，不写就没有云端引擎）。API key 不写在这里：在 .env 里写
+# RUNNINGHUB_API_KEY=你的 key（RunningHub 网站 → 个人中心 → API 控制台）。没有 key 时 doctor 报警告、提交任务直接拒绝。
+# 每个引擎对应一个云端工作流（workflow_id）或 AI 应用（webapp_id），参数映射见 workflows/runninghub_example.map.yaml。
+# runninghub:
+#   base_url: https://www.runninghub.cn
+#   api_key_env: RUNNINGHUB_API_KEY
+#   engines:
+#     rh_flux: {kind: image, workflow_id: "1234567890", label: "Flux 云端"}       # map 默认 runninghub_rh_flux.map.yaml
+#     rh_wan: {kind: video, webapp_id: "9876543210", map: runninghub_rh_wan.map.yaml}
+
 # 网页出图用的浏览器。
 # transport: extension（默认）——出图在你平时用的 Chrome/Edge 里进行：在那个浏览器里加载仓库下的
 #   browser-extension（chrome://extensions → 开发者模式 → 加载已解压的扩展程序），并登录 ChatGPT 和 Gemini。

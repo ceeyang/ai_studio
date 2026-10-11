@@ -134,6 +134,32 @@ class BrowserCfg(BaseModel):
     launch_timeout: float = 30.0       # 启动后等调试端口响应的秒数
 
 
+class RunningHubEngineCfg(BaseModel):
+    """一个 RunningHub 云端工作流（或 AI 应用）当成一个引擎用。
+
+    workflow_id 和 webapp_id 二选一；map 是 workflows/ 下的映射文件名（不写就用
+    runninghub_<引擎名>.map.yaml），把我们的提示词/尺寸/种子/首帧等写进 nodeInfoList。"""
+    kind: Literal["image", "video"]
+    workflow_id: str | None = None
+    webapp_id: str | None = None
+    map: str | None = None
+    enabled: bool = True
+    label: str | None = None           # 界面上显示的名字（不写用引擎名）
+    timeout: float = 1800.0            # 等云端出结果的最长秒数
+
+
+class RunningHubCfg(BaseModel):
+    """RunningHub 云端 ComfyUI（https://www.runninghub.cn OpenAPI）。只有在 engines 里配了才会出现引擎。
+    API key 不写进配置，从环境变量 api_key_env（默认 RUNNINGHUB_API_KEY）读。"""
+    base_url: str = "https://www.runninghub.cn"
+    api_key_env: str = "RUNNINGHUB_API_KEY"
+    poll_interval: float = 5.0
+    engines: dict[str, RunningHubEngineCfg] = Field(default_factory=dict)
+
+    def api_key(self) -> str | None:
+        return os.environ.get(self.api_key_env) or None
+
+
 class Config(BaseModel):
     server: ServerCfg = Field(default_factory=ServerCfg)
     comfyui: ComfyCfg = Field(default_factory=ComfyCfg)
@@ -143,6 +169,7 @@ class Config(BaseModel):
     subtitles: SubtitlesCfg = Field(default_factory=SubtitlesCfg)
     dub: DubCfg = Field(default_factory=DubCfg)
     browser: BrowserCfg = Field(default_factory=BrowserCfg)
+    runninghub: RunningHubCfg | None = None
     workflows_dir: Path = ROOT / "workflows"
     log_dir: Path = ROOT / "logs"
     # 生产态由后端托管的前端构建目录（cd frontend; npm run build 生成）；不存在就只提供 API
