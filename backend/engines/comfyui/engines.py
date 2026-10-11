@@ -62,22 +62,24 @@ class ZImageEngine(_ComfyEngine):
 class Krea2Engine(_ComfyEngine):
     """moodyCutieMixKrea2 文生图（人像向）：8 步出图 → 潜空间放大 1.5 倍 → 4 步 denoise 0.54 精修。
 
-    不吃参考图；最终出图是 EmptyLatent 尺寸的 1.5 倍（9:16 出 1152×2016）。"""
+    不吃参考图；最终出图是 EmptyLatent 尺寸的 1.5 倍（9:16 出 1152×2016）。
+    两段采样都是 cfg 1.0，负面提示词不起作用：caps 不声明支持，工作流里负面写空，原文记在 meta 里。"""
     label = "Krea2 人像"
     name = "krea2"
     family = "krea2"
     template_name = "krea2"
-    caps = ImageCaps(max_refs=0, supports_negative=True,
+    caps = ImageCaps(max_refs=0, supports_negative=False,
                      sizes={"9:16": (768, 1344), "16:9": (1344, 768), "1:1": (1024, 1024),
                             "21:9": (1792, 768)})
 
     def build(self, req: ImageRequest) -> EngineCall:
         w, h = size_for(self.caps.sizes, req.aspect)
-        wf = self._render({"prompt": req.prompt, "negative": req.negative, "width": w,
+        wf = self._render({"prompt": req.prompt, "negative": "", "width": w,
                            "height": h, "seed": req.seed, "prefix": req.prefix})
         return EngineCall(self.name, wf, "image", self.family,
-                          meta={"prompt": req.prompt, "negative": req.negative, "seed": req.seed,
-                                "size": [w, h], "steps": wf["8"]["inputs"]["steps"]},
+                          meta={"prompt": req.prompt, "seed": req.seed, "size": [w, h],
+                                "steps": wf["8"]["inputs"]["steps"],
+                                **({"negative_ignored": req.negative} if req.negative else {})},
                           dropped_refs=[str(p) for p in req.refs])
 
 

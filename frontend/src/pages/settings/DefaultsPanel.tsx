@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { errorText } from '../../api/client';
 import { useAppSettings, useSaveSettings } from '../../api/queries';
-import type { AppSettings, AppSettingsIn, EngineChoice, LlmChoice, SettingKind } from '../../api/types';
+import type { AppSettings, AppSettingsIn, EngineChoice, LlmChoice, SettingKind, SettingValue } from '../../api/types';
 import { engineLabel } from '../../format';
 
-/** 设置页「默认模型」：默认文本模型 / 图片来源 / 视频来源，按步骤单独设置。null（空串）= 跟随默认。 */
+/** 设置页「默认模型」：默认文本模型 / 新项目的图片来源 / 新项目的视频来源，按步骤单独设置。
+ *  null（空串）= 跟随默认。规则：设置页只管默认，项目和镜头上选的总是优先。 */
 
 interface Draft {
   text_model: string;
@@ -47,6 +48,20 @@ function engineName(choices: EngineChoice[], name: string | null | undefined): s
   return row ? engineLabel(row) : engineLabel(name);
 }
 
+/** 存的设置值已经不在可选项里（config 删了 provider、引擎停用了）：下拉框里留一项，旁边说清楚现在用的是什么 */
+function InvalidOption({ v }: { v: SettingValue }) {
+  return v.invalid && v.value ? <option value={v.value}>{`已失效：${v.value}`}</option> : null;
+}
+
+function InvalidNote({ v, now, id }: { v: SettingValue; now: string; id: string }) {
+  if (!v.invalid || !v.value) return null;
+  return (
+    <small className="error" data-testid={`invalid-${id}`}>
+      已失效（配置里没有 {v.value}），现在用 {now}
+    </small>
+  );
+}
+
 function Options({ kind, data }: { kind: SettingKind; data: AppSettings }) {
   if (kind === 'llm') {
     return (
@@ -86,7 +101,9 @@ export function DefaultsPanel() {
     return (
       <section className="panel area-defaults" aria-label="默认模型">
         <h2>默认模型</h2>
-        <p className="error">{errorText(settings.error)}</p>
+        <p className="error" role="alert">
+          {errorText(settings.error)}
+        </p>
       </section>
     );
   }
@@ -94,7 +111,9 @@ export function DefaultsPanel() {
     return (
       <section className="panel area-defaults" aria-label="默认模型">
         <h2>默认模型</h2>
-        <p className="muted">加载中…</p>
+        <p className="muted" role="status">
+          加载中…
+        </p>
       </section>
     );
   }
@@ -114,52 +133,65 @@ export function DefaultsPanel() {
   };
   const overridden = data.steps.filter((s) => s.value).length;
   const bad = [...data.choices.image, ...data.choices.video].filter((e) => !e.ready && e.note);
+  const stateText = save.isPending ? '保存中…' : dirty ? '有改动，还没保存' : justSaved ? '已保存，马上生效' : '';
+  const nameOf = (kind: SettingKind, id: string | null | undefined) =>
+    kind === 'llm' ? llmName(data.choices.llm, id) : engineName(kind === 'image' ? data.choices.image : data.choices.video, id);
 
   return (
     <section className="panel area-defaults" aria-label="默认模型">
       <div className="page-head">
         <h2>默认模型</h2>
         <div className="row">
-          {save.isPending ? (
-            <span className="muted small">保存中…</span>
-          ) : dirty ? (
-            <span className="muted small" data-testid="defaults-state">有改动，还没保存</span>
-          ) : justSaved ? (
-            <span className="saved-text small" data-testid="defaults-state">已保存，马上生效</span>
-          ) : null}
+          {/* 状态一直在 DOM 里，读屏软件才会念出变化 */}
+          <span
+            role="status"
+            aria-live="polite"
+            className={`small ${justSaved && !dirty && !save.isPending ? 'saved-text' : 'muted'}`}
+            data-testid="defaults-state"
+          >
+            {stateText}
+          </span>
           <button type="button" className="primary" disabled={!dirty || save.isPending} onClick={onSave}>
             保存
           </button>
         </div>
       </div>
-      <p className="muted small">
-        新建项目、各步骤没单独指定时用这里的选择；改了马上生效，不用重启。镜头、项目里单独选过的引擎优先。
-      </p>
-      {save.error && <p className="error">{errorText(save.error)}</p>}
+      <p className="muted small">设置页只管默认，项目和镜头上选的总是优先。改了马上生效，不用重启。</p>
+      {save.error && (
+        <p className="error" role="alert">
+          {errorText(save.error)}
+        </p>
+      )}
       <div className="defaults-grid">
         <label className="field">
           <span>文本模型</span>
           <select aria-label="文本模型" value={draft.text_model} onChange={(e) => set('text_model', e.target.value)}>
             <option value="">{`按配置文件（${llmName(data.choices.llm, data.text_model.fallback)}）`}</option>
+            <InvalidOption v={data.text_model} />
             <Options kind="llm" data={data} />
           </select>
+          <InvalidNote v={data.text_model} now={nameOf('llm', data.text_model.effective)} id="text_model" />
           <small className="muted">剧本、分镜、角色推荐、台词适配、字幕翻译都用它（下面可以单独改）</small>
         </label>
         <label className="field">
-          <span>图片来源</span>
-          <select aria-label="图片来源" value={draft.image_engine} onChange={(e) => set('image_engine', e.target.value)}>
+          <span>新项目的图片来源</span>
+          <select aria-label="新项目的图片来源" value={draft.image_engine} onChange={(e) => set('image_engine', e.target.value)}>
             <option value="">{`内置默认（${engineName(data.choices.image, data.image_engine.fallback)}）`}</option>
+            <InvalidOption v={data.image_engine} />
             <Options kind="image" data={data} />
           </select>
-          <small className="muted">新建项目的图像引擎；定妆照、三视图没单独设置时跟项目走</small>
+          <InvalidNote v={data.image_engine} now={nameOf('image', data.image_engine.effective)} id="image_engine" />
+          <small className="muted">只影响之后新建的项目；已有项目在项目里改图像/视频引擎</small>
         </label>
         <label className="field">
-          <span>视频来源</span>
-          <select aria-label="视频来源" value={draft.video_engine} onChange={(e) => set('video_engine', e.target.value)}>
+          <span>新项目的视频来源</span>
+          <select aria-label="新项目的视频来源" value={draft.video_engine} onChange={(e) => set('video_engine', e.target.value)}>
             <option value="">{`内置默认（${engineName(data.choices.video, data.video_engine.fallback)}）`}</option>
+            <InvalidOption v={data.video_engine} />
             <Options kind="video" data={data} />
           </select>
-          <small className="muted">新建项目的视频引擎</small>
+          <InvalidNote v={data.video_engine} now={nameOf('video', data.video_engine.effective)} id="video_engine" />
+          <small className="muted">只影响之后新建的项目；已有项目在项目里改图像/视频引擎</small>
         </label>
       </div>
       {bad.length > 0 && (
@@ -192,25 +224,21 @@ export function DefaultsPanel() {
                 </td>
                 <td>
                   <select aria-label={`${s.label}用什么`} value={draft.steps[s.key] ?? ''} onChange={(e) => setStep(s.key, e.target.value)}>
-                    <option value="">{`跟随默认（${
-                      s.kind === 'llm'
-                        ? llmName(data.choices.llm, s.fallback)
-                        : engineName(s.kind === 'image' ? data.choices.image : data.choices.video, s.fallback)
-                    }）`}</option>
+                    <option value="">{`跟随默认（${nameOf(s.kind, s.fallback)}）`}</option>
+                    <InvalidOption v={s} />
                     <Options kind={s.kind} data={data} />
                   </select>
+                  <InvalidNote v={s} now={nameOf(s.kind, s.effective)} id={s.key} />
                 </td>
                 <td className="muted" data-testid={`effective-${s.key}`}>
-                  {s.kind === 'llm'
-                    ? llmName(data.choices.llm, s.effective)
-                    : engineName(s.kind === 'image' ? data.choices.image : data.choices.video, s.effective)}
+                  {nameOf(s.kind, s.effective)}
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
         <p className="muted small">
-          首帧、视频：镜头上单独选的 → 项目的引擎（新建项目时按这里填）。定妆照、三视图：抽卡时手选的 → 这里的设置 → 项目的图像引擎（三视图没设置时有 H3 先用 H3）。
+          文本步骤：这里的设置 → 上面的默认文本模型 → 配置文件。定妆照、三视图：抽卡时手选的 → 这里的设置 → 项目的图像引擎（三视图没设置时有 H3 先用 H3）。首帧、视频没有单独设置：跟项目和镜头上选的引擎走。
         </p>
       </details>
     </section>

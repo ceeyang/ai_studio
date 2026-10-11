@@ -21,8 +21,6 @@ function settings(over: Partial<AppSettings> = {}): AppSettings {
       STEP('subtitles.translate', '字幕翻译（配音前）', 'llm', 'claude'),
       STEP('portrait', '角色定妆照', 'image', 'zimage'),
       STEP('turnaround', '三视图', 'image', 'h3_image'),
-      STEP('keyframes', '首帧', 'image', 'zimage'),
-      STEP('videos', '视频', 'video', 'h3_video'),
     ],
     project: null,
     choices: {
@@ -60,7 +58,7 @@ function base(extra: Record<string, unknown> = {}) {
 }
 
 describe('设置页「默认模型」', () => {
-  it('在页面最上面：文本模型 / 图片来源 / 视频来源三个下拉框，中文名，默认项写明现在用的', async () => {
+  it('在页面最上面：文本模型 / 新项目的图片来源 / 新项目的视频来源，中文名，默认项写明现在用的', async () => {
     base();
     renderAt(<SettingsPage />, { route: '/settings', path: '/settings' });
     const panel = await screen.findByRole('region', { name: '默认模型' });
@@ -70,14 +68,16 @@ describe('设置页「默认模型」', () => {
     expect(text.value).toBe('');
     expect(within(text).getByRole('option', { name: '按配置文件（Claude（本机 Claude Code））' })).toBeTruthy();
     expect(within(text).getByRole('option', { name: '本机 LM Studio（lmstudio，占显卡）' })).toBeTruthy();
-    const img = screen.getByLabelText('图片来源');
+    const img = screen.getByLabelText('新项目的图片来源');
     expect(within(img).getByRole('option', { name: '内置默认（Z-Image 快速）' })).toBeTruthy();
     expect(within(img).getByRole('option', { name: 'Krea2 人像' })).toBeTruthy();
     expect(within(img).getByRole('option', { name: 'ChatGPT 网页' })).toBeTruthy();
     expect(within(img).getByRole('option', { name: 'Flux（RunningHub 云端）（现在不可用）' })).toBeTruthy();
     expect(screen.getByText(/没有设置 RunningHub API key/)).toBeTruthy();
-    const vid = screen.getByLabelText('视频来源');
+    const vid = screen.getByLabelText('新项目的视频来源');
     expect(within(vid).getByRole('option', { name: '内置默认（H3 视频（有声））' })).toBeTruthy();
+    expect(screen.getAllByText('只影响之后新建的项目；已有项目在项目里改图像/视频引擎')).toHaveLength(2);
+    expect(screen.getByText('设置页只管默认，项目和镜头上选的总是优先。改了马上生效，不用重启。')).toBeTruthy();
     // 整页只有一个主按钮
     expect(document.querySelectorAll('button.primary')).toHaveLength(1);
     expect((screen.getByRole('button', { name: '保存' }) as HTMLButtonElement).disabled).toBe(true);
@@ -88,8 +88,11 @@ describe('设置页「默认模型」', () => {
     const calls = base({ 'PUT /api/settings': saved });
     renderAt(<SettingsPage />, { route: '/settings', path: '/settings' });
     const user = userEvent.setup();
-    await user.selectOptions(await screen.findByLabelText('图片来源'), 'krea2');
-    expect(screen.getByTestId('defaults-state').textContent).toBe('有改动，还没保存');
+    await user.selectOptions(await screen.findByLabelText('新项目的图片来源'), 'krea2');
+    const state = screen.getByTestId('defaults-state');
+    expect(state.getAttribute('role')).toBe('status');
+    expect(state.getAttribute('aria-live')).toBe('polite');
+    expect(state.textContent).toBe('有改动，还没保存');
     await user.click(screen.getByRole('button', { name: '保存' }));
     await waitFor(() => expect(calls.some((c) => c.method === 'PUT')).toBe(true));
     expect(calls.find((c) => c.method === 'PUT')?.body).toEqual({ image_engine: 'krea2' });
@@ -108,12 +111,12 @@ describe('设置页「默认模型」', () => {
     await user.click(details.querySelector('summary')!);
     const rows = details.querySelectorAll('tbody tr');
     expect([...rows].map((r) => r.querySelector('td')?.firstChild?.textContent)).toEqual(
-      ['剧本', '分镜', '字幕翻译（配音前）', '角色定妆照', '三视图', '首帧', '视频']);
+      ['剧本', '分镜', '字幕翻译（配音前）', '角色定妆照', '三视图']);
+    expect(details.textContent).toContain('首帧、视频没有单独设置：跟项目和镜头上选的引擎走');
     const script = screen.getByLabelText('剧本用什么') as HTMLSelectElement;
     expect(script.value).toBe('lmstudio');
     expect(screen.getByTestId('effective-script').textContent).toBe('本机 LM Studio（lmstudio，占显卡）');
     expect(within(screen.getByLabelText('三视图用什么')).getByRole('option', { name: '跟随默认（H3 图像）' })).toBeTruthy();
-    expect(within(screen.getByLabelText('视频用什么')).queryByRole('option', { name: 'Krea2 人像' })).toBeNull();
     await user.selectOptions(script, '');
     await user.selectOptions(screen.getByLabelText('角色定妆照用什么'), 'krea2');
     await user.click(screen.getByRole('button', { name: '保存' }));
@@ -125,9 +128,32 @@ describe('设置页「默认模型」', () => {
     base({ 'PUT /api/settings': () => json({ detail: '默认图片来源：图片来源 x 不存在或未启用' }, 400) });
     renderAt(<SettingsPage />, { route: '/settings', path: '/settings' });
     const user = userEvent.setup();
-    await user.selectOptions(await screen.findByLabelText('视频来源'), 'wan22_i2v');
+    await user.selectOptions(await screen.findByLabelText('新项目的视频来源'), 'wan22_i2v');
     await user.click(screen.getByRole('button', { name: '保存' }));
-    expect(await screen.findByText(/不存在或未启用/)).toBeTruthy();
+    expect((await screen.findByRole('alert')).textContent).toMatch(/不存在或未启用/);
+  });
+
+  it('存的设置已经失效：下拉框留着这一项，旁边写「已失效（配置里没有 X），现在用 Y」', async () => {
+    const st = settings({
+      text_model: { value: 'gone', effective: 'claude', fallback: 'claude', invalid: true, source: 'config' },
+      image_engine: { value: 'old_engine', effective: 'zimage', fallback: 'zimage', invalid: true, source: 'default' },
+    });
+    st.steps = st.steps.map((s) => (s.key === 'portrait' ? { ...s, value: 'old_engine', invalid: true } : s));
+    base({ 'GET /api/settings': st });
+    renderAt(<SettingsPage />, { route: '/settings', path: '/settings' });
+    expect((await screen.findByTestId('invalid-text_model')).textContent).toBe('已失效（配置里没有 gone），现在用 Claude（本机 Claude Code）');
+    expect((screen.getByLabelText('文本模型') as HTMLSelectElement).value).toBe('gone');
+    expect(within(screen.getByLabelText('文本模型')).getByRole('option', { name: '已失效：gone' })).toBeTruthy();
+    expect(screen.getByTestId('invalid-image_engine').textContent).toBe('已失效（配置里没有 old_engine），现在用 Z-Image 快速');
+    expect(screen.getByTestId('invalid-portrait').textContent).toContain('现在用 Z-Image 快速');
+    expect(screen.queryByTestId('invalid-turnaround')).toBeNull();
+  });
+
+  it('设置读不到：错误用 role=alert', async () => {
+    base({ 'GET /api/settings': () => json({ detail: '数据库坏了' }, 500) });
+    renderAt(<SettingsPage />, { route: '/settings', path: '/settings' });
+    const panel = await screen.findByRole('region', { name: '默认模型' });
+    await waitFor(() => expect(within(panel).getByRole('alert').textContent).toContain('数据库坏了'));
   });
 
   it('settingsPatch：没改动是空对象，空串变 null', () => {

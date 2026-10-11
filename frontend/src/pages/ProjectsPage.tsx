@@ -72,17 +72,18 @@ function StatusPill({ status }: { status: string }) {
 
 function NewProjectDialog({ onClose }: { onClose: () => void }) {
   const engines = useEngines();
-  // 设置页「默认模型」：首帧/视频这一步 → 图片/视频来源；拿不到就用 zimage / h3_video
+  // 设置页「新项目的图片/视频来源」；拿不到设置就用 zimage / h3_video。设置还在加载时不让提交，
+  // 免得用户手快、按内置默认建了项目
   const settings = useAppSettings();
-  const step = (k: string) => settings.data?.steps.find((x) => x.key === k)?.effective ?? undefined;
+  const settingsLoading = settings.isPending;
   const create = useCreateProject();
   const navigate = useNavigate();
   const [title, setTitle] = useState('');
   const [aspect, setAspect] = useState<Aspect>('9:16');
   const [imageEngine, setImageEngine] = useState('');
   const [videoEngine, setVideoEngine] = useState('');
-  const image = imageEngine || pickDefault(engines.data?.image, step('keyframes') ?? 'zimage');
-  const video = videoEngine || pickDefault(engines.data?.video, step('videos') ?? 'h3_video');
+  const image = imageEngine || pickDefault(engines.data?.image, settings.data?.image_engine.effective ?? 'zimage');
+  const video = videoEngine || pickDefault(engines.data?.video, settings.data?.video_engine.effective ?? 'h3_video');
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -134,7 +135,7 @@ function NewProjectDialog({ onClose }: { onClose: () => void }) {
           <button type="button" className="ghost" onClick={onClose}>
             取消
           </button>
-          <button type="submit" className="primary" disabled={!title.trim() || !image || !video || create.isPending}>
+          <button type="submit" className="primary" disabled={!title.trim() || !image || !video || settingsLoading || create.isPending}>
             创建项目
           </button>
         </div>

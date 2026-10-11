@@ -52,23 +52,31 @@ describe('ProjectsPage', () => {
     });
   });
 
-  it('新建项目：引擎默认按设置页（首帧/视频这一步 → 图片/视频来源）', async () => {
+  it('新建项目：引擎默认按设置页「新项目的图片/视频来源」；设置没加载完不能提交', async () => {
+    let release: (v: unknown) => void = () => {};
+    const gate = new Promise((r) => (release = r));
     installFetch({
       'GET /api/projects': [],
       'GET /api/engines': { image: [...ENGINES.image, { name: 'krea2', family: 'krea2', caps: {} }], video: ENGINES.video },
-      'GET /api/settings': {
-        steps: [
-          { key: 'keyframes', label: '首帧', kind: 'image', value: null, effective: 'krea2', fallback: 'krea2', source: 'default' },
-          { key: 'videos', label: '视频', kind: 'video', value: null, effective: 'h3_video', fallback: 'h3_video', source: 'default' },
-        ],
+      'GET /api/settings': async () => {
+        await gate;
+        return {
+          image_engine: { value: 'krea2', effective: 'krea2', fallback: 'zimage', source: 'settings' },
+          video_engine: { value: null, effective: 'h3_video', fallback: 'h3_video', source: 'default' },
+          steps: [],
+        };
       },
     });
     renderAt(<ProjectsPage />, { route: '/', path: '/' });
     const user = userEvent.setup();
     const empty = (await screen.findByText(/还没有项目/)).closest('section')!;
     await user.click(within(empty).getByRole('button', { name: '新建项目' }));
+    await user.type(screen.getByLabelText('项目标题'), '新片');
+    expect((screen.getByRole('button', { name: '创建项目' }) as HTMLButtonElement).disabled).toBe(true);
+    release(null);
     await waitFor(() => expect((screen.getByLabelText('图像引擎') as HTMLSelectElement).value).toBe('krea2'));
     expect((screen.getByLabelText('视频引擎') as HTMLSelectElement).value).toBe('h3_video');
+    expect((screen.getByRole('button', { name: '创建项目' }) as HTMLButtonElement).disabled).toBe(false);
   });
 
   it('新建项目失败时显示后端的原因', async () => {

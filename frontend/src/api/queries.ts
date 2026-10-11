@@ -239,7 +239,7 @@ export function useAppSettings(project?: string) {
   });
 }
 
-/** 某一步现在生效的图片/视频引擎（拿不到设置时 undefined，调用方用原来的写法兜底） */
+/** 定妆照 / 三视图这一步现在生效的引擎（拿不到设置时 undefined，调用方用原来的写法兜底） */
 export function useStepDefault(project: string | undefined, step: string): string | undefined {
   // 没有项目就不问：图片/视频步骤的生效值要按项目算
   const st = useQuery({

@@ -14,7 +14,7 @@ from backend.app.schemas import (CharacterIn, CharacterOut, CharacterPatch, EndC
                                  ProjectOverview, ProjectPatch, StyleIO, TurnaroundCellOut,
                                  TurnaroundOut, TurnaroundSheetOut)
 from backend.domain.characters import portrait_ext, portrait_of, set_portrait
-from backend.domain.settings import default_image_engine, default_video_engine
+from backend.domain.settings import default_image_engine, default_video_engine, sheet_engine
 from backend.domain.turnaround import (DEFAULT_SHEET_ENGINE, SHEETS, VIEW_KEYS, VIEW_LABELS,
                                        VIEW_SHEET, cell_state, crop_method, sheet_slot_kind,
                                        sheet_state)
@@ -134,7 +134,7 @@ def _url(c) -> str | None:
     return "/media/" + quote(c.file_path) if c else None
 
 
-def turnaround_out(s, c: Character, slots: dict) -> TurnaroundOut:
+def turnaround_out(s, c: Character, slots: dict, sv=None) -> TurnaroundOut:
     sheets = []
     for key, spec in SHEETS.items():
         slot = slots.get(sheet_slot_kind(key))
@@ -150,11 +150,13 @@ def turnaround_out(s, c: Character, slots: dict) -> TurnaroundOut:
         cells.append(TurnaroundCellOut(view=view, label=VIEW_LABELS[view], sheet=VIEW_SHEET[view],
                                        selected_candidate_id=sel.id if sel else None,
                                        url=_url(sel), stale=is_stale))
-    return TurnaroundOut(look=c.turnaround_look or "", default_engine=DEFAULT_SHEET_ENGINE,
+    # 不选引擎时实际会用的（设置页三视图这一步 → 有 H3 用 H3 → 项目的图像引擎）
+    default = sheet_engine(sv, c.project.image_engine) if sv is not None else DEFAULT_SHEET_ENGINE
+    return TurnaroundOut(look=c.turnaround_look or "", default_engine=default,
                          sheets=sheets, cells=cells)
 
 
-def character_out(s, c: Character, progress=None) -> CharacterOut:
+def character_out(s, c: Character, progress=None, sv=None) -> CharacterOut:
     pc = portrait_of(s, c.id)
     slots = {x.kind: x for x in slots_for(s, "character", c.id)}
     slot = slots.get("portrait")
@@ -176,13 +178,13 @@ def character_out(s, c: Character, progress=None) -> CharacterOut:
         "design_options": list(c.design_options or []),
         "active_jobs": [job_brief(j, progress) for j in jobs],
         "last_failure": job_brief(failed, failed=True) if failed else None,
-        "turnaround": turnaround_out(s, c, slots)})
+        "turnaround": turnaround_out(s, c, slots, sv)})
 
 
 @router.get("/projects/{slug}/characters", response_model=list[CharacterOut])
 def list_characters(slug: str, request: Request):
     with services(request).db.session() as s:
-        return [character_out(s, c, manager(request).progress)
+        return [character_out(s, c, manager(request).progress, sv=services(request))
                 for c in project_by_slug(s, slug).characters]
 
 
@@ -195,7 +197,7 @@ def create_character(slug: str, body: CharacterIn, request: Request):
         c = Character(project_id=p.id, **body.model_dump())
         s.add(c)
         s.flush()
-        return character_out(s, c)
+        return character_out(s, c, sv=services(request))
 
 
 @router.patch("/characters/{char_id}", response_model=CharacterOut)
@@ -205,7 +207,7 @@ def patch_character(char_id: int, body: CharacterPatch, request: Request):
         for k, v in body.model_dump(exclude_unset=True).items():
             setattr(c, k, v)
         s.flush()
-        return character_out(s, c)
+        return character_out(s, c, sv=services(request))
 
 
 @router.post("/characters/{char_id}/portrait", response_model=CharacterOut)
@@ -228,7 +230,7 @@ async def upload_portrait(char_id: int, request: Request):
     with sv.db.session() as s:
         c = get_or_404(s, Character, char_id, "角色")
         set_portrait(s, sv.media, c, data, name)
-        return character_out(s, c)
+        return character_out(s, c, sv=services(request))
 
 
 @router.get("/projects/{slug}/locations", response_model=list[LocationOut])

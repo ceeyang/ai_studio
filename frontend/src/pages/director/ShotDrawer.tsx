@@ -1,6 +1,6 @@
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { errorText } from '../../api/client';
-import { useEngines, usePatchShot, useSelectCandidate, useStepDefault } from '../../api/queries';
+import { useEngines, usePatchShot, useProject, useSelectCandidate } from '../../api/queries';
 import { type DialogueLine, type EngineRow, type ShotDetail, type ShotPatch, TRANSITIONS, type Transition } from '../../api/types';
 import { useConfirm } from '../../components/ConfirmDialog';
 import { confirmDiscard } from '../../components/confirmDiscard';
@@ -81,7 +81,7 @@ export interface ShotDrawerProps {
   onDirtyChange?(dirty: boolean): void;
   /** 首帧缺少或过期时点了视频那一格的「先出首帧 / 先重拍首帧」：切到首帧阶段（抽屉留着） */
   onNeedFirstFrame?(): void;
-  /** 项目 slug：引擎下拉框的「默认（…）」按项目和设置页算 */
+  /** 项目 slug：引擎下拉框的「默认（…）」写成项目现在用的引擎 */
   slug?: string;
 }
 
@@ -101,8 +101,10 @@ export function ShotDrawer({
   slug,
 }: ShotDrawerProps) {
   const engines = useEngines();
-  const imageDefault = useStepDefault(slug, 'keyframes');
-  const videoDefault = useStepDefault(slug, 'videos');
+  // 留空 = 跟项目的引擎（设置页只管新项目的默认，镜头上没选时就是项目的）
+  const project = useProject(slug ?? '');
+  const imageDefault = project.data?.image_engine;
+  const videoDefault = project.data?.video_engine;
   const patch = usePatchShot(episodeId);
   const patchDialogue = usePatchShot(episodeId);
   const select = useSelectCandidate(episodeId);

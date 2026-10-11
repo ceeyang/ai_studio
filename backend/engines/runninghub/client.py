@@ -33,6 +33,32 @@ class RunningHubError(RuntimeError):
     """RunningHub 调用失败。信息原样给用户看。"""
 
 
+class RunningHubConnError(RunningHubError):
+    """连不上 RunningHub（网络抖动），轮询时可以重试。"""
+
+
+POLL_RETRIES = 3     # 轮询状态时连续连不上几次就放弃（并取消云端任务）
+
+
+def safe_name(url: str) -> str:
+    """产物文件名：先解码再取最后一段（%2F、%5C 编码的 ../ 也只剩文件名），去掉不能用的字符。"""
+    raw = unquote(urlparse(url).path).replace("\\", "/")
+    name = Path(raw).name.strip().lstrip(".")
+    name = "".join(ch for ch in name if ch not in '<>:"|?*' and ord(ch) >= 32)
+    return name or "output.bin"
+
+
+def unique_path(run_dir: Path, name: str) -> Path:
+    """同名文件加 _1、_2 后缀，不覆盖。"""
+    dst = run_dir / name
+    stem, suffix = Path(name).stem, Path(name).suffix
+    i = 1
+    while dst.exists():
+        dst = run_dir / f"{stem}_{i}{suffix}"
+        i += 1
+    return dst
+
+
 class RunningHubClient:
     def __init__(self, base_url: str, api_key: str | None, *, api_key_env: str = "RUNNINGHUB_API_KEY",
                  timeout: float = 60.0, poll_interval: float = 5.0,
@@ -55,7 +81,7 @@ class RunningHubClient:
         try:
             r = self._http.post(path, json=payload)
         except httpx.TransportError as e:
-            raise RunningHubError(f"连不上 RunningHub（{self.base_url}）：{type(e).__name__} {e}") from None
+            raise RunningHubConnError(f"连不上 RunningHub（{self.base_url}）：{type(e).__name__} {e}") from None
         return self._data(path, r)
 
     @staticmethod
@@ -120,14 +146,14 @@ class RunningHubClient:
     def download(self, url: str, run_dir: Path) -> Path:
         run_dir = Path(run_dir)
         run_dir.mkdir(parents=True, exist_ok=True)
-        name = unquote(Path(urlparse(url).path).name) or "output.bin"
+        name = safe_name(url)
         try:
             r = self._http.get(url)
         except httpx.TransportError as e:
             raise RunningHubError(f"下载 RunningHub 产物失败（{name}）：{e}") from None
         if r.status_code >= 400:
             raise RunningHubError(f"下载 RunningHub 产物 {name} 返回 HTTP {r.status_code}")
-        dst = run_dir / name
+        dst = unique_path(run_dir, name)
         dst.write_bytes(r.content)
         return dst
 
@@ -137,11 +163,22 @@ class RunningHubClient:
         """轮询到 SUCCESS 返回；FAILED 抛错（带失败原因）；取消时顺手取消云端任务。"""
         deadline = time.monotonic() + timeout
         last = ""
+        conn_fails = 0
         while True:
             if cancel.is_set():
                 self.cancel(task_id)
                 raise JobCanceled()
-            st = self.status(task_id)
+            try:
+                st = self.status(task_id)
+            except RunningHubConnError as e:
+                conn_fails += 1
+                if conn_fails >= POLL_RETRIES:
+                    self.cancel(task_id)
+                    raise RunningHubError(f"RunningHub 任务 {task_id}：连续 {conn_fails} 次{e}，"
+                                          "已取消云端任务") from None
+                cancel.wait(self.poll_interval)
+                continue
+            conn_fails = 0
             if st != last:
                 last = st
                 if on_status:

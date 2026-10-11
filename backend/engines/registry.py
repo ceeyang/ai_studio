@@ -35,6 +35,7 @@ def check_ready(engine: Any) -> None:
 class EngineRegistry:
     def __init__(self, cfg: Config):
         self._engines: dict[str, Any] = {}
+        self.load_errors: dict[str, str] = {}   # 配错没加载的引擎 → 原因（doctor 报）
         for name, cls in ENGINE_CLASSES.items():
             ec = cfg.engine(name)
             if not ec.enabled:
@@ -44,7 +45,8 @@ class EngineRegistry:
                 self._engines[name] = cls(tpl, ec.params)
             else:
                 self._engines[name] = cls(ec.params)
-        self._engines.update(load_runninghub_engines(cfg, set(ENGINE_CLASSES)))
+        rh, self.load_errors = load_runninghub_engines(cfg, set(ENGINE_CLASSES))
+        self._engines.update(rh)
 
     def get(self, name: str) -> Any:
         try:

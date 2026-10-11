@@ -203,10 +203,12 @@ def test_api_draw_submits_portrait_jobs(api):
     assert r.status_code == 200, r.text
     assert len(r.json()["job_ids"]) == 2
     js = jobs(api, "image.portrait")
-    assert js[0] == ("image.portrait", "character", ch["id"], {"character_id": ch["id"]}, True)
+    assert js[0] == ("image.portrait", "character", ch["id"],
+                     {"character_id": ch["id"], "engine": "h3_image"}, True)
     r = api.post(f"/api/characters/{ch['id']}/portraits/draw",
                  json={"count": 1, "visual_prompt": "  custom look  "})
-    assert jobs(api, "image.portrait")[-1][3] == {"character_id": ch["id"], "visual_prompt": "custom look"}
+    assert jobs(api, "image.portrait")[-1][3] == {"character_id": ch["id"], "engine": "h3_image",
+                                                  "visual_prompt": "custom look"}
     assert api.post(f"/api/characters/{ch['id']}/portraits/draw", json={"count": 5}).status_code == 422
     assert api.post("/api/characters/999/portraits/draw", json={"count": 1}).status_code == 404
     # 角色列表带上进行中的抽卡任务

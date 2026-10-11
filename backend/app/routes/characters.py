@@ -12,6 +12,7 @@ from backend.domain.characters import portrait_of, use_portrait
 from backend.domain.turnaround import (SHEETS, crop_cells, look_of, select_sheet,
                                        sheet_slot_kind)
 from backend.domain.models import Candidate, Character, Episode, Slot
+from backend.domain.settings import portrait_engine
 from backend.engines.registry import check_ready
 from backend.pipeline.characters import sheet_engine_name
 from backend.queue.errors import JobError
@@ -21,32 +22,26 @@ router = APIRouter(prefix="/api", tags=["characters"])
 
 @router.post("/characters/{char_id}/portraits/draw", response_model=RunOut)
 def draw_portraits(char_id: int, body: PortraitDrawIn, request: Request):
-    """抽卡：用项目的图像引擎（或指定的 engine）出 count 张正面半身定妆照，每张一个任务。"""
+    """抽卡：出 count 张正面半身定妆照，每张一个任务。引擎在这里一次定下（手选 → 设置页定妆照这一步 →
+    项目的图像引擎）写进 payload，队列（model_family）和执行用的是同一个。"""
     sv = services(request)
     vp = (body.visual_prompt or "").strip()
     with sv.db.session() as s:
         c = get_or_404(s, Character, char_id, "角色")
         if not vp and not c.visual_prompt.strip():
             raise JobError(f"角色 {c.name} 还没有外貌提示词，先写一个或用 AI 推荐造型")
-        project_id, engine_name = c.project_id, body.engine or c.project.image_engine
-    if body.engine:
-        check_engines(sv, body.engine, None)
-    try:
-        eng = sv.engines.image(engine_name)
-    except KeyError:
-        family = None
-    else:
-        check_ready(eng)
-        family = eng.family
-    payload: dict = {"character_id": char_id}
+        project_id = c.project_id
+        engine_name = portrait_engine(sv, c.project.image_engine, body.engine)
+    check_engines(sv, engine_name, None)
+    eng = sv.engines.image(engine_name)
+    check_ready(eng)
+    payload: dict = {"character_id": char_id, "engine": engine_name}
     if vp:
         payload["visual_prompt"] = vp
-    if body.engine:
-        payload["engine"] = body.engine
     m = manager(request)
     return RunOut(job_ids=[m.submit("image.portrait", payload, project_id=project_id,
                                     owner_type="character", owner_id=char_id,
-                                    model_family=family)
+                                    model_family=eng.family)
                            for _ in range(body.count)])
 
 
@@ -56,7 +51,7 @@ def use(char_id: int, candidate_id: int, request: Request):
     with services(request).db.session() as s:
         c = get_or_404(s, Character, char_id, "角色")
         use_portrait(s, c, candidate_id)
-        return character_out(s, c)
+        return character_out(s, c, sv=services(request))
 
 
 @router.post("/characters/{char_id}/suggest", response_model=RunOut)
@@ -108,7 +103,7 @@ def patch_turnaround_look(char_id: int, body: TurnaroundLookPatch, request: Requ
         c = get_or_404(s, Character, char_id, "角色")
         c.turnaround_look = body.look.strip()
         s.flush()
-        return character_out(s, c)
+        return character_out(s, c, sv=services(request))
 
 
 @router.post("/characters/{char_id}/turnaround/generate", response_model=RunOut)
@@ -155,7 +150,7 @@ def select_turnaround_sheet(char_id: int, sheet: str, body: TurnaroundSelectIn, 
         if slot is None or slot.kind != sheet_slot_kind(sheet):
             raise LookupError(f"候选 {body.candidate_id} 不是{SHEETS[sheet].label}设定图")
         select_sheet(s, sv.media, c, body.candidate_id)
-        return character_out(s, c)
+        return character_out(s, c, sv=services(request))
 
 
 @router.post("/characters/{char_id}/turnaround/sheets/{sheet}/crop", response_model=CharacterOut)
@@ -166,4 +161,4 @@ def crop_turnaround_sheet(char_id: int, sheet: str, body: TurnaroundCropIn, requ
     with sv.db.session() as s:
         c = get_or_404(s, Character, char_id, "角色")
         crop_cells(s, sv.media, c, sheet, body.method)
-        return character_out(s, c)
+        return character_out(s, c, sv=services(request))

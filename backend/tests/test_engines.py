@@ -141,7 +141,8 @@ def test_config_override_and_disabled_engine():
 def test_krea2_build(reg):
     """Krea2：8 步出图 → 潜空间放大 1.5 倍 → 4 步 denoise 0.54 精修。参数与 ai_videos 实测工作流一致。"""
     eng = reg.image("krea2")
-    assert eng.family == "krea2" and eng.caps.max_refs == 0 and eng.caps.supports_negative
+    # cfg 1.0 时负面提示词不起作用：不声明支持，也不写进工作流（避免以为它生效了）
+    assert eng.family == "krea2" and eng.caps.max_refs == 0 and not eng.caps.supports_negative
     call = eng.build(ImageRequest(prompt="a girl", negative="lowres", aspect="9:16", seed=7,
                                   prefix="studio/demo/kf", refs=[]))
     wf = call.workflow
@@ -149,7 +150,8 @@ def test_krea2_build(reg):
     assert wf["2"]["inputs"] == {"clip_name": "qwen3vl_4b_fp8_scaled.safetensors", "type": "krea2",
                                  "device": "default"}
     assert wf["3"]["inputs"]["vae_name"] == "qwen_image_vae.safetensors"
-    assert wf["5"]["inputs"]["text"] == "a girl" and wf["6"]["inputs"]["text"] == "lowres"
+    assert wf["5"]["inputs"]["text"] == "a girl" and wf["6"]["inputs"]["text"] == ""
+    assert call.meta["negative_ignored"] == "lowres"
     assert (wf["7"]["inputs"]["width"], wf["7"]["inputs"]["height"]) == (768, 1344)
     k1 = wf["8"]["inputs"]
     assert wf["8"]["class_type"] == "KSamplerAdvanced"

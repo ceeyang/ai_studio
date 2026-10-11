@@ -47,15 +47,10 @@ describe('ShotDrawer', () => {
     expect(patch?.body).toEqual({ image_prompt: 'new prompt', duration: 7 });
   });
 
-  it('引擎下拉框：留空写成「默认（项目现在用的引擎）」，没拿到设置时写「项目默认」', async () => {
+  it('引擎下拉框：留空写成「默认（项目现在用的引擎）」', async () => {
     installFetch({
       'GET /api/engines': { image: [...ENGINES.image, { name: 'krea2', family: 'krea2', caps: {} }], video: ENGINES.video },
-      'GET /api/settings': {
-        steps: [
-          { key: 'keyframes', label: '首帧', kind: 'image', value: null, effective: 'krea2', fallback: 'krea2', source: 'default' },
-          { key: 'videos', label: '视频', kind: 'video', value: null, effective: 'h3_video', fallback: 'h3_video', source: 'default' },
-        ],
-      },
+      'GET /api/projects/demo': { id: 1, slug: 'demo', title: 'demo', aspect: '9:16', image_engine: 'krea2', video_engine: 'h3_video' },
     });
     renderAt(<ShotDrawer shot={SHOT} episodeId={1} slug="demo" onClose={() => {}} onGenerate={() => {}} />);
     await waitFor(() => expect(within(screen.getByLabelText('图像引擎')).getByRole('option', { name: '默认（Krea2 人像）' })).toBeTruthy());

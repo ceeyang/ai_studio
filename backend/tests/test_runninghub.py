@@ -124,6 +124,49 @@ def test_outputs_and_download(tmp_path):
     assert p.name == "a.png" and p.read_bytes() == b"PNGDATA"
 
 
+def test_download_name_cannot_escape_run_dir_and_dedupes(tmp_path):
+    fake = FakeRH()
+    c = client(fake)
+    run = tmp_path / "run"
+    p = c.download("https://cdn.rh.test/out/..%2F..%2Fx.png", run)
+    assert p.parent == run and p.name == "x.png"
+    p2 = c.download("https://cdn.rh.test/other/x.png", run)
+    assert p2.parent == run and p2.name == "x_1.png"
+    p3 = c.download("https://cdn.rh.test/out/..%5C..%5Cy.png", run)
+    assert p3.parent == run and p3.name == "y.png"
+    p4 = c.download("https://cdn.rh.test/", run)
+    assert p4.parent == run and p4.name == "output.bin"
+
+
+def test_wait_retries_transport_errors():
+    fake = FakeRH(statuses=("RUNNING", "SUCCESS"))
+    fails = {"n": 0}
+
+    def flaky(req):
+        if req.url.path == "/task/openapi/status" and fails["n"] < 2:
+            fails["n"] += 1
+            raise httpx.ConnectError("reset", request=req)
+        return fake(req)
+
+    c = RunningHubClient(BASE, "k", transport=httpx.MockTransport(flaky), poll_interval=0)
+    assert c.wait("T1", cancel=threading.Event()) == "SUCCESS"
+
+
+def test_wait_gives_up_after_transport_errors_and_cancels():
+    seen = []
+
+    def down(req):
+        seen.append(req.url.path)
+        if req.url.path == "/task/openapi/status":
+            raise httpx.ConnectError("down", request=req)
+        return httpx.Response(200, json={"code": 0})
+
+    c = RunningHubClient(BASE, "k", transport=httpx.MockTransport(down), poll_interval=0)
+    with pytest.raises(RunningHubError, match="连不上"):
+        c.wait("T1", cancel=threading.Event())
+    assert seen.count("/task/openapi/status") == 3 and seen[-1] == "/task/openapi/cancel"
+
+
 def test_upload_returns_remote_file_name(tmp_path):
     fake = FakeRH()
     img = tmp_path / "首帧.png"
@@ -192,18 +235,29 @@ def test_registry_loads_configured_engines(tmp_path):
     assert vid.caps.fps == 16 and vid.frames_for(5) == 81
 
 
-def test_disabled_engine_and_name_clash(tmp_path):
+def test_disabled_engine_and_name_clash_is_skipped(tmp_path):
     reg = EngineRegistry(rh_cfg(tmp_path, rh_img=RunningHubEngineCfg(kind="image", workflow_id="w",
                                                                      enabled=False)))
     assert "rh_img" not in reg.names()
     (tmp_path / "runninghub_zimage.map.yaml").write_text(MAP_IMG, encoding="utf-8")
-    with pytest.raises(ValueError, match="重名"):
-        EngineRegistry(rh_cfg(tmp_path, zimage=RunningHubEngineCfg(kind="image", workflow_id="w")))
+    reg = EngineRegistry(rh_cfg(tmp_path, zimage=RunningHubEngineCfg(kind="image", workflow_id="w")))
+    assert runtime_of(reg.get("zimage")) == "comfyui"          # 本机引擎不被顶掉
+    assert "重名" in reg.load_errors["zimage"]
 
 
-def test_engine_needs_exactly_one_id(tmp_path):
-    with pytest.raises(ValueError, match="workflow_id"):
-        EngineRegistry(rh_cfg(tmp_path, rh_img=RunningHubEngineCfg(kind="image")))
+def test_misconfigured_engine_does_not_crash_startup(tmp_path, monkeypatch):
+    """配错的云端引擎（两个 id 都没写、映射文件不存在）跳过并记下原因，其他引擎照常；doctor 报失败。"""
+    monkeypatch.setenv("RUNNINGHUB_API_KEY", "sk")
+    cfg = rh_cfg(tmp_path, rh_img=RunningHubEngineCfg(kind="image"),
+                 rh_missing=RunningHubEngineCfg(kind="image", workflow_id="w"),
+                 rh_vid=RunningHubEngineCfg(kind="video", webapp_id="app"))
+    reg = EngineRegistry(cfg)
+    assert "rh_vid" in reg.names() and "rh_img" not in reg.names() and "rh_missing" not in reg.names()
+    assert "workflow_id" in reg.load_errors["rh_img"]
+    assert "映射文件不存在" in reg.load_errors["rh_missing"]
+    checks = {c.name: c for c in check_runninghub(cfg, reg)}
+    assert checks["rh_img"].status == "fail" and "workflow_id" in checks["rh_img"].detail
+    assert checks["rh_missing"].status == "fail" and checks["rh_vid"].status == "ok"
 
 
 def test_image_build_maps_node_info(tmp_path):

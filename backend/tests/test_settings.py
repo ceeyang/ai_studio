@@ -42,17 +42,44 @@ def test_llm_provider_order(db):
 
 
 # ---------------------------------------------------------------- 生效顺序（图片/视频）
-def test_image_video_resolution_order(tmp_path, db):
+def test_new_project_engine_defaults(tmp_path, db):
+    """「新项目的图片/视频来源」只决定新建项目填什么；首帧/视频没有按步骤设置。"""
     sv = make_services(tmp_path, db)
     assert default_image_engine(sv) == "zimage" and default_video_engine(sv) == "h3_video"
     sv.settings.save({"image_engine": "krea2", "video_engine": "wan22_i2v"})
     assert default_image_engine(sv) == "krea2" and default_video_engine(sv) == "wan22_i2v"
+    # 旧版本存过的首帧/视频步骤设置不再生效
     sv.settings.save({"step:keyframes": "h3_image", "step:videos": "h3_video"})
-    assert default_image_engine(sv) == "h3_image" and default_video_engine(sv) == "h3_video"
-    assert default_image_engine(sv, step=None) == "krea2"     # 全局那一行不看步骤设置
+    assert sv.settings.load().steps == {}
+    assert default_image_engine(sv) == "krea2" and default_video_engine(sv) == "wan22_i2v"
     # 设置里写了已经停用的引擎：跳过
-    sv.settings.save({"step:keyframes": "nope"})
-    assert default_image_engine(sv) == "krea2"
+    sv.settings.save({"image_engine": "nope"})
+    assert default_image_engine(sv) == "zimage"
+
+
+def test_store_save_same_new_key_concurrently(db):
+    """两个请求同时写同一个新 key 不撞主键（INSERT … ON CONFLICT DO UPDATE）。"""
+    import threading
+
+    st = SettingsStore(db)
+    errors = []
+
+    def write(v):
+        try:
+            for _ in range(20):
+                st.save({"text_model": v})
+                st.save({"text_model": None})
+                st.save({"text_model": v})
+        except Exception as e:  # noqa: BLE001
+            errors.append(e)
+
+    ts = [threading.Thread(target=write, args=(x,)) for x in ("a", "b", "c", "d")]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
+    assert errors == []
+    assert st.load().text_model in {"a", "b", "c", "d"}
 
 
 def test_portrait_and_sheet_resolution(tmp_path, db):
@@ -108,10 +135,12 @@ def test_gateway_reads_settings_at_call_time(db):
     assert g.generate("character", "s", "u", Out, step="character.recommend").n == 2
 
 
-def test_gateway_unknown_provider_in_settings_falls_back(db):
+def test_gateway_unknown_provider_in_settings_falls_back_and_logs(db):
     g, st = _gw(db)
     st.save({"text_model": "gone"})
-    assert g.generate("script", "s", "u", Out).n == 1
+    logs = []
+    assert g.generate("script", "s", "u", Out, log=logs.append).n == 1
+    assert any("gone" in m and "已失效" in m and "这次用 a" in m for m in logs)
 
 
 # ---------------------------------------------------------------- API
@@ -122,9 +151,10 @@ def test_api_get_defaults(api):
     assert "手动" in tm["effective_label"] and tm["fallback_label"] == tm["effective_label"]
     assert d["image_engine"]["effective"] == "zimage" and d["video_engine"]["effective"] == "h3_video"
     steps = {x["key"]: x for x in d["steps"]}
-    assert set(steps) >= {"script", "storyboard", "character.suggest", "character.recommend",
+    assert set(steps) == {"script", "storyboard", "character.suggest", "character.recommend",
                           "character.turnaround_look", "dialogue.fit_khmer", "subtitles.translate",
-                          "portrait", "turnaround", "keyframes", "videos"}
+                          "portrait", "turnaround"}             # 首帧/视频跟项目走，没有步骤设置
+    assert all(x["invalid"] is False for x in d["steps"])
     assert steps["script"]["label"] == "剧本" and steps["script"]["kind"] == "llm"
     assert steps["turnaround"]["effective"] == "h3_image" and steps["portrait"]["effective"] == "zimage"
     assert [p["id"] for p in d["choices"]["llm"]] == ["manual"]
@@ -141,18 +171,21 @@ def test_api_put_validates_and_saves(api):
     assert r.status_code == 400 and "nope" in r.json()["detail"]
     r = api.put("/api/settings", json={"steps": {"bogus": "x"}})
     assert r.status_code == 400
-    r = api.put("/api/settings", json={"steps": {"videos": "zimage"}})
-    assert r.status_code == 400 and "视频" in r.json()["detail"]
+    r = api.put("/api/settings", json={"steps": {"turnaround": "h3_video"}})
+    assert r.status_code == 400 and "三视图" in r.json()["detail"]
+    r = api.put("/api/settings", json={"steps": {"keyframes": "zimage"}})
+    assert r.status_code == 400 and "没有这个步骤" in r.json()["detail"]
+    assert api.put("/api/settings", json={"image_engin": "krea2"}).status_code == 422   # 拼错的字段
 
     d = api.put("/api/settings", json={"image_engine": "krea2", "video_engine": "wan22_i2v",
                                        "steps": {"portrait": "gpt_image", "script": "manual"}}).json()
     assert d["image_engine"] == {"value": "krea2", "effective": "krea2", "fallback": "zimage",
-                                 "source": "settings"}
+                                 "source": "settings", "invalid": False}
     steps = {x["key"]: x for x in d["steps"]}
     assert steps["portrait"]["value"] == "gpt_image" and steps["portrait"]["effective"] == "gpt_image"
     assert steps["portrait"]["fallback"] == "krea2"           # 改回跟随默认后：跟（新项目的）图像引擎
     assert steps["turnaround"]["fallback"] == "h3_image"
-    assert steps["keyframes"]["effective"] == "krea2" and steps["videos"]["effective"] == "wan22_i2v"
+    assert d["video_engine"]["effective"] == "wan22_i2v"
     assert steps["script"]["source"] == "step"
     # 只改传了的字段；null 回到跟随默认
     d = api.put("/api/settings", json={"steps": {"portrait": None}}).json()
@@ -162,7 +195,7 @@ def test_api_put_validates_and_saves(api):
 
 
 def test_new_project_defaults_from_settings(api):
-    api.put("/api/settings", json={"image_engine": "krea2", "steps": {"videos": "wan22_i2v"}})
+    api.put("/api/settings", json={"image_engine": "krea2", "video_engine": "wan22_i2v"})
     p = api.post("/api/projects", json={"title": "新片"}).json()
     assert p["image_engine"] == "krea2" and p["video_engine"] == "wan22_i2v"
     p2 = api.post("/api/projects", json={"title": "指定", "image_engine": "zimage"}).json()
@@ -176,10 +209,12 @@ def test_api_settings_for_project(api):
     d = api.get("/api/settings", params={"project": "pp"}).json()
     steps = {x["key"]: x for x in d["steps"]}
     assert d["project"] == "pp"
-    assert steps["keyframes"]["effective"] == "gpt_image"     # 项目自己的引擎
     assert steps["portrait"]["effective"] == "gpt_image"      # 没单独设置：跟项目
     assert steps["turnaround"]["effective"] == "zimage"       # 单独设置
-    assert steps["videos"]["effective"] == "wan22_i2v"
+    # 三视图的「默认（…）」也跟着设置走
+    api.post("/api/projects/pp/characters", json={"name": "陈", "visual_prompt": "LOOK"})
+    ch = api.get("/api/projects/pp/characters").json()[0]
+    assert ch["turnaround"]["default_engine"] == "zimage"
     assert api.get("/api/settings", params={"project": "nope"}).status_code == 404
 
 
@@ -201,3 +236,37 @@ def test_migration_creates_app_settings(tmp_path):
     finally:
         c.close()
     assert "key" in ddl and "value" in ddl
+
+
+def test_api_portrait_draw_resolves_engine_once_in_route(api):
+    """定妆照这一步设成网页引擎：路由就按它算队列（不占 GPU worker），payload 写死 engine，任务不再重新选。"""
+    api.post("/api/projects", json={"title": "demo", "image_engine": "zimage"})
+    ch = api.post("/api/projects/demo/characters", json={"name": "陈", "visual_prompt": "LOOK"}).json()
+    api.put("/api/settings", json={"steps": {"portrait": "gpt_image"}})
+    [jid] = api.post(f"/api/characters/{ch['id']}/portraits/draw", json={"count": 1}).json()["job_ids"]
+    job = api.get(f"/api/jobs/{jid}").json()
+    assert job["payload"]["engine"] == "gpt_image"
+    assert job["model_family"] == "chatgpt_web" and job["gpu"] is False
+    # 手选的最优先
+    [jid] = api.post(f"/api/characters/{ch['id']}/portraits/draw",
+                     json={"count": 1, "engine": "krea2"}).json()["job_ids"]
+    job = api.get(f"/api/jobs/{jid}").json()
+    assert job["payload"]["engine"] == "krea2" and job["model_family"] == "krea2"
+    # 改回跟随默认：跟项目
+    api.put("/api/settings", json={"steps": {"portrait": None}})
+    [jid] = api.post(f"/api/characters/{ch['id']}/portraits/draw", json={"count": 1}).json()["job_ids"]
+    assert api.get(f"/api/jobs/{jid}").json()["payload"]["engine"] == "zimage"
+
+
+def test_api_marks_invalid_settings(api):
+    """设置里存的 provider / 引擎不在了：标 invalid，生效值是退回去用的。"""
+    store = api.app.state.services.settings
+    store.save({"text_model": "gone", "image_engine": "old_engine", "step:portrait": "old_engine",
+                "step:script": "gone"})
+    d = api.get("/api/settings").json()
+    assert d["text_model"]["invalid"] is True and d["text_model"]["effective"] == "manual"
+    assert d["image_engine"]["invalid"] is True and d["image_engine"]["effective"] == "zimage"
+    steps = {x["key"]: x for x in d["steps"]}
+    assert steps["portrait"]["invalid"] is True and steps["portrait"]["effective"] == "zimage"
+    assert steps["script"]["invalid"] is True and steps["script"]["effective"] == "manual"
+    assert steps["storyboard"]["invalid"] is False

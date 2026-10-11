@@ -26,6 +26,7 @@
 """
 from __future__ import annotations
 
+import logging
 import math
 from dataclasses import dataclass
 from pathlib import Path
@@ -36,6 +37,7 @@ from backend.engines.base import (EngineCall, ImageCaps, ImageRequest, VideoCaps
                                   size_for, upload_ref)
 from backend.engines.runninghub.client import NO_KEY_HINT
 
+log = logging.getLogger(__name__)
 RUNTIME = "runninghub"
 FAMILY = "runninghub"      # 队列给它开一条串行通道，不占本机 GPU worker
 DEFAULT_SIZES = {"9:16": (720, 1280), "16:9": (1280, 720), "1:1": (1024, 1024)}
@@ -156,18 +158,23 @@ class RunningHubVideoEngine(_RunningHubEngine):
                            "refs": [str(p) for p in keep]}, dropped)
 
 
-def load_runninghub_engines(cfg, reserved: set[str]) -> dict:
-    """按 config.runninghub.engines 建引擎；没配就是空。"""
+def load_runninghub_engines(cfg, reserved: set[str]) -> tuple[dict, dict[str, str]]:
+    """按 config.runninghub.engines 建引擎；没配就是空。配错的引擎跳过（不让整个服务起不来），
+    原因放在第二个返回值里给 doctor 报。"""
     rh = cfg.runninghub
     if rh is None:
-        return {}
-    out = {}
+        return {}, {}
+    out, errors = {}, {}
     for name, ecfg in rh.engines.items():
         if not ecfg.enabled:
             continue
-        if name in reserved:
-            raise ValueError(f"RunningHub 引擎 {name} 和本机引擎重名，换个名字（比如 rh_{name}）")
-        nmap = NodeMap.load(Path(cfg.workflows_dir) / (ecfg.map or f"runninghub_{name}.map.yaml"))
-        cls = RunningHubImageEngine if ecfg.kind == "image" else RunningHubVideoEngine
-        out[name] = cls(name, ecfg, nmap, rh)
-    return out
+        try:
+            if name in reserved:
+                raise ValueError(f"RunningHub 引擎 {name} 和本机引擎重名，换个名字（比如 rh_{name}）")
+            nmap = NodeMap.load(Path(cfg.workflows_dir) / (ecfg.map or f"runninghub_{name}.map.yaml"))
+            cls = RunningHubImageEngine if ecfg.kind == "image" else RunningHubVideoEngine
+            out[name] = cls(name, ecfg, nmap, rh)
+        except Exception as e:  # noqa: BLE001  配置错误只影响这一个引擎
+            errors[name] = str(e)
+            log.warning("RunningHub 引擎 %s 配置有误，已跳过：%s", name, e)
+    return out, errors

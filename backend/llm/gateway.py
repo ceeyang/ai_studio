@@ -49,19 +49,28 @@ class LLMGateway:
         self._run = run
         self.override = override
 
-    def provider_cfg(self, task: str, step: str | None = None) -> ProviderCfg:
-        """这一次调用用哪个 provider：设置页的覆盖（按步骤 → 全局默认）→ config.yaml。"""
+    def provider_cfg(self, task: str, step: str | None = None,
+                     emit: Callable[[str], None] | None = None) -> ProviderCfg:
+        """这一次调用用哪个 provider：设置页的覆盖（按步骤 → 全局默认）→ config.yaml。
+        设置里的 provider 失效时退回 config.yaml，并在任务日志里写一行。"""
+        say = emit or (lambda m: None)
         pid = None
         if self.override is not None:
             try:
                 pid = self.override(step or task)
             except Exception as e:  # 读设置失败不能挡住任务，退回 config
                 logger.warning("读文本模型设置失败，按 config.yaml：%s", e)
+                say(f"读设置页的文本模型失败（{e}），按 config.yaml")
         if pid:
             try:
                 return self.cfg.provider(pid)
             except KeyError:
-                logger.warning("设置里的文本模型 %s 不在 config.yaml 的 llm.providers 里，按 config.yaml", pid)
+                fb = self.cfg.provider_for(task)
+                msg = (f"设置页里的文本模型 {pid} 已失效（config.yaml 的 llm.providers 里没有），"
+                       f"这次用 {fb.id}；到设置页改一下")
+                logger.warning(msg)
+                say(msg)
+                return fb
         return self.cfg.provider_for(task)
 
     def generate(self, task: str, system: str, user: str, schema: type[T], *,
@@ -71,7 +80,7 @@ class LLMGateway:
                  step: str | None = None) -> T:
         emit = log or (lambda m: None)
         key = key or task
-        pcfg = self.provider_cfg(task, step)
+        pcfg = self.provider_cfg(task, step, emit)
         if pcfg.kind == "manual":
             return self._manual(task, key, system, user, schema, check, manual or {})
         provider = self.providers.get(pcfg.id)

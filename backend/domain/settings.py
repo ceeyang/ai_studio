@@ -1,20 +1,22 @@
-"""全局设置：默认文本模型、默认图片来源、默认视频来源，以及按步骤单独设置。
+"""全局设置：默认文本模型、新项目的图片/视频来源，以及按步骤单独设置。
 
 存在 app_settings 表里（key → JSON），每次调用时现读（SQLite 一次主键查询），改了不用重启。
 值为 null / 没有这一行 = 跟随默认。
 
-生效顺序（越靠前越优先）：
+规则：设置页只管默认，项目和镜头上选的总是优先。生效顺序（越靠前越优先）：
 - 文本模型（LLM provider）：这一步的单独设置 → 全局默认文本模型 → config.yaml（llm.routes[任务] → llm.default）
-- 首帧 / 视频：镜头上单独选的引擎 → 项目的引擎（新建项目时按「首帧/视频这一步的设置 → 全局默认 → zimage / h3_video」填）
-- 定妆照 / 三视图：这次调用明确指定的引擎 → 这一步的单独设置 → （三视图：有 H3 用 H3）→ 项目的图像引擎
-  项目引擎总是有值，所以定妆照、三视图这两步的单独设置排在项目之前，否则永远轮不到。
+- 首帧 / 视频：镜头上单独选的引擎 → 项目的引擎。设置页的「新项目的图片/视频来源」只在新建项目时
+  用来填项目引擎（不给就 zimage / h3_video），不影响已有项目。
+- 定妆照 / 三视图：这次手选的引擎 → 设置页这一步的单独设置 → （三视图：有 H3 用 H3）→ 项目的图像引擎。
+  这两步没有项目级的选择，项目的图像引擎就是它们的「默认」，所以这一步的设置排在它前面。
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from backend.domain.models import AppSetting, utcnow
 
@@ -28,8 +30,9 @@ LLM_STEPS: dict[str, str] = {
     "dialogue.fit_khmer": "高棉语台词适配",
     "subtitles.translate": "字幕翻译（配音前）",
 }
-IMAGE_STEPS: dict[str, str] = {"portrait": "角色定妆照", "turnaround": "三视图", "keyframes": "首帧"}
-VIDEO_STEPS: dict[str, str] = {"videos": "视频"}
+# 首帧 / 视频没有按步骤设置：它们跟项目和镜头走（项目引擎就是它们的设置）
+IMAGE_STEPS: dict[str, str] = {"portrait": "角色定妆照", "turnaround": "三视图"}
+VIDEO_STEPS: dict[str, str] = {}
 STEP_KIND = {**{k: "llm" for k in LLM_STEPS}, **{k: "image" for k in IMAGE_STEPS},
              **{k: "video" for k in VIDEO_STEPS}}
 STEP_LABEL = {**LLM_STEPS, **IMAGE_STEPS, **VIDEO_STEPS}
@@ -64,17 +67,16 @@ class SettingsStore:
 
     def save(self, values: dict[str, Any]) -> None:
         """values：text_model / image_engine / video_engine / step:<key> → 值（None = 跟随默认）。"""
+        # 两个请求同时写同一个新 key 时不能撞主键：用 SQLite 的 INSERT … ON CONFLICT DO UPDATE
         with self.db.session() as s:
             for key, val in values.items():
-                row = s.get(AppSetting, key)
                 if val in (None, ""):
-                    if row is not None:
-                        s.delete(row)
-                elif row is None:
-                    s.add(AppSetting(key=key, value=val))
-                else:
-                    row.value = val
-                    row.updated_at = utcnow()
+                    s.execute(delete(AppSetting).where(AppSetting.key == key))
+                    continue
+                now = utcnow()
+                stmt = sqlite_insert(AppSetting).values(key=key, value=val, updated_at=now)
+                s.execute(stmt.on_conflict_do_update(index_elements=[AppSetting.key],
+                                                     set_={"value": val, "updated_at": now}))
 
     # ------------------------------------------------------------ LLM
     def llm_provider(self, step: str) -> str | None:
@@ -95,17 +97,18 @@ def _first(names: list[str], *cands: str | None) -> str | None:
     return None
 
 
-def default_image_engine(sv, step: str | None = "keyframes", st: AppSettings | None = None) -> str:
-    """新建项目的图像引擎（以及「跟随默认」显示的名字）：这一步的设置 → 全局默认 → zimage → 第一个可用的。"""
+def default_image_engine(sv, st: AppSettings | None = None) -> str:
+    """新建项目的图像引擎：设置页「新项目的图片来源」→ zimage → 第一个可用的（设置里的引擎停用了就跳过）。"""
     st = st or _settings(sv)
     names = sv.engines.names("image")
-    return _first(names, st.step(step) if step else None, st.image_engine, FALLBACK_IMAGE) or (names[0] if names else FALLBACK_IMAGE)
+    return _first(names, st.image_engine, FALLBACK_IMAGE) or (names[0] if names else FALLBACK_IMAGE)
 
 
-def default_video_engine(sv, step: str | None = "videos", st: AppSettings | None = None) -> str:
+def default_video_engine(sv, st: AppSettings | None = None) -> str:
+    """新建项目的视频引擎：设置页「新项目的视频来源」→ h3_video → 第一个可用的。"""
     st = st or _settings(sv)
     names = sv.engines.names("video")
-    return _first(names, st.step(step) if step else None, st.video_engine, FALLBACK_VIDEO) or (names[0] if names else FALLBACK_VIDEO)
+    return _first(names, st.video_engine, FALLBACK_VIDEO) or (names[0] if names else FALLBACK_VIDEO)
 
 
 def portrait_engine(sv, project_engine: str, explicit: str | None = None,

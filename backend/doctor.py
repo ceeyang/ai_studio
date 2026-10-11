@@ -124,7 +124,8 @@ def check_runninghub(cfg: Config, engines) -> list[Check]:
     """RunningHub 云端引擎：有没有 API key、配了哪些引擎（不联网、不扣费）。没配 runninghub 就不报。"""
     rh = cfg.runninghub
     used = {n: e for n, e in engines.all().items() if runtime_of(e) == "runninghub"}
-    if rh is None or not used:
+    broken = dict(getattr(engines, "load_errors", {}) or {})
+    if rh is None or not (used or broken):
         return []
     out: list[Check] = []
     if rh.api_key():
@@ -132,11 +133,13 @@ def check_runninghub(cfg: Config, engines) -> list[Check]:
     else:
         out.append(Check("RunningHub", "API key", "warn",
                          f"没有设置 RunningHub API key（环境变量 {rh.api_key_env}），"
-                         f"{'、'.join(sorted(used))} 用不了：在 .env 里写上 {rh.api_key_env}=你的 key 后重启 studio"))
+                         f"{'、'.join(sorted(used)) or '云端引擎'} 用不了：在 .env 里写上 {rh.api_key_env}=你的 key 后重启 studio"))
     for name, e in sorted(used.items()):
         target = f"工作流 {e.cfg.workflow_id}" if e.cfg.workflow_id else f"AI 应用 {e.cfg.webapp_id}"
         kind = "图像" if e.cfg.kind == "image" else "视频"
         out.append(Check("RunningHub", name, "ok", f"{e.label} · {kind} · {target}"))
+    for name, err in sorted(broken.items()):
+        out.append(Check("RunningHub", name, "fail", f"配置有误，没有加载：{err}"))
     return out
 
 

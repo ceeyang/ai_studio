@@ -49,6 +49,8 @@ export interface SettingValue {
   effective: string | null;
   /** 改回「跟随默认」后会用的 */
   fallback: string | null;
+  /** 设置值已经不在可选项里（config 删了 provider / 引擎停用），effective 是退回去用的 */
+  invalid?: boolean;
   /** 文本模型才有：provider 的友好名字 */
   effective_label?: string | null;
   fallback_label?: string | null;
