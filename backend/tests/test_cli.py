@@ -253,3 +253,13 @@ def test_run_all_prints_combined_impact(cli, api):
     r = cli("run", "all", "demo")
     assert r.exit_code == 1
     assert "重跑影响（all）：会重跑整集：删除 2 个镜头（其中 1 个有选定首帧）" in r.output
+
+
+def test_run_all_explains_that_portraits_are_not_included(cli, tmp_path):
+    cli("project", "create", "demo")
+    f = tmp_path / "梗概.md"
+    f.write_text("林夏发现提词器被改了。", encoding="utf-8")
+    cli("episode", "import", "demo", "--file", f, "--seconds", "30")
+    r = cli("run", "all", "demo", "--yes")
+    assert r.exit_code == 0, r.output
+    assert "不含定妆照" in r.output and "studio character portrait" in r.output

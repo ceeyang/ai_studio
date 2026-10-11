@@ -56,6 +56,15 @@ describe('ShotStage', () => {
     expect(posts(calls)[1].body).toEqual({ stage: 'keyframes', candidates: 1, force: false, shots: ['12'] });
   });
 
+  it('提交后后端给了提醒（出场角色没有定妆照）：照常跟踪任务，并把提醒显示出来', async () => {
+    const W = '老周 还没有定妆照：h3_image 出首帧要用定妆照锁脸';
+    installFetch(routes({ 'POST /api/episodes/4/run': { job_ids: [95], warnings: [W] } }));
+    renderAt(<Harness />, AT);
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: '生成首帧 S01' }));
+    expect((await screen.findByTestId('run-warning')).textContent).toBe(W);
+  });
+
   it('首帧引擎不吃参考图、角色又有定妆照：首帧阶段一行提示；视频阶段不提示', async () => {
     const HINT = '当前首帧引擎不吃参考图，人物一致只靠文字；要锁脸可换 H3 图像';
     const shots = [makeShot({ id: 11, code: 'S01', first_frame_refs_unused: ['老周 定妆照'] }), makeShot({ id: 12, code: 'S02', order: 1 })];

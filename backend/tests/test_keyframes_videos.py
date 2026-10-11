@@ -589,3 +589,41 @@ def test_engine_video_prompt_keeps_eyes_off_the_lens():
                                                  has_audio=True, speakers=off)
     # 算哈希的老写法不加
     assert GAZE_LINE not in compose_video_prompt("x", "img", "", [], anchor="", has_audio=True)
+
+
+def test_keyframe_warns_when_locking_engine_has_no_portrait(tmp_path, db):
+    from backend.domain.models import Character
+
+    ctx, runner, shot_id = setup(tmp_path, db)
+    with db.session() as s:
+        shot, _, proj, _ = load_shot(s, shot_id)
+        proj.image_engine = "h3_image"
+        ch = Character(project_id=proj.id, name="老周", visual_prompt="a man")
+        s.add(ch)
+        s.flush()
+        shot.cast = [{"character_id": ch.id, "variation_id": None}]
+    run_keyframe(ctx, {"shot_id": shot_id})
+    assert any("老周 还没有定妆照，h3_image 只能按文字出脸" in m for m in ctx.logs)
+
+
+def test_run_warns_about_missing_portraits_but_submits(api):
+    """出首帧前：锁脸引擎、出场角色没有定妆照——照常提交，返回一句提醒（不拦）。"""
+    from backend.domain.models import Character, Episode, Project
+
+    sv = api.app.state.services
+    api.post("/api/projects", json={"title": "demo"})
+    ep_id = api.post("/api/projects/demo/episodes", json={"source_text": "x"}).json()["id"]
+    with sv.db.session() as s:
+        ep = s.get(Episode, ep_id)
+        ep.project.image_engine = "h3_image"
+        ch = Character(project_id=ep.project_id, name="老周", visual_prompt="a man")
+        s.add(ch)
+        s.flush()
+        s.add(Shot(episode_id=ep_id, order=0, code="S01", image_prompt=IMG,
+                   cast=[{"character_id": ch.id, "variation_id": None}]))
+    r = api.post(f"/api/episodes/{ep_id}/run", json={"stage": "keyframes"})
+    assert r.status_code == 200 and r.json()["job_ids"]
+    assert "老周 还没有定妆照" in r.json()["warnings"][0]
+    with sv.db.session() as s:
+        s.get(Episode, ep_id).project.image_engine = "zimage"   # 不锁脸的引擎：不提醒
+    assert api.post(f"/api/episodes/{ep_id}/run", json={"stage": "keyframes"}).json()["warnings"] == []

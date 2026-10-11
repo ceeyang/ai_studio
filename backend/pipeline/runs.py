@@ -97,6 +97,55 @@ def _run_precheck(check: Precheck, engines, stages: list[str], picked, codes: di
             raise JobError(f"ComfyUI 连不上（{url}），先启动 ComfyUI 或到设置页检查")
 
 
+def portrait_warnings(db: Database, engines, episode_id: int, stages: list[str],
+                      shots: list[str] | None = None) -> list[str]:
+    """出首帧之前：出场角色还没有选定定妆照、而这一镜的图像引擎要用定妆照锁脸时给一句提醒（不拦）。
+
+    没有定妆照时首帧只按文字出脸；之后补了定妆照，这些首帧会因为参考图变了而过期重出——GPU 白跑一轮。
+    整集 all 从剧本开始、还没有镜头时，按项目里所有角色和项目的图像引擎估计。"""
+    if "keyframes" not in stages:
+        return []
+    from backend.domain.characters import portrait_of
+    from backend.domain.models import Character
+
+    def max_refs(name: str) -> int:
+        try:
+            return engines.image(name).caps.max_refs
+        except KeyError:
+            return 0
+
+    with db.session() as s:
+        ep = s.get(Episode, episode_id)
+        if ep is None:
+            return []
+        proj = ep.project
+        try:
+            picked = _pick_shots(ep.shots, shots) if ep.shots else []
+        except JobError:
+            return []
+        locking: dict[int, set[str]] = {}   # 角色 id → 要锁脸的图像引擎
+        if picked:
+            for sh in picked:
+                eng = sh.image_engine or proj.image_engine
+                if max_refs(eng) > 0:
+                    for c in sh.cast or []:
+                        if isinstance(c, dict) and c.get("character_id") is not None:
+                            locking.setdefault(c["character_id"], set()).add(eng)
+        elif max_refs(proj.image_engine) > 0:
+            locking = {c.id: {proj.image_engine} for c in proj.characters}
+        missing = []
+        for cid in sorted(locking):
+            ch = s.get(Character, cid)
+            if ch is not None and portrait_of(s, cid) is None:
+                missing.append((ch.name, sorted(locking[cid])))
+    if not missing:
+        return []
+    names = "、".join(n for n, _ in missing)
+    engs = "、".join(sorted({e for _, es in missing for e in es}))
+    return [f"{names} 还没有定妆照：{engs} 出首帧要用定妆照锁脸，现在只能按文字出脸；之后补了定妆照，"
+            "这些首帧会过期重出。建议先到「角色」阶段抽定妆照（或 studio character portrait 上传）再出首帧"]
+
+
 def submit_chain(manager, db: Database, engines, episode_id: int, stages: list[str],
                  opts: RunOptions, depends_on: list[int] | None = None, *,
                  precheck: Precheck | None = None) -> list[int]:

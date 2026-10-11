@@ -55,6 +55,20 @@ def run_comfy(ctx, call, slug: str, ref_labels: dict[str, str] | None = None):
     return files, run_dir
 
 
+def missing_portraits(s, shot) -> list[str]:
+    """这一镜出场、但还没有选定定妆照的角色名。"""
+    from backend.domain.characters import portrait_of
+    from backend.domain.models import Character
+
+    out = []
+    for c in shot.cast or []:
+        cid = c.get("character_id") if isinstance(c, dict) else None
+        ch = s.get(Character, cid) if cid is not None else None
+        if ch is not None and ch.name not in out and portrait_of(s, ch.id) is None:
+            out.append(ch.name)
+    return out
+
+
 def ref_labels(packed, paths) -> dict[str, str]:
     """引擎丢弃参考图时报的是路径，换成"陈师傅 三视图·背面"这样的名字记日志。"""
     return {str(p): r.label for r, p in zip(packed, paths)}
@@ -75,6 +89,7 @@ def run_keyframe(ctx, payload: dict) -> dict:
         prompt = compose_image_prompt(shot_image_prompt(shot, proj), anchor)
         negative = join_negative(proj.negative, style.negative if style else "")
         packed = shot_refs(s, shot)
+        no_portrait = missing_portraits(s, shot) if engine.caps.max_refs > 0 else []
         refs = [sv.media.abs(r.file_path) for r in packed]
         labels = ref_labels(packed, refs)
         used = packed[:engine.caps.max_refs]
@@ -96,6 +111,9 @@ def run_keyframe(ctx, payload: dict) -> dict:
     seed_text = "无种子（网页出图每次不同）" if call.runner == "browser" else f"seed {seed}"
     ctx.log(f"首帧 {code} · {engine_name} · {seed_text} · 参考图 {len(refs)} 张"
             f"{'：' + '、'.join(labels.values()) if labels else ''}")
+    if no_portrait:
+        ctx.log(f"首帧 {code}：{'、'.join(no_portrait)} 还没有定妆照，{engine_name} 只能按文字出脸；"
+                "补了定妆照之后这张首帧会过期重出")
     if refs and engine.caps.max_refs == 0:
         ctx.log(f"首帧 {code}：{engine_name} 不吃参考图，{'、'.join(labels.values())}用不上，"
                 f"人物一致只靠提示词里的外貌文字；要锁脸可换 H3 图像")

@@ -10,7 +10,8 @@ from backend.app.schemas import FitKhmerIn, RerunImpact, RunIn, RunOut, Translat
 from backend.domain.models import Episode
 from backend.engines.comfyui import health
 from backend.pipeline.impact import protected_losses, rerun_impact
-from backend.pipeline.runs import FIT_STAGE, STAGES, Precheck, RunOptions, submit_chain
+from backend.pipeline.runs import (FIT_STAGE, STAGES, Precheck, RunOptions, portrait_warnings,
+                                   submit_chain)
 from backend.queue.errors import JobError
 
 router = APIRouter(prefix="/api", tags=["runs"])
@@ -64,8 +65,10 @@ def run_stage(episode_id: int, body: RunIn, request: Request):
                       priority=body.priority,
                       export=body.export.model_dump() if body.export else None,
                       scene_block_ids=body.scene_block_ids, note=body.note)
-    return RunOut(job_ids=submit_chain(manager(request), sv.db, sv.engines, episode_id, stages, opts,
-                                       precheck=_precheck(sv)))
+    ids = submit_chain(manager(request), sv.db, sv.engines, episode_id, stages, opts,
+                       precheck=_precheck(sv))
+    return RunOut(job_ids=ids, warnings=portrait_warnings(sv.db, sv.engines, episode_id, stages,
+                                                          body.shots))
 
 
 @router.post("/episodes/{episode_id}/dialogue/fit-khmer", response_model=RunOut)

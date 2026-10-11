@@ -388,6 +388,8 @@ export interface EndCard {
 
 export interface RunOut {
   job_ids: number[];
+  /** 不拦提交的提醒（如出场角色还没有定妆照，锁脸引擎只能按文字出脸） */
+  warnings?: string[];
 }
 
 /** GET /api/episodes/{id}/rerun-impact：现在重跑剧本 / 分镜会删什么、覆盖什么 */

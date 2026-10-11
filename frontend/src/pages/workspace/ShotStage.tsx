@@ -1,7 +1,7 @@
 // 单集工作台的首帧 / 视频阶段：工具栏（镜头数、候选数、勾选）+ 按段落分组的镜头卡片网格 + 镜头抽屉（?shot=<id>）。
 // 阶段条的「下一步」（首帧确认门，见 shotGate）由工作台算好传进来；点它时这里照着提交。
 import { useQueryClient } from '@tanstack/react-query';
-import { type Dispatch, type SetStateAction, useEffect, useRef } from 'react';
+import { type Dispatch, type SetStateAction, useEffect, useRef, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import { api, errorText } from '../../api/client';
 import {
@@ -90,6 +90,8 @@ export function ShotStage({
   const locations = useLocations(slug);
   const characters = useCharacters(slug);
   const run = useRunStage(id);
+  /** 上一次提交时后端给的提醒（如出场角色还没有定妆照） */
+  const [runWarnings, setRunWarnings] = useState<string[]>([]);
   const reorder = useReorderShots(id);
   const split = useSplitShot(id);
   const del = useDeleteShot(id);
@@ -122,6 +124,8 @@ export function ShotStage({
   /** 依次提交几批，合起来跟踪；全部提交成功返回 true */
   const submit = async (batches: GateBatch[], text: string): Promise<boolean> => {
     const ids: number[] = [];
+    const warns: string[] = [];
+    setRunWarnings([]);
     setSubmitting(true);
     try {
       for (const b of batches) {
@@ -129,8 +133,10 @@ export function ShotStage({
         if (b.ids.length > 0) body.shots = b.ids.map(String);
         const r = await run.mutateAsync(body);
         ids.push(...r.job_ids);
+        warns.push(...(r.warnings ?? []).filter((w) => !warns.includes(w)));
       }
       notice.track(ids, text);
+      setRunWarnings(warns);
       return true;
     } catch (err) {
       // 前面几批已经提交了的照常进行，错误一起说
@@ -287,6 +293,11 @@ export function ShotStage({
         </p>
       )}
       {!(openShot && active) && notice.view}
+      {runWarnings.map((w) => (
+        <p key={w} className="warn small" role="note" data-testid="run-warning">
+          {w}
+        </p>
+      ))}
 
       {shots.length === 0 ? (
         <p className="panel empty">

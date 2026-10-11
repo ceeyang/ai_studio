@@ -179,8 +179,21 @@ def run(stage: str = typer.Argument(..., help="script / storyboard / keyframes /
     if "export" in (stage, *nxt) or stage == "all":
         body["export"] = {"subtitles": subtitles, "dub": dub, "end_card": end_card, "trim": trim,
                           "bed": bed, "align": align}
-    _emit(_call("POST", f"/api/episodes/{ep['id']}/run", json=body),
-          lambda r: typer.echo(f"已提交 {len(r['job_ids'])} 个任务：{', '.join(map(str, r['job_ids']))}"))
+    def show(r: dict) -> None:
+        typer.echo(f"已提交 {len(r['job_ids'])} 个任务：{', '.join(map(str, r['job_ids']))}")
+        for w in r.get("warnings") or []:
+            typer.echo(f"提醒：{w}", err=True)
+        if stage == "all":
+            typer.echo(ALL_GUIDE, err=True)
+
+    _emit(_call("POST", f"/api/episodes/{ep['id']}/run", json=body), show)
+
+
+# run all 不含定妆照（要人挑），也没有网页上的首帧确认门：用锁脸引擎时先把定妆照定好
+ALL_GUIDE = ("说明：all = 剧本 → 分镜 → 首帧 → 视频 → 导出，不含定妆照，也不停下来确认首帧。"
+             "图像引擎要用定妆照锁脸（如 h3_image）时，先跑 studio run script <项目> --then storyboard，"
+             "在网页「角色」阶段抽好定妆照（或 studio character portrait 上传），"
+             "再跑 studio run keyframes <项目> --then videos,export")
 
 
 def impact_line(im: dict) -> str:
