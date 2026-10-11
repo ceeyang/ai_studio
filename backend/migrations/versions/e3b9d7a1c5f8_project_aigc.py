@@ -4,7 +4,7 @@
 广电总局微短剧 AI 标识要求、《人工智能生成合成内容标识办法》的显式 / 隐式标识。
 
 Revision ID: e3b9d7a1c5f8
-Revises: a3f8c1d5e7b2
+Revises: b9e3d7a1c5f2
 Create Date: 2026-10-12 02:00:00
 
 """
@@ -16,7 +16,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = 'e3b9d7a1c5f8'
-down_revision: Union[str, Sequence[str], None] = 'a3f8c1d5e7b2'
+down_revision: Union[str, Sequence[str], None] = 'b9e3d7a1c5f2'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
