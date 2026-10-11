@@ -1754,7 +1754,8 @@ img.rail-avatar { border: 0; }
 .ff-from-asset { display: flex; gap: var(--s-2); align-items: center; flex-wrap: wrap; }
 .prop-name { display: flex; align-items: center; gap: var(--s-2); margin: 0; font-family: var(--mono); font-size: 13px; overflow-wrap: anywhere; }
 
-/* ==================================================================   从一个点子开始（/start）：四步向导 + 工作台顶上的「点子出片」条
+/* =========================================================================
+   从一个点子开始（/start）：四步向导 + 工作台顶上的「点子出片」条
    ========================================================================= */
 .idea-wizard { max-width: 1080px; }
 .idea-wizard .eyebrow a { color: inherit; }
@@ -1800,7 +1801,6 @@ img.rail-avatar { border: 0; }
 .autopilot-bar ul { margin: 0; padding-left: 1.2em; font-size: 12.5px; }
 .autopilot-bar p.warn, .autopilot-bar p.error { margin: 0; }
 .head-actions { display: inline-flex; align-items: center; gap: var(--s-2); flex-wrap: wrap; }
-=======
 /* 从其他项目导入（续季）：按角色 / 场景 / 道具分组勾选，带缩略图 */
 .import-assets .import-group { border: 1px solid var(--divider); border-radius: 8px; padding: var(--s-2) var(--s-3); margin: 0; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
 .import-assets .import-group legend { display: flex; align-items: center; gap: var(--s-2); padding: 0 4px; font-size: 13px; color: var(--text-2); }
