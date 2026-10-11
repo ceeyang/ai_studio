@@ -49,6 +49,9 @@ class Cut:
     flagged: list[str] = field(default_factory=list)   # 选定视频出片自检疑似跳切的镜头（「S02 2.0s」）
     voices: dict[str, str | None] = field(default_factory=dict)
     end_card: dict | None = None
+    # continued[i]：第 i 段接上一镜（首帧是第 i-1 段视频的最后一帧）。这时第 i-1 段不能裁尾、
+    # 接缝强制硬切（load_cut 已经改好 transitions），切点才正好落在抽出来的那一帧上
+    continued: list[bool] = field(default_factory=list)
 
 
 def load_cut(sv, episode_id: int, *, allow_missing: bool = False) -> Cut:
@@ -59,11 +62,18 @@ def load_cut(sv, episode_id: int, *, allow_missing: bool = False) -> Cut:
         cut = Cut(episode_id, proj.slug, ep.number, proj.title, proj.aspect,
                   voices={c.name: c.voice for c in proj.characters}, end_card=proj.end_card)
         trans = []
+        prev_in = False   # 上一镜（按集里的顺序）有没有进成片
         for sh in ep.shots:
             c = selected_candidate(s, "shot", sh.id, "video")
             if c is None:
                 cut.missing.append(sh.code)
+                prev_in = False
                 continue
+            cont = bool(sh.continue_from_prev) and prev_in and bool(cut.clips)
+            cut.continued.append(cont)
+            if cont:
+                trans[-1] = "hard_cut"   # 上一镜接到这一镜：不要转场，硬切在尾帧上
+            prev_in = True
             cut.codes.append(sh.code)
             cut.clips.append(sv.media.abs(c.file_path))
             cut.clip_rels.append(c.file_path)
@@ -85,8 +95,10 @@ def clip_limits(sv, cut: Cut, trim: bool) -> tuple[list[float], list[float | Non
     """每段视频的实际时长，和合成时最多用多少秒（None = 整段）。规则见 backend/post/timeline.py。"""
     secs = [sv.ffmpeg.video_duration(c) for c in cut.clips]
     limits: list[float | None] = []
-    for clip, sec, dur, dlg in zip(cut.clips, secs, cut.shot_seconds, cut.dialogue):
-        if not trim or trim_limit(sec, dur, dlg) is None:   # 按分镜就不该裁的，不用再量音轨
+    nxt = [i + 1 < len(cut.continued) and cut.continued[i + 1] for i in range(len(cut.clips))]
+    for clip, sec, dur, dlg, keep_tail in zip(cut.clips, secs, cut.shot_seconds, cut.dialogue, nxt):
+        # 下一镜接上一镜：它的首帧是这段的最后一帧，裁了尾两镜就接不上
+        if not trim or keep_tail or trim_limit(sec, dur, dlg) is None:   # 按分镜就不该裁的，不用再量音轨
             limits.append(None)
             continue
         limits.append(trim_limit(sec, dur, dlg, audio_end=sv.ffmpeg.sound_end(clip)))

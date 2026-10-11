@@ -250,6 +250,7 @@ class LocationOut(ORM):
     # 场景图（不出人物的环境参考图，首帧参考图里排第一）：选定的那张和全部候选
     image_candidate_id: int | None = None
     image_url: str | None = None
+    image_stale: bool = False            # 选定的场景图是按旧设定（名字 / 时段 / 画面提示词）出的
     images: list[CandidateOut] = Field(default_factory=list)
     active_jobs: list[JobBrief] = Field(default_factory=list)   # 排队 / 生成中的场景图任务
     last_failure: JobBrief | None = None                        # 最近一次出场景图失败（之后没出过新的）
@@ -441,6 +442,8 @@ class ShotDetail(ShotOut):
     failures: list[JobBrief] = Field(default_factory=list)      # 首帧、视频各自最近一次失败（之后没出过新的才给）
     # 首帧引擎完全不吃参考图（max_refs=0）时，这个镜头本该带上却用不上的参考图（如「老周 定妆照」）
     first_frame_refs_unused: list[str] = Field(default_factory=list)
+    # 首帧引擎的参考图上限装不下所有出场角色的定妆照时，没带上的那几张（「小李 定妆照」）
+    first_frame_portraits_dropped: list[str] = Field(default_factory=list)
     # image_prompt 里有外貌占位符 {{char:<id>}} 时，出图实际用的文字（占位符按景别换成角色当前外貌）
     image_prompt_resolved: str | None = None
     # image_prompt 里出现的外貌占位符 → 角色名（「{{char:3}}」→「老周」），镜头抽屉显示图例

@@ -287,3 +287,38 @@ def test_export_failure_also_removes_partial_output(tmp_path, db):
         run_export(FakeCtx(sv, job_id=8), {"episode_id": ep_id})
     exports = sv.media.root / "demo" / "exports"
     assert not exports.exists() or list(exports.iterdir()) == []
+
+
+def test_export_continue_from_prev_keeps_tail_and_hard_cuts(tmp_path, db):
+    """S02 接上一镜（首帧取 S01 视频的最后一帧）：S01 不能按分镜裁尾，接缝强制硬切，
+    切点正好落在抽出来的那一帧上。没接上一镜的 S03 照常裁尾。"""
+    ff = FakeFFmpeg()
+    sv = make_services(tmp_path, db, ffmpeg=ff)
+    ep_id, ids = seed_shots(db)
+    with db.session() as s:
+        for sid in ids:
+            s.get(Shot, sid).duration = 3.0           # 视频 5 秒，分镜 3 秒：本来都要裁尾
+        s.get(Shot, ids[1]).continue_from_prev = True  # S01 → S02 原本是 dissolve_0.5
+    for i, sid in enumerate(ids):
+        add_video(sv, sid, f"h{i}")
+    ctx = FakeCtx(sv, job_id=5)
+    run_export(ctx, {"episode_id": ep_id})
+    call = ff.calls[0]
+    assert call["transitions"] == ["hard_cut", "hard_cut"]
+    lim = call["max_seconds"]
+    assert lim[0] is None and lim[1] is not None and lim[2] is not None
+    assert any("接上一镜" in m and "S01" in m and "S02" in m for m in ctx.logs)
+
+
+def test_export_continue_from_prev_with_missing_prev_changes_nothing(tmp_path, db):
+    """上一镜没有选定视频（allow_missing 跳过）时，接上一镜那一镜前面接的是别的镜头，不改转场。"""
+    ff = FakeFFmpeg()
+    sv = make_services(tmp_path, db, ffmpeg=ff)
+    ep_id, ids = seed_shots(db)
+    with db.session() as s:
+        s.get(Shot, ids[2]).continue_from_prev = True
+        s.get(Shot, ids[0]).transition_out = "dissolve_0.5"
+    add_video(sv, ids[0], "a")
+    add_video(sv, ids[2], "c")
+    run_export(FakeCtx(sv), {"episode_id": ep_id, "allow_missing": True})
+    assert ff.calls[0]["transitions"] == ["dissolve_0.5"]

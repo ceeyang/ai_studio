@@ -112,6 +112,26 @@ def test_openai_rejecting_images_suggests_switching_model(tmp_path):
     assert "看不了图片" in str(ei.value) and "image input not supported" in str(ei.value)
 
 
+@pytest.mark.parametrize("status", [401, 403, 404, 429, 500, 503])
+def test_openai_other_errors_with_images_keep_their_own_message(tmp_path, status):
+    """带图片时只有 400/415/422 才算「看不了图片」；鉴权、限流、服务端错误照原样报。"""
+    p = OpenAIProvider(ProviderCfg(id="o", kind="openai", base_url="http://llm.test/v1"),
+                       transport=httpx.MockTransport(lambda r: httpx.Response(status, text="boom")))
+    with pytest.raises(LLMError) as ei:
+        p.complete("S", [{"role": "user", "content": "u"}], images=[png(tmp_path)])
+    assert type(ei.value) is LLMError
+    assert f"HTTP {status}" in str(ei.value) and "看不了图片" not in str(ei.value)
+
+
+@pytest.mark.parametrize("status", [400, 415, 422])
+def test_openai_image_rejection_statuses(tmp_path, status):
+    from backend.llm.base import VisionRejected
+    p = OpenAIProvider(ProviderCfg(id="o", kind="openai", base_url="http://llm.test/v1"),
+                       transport=httpx.MockTransport(lambda r: httpx.Response(status, text="no")))
+    with pytest.raises(VisionRejected):
+        p.complete("S", [{"role": "user", "content": "u"}], images=[png(tmp_path)])
+
+
 def test_unsupported_image_format(tmp_path):
     f = tmp_path / "a.bmp"
     f.write_bytes(b"BM")
@@ -295,3 +315,21 @@ def test_photo_look_problems():
     assert photo_look_problems(LOOK) == []
     assert "中文" in photo_look_problems("a man 老周")[0]
     assert "姿势" in photo_look_problems("a man sitting on a stool")[0]
+
+
+@pytest.mark.parametrize("text", ["a man who resembles Andy Lau", "she looks like a famous singer",
+                                  "a celebrity smile", "a young actor's haircut",
+                                  "an actress with long hair", "Resembling a movie star",
+                                  "a famous face"])
+def test_photo_look_problems_rejects_identity_words(text):
+    """看图写外观不认人：写了像谁、明星、演员就让它重写。"""
+    from backend.pipeline.characters import photo_look_problems
+
+    bad = photo_look_problems(text)
+    assert bad and "不认人" in bad[-1]
+
+
+def test_photo_look_problems_allows_ordinary_words():
+    from backend.pipeline.characters import photo_look_problems
+
+    assert photo_look_problems("an active young man, practical jacket, interactive smartwatch") == []

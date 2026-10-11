@@ -4,7 +4,7 @@ from dataclasses import replace
 import pytest
 
 from backend.app.views import shot_detail
-from backend.domain.characters import set_portrait
+from backend.domain.characters import portrait_of, set_portrait
 from backend.domain.locations import location_image_of, set_location_image
 from backend.domain.models import Character, Location, Project, SceneBlock, Shot, StyleBible
 from backend.domain.refs import (MAX_SHOT_REFS, add_shot_ref, remove_shot_ref, shot_ref_images,
@@ -61,7 +61,11 @@ def test_location_prompt_is_people_free_and_positive():
     # 正面写法：不写 no people / without people 这类否定词（cfg 1 下会把人招进画面）
     assert "no people" not in p.lower() and "without" not in p.lower() and "nobody" not in p.lower()
     # 只取风格锚里的成像词：镜头、胶片；不带 rainy night street 这类场景词
-    assert "Photographic style:" in p and "Kodak film grain" in p and "neon" not in p
+    assert "Style: " in p and "Kodak film grain" in p and "neon" not in p
+    # 不写「等演员」这类会把人招进画面的词，也不硬说「照片风格」（动画 / 插画预设会打架）
+    assert "actor" not in p.lower() and "waiting" not in p.lower()
+    assert "Photographic" not in p
+    assert "the whole set is visible and still, wide eye-level view of the bare environment" in p
 
 
 def test_location_prompt_needs_english():
@@ -99,6 +103,48 @@ def test_location_step_setting_picks_engine(tmp_path, db):
     assert runner.calls[0].engine == "krea2"
 
 
+def test_location_image_goes_stale_when_setting_changes(tmp_path, db):
+    """场景的英文画面提示词 / 名字 / 时段改了：选定的 AI 场景图按旧设定出的，标过期；上传的不标。"""
+    from backend.app.routes.locations import location_out
+
+    ctx, runner, ids = setup(tmp_path, db, image_engine="zimage")
+    run_location_image(ctx, {"location_id": ids["loc"]})
+
+    def out():
+        with db.session() as s:
+            return location_out(s, s.get(Location, ids["loc"]))
+
+    assert out().image_stale is False
+    for field, value in (("visual_prompt", GARAGE + " A red toolbox."), ("time_of_day", "黄昏"),
+                         ("name", "修车铺")):
+        with db.session() as s:
+            loc = s.get(Location, ids["loc"])
+            old = getattr(loc, field)
+            setattr(loc, field, value)
+        assert out().image_stale is True, field
+        with db.session() as s:
+            setattr(s.get(Location, ids["loc"]), field, old)
+        assert out().image_stale is False
+    # 氛围不进出图提示词，改了不算
+    with db.session() as s:
+        s.get(Location, ids["loc"]).atmosphere = "压抑"
+    assert out().image_stale is False
+    # 按新设定重出一张并选定：不过期
+    with db.session() as s:
+        s.get(Location, ids["loc"]).visual_prompt = GARAGE + " A red toolbox."
+    ctx.job_id += 1
+    new = run_location_image(ctx, {"location_id": ids["loc"]})["candidate_ids"][0]
+    with db.session() as s:
+        from backend.domain.slots import select_candidate
+        select_candidate(s, new)
+    assert out().image_stale is False
+    # 上传的场景图是用户自己定的：改设定不标过期
+    _loc_image(ctx.services, ids["loc"], 5)
+    with db.session() as s:
+        s.get(Location, ids["loc"]).visual_prompt = GARAGE
+    assert out().image_stale is False
+
+
 # ------------------------------------------------------------ 参考图打包
 def _portrait(sv, char_id):
     with sv.db.session() as s:
@@ -130,9 +176,10 @@ def test_pack_order_location_then_shot_refs_then_cast(tmp_path, db):
         assert [r.label for r in refs] == ["场景图·修车行", "构图参考 1", "构图参考 2", "陈师傅 定妆照"]
         # 视频只带出场角色
         assert [r.candidate_id for r in shot_refs(s, shot, video=True)] == [pid]
+        # 截断时先保住定妆照，剩下的名额给场景图；发出去的仍按原顺序
         used, dropped = split_refs(refs, 2)
-        assert [r.candidate_id for r in used] == [lid, r1] and [r.label for r in dropped] == [
-            "构图参考 2", "陈师傅 定妆照"]
+        assert [r.candidate_id for r in used] == [lid, pid] and [r.label for r in dropped] == [
+            "构图参考 1", "构图参考 2"]
 
 
 def test_shot_refs_max_two_and_remove(tmp_path, db):
@@ -165,13 +212,109 @@ def test_keyframe_sends_refs_in_priority_and_logs_dropped(tmp_path, db):
     with db.session() as s:
         loc_path = str(sv.media.abs(location_image_of(s, ids["loc"]).file_path))
         ref1 = str(sv.media.abs(shot_ref_images(s, ids["shot"])[0].file_path))
-    assert call.meta["refs"] == [loc_path, ref1]
+        portrait = str(sv.media.abs(portrait_of(s, ids["chen"]).file_path))
+    # 上限 2 张：定妆照先留，剩下一张给场景图；构图参考两张都丢
+    assert call.meta["refs"] == [loc_path, portrait] and ref1 not in call.meta["refs"]
+    assert any("已丢弃：构图参考 1" in m for m in ctx.logs)
     assert any("已丢弃：构图参考 2" in m for m in ctx.logs)
-    assert any("已丢弃：陈师傅 定妆照" in m for m in ctx.logs)
+    assert not any("已丢弃：陈师傅 定妆照" in m for m in ctx.logs)
     with db.session() as s:
         from backend.domain.slots import selected_candidate
         ff = selected_candidate(s, "shot", ids["shot"], "first_frame")
         assert [r["id"] for r in ff.params["inputs"]["refs"]][0] == lid
+
+
+def _second_actor(db, ids):
+    """给镜头再加一个出场角色小李（排在陈师傅后面）。"""
+    with db.session() as s:
+        li = Character(project_id=ids["project"], name="小李", visual_prompt="a young apprentice")
+        s.add(li)
+        s.flush()
+        sh = s.get(Shot, ids["shot"])
+        sh.cast = [*sh.cast, {"character_id": li.id, "variation_id": None}]
+        return li.id
+
+
+def test_split_refs_keeps_one_portrait_per_actor_first():
+    from backend.domain.refs import Ref
+    packed = [Ref(1, "l", "场景图·修车行", "location"), Ref(2, "a", "构图参考 1", "shot_ref"),
+              Ref(3, "b", "构图参考 2", "shot_ref"), Ref(4, "p", "陈师傅 定妆照", "portrait"),
+              Ref(5, "q", "小李 定妆照", "portrait"), Ref(6, "c", "陈师傅 三视图·正面", "turnaround")]
+    # gemini 网页最多 3 张：两张定妆照 + 场景图
+    used, dropped = split_refs(packed, 3)
+    assert [r.candidate_id for r in used] == [1, 4, 5]
+    assert [r.candidate_id for r in dropped] == [2, 3, 6]
+    # 4 张：再补一张构图参考；6 张全带；三视图格排在构图参考后面
+    assert [r.candidate_id for r in split_refs(packed, 4)[0]] == [1, 2, 4, 5]
+    assert [r.candidate_id for r in split_refs(packed, 5)[0]] == [1, 2, 3, 4, 5]
+    assert split_refs(packed, 9) == (packed, [])
+    # 角色比名额多：按出场顺序留前面的人，场景图也让位
+    used, dropped = split_refs(packed, 1)
+    assert [r.candidate_id for r in used] == [4] and 5 in [r.candidate_id for r in dropped]
+    assert split_refs(packed, 0) == ([], packed)
+
+
+def test_keyframe_gemini_limit_keeps_both_faces(tmp_path, db):
+    from backend.engines.browser.engines import GeminiImageEngine
+    assert GeminiImageEngine.caps.max_refs == 3
+    ctx, runner, ids = setup(tmp_path, db)
+    sv = ctx.services
+    eng = sv.engines.image("h3_image")
+    eng.caps = replace(eng.caps, max_refs=3)          # 和 gemini 网页一样最多 3 张
+    li = _second_actor(db, ids)
+    p1, p2 = _portrait(sv, ids["chen"]), _portrait(sv, li)
+    lid = _loc_image(sv, ids["loc"])
+    _shot_ref(sv, ids["shot"], 1)
+    _shot_ref(sv, ids["shot"], 2)
+    run_keyframe(ctx, {"shot_id": ids["shot"]})
+    with db.session() as s:
+        from backend.domain.slots import selected_candidate
+        ff = selected_candidate(s, "shot", ids["shot"], "first_frame")
+        assert [r["id"] for r in ff.params["inputs"]["refs"]] == [lid, p1, p2]
+        assert [r.get("kind") for r in ff.params["inputs"]["refs"]] == ["location", "portrait", "portrait"]
+        params = ff.params
+    assert len(runner.calls[0].meta["refs"]) == 3
+    assert any("已丢弃：构图参考 1" in m for m in ctx.logs)
+    assert not any("没带上" in m for m in ctx.logs)
+    from backend.pipeline.prompting import first_frame_locked_face
+    assert first_frame_locked_face(params, 3)
+    with db.session() as s:
+        shot = s.get(Shot, ids["shot"])
+        proj = s.get(Project, ids["project"])
+        d = shot_detail(s, sv, shot, proj, proj.style_bible)
+    assert d.first_frame_portraits_dropped == []
+    assert not next(x for x in d.slots if x.kind == "first_frame").stale
+
+
+def test_keyframe_logs_and_reports_dropped_portraits(tmp_path, db):
+    ctx, runner, ids = setup(tmp_path, db)
+    sv = ctx.services
+    eng = sv.engines.image("h3_image")
+    eng.caps = replace(eng.caps, max_refs=1)
+    li = _second_actor(db, ids)
+    _portrait(sv, ids["chen"])
+    _portrait(sv, li)
+    _loc_image(sv, ids["loc"])
+    run_keyframe(ctx, {"shot_id": ids["shot"]})
+    assert any("小李 定妆照没带上" in m for m in ctx.logs)
+    with db.session() as s:
+        shot = s.get(Shot, ids["shot"])
+        proj = s.get(Project, ids["project"])
+        d = shot_detail(s, sv, shot, proj, proj.style_bible)
+    assert d.first_frame_portraits_dropped == ["小李 定妆照"]
+
+
+def test_locked_face_needs_a_face_ref():
+    from backend.pipeline.prompting import first_frame_locked_face
+    only_scene = {"inputs": {"refs": [{"id": 1, "label": "场景图·修车行", "kind": "location"},
+                                      {"id": 2, "label": "构图参考 1", "kind": "shot_ref"}]}}
+    assert not first_frame_locked_face(only_scene, 3)
+    assert first_frame_locked_face({"inputs": {"refs": [{"id": 3, "label": "陈师傅 定妆照",
+                                                          "kind": "portrait"}]}}, 3)
+    # 老记录没有 kind：按 label 认
+    assert not first_frame_locked_face({"inputs": {"refs": [{"id": 1, "label": "场景图·修车行"}]}}, 3)
+    assert first_frame_locked_face({"inputs": {"refs": [{"id": 4, "label": "陈师傅 三视图·正面"}]}}, 3)
+    assert not first_frame_locked_face({"inputs": {"refs": []}}, 3)
 
 
 def test_location_image_selection_makes_first_frame_stale(tmp_path, db):

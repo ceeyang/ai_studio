@@ -3,6 +3,7 @@
 以及三视图（character.turnaround_look 写全身描述，image.turnaround 出设定图并自动切成单个视角）。"""
 from __future__ import annotations
 
+import re
 import shutil
 from urllib.parse import quote
 
@@ -215,7 +216,16 @@ def photo_look_problems(vp: str) -> list[str]:
     poses = sorted({m.group(0).lower() for m in _POSE.finditer(vp or "")})
     if poses:
         out.append(f"visual_prompt 里写了姿势（{', '.join(poses)}），只写外观，不写坐、蹲、跪这类姿势")
+    who = sorted({m.group(0).lower() for m in _IDENTITY.finditer(vp or "")})
+    if who:
+        out.append(f"visual_prompt 里写了「{', '.join(who)}」：不认人，不写像谁、明星、演员，"
+                   "只描述看得见的脸型、五官、发型、体型和服装")
     return out
+
+
+# 看图写外观时不认人：出现像谁 / 明星 / 演员这类词就让模型重写
+_IDENTITY = re.compile(r"\b(?:resembl\w*|looks?\s+like|looking\s+like|celebrit\w*|actors?|"
+                       r"actress(?:es)?|famous)\b", re.I)
 
 
 @HANDLERS.register("character.from_photo")

@@ -398,15 +398,28 @@ def keyframe_input_hash(shot, project, style, engine_name: str, ref_ids=()) -> s
 
 
 def first_frame_locked_face(ff_params: dict | None, image_max_refs: int) -> bool:
-    """选定的首帧是不是带定妆照锁过脸。首帧候选的 inputs["refs"] 记着引擎实际用到的参考图；
+    """选定的首帧是不是带定妆照锁过脸。首帧候选的 inputs["refs"] 记着引擎实际用到的参考图，
+    其中有定妆照或三视图格才算锁脸（只带了场景图 / 构图参考的不算）；
     老候选没有 inputs 时按出图引擎能不能吃参考图估计（引擎不存在、上传的首帧按没锁脸算）。
 
     没锁脸（zimage / krea2 文生图）时，首帧里的脸是文字画出来的，和定妆照不是同一张脸：
     视频再带定妆照，H3 会在两张脸之间折中或中途「跳」到参考图。这种镜头视频身份以首帧为准。"""
     inputs = (ff_params or {}).get("inputs")
     if isinstance(inputs, dict) and "refs" in inputs:
-        return bool(inputs["refs"])
+        return any(_is_face_ref(r) for r in inputs["refs"] or [])
     return image_max_refs > 0
+
+
+def _is_face_ref(r) -> bool:
+    """首帧用到的这张参考图带不带脸（定妆照 / 三视图格）。场景图、构图参考不算锁脸。
+    新记录有 kind；老记录只有 label，按「XX 定妆照」「XX 三视图·正面」认。"""
+    if not isinstance(r, dict):
+        return False
+    kind = r.get("kind")
+    if kind:
+        return kind in ("portrait", "turnaround")
+    label = str(r.get("label") or "")
+    return label.endswith("定妆照") or "三视图·" in label
 
 
 def video_input_hash(shot, project, style, first_frame_candidate_id: int, engine_name: str,
@@ -424,7 +437,8 @@ LEGACY_STALE = "输入已变化（旧记录无法细分）"
 
 
 def ref_inputs(refs) -> list[dict]:
-    return [{"id": r.candidate_id, "label": r.label} for r in refs]
+    return [{"id": r.candidate_id, "label": r.label, **({"kind": r.kind} if getattr(r, "kind", "") else {})}
+            for r in refs]
 
 
 def keyframe_inputs(shot, project, style, engine_name: str, refs=()) -> dict:

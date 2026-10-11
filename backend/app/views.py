@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from backend.app.schemas import (CandidateOut, ContinuePrevOut, EpisodeDetail, ExportOut, JobBrief, JobContext,
                                  SceneBlockOut, ShotDetail, SlotOut)
 from backend.domain.models import Character, Episode, Job, Project, Shot
-from backend.domain.refs import SHOT_REF_SLOT, shot_ref_images, shot_refs
+from backend.domain.refs import SHOT_REF_SLOT, shot_ref_images, shot_refs, split_refs
 from backend.domain.shots import prev_shot
 from backend.domain.slots import selected_candidate, slots_for
 from backend.pipeline.continuity import continue_hash, continue_inputs
@@ -122,7 +122,9 @@ def shot_detail(s: Session, sv, shot, proj, style, *, jobs: OwnerJobs | None = N
     v_pack = shot_refs(s, shot, video=True)
     ie = shot.image_engine or proj.image_engine
     ff_cap = _max_refs(sv, "image", ie)
-    ff_refs = refs[:ff_cap]
+    ff_refs, ff_dropped = split_refs(refs, ff_cap)   # 和 keyframes.run_keyframe 同一个截断规则
+    # 参考图上限装不下所有出场角色的定妆照：抽屉里提示哪些人的脸没锁上
+    lost = [r.label for r in ff_dropped if r.kind == "portrait"] if ff_cap > 0 else []
     known_ie = ie in sv.engines.names("image")
     # 首帧引擎完全不吃参考图：定妆照对首帧没有作用，界面要提示（引擎不存在不算，那是另一种错）
     unused = [r.label for r in refs] if ff_cap == 0 and known_ie else []
@@ -140,6 +142,7 @@ def shot_detail(s: Session, sv, shot, proj, style, *, jobs: OwnerJobs | None = N
         current["first_frame"] = continue_hash(pv.id) if pv is not None else "waiting-prev-video"
         inputs["first_frame"] = continue_inputs(prev.code if prev else "", pv.id if pv else 0)
         unused = []
+        lost = []
     legacy_ok: dict[str, str] = {}
     ff = next((x for x in slots if x.kind == "first_frame"), None)
     if ff is not None and ff.selected_candidate_id:
@@ -184,6 +187,7 @@ def shot_detail(s: Session, sv, shot, proj, style, *, jobs: OwnerJobs | None = N
         "active_jobs": [job_brief(j, progress) for j in jobs.active],
         "failures": [job_brief(f, failed=True) for f in sorted(failures, key=lambda x: x.id)],
         "first_frame_refs_unused": unused,
+        "first_frame_portraits_dropped": lost,
         "shot_refs": [candidate_out(c) for c in shot_ref_images(s, shot.id)],
         "image_max_refs": ff_cap if known_ie else None,
         "continue_prev": cont,

@@ -9,7 +9,8 @@ from sqlalchemy import select
 from backend.app.deps import check_engines, get_or_404, manager, project_by_slug, read_upload, services
 from backend.app.schemas import LocationDrawIn, LocationOut, LocationPatch, RunOut
 from backend.app.views import candidate_out, job_brief, owner_jobs
-from backend.domain.locations import LOCATION_SLOT, location_image_of, set_location_image
+from backend.domain.locations import (LOCATION_SLOT, location_image_of, location_image_stale,
+                                      set_location_image)
 from backend.domain.models import Candidate, Job, Location, Slot
 from backend.domain.settings import location_engine
 from backend.domain.slots import select_candidate
@@ -35,6 +36,7 @@ def location_out(s, loc: Location, progress=None) -> LocationOut:
     return LocationOut.model_validate(loc).model_copy(update={
         "image_candidate_id": sel.id if sel else None,
         "image_url": "/media/" + quote(sel.file_path) if sel else None,
+        "image_stale": location_image_stale(loc, sel),
         "images": [candidate_out(c) for c in slot.candidates] if slot else [],
         "active_jobs": [job_brief(j, progress) for j in jobs],
         "last_failure": job_brief(failed, failed=True) if failed else None})

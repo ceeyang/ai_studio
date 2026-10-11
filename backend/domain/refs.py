@@ -1,7 +1,8 @@
 """首帧 / 视频的参考图打包（设计文档 §6.4）。
 
-首帧的顺序固定：场景图 → 镜头构图参考图（最多 2 张）→ 出场角色 → 道具 → 上一镜尾帧，超出引擎上限时
-从后往前丢（引擎 build 时按这个顺序截断，丢掉的记进任务日志）。
+首帧发给引擎的顺序固定：场景图 → 镜头构图参考图（最多 2 张）→ 出场角色 → 道具 → 上一镜尾帧。
+超出引擎上限时不是简单从后往前丢（那样先丢的是定妆照，脸就没锁住）：split_refs 先给每个出场角色留一张
+定妆照，剩下的名额再按 场景图 → 构图参考 → 三视图格 补满；留下的仍按上面的顺序发，丢掉的记进任务日志。
 - 场景图：镜头所在段落的场景选定的那张（不出人物，固定场景一致性），见 domain/locations.py。
 - 构图参考：用户在镜头抽屉上传的构图 / 动作参考（Slot kind="shot_ref"，槽位里的候选全部都用）。
 - 出场角色：先放所有出场角色选定的定妆照（按 cast 顺序），再按同样顺序放每人一张与机位最匹配的
@@ -39,6 +40,11 @@ class Ref:
     candidate_id: int
     file_path: str
     label: str
+    kind: str = ""     # location / shot_ref / portrait / turnaround（截断优先级和「锁脸」判断用）
+
+
+# 带脸的参考图：首帧带了其中一张才算按定妆照锁过脸
+FACE_KINDS = ("portrait", "turnaround")
 
 
 def _cast(s: Session, shot) -> list[Character]:
@@ -63,11 +69,11 @@ def _cast_refs(s: Session, shot) -> list[Ref]:
         p = portrait_of(s, ch.id)
         if p is None:
             continue  # 没有定妆照就不带三视图（三视图是按定妆照锁的脸）
-        portraits.append(Ref(p.id, p.file_path, f"{ch.name} 定妆照"))
+        portraits.append(Ref(p.id, p.file_path, f"{ch.name} 定妆照", "portrait"))
         picked = pick_cell(s, ch, view)
         if picked is not None:
             v, c = picked
-            cells.append(Ref(c.id, c.file_path, f"{ch.name} 三视图·{VIEW_LABELS[v]}"))
+            cells.append(Ref(c.id, c.file_path, f"{ch.name} 三视图·{VIEW_LABELS[v]}", "turnaround"))
     return portraits + cells
 
 
@@ -116,13 +122,33 @@ def shot_refs(s: Session, shot, *, video: bool = False) -> list[Ref]:
     loc = shot_location(s, shot)
     img = location_image_of(s, loc.id) if loc is not None else None
     if img is not None:
-        head.append(Ref(img.id, img.file_path, f"场景图·{loc.name}"))
+        head.append(Ref(img.id, img.file_path, f"场景图·{loc.name}", "location"))
     for i, c in enumerate(shot_ref_images(s, shot.id), start=1):
-        head.append(Ref(c.id, c.file_path, f"构图参考 {i}"))
+        head.append(Ref(c.id, c.file_path, f"构图参考 {i}", "shot_ref"))
     return head + cast
 
 
+# 截断时补名额的顺序（定妆照先每个角色留一张，见 split_refs）
+_FILL_ORDER = ("location", "shot_ref", "turnaround")
+
+
 def split_refs(packed: list[Ref], max_refs: int) -> tuple[list[Ref], list[Ref]]:
-    """按引擎上限截断：保留前 max_refs 张（优先级高的在前），返回 (用到的, 丢掉的)。"""
+    """按引擎上限截断，返回 (用到的, 丢掉的)，两边都保持 packed 里的顺序。
+
+    先给每个出场角色留一张定妆照（角色比名额多时按出场顺序留前几个），剩下的名额按
+    场景图 → 构图参考 → 三视图格 补；kind 不认识的排在最后。"""
     n = max(int(max_refs), 0)
-    return packed[:n], packed[n:]
+    if len(packed) <= n:
+        return list(packed), []
+    keep: set[int] = set()
+    for i, r in enumerate(packed):
+        if r.kind == "portrait" and len(keep) < n:
+            keep.add(i)
+    rank = {k: j for j, k in enumerate(_FILL_ORDER)}
+    rest = sorted((i for i, r in enumerate(packed) if i not in keep),
+                  key=lambda i: (rank.get(packed[i].kind, len(rank)), i))
+    for i in rest[:n - len(keep)]:
+        keep.add(i)
+    used = [r for i, r in enumerate(packed) if i in keep]
+    dropped = [r for i, r in enumerate(packed) if i not in keep]
+    return used, dropped

@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import math
 import re
+import unicodedata
 
 from sqlalchemy import select
 
@@ -211,13 +212,26 @@ _DIALOGUE = re.compile(r"[:：]\s*[「“\"]([^」”\"\n]*)[」”\"]")
 _SOURCE_SPEECH = re.compile(r"[「“\"][^」”\"\n]+[」”\"]|[说道问喊][:：]")
 
 
+# 冒号前是屏幕 / 字条 / 标牌这类「画面里的字」时不是台词（「手机屏幕显示：「余额不足」」）
+_SCREEN_TEXT = re.compile(r"(?:屏幕|屏|字条|纸条|便条|显示|写着|写道|标牌|招牌|牌子|告示|横幅|字幕|"
+                          r"短信|消息|弹幕|标语|海报|弹窗|通知)[上里中]?\s*$")
+_CLAUSE_END = re.compile(r"[。！？!?\n」”\"]")
+
+
+def _is_screen_text(text: str, colon: int) -> bool:
+    head = _CLAUSE_END.split(text[:colon])[-1]
+    return bool(_SCREEN_TEXT.search(head))
+
+
 def dialogue_lines(texts: list[str]) -> list[str]:
     return [m.group(1).strip() for t in texts for m in _DIALOGUE.finditer(t or "")
-            if m.group(1).strip()]
+            if m.group(1).strip() and not _is_screen_text(t, m.start())]
 
 
 def _speech_len(line: str) -> int:
-    return len("".join(line.split()))
+    """台词字数：不算标点和空白（「好……走！」是 2 个字）。"""
+    return sum(1 for ch in line if not ch.isspace()
+               and not unicodedata.category(ch).startswith(("P", "S", "Z")))
 
 
 def min_dialogue_lines(target_seconds: float) -> int:

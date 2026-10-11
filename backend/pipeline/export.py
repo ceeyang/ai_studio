@@ -65,6 +65,10 @@ def run_export(ctx, payload: dict) -> dict:
     variant = cut.aspect.replace(":", "x")
     ctx.check_canceled()
     secs, limits = clip_limits(sv, cut, opts.trim)
+    joined = [f"{cut.codes[i - 1]}→{cut.codes[i]}" for i, c in enumerate(cut.continued) if c]
+    if joined:
+        ctx.log("接上一镜：" + "、".join(joined) + " 的上一镜不裁尾、接缝改成硬切"
+                "（后一镜的首帧就是上一镜的最后一帧，切点落在这一帧上）")
     short = [f"{code}（视频 {sec:.2f}s，台词到 {end:.2f}s）"
              for code, sec, dlg in zip(cut.codes, secs, cut.dialogue)
              if (end := max((float(d.get("end") or 0) for d in dlg), default=0.0)) > sec + 0.05]

@@ -22,6 +22,20 @@ def image_ext(filename: str, what: str = "场景图") -> str:
     return ext
 
 
+def location_spec(loc) -> str:
+    """场景图按哪份设定出的：名字、时段、英文画面提示词（这几样进出图提示词；氛围不进）。
+    AI 出的场景图把它记在 params["spec"]，设定改了选定的那张就标过期。"""
+    from backend.domain.hashing import input_hash
+    return input_hash("location_spec", (loc.name or "").strip(), (loc.time_of_day or "").strip(),
+                      (loc.visual_prompt or "").strip())
+
+
+def location_image_stale(loc, cand: Candidate | None) -> bool:
+    """选定的场景图是按旧设定出的。上传的和老记录（没有 spec）不算：没法知道它对应哪份设定。"""
+    spec = ((cand.params or {}).get("spec") if cand is not None else None)
+    return bool(spec) and spec != location_spec(loc)
+
+
 def location_image_of(s: Session, loc_id: int) -> Candidate | None:
     return selected_candidate(s, "location", loc_id, LOCATION_SLOT)
 

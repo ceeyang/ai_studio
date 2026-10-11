@@ -314,6 +314,23 @@ def test_dialogue_problems_rules():
     assert len(bad) == 1 and "角色名：「台词」" in bad[0]
 
 
+def test_dialogue_length_ignores_punctuation_and_screen_text():
+    from backend.pipeline.script import _speech_len, dialogue_lines, dialogue_problems
+
+    # 16 个字加标点：不算超长
+    line = "你知道吗，这钱，我一分都不会收下的！"
+    assert _speech_len(line) == 15
+    assert dialogue_problems([f"老周：「{line}」"], 3) == []
+    assert _speech_len("好……走！ 快") == 3
+    # 屏幕 / 字条 / 标牌上的字不是台词：不进对白、不按 16 字卡
+    texts = ["手机屏幕显示：「余额不足，请于今日二十四点前还清全部欠款」",
+             "桌上的字条写着：「别找我了，我已经离开这座城市再也不会回来」",
+             "门口标牌：「营业时间早九点到晚十点节假日照常营业不休息」",
+             "林夏看着屏幕说：「谁干的？」"]
+    assert dialogue_lines(texts) == ["谁干的？"]
+    assert dialogue_problems(texts, 3) == []
+
+
 def test_structure_retries_on_long_dialogue_then_accepts(tmp_path, db):
     long_line = {**STRUCTURE, "scenes": [
         {"location": "直播间", "text": "林夏：「我在直播，你别乱来，你知道这样做后果有多严重吗」"},

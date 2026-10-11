@@ -214,7 +214,8 @@ def test_stale_reason_portrait_changed(tmp_path, db):
     run_keyframe(ctx, {"shot_id": ids["shot"]})
     with db.session() as s:
         ff = selected_candidate(s, "shot", ids["shot"], "first_frame")
-        assert ff.params["inputs"]["refs"] == [{"id": chen_cid, "label": "陈师傅 定妆照"}]
+        assert ff.params["inputs"]["refs"] == [{"id": chen_cid, "label": "陈师傅 定妆照",
+                                                  "kind": "portrait"}]
         assert ff.params["inputs"]["engine"] == "h3_image"
     assert stale_reason(sv, ids["shot"], "first_frame") is None
     put_portrait(sv, ids["chen"], "chen_v2.png")

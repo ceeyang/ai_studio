@@ -46,6 +46,9 @@ def claude_image_blocks(images) -> list[dict]:
     return out
 
 
+VISION_REJECT_STATUS = (400, 415, 422)
+
+
 class OpenAIProvider:
     def __init__(self, cfg: ProviderCfg, *, transport: httpx.BaseTransport | None = None):
         if not cfg.base_url:
@@ -80,7 +83,8 @@ class OpenAIProvider:
         else:
             raise LLMError(f"连不上 {self.id}（{self.cfg.base_url}）：{last}")
         if r.status_code >= 400:
-            if images and r.status_code < 500:
+            # 只有「请求本身不被接受」才可能是不支持图片；401 / 429 / 5xx 是鉴权、限流、服务端的问题，照原样报
+            if images and r.status_code in VISION_REJECT_STATUS:
                 raise VisionRejected(f"带图片的请求被拒：HTTP {r.status_code} {r.text[:300]}")
             raise LLMError(f"{self.id} 返回 HTTP {r.status_code}：{r.text[:500]}")
         d = r.json()

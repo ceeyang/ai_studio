@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import shutil
 
-from backend.domain.refs import shot_refs
+from backend.domain.refs import shot_refs, split_refs
 from backend.domain.models import Shot
 from backend.domain.slots import add_candidate, get_or_create_slot, selected_candidate
 from backend.engines.base import ImageRequest
@@ -97,9 +97,14 @@ def run_keyframe(ctx, payload: dict) -> dict:
         negative = join_negative(proj.negative, style.negative if style else "")
         packed = shot_refs(s, shot)
         no_portrait = missing_portraits(s, shot) if engine.caps.max_refs > 0 else []
-        refs = [sv.media.abs(r.file_path) for r in packed]
-        labels = ref_labels(packed, refs)
-        used = packed[:engine.caps.max_refs]
+        # 超出上限时先保住每个角色的定妆照（split_refs），只把留下的发给引擎；引擎不吃参考图时照发，
+        # 由下面的日志说明用不上
+        used, dropped = (split_refs(packed, engine.caps.max_refs) if engine.caps.max_refs > 0
+                         else (packed, []))
+        refs = [sv.media.abs(r.file_path) for r in used]
+        labels = ref_labels(used, refs)
+        if engine.caps.max_refs == 0:
+            used = []
         h = keyframe_input_hash(shot, proj, style, engine_name, [r.candidate_id for r in used])
         inputs = keyframe_inputs(shot, proj, style, engine_name, used)
         # 只要一个候选、又不强制时，输入没变就不重出（多候选是用户明确要抽卡）
@@ -120,6 +125,13 @@ def run_keyframe(ctx, payload: dict) -> dict:
             f"{'：' + '、'.join(labels.values()) if labels else ''}")
     for n in notes:
         ctx.log(f"首帧 {code}：{n}")
+    for r in dropped:
+        ctx.log(f"超出引擎参考图上限，已丢弃：{r.label}")
+    lost = [r.label for r in dropped if r.kind == "portrait"]
+    if lost:
+        ctx.log(f"首帧 {code}：{engine_name} 最多 {engine.caps.max_refs} 张参考图，装不下所有出场角色的"
+                f"定妆照，{'、'.join(lost)}没带上，这几个人的脸只能按文字出；要锁脸就减少出场角色或换"
+                "参考图上限更大的引擎")
     if no_portrait:
         ctx.log(f"首帧 {code}：{'、'.join(no_portrait)} 还没有定妆照，{engine_name} 只能按文字出脸；"
                 "补了定妆照之后这张首帧会过期重出")

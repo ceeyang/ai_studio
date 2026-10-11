@@ -11,7 +11,7 @@ import re
 import shutil
 
 from backend.domain.hashing import input_hash
-from backend.domain.locations import add_location_image
+from backend.domain.locations import add_location_image, location_spec
 from backend.domain.models import Location
 from backend.domain.settings import location_engine
 from backend.engines.base import ImageRequest
@@ -71,11 +71,13 @@ def location_prompt(loc, anchor: str) -> str:
     parts = [f"Empty {place}, unoccupied{', ' + when if when else ''}."]
     if rest:
         parts.append(rest)
-    parts.append("Environment reference plate: the whole set is visible and still, an empty "
-                 "unoccupied space waiting for the actors, wide eye-level view.")
+    # 只写正面的画面：提到演员 / 等人这类词会把人招进画面
+    parts.append("Environment reference plate: the whole set is visible and still, wide eye-level "
+                 "view of the bare environment.")
     style = photo_style(anchor)
     if style:
-        parts.append(f"Photographic style: {style}.")
+        # 写「Style」而不是「Photographic style」：动画 / 插画风格预设不能被说成照片
+        parts.append(f"Style: {style}.")
     return " ".join(parts)
 
 
@@ -103,6 +105,7 @@ def run_location_image(ctx, payload: dict) -> dict:
         negative = join_negative(proj.negative, style.negative if style else "", LOCATION_NEGATIVE)
         seed = shot_seed(proj.seed, loc_id + 50_000, ctx.job_id)
         slug, name, aspect = proj.slug, loc.name, proj.aspect
+        spec = location_spec(loc)
     call = engine.build(ImageRequest(prompt=prompt, negative=negative, aspect=aspect, seed=seed,
                                      prefix=f"studio/{slug}/location_{loc_id}"))
     ctx.log(f"场景图 {name} · {engine_name} · {seed_label(call, seed)}")
@@ -111,7 +114,7 @@ def run_location_image(ctx, payload: dict) -> dict:
     shutil.copyfile(files[0], dst)
     with sv.db.session() as s:
         c = add_location_image(s, loc_id, file_path=sv.media.rel(dst), engine=engine_name,
-                               params={**call.meta, "prompt": prompt,
+                               params={**call.meta, "prompt": prompt, "spec": spec,
                                        "workflow": sv.media.rel(run_dir / "workflow.api.json")},
                                input_hash=input_hash("location_image", prompt, negative,
                                                      engine_name, aspect, seed),
