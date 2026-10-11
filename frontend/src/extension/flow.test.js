@@ -240,6 +240,20 @@ describe('extension flow', () => {
     expect(page.t).toBeGreaterThanOrEqual(150 + G.settle_seconds);
   });
 
+  it('Gemini 出视频：已有对话里点做视频弹「Start a new chat?」——点 New chat 进新对话的视频模式再提交', async () => {
+    const G = SITES.gemini;
+    const VID = 'https://contribution.usercontent.google.com/download?c=new&filename=video.mp4';
+    const page = new FakePage(G, { hasFileInput: false, pasteWorks: true, videoNewChat: true }).afterSubmit([
+      [1, (p) => p.show(G.stop_button)],
+      [30, (p) => { p.hide(G.stop_button); p.reply = 'Your video is ready!'; p.addVideo(VID); }],
+    ]);
+    const { out, logs } = await run(page, { spec: G, kind: 'video', aspect: '9:16', refs: [REF], timeout: 600 });
+    expect(out.map((o) => o.src)).toEqual([VID]);
+    expect(page.calls).toContainEqual(['click', G.video_new_chat]);
+    expect(logs.some((m) => m.includes('按网站提示开了新对话'))).toBe(true);
+    expect(logs.some((m) => m.includes('已切到做视频'))).toBe(true);
+  });
+
   it('Gemini 出视频：点了按钮却没进入视频模式（没有视频额度等）就报错、不提交', async () => {
     const G = SITES.gemini;
     const page = new FakePage(G);

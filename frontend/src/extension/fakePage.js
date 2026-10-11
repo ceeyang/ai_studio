@@ -8,7 +8,7 @@ const MP4_HEAD = btoa('\0\0\0\x18ftypisom\0\0\x02\0isomiso2');
 export class FakePage {
   constructor(spec, {
     loggedIn = true, hasFileInput = true, promptBox = true, pasteWorks = false, fileInputWorks = true, videoIntro = false,
-    redirects = {},
+    videoNewChat = false, redirects = {},
   } = {}) {
     this.spec = spec;
     this.t = 0;
@@ -31,6 +31,7 @@ export class FakePage {
     this.urlNow = 'about:blank';
     this.videos_ = [];
     this.videoIntro = videoIntro; // 第一次选视频工具时弹介绍框
+    this.videoNewChat = videoNewChat; // 已有对话里点做视频：弹「Start a new chat?」，点 New chat 才进视频模式
     this.redirects = redirects; // goto 这些地址时实际跳到哪（模拟之前的对话打不开）
     this.aspect = null;
     // 做视频的按钮、画幅按钮和菜单项都在页面上（点最后一个做视频的按钮才进入视频模式）
@@ -88,8 +89,18 @@ export class FakePage {
     }
     const steps = this.spec.video_steps || [];
     if (steps.length && sel === steps[steps.length - 1]) {
+      if (this.videoNewChat) {
+        this.show(this.spec.video_new_chat);
+        return true;
+      }
       this.show(this.spec.video_active);
       if (this.videoIntro) this.show(this.spec.video_dismiss);
+      return true;
+    }
+    if (sel === this.spec.video_new_chat && this.shown.has(sel)) {
+      this.hide(sel);
+      this.urlNow = this.spec.new_chat_url || this.spec.home;
+      this.show(this.spec.video_active);
       return true;
     }
     if (sel === this.spec.video_dismiss && this.shown.has(sel)) {

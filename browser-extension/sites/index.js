@@ -12,6 +12,7 @@ export const VIDEO_DEFAULTS = {
   video_steps: [],
   video_active: '',
   video_dismiss: '',
+  video_new_chat: '',
   video_aspect_button: '',
   video_aspect_options: {},
   video_pending_patterns: [],

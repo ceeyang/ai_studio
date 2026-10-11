@@ -209,6 +209,18 @@ class Flow {
         }
         await this.d.sleep(1);
       }
+      if (s.video_new_chat && (await this.d.visible(s.video_new_chat))) {
+        // 已有对话里点做视频：Gemini 弹「Start a new chat?」——只能在新对话里做视频（2026-10-12 实测）。
+        // 点「New chat」直接开一个已经选好视频工具的新对话；参考图还没传，换对话不丢东西
+        await this.d.click(s.video_new_chat);
+        this.continued = false;
+        this.log(`${s.label}：这条对话里不能做视频，按网站提示开了新对话`);
+        const start = this.clock();
+        while (s.video_active && !(await this.d.visible(s.video_active)) && this.clock() - start < CONTINUE_CHECK) {
+          await this.checkCancel();
+          await this.d.sleep(this.poll);
+        }
+      }
       for (let i = 0; i < 3 && s.video_dismiss && (await this.d.visible(s.video_dismiss)); i++) {
         await this.d.click(s.video_dismiss); // 第一次用视频工具时的介绍框
         await this.d.sleep(1);

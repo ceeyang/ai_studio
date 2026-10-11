@@ -65,6 +65,7 @@ class SiteSpec:
     video_steps: tuple[str, ...] = ()
     video_active: str = ""                   # 视频工具已经选中的标志（复用对话时先看它，选中了就不再点）
     video_dismiss: str = ""                  # 第一次用视频工具时的介绍框按钮（Gemini「Try it」）
+    video_new_chat: str = ""                 # 已有对话里不能做视频时弹框的「开新对话」按钮（Gemini「New chat」）
     video_aspect_button: str = ""            # 画幅按钮（点开是菜单）；空 = 画幅写进提示词
     video_aspect_options: dict = field(default_factory=dict)   # {"9:16": 菜单项选择器, "16:9": …}
     # 回复里说「正在生成视频，要几分钟」：有这句话不算「回复了文字但没出视频」

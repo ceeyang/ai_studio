@@ -82,6 +82,9 @@ GEMINI = SiteSpec(
     ),
     video_active='button[aria-label="Deselect Videos"], button[aria-label*="取消选择视频"]',
     video_dismiss='.cdk-overlay-container button:has-text("Try it"), .cdk-overlay-container button:has-text("试试")',
+    # 已有对话里点「Create video」会弹「Start a new chat?」：点 New chat
+    video_new_chat=('.cdk-overlay-container button:has-text("New chat"), .cdk-overlay-container button:has-text("新对话"), '
+                    '.cdk-overlay-container button:has-text("发起新对话")'),
     video_aspect_button='button[aria-label^="Aspect ratio"], button[aria-label^="宽高比"]',
     video_aspect_options={
         "9:16": '[role="menuitemradio"]:has-text("9:16")',
