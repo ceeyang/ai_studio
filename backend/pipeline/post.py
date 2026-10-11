@@ -251,10 +251,17 @@ def _tts(sv, cache: Path, text: str, voice: str, rate: int) -> tuple[Path, float
     wav = cache / f"{input_hash('tts', text, voice, rate)}.wav"
     if not wav.exists() or wav.stat().st_size == 0:
         raw = wav.with_suffix(".raw.mp3")
+        from backend.queue.trace import trace_add, trace_rel, trace_update
+        seq = trace_add("engine", f"配音 · edge-tts · {voice} · {rate:+d}%",
+                        {"engine": "edge-tts", "runner": "edge_tts", "output_kind": "audio",
+                         "status": "running", "prompt": text,
+                         "params": {"voice": voice, "rate": f"{rate:+d}%"}})
         try:
             edge_tts_save(text, voice, rate, raw)
         except Exception as e:
+            trace_update(seq, {"status": "error", "error": str(e)[:3000]})
             raise JobError(f"Edge TTS 失败（{voice}，{rate:+d}%）：{e}") from e
+        trace_update(seq, {"status": "ok", "outputs": [trace_rel(wav)]})
         try:
             sv.ffmpeg.trim_silence(raw, wav)
         except BaseException:

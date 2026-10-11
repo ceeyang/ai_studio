@@ -28,6 +28,7 @@ from backend.queue.errors import JobCanceled, JobError, NeedsInput
 from backend.queue.events import EventBus
 from backend.queue.handlers import HandlerRegistry
 from backend.queue.scheduler import QueuedJob, pick_next
+from backend.queue.trace import JobTracer, collect_secrets, list_traces, use_tracer
 
 log = logging.getLogger(__name__)
 
@@ -235,6 +236,21 @@ class JobManager:
         self.db.after_session(write)
         self.bus.publish({"type": "log", "job_id": job_id, "line": line})
 
+    def _tracer(self, job_id: int) -> JobTracer | None:
+        """这次执行的调用明细记录器（见 backend/queue/trace.py）。建不起来就不记，不影响任务。"""
+        try:
+            sv = self.services
+            media = getattr(sv, "media", None)
+            return JobTracer(self.db, job_id, data_dir=getattr(media, "root", None),
+                             secrets=collect_secrets(sv), bus=self.bus)
+        except Exception:
+            log.exception("任务 %s 的调用明细记录器建不起来，这次不记", job_id)
+            return None
+
+    def traces(self, job_id: int) -> list[dict]:
+        self.get(job_id)   # 任务不存在时报 LookupError
+        return list_traces(self.db, job_id)
+
     @contextmanager
     def gpu_exclusive(self) -> Iterator[None]:
         with self._count_lock:
@@ -393,7 +409,16 @@ class JobManager:
                 self.current_family = family
             if cancel.is_set():
                 raise JobCanceled()
-            result = spec.fn(JobContext(self, jid, cancel), payload)
+            tracer = self._tracer(jid)
+            with use_tracer(tracer):
+                try:
+                    result = spec.fn(JobContext(self, jid, cancel), payload)
+                finally:
+                    if tracer is not None and tracer.added == 0:
+                        # 有记录器但一条都没记：写一句，页面就能和「旧版本跑的、没有明细」区分开
+                        tracer.add("note", "没有调用记录", {
+                            "text": "这次执行没有调用文本模型、出图 / 视频引擎或 ffmpeg"
+                                    "（比如输入没变直接跳过，或者在调用之前就出错了）"})
         except JobCanceled:
             status = "canceled"
         except NeedsInput as e:

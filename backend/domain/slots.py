@@ -26,6 +26,10 @@ def add_candidate(s: Session, slot: Slot, *, file_path: str, engine: str, params
                   input_hash=input_hash, job_id=job_id)
     s.add(c)
     s.flush()
+    if job_id is not None:
+        # 任务调用明细：把这个候选补到最近一次引擎调用上（不在任务里时是空操作）
+        from backend.queue.trace import annotate_last
+        annotate_last("engine", {"candidate_ids": [c.id], "candidate_files": [file_path]})
     if force_select:
         slot.selected_candidate_id = c.id
     elif auto_select:

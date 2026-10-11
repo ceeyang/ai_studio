@@ -7,6 +7,7 @@ import type { Job } from '../api/types';
 import { useConfirm } from '../components/ConfirmDialog';
 import { ACTIVE_STATUSES, fmtDuration, fmtShortTime, fmtTime, jobStatusLabel, jobTypeLabel } from '../format';
 import { splitTraceback } from './jobs/log';
+import { JobTraces } from './jobs/JobTraces';
 import { ManualInputForm } from './jobs/ManualInputForm';
 
 const STATUS_OPTIONS = [
@@ -126,6 +127,7 @@ function JobDetail({ id, onRetried }: { id: number; onRetried: (newId: number) =
           <pre className="log">{log}</pre>
         </details>
       )}
+      <JobTraces jobId={j.id} active={active} />
       <details>
         <summary>调试信息</summary>
         <dl className="debug-list">

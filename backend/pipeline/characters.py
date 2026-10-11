@@ -123,10 +123,11 @@ def run_portrait(ctx, payload: dict) -> dict:
         negative = join_negative(proj.negative, style.negative if style else "", PORTRAIT_NEGATIVE)
         seed = shot_seed(proj.seed, char_id, ctx.job_id)
         slug, name = proj.slug, ch.name
-    call = engine.build(ImageRequest(prompt=prompt, negative=negative, aspect=portrait_aspect(engine),
-                                     seed=seed, prefix=f"studio/{slug}/portrait_{char_id}"))
+    req = ImageRequest(prompt=prompt, negative=negative, aspect=portrait_aspect(engine),
+                       seed=seed, prefix=f"studio/{slug}/portrait_{char_id}")
+    call = engine.build(req)
     ctx.log(f"定妆照 {name} · {engine_name} · {seed_label(call, seed)}")
-    files, run_dir = run_comfy(ctx, call, slug)
+    files, run_dir = run_comfy(ctx, call, slug, req=req, what=f"定妆照 {name}")
     dst = sv.media.new_media_path(slug, "portrait", files[0].suffix)
     shutil.copyfile(files[0], dst)
     with sv.db.session() as s:
@@ -341,12 +342,15 @@ def run_turnaround_sheet(ctx, payload: dict) -> dict:
                        negative, engine_name, portrait_id)
         seed = shot_seed(proj.seed, char_id, ctx.job_id)
         slug, name = proj.slug, ch.name
-    call = engine.build(ImageRequest(prompt=prompt, negative=negative, aspect=spec.aspect,
-                                     seed=seed, refs=refs,
-                                     prefix=f"studio/{slug}/turnaround_{char_id}_{sheet}"))
+    req = ImageRequest(prompt=prompt, negative=negative, aspect=spec.aspect,
+                       seed=seed, refs=refs,
+                       prefix=f"studio/{slug}/turnaround_{char_id}_{sheet}")
+    call = engine.build(req)
     ctx.log(f"三视图 {name} · {spec.label}设定图 · {engine_name} · {seed_label(call, seed)}"
             f"{' · 定妆照锁脸' if refs else ''}")
-    files, run_dir = run_comfy(ctx, call, slug)
+    files, run_dir = run_comfy(ctx, call, slug, {str(p): f"{name} 定妆照" for p in refs}, req=req,
+                               what=f"三视图 {name} · {spec.label}",
+                               ref_kinds={str(p): "定妆照" for p in refs})
     dst = sv.media.new_media_path(slug, "turnaround", files[0].suffix)
     shutil.copyfile(files[0], dst)
     with sv.db.session() as s:

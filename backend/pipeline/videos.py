@@ -8,7 +8,7 @@ from backend.domain.slots import add_candidate, get_or_create_slot, selected_can
 from backend.engines.base import VideoRequest
 from backend.pipeline.common import job_services
 from backend.pipeline.continuity import video_ref_plan
-from backend.pipeline.keyframes import load_shot, ref_labels, run_comfy
+from backend.pipeline.keyframes import load_shot, ref_labels, ref_roles, run_comfy
 from backend.domain.models import Location, SceneBlock
 from backend.pipeline.prompting import (STAY_IN_FRAME, Speaker, compose_video_prompt,
                                         entering_clause, gender_of, insert_kind, token_refs, join_negative,
@@ -314,6 +314,7 @@ def run_video(ctx, payload: dict) -> dict:
         packed = plan.refs
         refs = [sv.media.abs(r.file_path) for r in packed]
         labels = ref_labels(packed, refs)
+        kinds = ref_roles(packed, refs)
         used = packed[:engine.caps.max_refs]
         h = video_input_hash(shot, proj, style, ff.id, engine_name, has_audio,
                              [r.candidate_id for r in used])
@@ -368,16 +369,19 @@ def run_video(ctx, payload: dict) -> dict:
             # （依赖这个任务）截尾帧时拿到的就是重拍后的选定视频
             seed = shot_seed(base_seed, shot_id, taken + attempt)
         # 连续性要求只加在发给引擎的提示词里，不进输入哈希
-        call = engine.build(VideoRequest(prompt=with_continuity(prompt, place, extra),
-                                         first_frame=first, aspect=aspect, seed=seed,
-                                         seconds=seconds, min_seconds=min_seconds,
-                                         negative=negative, refs=refs,
-                                         prefix=f"studio/{slug}/clip_{code}"))
+        req = VideoRequest(prompt=with_continuity(prompt, place, extra),
+                           first_frame=first, aspect=aspect, seed=seed,
+                           seconds=seconds, min_seconds=min_seconds,
+                           negative=negative, refs=refs,
+                           prefix=f"studio/{slug}/clip_{code}")
+        call = engine.build(req)
         ctx.log(f"视频 {code} · {engine_name} · {seconds:.1f}s · seed {seed} · 参考图 {len(refs)} 张"
                 f"{'（原生有声）' if has_audio else '（无声）'}"
                 f"{'（自动重拍）' if attempt else ''}"
                 f"{'：' + '、'.join(labels.values()) if labels else ''}")
-        files, run_dir = run_comfy(ctx, call, slug, labels)
+        files, run_dir = run_comfy(ctx, call, slug, labels, req=req,
+                                   what=f"视频 {code}{'（自动重拍）' if attempt else ''}",
+                                   ref_kinds=kinds)
         video = next((f for f in files if f.suffix.lower() in VIDEO_EXTS), None)
         if video is None:
             raise JobError(f"镜头 {code} 没有产出视频文件：{[f.name for f in files]}")

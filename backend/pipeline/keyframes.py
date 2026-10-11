@@ -1,7 +1,10 @@
 """首帧阶段：每个任务给一个镜头出一张首帧候选。"""
 from __future__ import annotations
 
+import json
 import shutil
+import time
+from pathlib import Path
 
 from backend.domain.refs import shot_refs, split_refs
 from backend.domain.models import Shot
@@ -12,8 +15,15 @@ from backend.pipeline.common import load_episode
 from backend.pipeline.prompting import (engine_image_prompt, join_negative, keyframe_input_hash,
                                         only_people_clause,
                                         keyframe_inputs, shot_image_prompt, shot_seed)
-from backend.queue.errors import JobError
+from backend.queue.errors import JobCanceled, JobError
 from backend.queue.handlers import HANDLERS
+from backend.queue.trace import trace_add, trace_rel, trace_update
+
+# 参考图的角色（Ref.kind → 调用明细里显示的名字）
+REF_ROLE = {"location": "场景图", "shot_ref": "构图参考", "portrait": "定妆照",
+            "turnaround": "三视图", "first_frame": "首帧", "end_frame": "尾帧"}
+PARAM_KEYS = ("size", "seconds", "frames", "fps", "seed", "steps", "turbo", "model", "service",
+              "site", "nondeterministic")
 
 
 def load_shot(s, shot_id: int):
@@ -24,11 +34,84 @@ def load_shot(s, shot_id: int):
     return shot, ep, proj, proj.style_bible
 
 
-def run_comfy(ctx, call, slug: str, ref_labels: dict[str, str] | None = None):
+def ref_roles(packed, paths) -> dict[str, str]:
+    """参考图路径 → 角色（场景图 / 构图参考 / 定妆照 / 三视图），记调用明细用。"""
+    return {str(p): REF_ROLE.get(r.kind, r.kind or "") for r, p in zip(packed, paths)}
+
+
+def engine_trace(call, req=None, labels: dict[str, str] | None = None,
+                 roles: dict[str, str] | None = None, what: str = "") -> tuple[str, dict]:
+    """一次引擎提交的调用明细：发给引擎的最终提示词、负面词、参考图（按顺序、标明角色）、参数、workflow。"""
+    labels, roles = labels or {}, roles or {}
+    meta = dict(call.meta or {})
+    wf = call.workflow if isinstance(call.workflow, dict) else {}
+    runner = getattr(call, "runner", "comfyui")
+    source = getattr(req, "prompt", None) or meta.get("prompt") or ""
+    final = wf.get("prompt") if runner in ("browser", "api") and isinstance(wf.get("prompt"), str) \
+        else source
+    try:
+        wf_text = json.dumps(wf, ensure_ascii=False)
+    except (TypeError, ValueError):
+        wf_text = str(wf)
+    negative = getattr(req, "negative", None) or meta.get("negative_ignored") or ""
+    dropped = set(call.dropped_refs or [])
+    refs: list[dict] = []
+    first = getattr(req, "first_frame", None)
+    if first:
+        refs.append({"path": trace_rel(first), "label": "首帧", "role": "首帧", "sent": True})
+    for p in list(getattr(req, "refs", None) or []):
+        key = str(p)
+        refs.append({"path": trace_rel(p), "label": labels.get(key) or Path(key).name,
+                     "role": roles.get(key, ""), "sent": key not in dropped})
+    end = getattr(req, "end_frame", None)
+    if end:
+        refs.append({"path": trace_rel(end), "label": "尾帧", "role": "尾帧",
+                     "sent": "end_frame" in wf_text or str(end) in wf_text})
+    params = {k: meta[k] for k in PARAM_KEYS if k in meta and meta[k] is not None}
+    if req is not None:
+        params["aspect"] = getattr(req, "aspect", None)
+        if getattr(req, "seconds", None) is not None and "seconds" not in params:
+            params["seconds"] = req.seconds
+        if getattr(req, "min_seconds", None):
+            params["min_seconds"] = req.min_seconds
+        if "seed" not in params and not meta.get("nondeterministic"):
+            params["seed"] = getattr(req, "seed", None)
+    data = {"engine": call.engine, "runner": runner, "output_kind": call.output_kind,
+            "family": call.model_family, "what": what, "status": "running",
+            "prompt": final, "negative": negative,
+            "negative_sent": bool(negative) and "negative_ignored" not in meta and negative in wf_text,
+            "refs": refs, "params": params, "workflow": wf}
+    if source and source != final:
+        data["source_prompt"] = source
+    kind = "视频" if call.output_kind == "video" else "出图"
+    title = " · ".join(x for x in (kind, call.engine, what) if x)
+    return title, data
+
+
+def run_comfy(ctx, call, slug: str, ref_labels: dict[str, str] | None = None, *,
+              req=None, what: str = "", ref_kinds: dict[str, str] | None = None):
     """执行引擎调用：ComfyUI 工作流交给 ComfyRunner，网页出图（call.runner == "browser"）交给
     BrowserRunner，RunningHub 云端（call.runner == "runninghub"）交给 RunningHubRunner，
     官方 API（call.runner == "api"）交给 ApiRunner。
-    都把产物下载到任务目录，返回文件列表和任务目录。"""
+    都把产物下载到任务目录，返回文件列表和任务目录。
+    req（ImageRequest / VideoRequest）、what（「首帧 S03」）、ref_kinds 只用来记任务的调用明细。"""
+    title, data = engine_trace(call, req, ref_labels, ref_kinds, what)
+    seq = trace_add("engine", title, data)
+    t0 = time.monotonic()
+    try:
+        files, run_dir = _run_engine(ctx, call, slug, ref_labels)
+    except BaseException as e:
+        trace_update(seq, {"status": "canceled" if isinstance(e, JobCanceled) else "error",
+                           "error": str(e)[:3000], "seconds": round(time.monotonic() - t0, 1)})
+        raise
+    wf_file = run_dir / "workflow.api.json"
+    trace_update(seq, {"status": "ok", "seconds": round(time.monotonic() - t0, 1),
+                       "outputs": [trace_rel(f) for f in files],
+                       "workflow_file": trace_rel(wf_file) if wf_file.exists() else None})
+    return files, run_dir
+
+
+def _run_engine(ctx, call, slug: str, ref_labels: dict[str, str] | None = None):
     sv = ctx.services
     kind = getattr(call, "runner", "comfyui")
     browser = kind == "browser"
@@ -119,6 +202,7 @@ def run_keyframe(ctx, payload: dict) -> dict:
                          else (packed, []))
         refs = [sv.media.abs(r.file_path) for r in used]
         labels = ref_labels(used, refs)
+        kinds = ref_roles(used, refs)
         if engine.caps.max_refs == 0:
             used = []
         h = keyframe_input_hash(shot, proj, style, engine_name, [r.candidate_id for r in used])
@@ -134,8 +218,9 @@ def run_keyframe(ctx, payload: dict) -> dict:
         slug, code, aspect = proj.slug, shot.code, proj.aspect
     if not shot.image_prompt.strip():
         raise JobError(f"镜头 {code} 没有 image_prompt")
-    call = engine.build(ImageRequest(prompt=prompt, negative=negative, aspect=aspect, seed=seed,
-                                     refs=refs, prefix=f"studio/{slug}/kf_{code}"))
+    req = ImageRequest(prompt=prompt, negative=negative, aspect=aspect, seed=seed,
+                       refs=refs, prefix=f"studio/{slug}/kf_{code}")
+    call = engine.build(req)
     seed_text = ("无种子（网页出图每次不同）" if call.runner == "browser"
                  else "无种子（API 出图每次不同）" if call.runner == "api" else f"seed {seed}")
     ctx.log(f"首帧 {code} · {engine_name} · {seed_text} · 参考图 {len(refs)} 张"
@@ -155,7 +240,8 @@ def run_keyframe(ctx, payload: dict) -> dict:
     if refs and engine.caps.max_refs == 0:
         ctx.log(f"首帧 {code}：{engine_name} 不吃参考图，{'、'.join(labels.values())}用不上，"
                 f"人物一致只靠提示词里的外貌文字；要锁脸可换 H3 图像")
-    files, run_dir = run_comfy(ctx, call, slug, labels)
+    files, run_dir = run_comfy(ctx, call, slug, labels, req=req, what=f"首帧 {code}",
+                               ref_kinds=kinds)
     dst = sv.media.new_media_path(slug, "first_frame", files[0].suffix)
     shutil.copyfile(files[0], dst)
     with sv.db.session() as s:

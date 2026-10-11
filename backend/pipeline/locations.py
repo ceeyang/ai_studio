@@ -124,10 +124,11 @@ def run_location_image(ctx, payload: dict) -> dict:
         seed = shot_seed(proj.seed, loc_id + 50_000, ctx.job_id)
         slug, name, aspect = proj.slug, loc.name, proj.aspect
         spec = location_spec(loc)
-    call = engine.build(ImageRequest(prompt=prompt, negative=negative, aspect=aspect, seed=seed,
-                                     prefix=f"studio/{slug}/location_{loc_id}"))
+    req = ImageRequest(prompt=prompt, negative=negative, aspect=aspect, seed=seed,
+                       prefix=f"studio/{slug}/location_{loc_id}")
+    call = engine.build(req)
     ctx.log(f"场景图 {name} · {engine_name} · {seed_label(call, seed)}")
-    files, run_dir = run_comfy(ctx, call, slug)
+    files, run_dir = run_comfy(ctx, call, slug, req=req, what=f"场景图 {name}")
     dst = sv.media.new_media_path(slug, "location", files[0].suffix)
     shutil.copyfile(files[0], dst)
     with sv.db.session() as s:

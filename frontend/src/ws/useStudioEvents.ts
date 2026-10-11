@@ -48,6 +48,10 @@ export function useStudioEvents({ url, WebSocketImpl, retryMs = 2000 }: StudioEv
     let stopped = false;
     let dropped = false;
     const logs = createLogThrottle((jobId) => void qc.invalidateQueries({ queryKey: keys.job(jobId) }));
+    // 调用明细也节流：一次 LLM 调用先记请求、再补回复，ffmpeg 合成时一秒能来好几条
+    const traces = createLogThrottle(
+      (jobId) => void qc.invalidateQueries({ queryKey: [...keys.job(jobId), 'traces'] }),
+    );
 
     const connect = () => {
       ws = new Impl(target);
@@ -75,6 +79,10 @@ export function useStudioEvents({ url, WebSocketImpl, retryMs = 2000 }: StudioEv
           logs.log(ev.job_id);
           return;
         }
+        if (ev.type === 'trace') {
+          traces.log(ev.job_id);
+          return;
+        }
         for (const queryKey of invalidationsFor(ev)) void qc.invalidateQueries({ queryKey });
         if (ev.type === 'job' && isGenerationSettled(ev.job)) emitJobSettled(ev.job);
       };
@@ -90,6 +98,7 @@ export function useStudioEvents({ url, WebSocketImpl, retryMs = 2000 }: StudioEv
     return () => {
       stopped = true;
       logs.dispose();
+      traces.dispose();
       if (timer) clearTimeout(timer);
       if (ws) {
         ws.onclose = null;

@@ -254,6 +254,19 @@ class Job(Base):
     finished_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
+class JobTrace(Base):
+    """任务的调用明细：每次 LLM 调用、引擎提交、ffmpeg 命令一条（见 backend/queue/trace.py）。"""
+    __tablename__ = "job_traces"
+    __table_args__ = (UniqueConstraint("job_id", "seq", name="uq_job_traces_job_seq"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    job_id: Mapped[int] = mapped_column(ForeignKey("jobs.id", ondelete="CASCADE"), index=True)
+    seq: Mapped[int] = mapped_column(Integer)
+    kind: Mapped[str] = mapped_column(String(16))          # llm / engine / ffmpeg / note
+    title: Mapped[str] = mapped_column(String(200), default="")
+    data: Mapped[dict] = mapped_column(JSON, default=dict)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
 class Export(Base):
     __tablename__ = "exports"
     id: Mapped[int] = mapped_column(primary_key=True)

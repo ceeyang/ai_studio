@@ -25,6 +25,7 @@ import type {
   ExportRow,
   FreeGpuResult,
   Job,
+  JobTraces,
   Location,
   LocationPatch,
   Project,
@@ -212,6 +213,15 @@ export function useJob(id: number | null) {
   return useQuery({
     queryKey: keys.job(id ?? 0),
     queryFn: () => api.get<Job>(`/api/jobs/${id}`),
+    enabled: id !== null && id > 0,
+  });
+}
+
+/** 任务的调用明细。查询键挂在 ['job', id] 下面：任务和日志的事件让任务详情失效时一起刷新 */
+export function useJobTraces(id: number | null) {
+  return useQuery({
+    queryKey: [...keys.job(id ?? 0), 'traces'] as const,
+    queryFn: () => api.get<JobTraces>(`/api/jobs/${id}/traces`),
     enabled: id !== null && id > 0,
   });
 }

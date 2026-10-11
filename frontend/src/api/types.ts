@@ -799,6 +799,23 @@ export interface Job {
   context?: JobContext | null;
 }
 
+/** 任务调用明细的一条：一次 LLM 调用、引擎提交、ffmpeg 命令或说明（见 backend/queue/trace.py） */
+export type JobTraceKind = 'llm' | 'engine' | 'ffmpeg' | 'note';
+
+export interface JobTrace {
+  id: number;
+  seq: number;
+  kind: JobTraceKind | string;
+  title: string;
+  data: Record<string, unknown>;
+  created_at: string | null;
+}
+
+export interface JobTraces {
+  job_id: number;
+  traces: JobTrace[];
+}
+
 export interface QueueCounts {
   queued: number;
   running: number;

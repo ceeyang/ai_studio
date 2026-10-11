@@ -10,6 +10,7 @@ import re
 import shutil
 import subprocess
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -208,10 +209,46 @@ class FFmpeg:
         return subprocess.CompletedProcess(args, proc.returncode, out, err)
 
     def run(self, args: list[str], cwd: Path | None = None) -> str:
-        p = self._exec(args, cwd=cwd)
+        seq = self._trace(args, cwd)
+        t0 = time.monotonic()
+        try:
+            p = self._exec(args, cwd=cwd)
+        except BaseException as e:
+            self._trace_done(seq, t0, error="任务取消，ffmpeg 已终止" if isinstance(e, JobCanceled)
+                             else (str(e)[:3000] or type(e).__name__))
+            raise
         if p.returncode != 0:
+            self._trace_done(seq, t0, code=p.returncode, error=(p.stderr or "")[-3000:])
             raise FFmpegError(f"{Path(str(args[0])).name} 失败：\n{p.stderr[-1500:]}")
+        self._trace_done(seq, t0, code=0)
         return p.stdout
+
+    def _trace(self, args: list, cwd: Path | None) -> int | None:
+        """任务调用明细：只记 ffmpeg 本身（出文件的命令），ffprobe 探测、-version 不记。"""
+        argv = [str(a) for a in args]
+        if not argv or argv[0] != str(self.ffmpeg) or "-version" in argv:
+            return None
+        from backend.queue.trace import trace_add, trace_rel
+        out = argv[-1] if len(argv) > 1 else ""
+        data: dict = {"argv": argv, "status": "running",
+                      "output": trace_rel(out) if out and out != "-" else out}
+        for flag, key in (("-filter_complex", "filter_complex"), ("-vf", "vf"), ("-af", "af")):
+            if flag in argv[:-1]:
+                data[key] = argv[argv.index(flag) + 1]
+        if cwd is not None:
+            data["cwd"] = trace_rel(cwd)
+        return trace_add("ffmpeg", f"ffmpeg · {Path(out).name or out}", data)
+
+    @staticmethod
+    def _trace_done(seq: int | None, t0: float, *, code: int | None = None, error: str = "") -> None:
+        if seq is None:
+            return
+        from backend.queue.trace import trace_update
+        patch: dict = {"status": "ok" if code == 0 and not error else "error",
+                       "seconds": round(time.monotonic() - t0, 2), "returncode": code}
+        if error:
+            patch["error"] = error
+        trace_update(seq, patch)
 
     def version(self) -> str:
         return self.run([self.ffmpeg, "-version"])

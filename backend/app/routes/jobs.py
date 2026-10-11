@@ -1,11 +1,17 @@
 """任务与队列。"""
 from __future__ import annotations
 
+import re
+
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import FileResponse
 
 from backend.app.deps import manager, project_by_slug, services
 from backend.app.schemas import InputIn, JobOut, RetryIn
 from backend.app.views import with_context
+from backend.queue.trace import TRACE_DIR
+
+TRACE_FILE = re.compile(r"^trace-\d{3,}-[A-Za-z0-9_.-]+\.txt$")
 
 router = APIRouter(prefix="/api", tags=["jobs"])
 
@@ -80,3 +86,22 @@ def free_gpu(request: Request):
     m.current_family = None
     after = _mem_snapshot(sv.comfy_client)
     return {"before": before, "after": after}
+
+
+@router.get("/jobs/{job_id}/traces")
+def job_traces(job_id: int, request: Request):
+    """任务的调用明细：每次 LLM 调用的提示词和回复、引擎提交的最终提示词 / 参考图 / 参数 / workflow、
+    ffmpeg 命令。Key 之类已经掩码；旧任务没有记录时 traces 为空。"""
+    return {"job_id": job_id, "traces": manager(request).traces(job_id)}
+
+
+@router.get("/jobs/{job_id}/trace-files/{name}")
+def job_trace_file(job_id: int, name: str, request: Request):
+    """调用明细里过长、落了盘的字段全文（<data_dir>/jobs/<id>/<name>）。"""
+    if not TRACE_FILE.match(name):
+        raise HTTPException(400, "非法文件名")
+    root = services(request).media.root
+    p = root / TRACE_DIR / str(job_id) / name
+    if not p.is_file():
+        raise HTTPException(404, "文件不存在")
+    return FileResponse(p, media_type="text/plain; charset=utf-8")

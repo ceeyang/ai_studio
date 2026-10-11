@@ -11,6 +11,7 @@ from __future__ import annotations
 import inspect
 import logging
 import subprocess
+import time
 from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from pathlib import Path
@@ -22,6 +23,7 @@ from backend.config import LLMCfg, ProviderCfg
 from backend.llm.base import LLMError, LLMProvider, VisionRejected
 from backend.llm.jsonutil import extract_json
 from backend.queue.errors import NeedsInput
+from backend.queue.trace import trace_add, trace_rel, trace_update
 
 T = TypeVar("T", bound=BaseModel)
 MAX_RETRIES = 2
@@ -54,6 +56,21 @@ def no_vision_error(pid: str, step: str, detail: str = "") -> LLMError:
     return LLMError(f"文本模型 {pid} 看不了图片{why}。到「设置 → 按步骤单独设置」把「{step_label(step)}」"
                     "这一步的文本模型换成能看图的（如本机 Claude，或支持视觉的 OpenAI 兼容模型），"
                     "或换成「手动粘贴」自己去网页上问")
+
+
+def _dump(obj: Any) -> Any:
+    try:
+        return obj.model_dump(mode="json")
+    except Exception:
+        return str(obj)
+
+
+def _trace_title(task: str, step: str | None, key: str | None) -> str:
+    """调用明细的标题：步骤名（script 的两次调用再带上 key：script_structure / script_visual）。"""
+    name = step or task
+    if key and key not in (task, step) and ":" not in key:
+        name = f"{name} · {key}"
+    return name
 
 
 def parse_output(text: str, schema: type[T], check: Callable[..., None] | None = None, *,
@@ -115,9 +132,11 @@ class LLMGateway:
         key = key or task
         images = [Path(p) for p in (images or [])]
         pcfg = self.provider_cfg(task, step, emit)
+        info = {"task": task, "step": step or task, "key": key,
+                "title": _trace_title(task, step, key)}
         if pcfg.kind == "manual":
             return self._manual(task, key, system, user, schema, check, manual or {},
-                                images, list(image_urls or []))
+                                images, list(image_urls or []), info=info)
         provider = self.providers.get(pcfg.id)
         if provider is None:
             raise LLMError(f"LLM provider {pcfg.id} 没有初始化")
@@ -126,7 +145,8 @@ class LLMGateway:
         guard = self.gpu_guard() if (pcfg.local_gpu and self.gpu_guard) else nullcontext()
         with guard:
             try:
-                return self._loop(provider, pcfg, system, user, schema, check, emit, images)
+                return self._loop(provider, pcfg, system, user, schema, check, emit, images,
+                                  info=info)
             except VisionRejected as e:
                 raise no_vision_error(pcfg.id, step or task, str(e)) from None
             finally:
@@ -134,32 +154,56 @@ class LLMGateway:
                     self._unload(pcfg, emit)
 
     def _loop(self, provider: LLMProvider, pcfg: ProviderCfg, system: str, user: str,
-              schema: type[T], check, emit, images: list[Path] | None = None) -> T:
+              schema: type[T], check, emit, images: list[Path] | None = None, *,
+              info: dict | None = None) -> T:
+        info = info or {}
         messages = [{"role": "user", "content": user}]
         last_err, last_raw = "", ""
         for attempt in range(1 + MAX_RETRIES):
             kw: dict[str, Any] = {"images": images} if images else {}
             if getattr(provider, "accepts_log", False):   # 网页文本模型：等回复时往任务日志写进度
                 kw["log"] = emit
-            res = provider.complete(system, messages, json_mode=True, **kw)
+            # 调用明细：发请求前先记下发了什么（任务跑着时就能看到），出结果后补回复和解析结果
+            seq = trace_add("llm", info.get("title") or pcfg.id, {
+                "task": info.get("task"), "step": info.get("step"), "key": info.get("key"),
+                "provider": pcfg.id, "provider_kind": pcfg.kind, "model": pcfg.model or None,
+                "attempt": attempt + 1, "max_attempts": 1 + MAX_RETRIES, "status": "running",
+                "system": system, "user": user,
+                # 第 2 次起：上一次的回复和「哪里不合格、请修正」也一起发给了模型
+                "followups": messages[1:],
+                "images": [trace_rel(p) for p in images or []],
+                "schema": getattr(schema, "__name__", str(schema))})
+            t0 = time.monotonic()
+            try:
+                res = provider.complete(system, messages, json_mode=True, **kw)
+            except BaseException as e:
+                trace_update(seq, {"status": "error", "error": _short(e, 3000),
+                                   "seconds": round(time.monotonic() - t0, 2)})
+                raise
             emit(f"LLM {pcfg.id}（{res.model or pcfg.model or '-'}）第 {attempt + 1} 次，"
                  f"{res.seconds:.1f}s，usage={res.usage}")
+            done = {"model": res.model or pcfg.model or None, "reply": res.text, "usage": res.usage,
+                    "seconds": round(res.seconds or (time.monotonic() - t0), 2)}
             try:
                 # last 按真实的调用次数算（输出连 schema 都不合格时 check 根本没被调用）
-                return parse_output(res.text, schema, check, last=attempt == MAX_RETRIES)
+                obj = parse_output(res.text, schema, check, last=attempt == MAX_RETRIES)
             except (LLMError, ValueError) as e:
                 last_err, last_raw = _short(e), res.text
+                trace_update(seq, {**done, "status": "invalid", "error": _short(e, 3000)})
                 emit(f"输出不合格：{last_err}")
                 messages = messages + [
                     {"role": "assistant", "content": res.text[:8000]},
                     {"role": "user", "content": f"上面的输出不符合要求：{last_err}\n"
                                                 "请修正后只输出一个符合格式的 JSON 对象，不要任何其他文字。"}]
+                continue
+            trace_update(seq, {**done, "status": "ok", "parsed": _dump(obj)})
+            return obj
         raise LLMError(f"{1 + MAX_RETRIES} 次输出都不合格：{last_err}\n"
                        f"最后一次原始输出：\n{last_raw[:3000]}")
 
     def _manual(self, task: str, key: str, system: str, user: str, schema: type[T], check,
                 manual: dict, images: list[Path] | None = None,
-                image_urls: list[str] | None = None) -> T:
+                image_urls: list[str] | None = None, *, info: dict | None = None) -> T:
         request = {"key": key, "task": task, "system": system, "user": user,
                    "schema": schema.model_json_schema()}
         if images:
@@ -168,13 +212,25 @@ class LLMGateway:
             if image_urls:
                 request["image_urls"] = list(image_urls)
         text = manual.get(key)
+        info = info or {}
+        title = info.get("title") or task
+        base = {"task": task, "step": info.get("step") or task, "key": key, "provider": "manual",
+                "provider_kind": "manual", "model": None, "attempt": 1, "max_attempts": 1,
+                "system": system, "user": user, "images": [trace_rel(p) for p in images or []],
+                "schema": getattr(schema, "__name__", str(schema))}
         if text is None:
+            trace_add("llm", title, {**base, "status": "waiting_input",
+                                     "note": "等人工把模型输出粘贴进来"})
             raise NeedsInput(request)
+        seq = trace_add("llm", title, {**base, "status": "running", "reply": text})
         try:
             # 手工粘贴的输出没有「让模型再写一次」的循环：能自动兜底的规则直接兜底
-            return parse_output(text, schema, check, last=True)
+            obj = parse_output(text, schema, check, last=True)
         except (LLMError, ValueError) as e:
+            trace_update(seq, {"status": "invalid", "error": _short(e, 3000)})
             raise NeedsInput({**request, "error": _short(e)}) from None
+        trace_update(seq, {"status": "ok", "parsed": _dump(obj)})
+        return obj
 
     def _unload(self, pcfg: ProviderCfg, emit) -> None:
         try:

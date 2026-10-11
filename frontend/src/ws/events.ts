@@ -7,6 +7,8 @@ export type WsEvent =
   | ({ type: 'queue'; event?: string } & QueueState)
   | { type: 'job'; job: Job }
   | { type: 'log'; job_id: number; line: string }
+  // 任务多了 / 更新了一条调用明细（只带 id，页面按需重新拉 /api/jobs/{id}/traces）
+  | { type: 'trace'; job_id: number; seq: number }
   | { type: 'progress'; job_id: number; value: number; max: number };
 
 export interface Progress {
@@ -88,6 +90,8 @@ export function invalidationsFor(ev: WsEvent): QueryKey[] {
     }
     case 'log':
       return [['job', ev.job_id]];
+    case 'trace':
+      return [['job', ev.job_id, 'traces']];
     default:
       return [];
   }

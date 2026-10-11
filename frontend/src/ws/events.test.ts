@@ -101,3 +101,9 @@ describe('invalidationsFor', () => {
     ).toEqual([]);
   });
 });
+
+describe('调用明细事件', () => {
+  it('只让这个任务的调用明细失效', () => {
+    expect(invalidationsFor({ type: 'trace', job_id: 9, seq: 2 })).toEqual([['job', 9, 'traces']]);
+  });
+});
