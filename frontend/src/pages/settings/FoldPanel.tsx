@@ -49,7 +49,7 @@ export function FoldPanel({ id, title, className, meta, actions, defaultOpen = t
     <section className={`panel fold-panel ${className}${open ? '' : ' folded'}`} aria-label={ariaLabel} data-testid={testId}>
       <div className="fold-head">
         <h2>
-          <button type="button" className="fold-toggle" aria-expanded={open} aria-controls={bodyId} onClick={toggle}>
+          <button type="button" className="fold-panel-toggle" aria-expanded={open} aria-controls={bodyId} onClick={toggle}>
             <span className="fold-chev" aria-hidden="true" />
             {title}
           </button>

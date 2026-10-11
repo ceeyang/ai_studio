@@ -1601,11 +1601,11 @@ img.rail-avatar { border: 0; }
 /* 设置页每块可展开 / 折叠：标题是按钮，右边是摘要和操作 */
 .fold-head { display: flex; align-items: center; gap: var(--s-3); flex-wrap: wrap; }
 .fold-head h2 { margin: 0; }
-.fold-toggle { display: inline-flex; align-items: center; gap: var(--s-2); background: none; border: 0; padding: 0; font: inherit; color: inherit; cursor: pointer; }
-.fold-toggle:hover:not(:disabled) { background: none; border: 0; color: var(--text); }
-.fold-toggle:active:not(:disabled) { transform: none; }
+.fold-panel-toggle { display: inline-flex; align-items: center; gap: var(--s-2); background: none; border: 0; padding: 0; font: inherit; color: inherit; cursor: pointer; }
+.fold-panel-toggle:hover:not(:disabled) { background: none; border: 0; color: var(--text); }
+.fold-panel-toggle:active:not(:disabled) { transform: none; }
 .fold-chev { width: 0; height: 0; border-left: 5px solid currentColor; border-top: 4px solid transparent; border-bottom: 4px solid transparent; opacity: .6; transition: transform .15s ease; }
-.fold-toggle[aria-expanded="true"] .fold-chev { transform: rotate(90deg); }
+.fold-panel-toggle[aria-expanded="true"] .fold-chev { transform: rotate(90deg); }
 .fold-actions { margin-left: auto; }
 .fold-body { margin-top: var(--s-3); }
 .fold-panel.folded { align-self: start; }
