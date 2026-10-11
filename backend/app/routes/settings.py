@@ -23,9 +23,9 @@ from backend.queue.errors import JobError
 
 router = APIRouter(prefix="/api", tags=["settings"])
 
-# 按步骤的 LLM 设置对应 config.yaml 里 llm.routes 的哪个任务（角色相关的三步共用 character）
+# 按步骤的 LLM 设置对应 config.yaml 里 llm.routes 的哪个任务（角色相关的几步共用 character）
 CONFIG_TASK = {"character.suggest": "character", "character.recommend": "character",
-               "character.turnaround_look": "character"}
+               "character.turnaround_look": "character", "character.from_photo": "character"}
 
 
 class SettingsIn(BaseModel):

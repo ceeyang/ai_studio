@@ -81,6 +81,14 @@ class StyleIO(ORM):
     negative: str = ""
 
 
+class AppearanceRefOut(BaseModel):
+    """「从参考图写外观」上传的参考照片，和 LLM 按它写好、等用户确认的外观。"""
+    candidate_id: int
+    url: str
+    visual_prompt: str | None = None     # LLM 写好的外观（还没写 / 用户放弃了是 None）
+    core_features: str | None = None
+
+
 class CharacterOut(ORM):
     id: int
     project_id: int
@@ -96,6 +104,7 @@ class CharacterOut(ORM):
     active_jobs: list[JobBrief] = Field(default_factory=list)     # 进行中的抽卡 / 推荐造型 / 三视图任务
     last_failure: JobBrief | None = None    # 最近失败的抽卡（之后没有成功的抽卡才给）
     turnaround: TurnaroundOut | None = None                       # 三视图设定图和切出来的格子
+    appearance_ref: AppearanceRefOut | None = None                # 外观参考照片（不当出图参考图用）
 
 
 class JobBrief(BaseModel):

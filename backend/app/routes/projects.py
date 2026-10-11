@@ -9,11 +9,12 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from sqlalchemy import func, select
 
 from backend.app.deps import check_engines, get_or_404, manager, project_by_slug, services
-from backend.app.schemas import (CharacterIn, CharacterOut, CharacterPatch, EndCardIO,
+from backend.app.schemas import (AppearanceRefOut, CharacterIn, CharacterOut, CharacterPatch, EndCardIO,
                                  EpisodeStats, LocationOut, LocationPatch, PortraitPathIn, ProjectIn, ProjectOut,
                                  ProjectOverview, ProjectPatch, StyleIO, StylePresetOut, TurnaroundCellOut,
                                  TurnaroundOut, TurnaroundSheetOut)
-from backend.domain.characters import portrait_ext, portrait_of, set_portrait
+from backend.domain.characters import (APPEARANCE_REF, portrait_ext, portrait_of,
+                                       set_portrait)
 from backend.domain.style_presets import PRESETS, get_preset, recommended
 from backend.domain.settings import default_image_engine, default_video_engine, sheet_engine
 from backend.domain.turnaround import (DEFAULT_SHEET_ENGINE, SHEETS, VIEW_KEYS, VIEW_LABELS,
@@ -145,7 +146,7 @@ def delete_project(slug: str, request: Request):
 
 
 CHARACTER_JOB_TYPES = ("image.portrait", "character.suggest", "character.turnaround_look",
-                       "image.turnaround")
+                       "image.turnaround", "character.from_photo")
 
 
 def _url(c) -> str | None:
@@ -174,6 +175,18 @@ def turnaround_out(s, c: Character, slots: dict, sv=None) -> TurnaroundOut:
                          sheets=sheets, cells=cells)
 
 
+def appearance_ref_out(slot) -> AppearanceRefOut | None:
+    if slot is None or slot.selected_candidate_id is None:
+        return None
+    sel = next((x for x in slot.candidates if x.id == slot.selected_candidate_id), None)
+    if sel is None:
+        return None
+    look = (sel.params or {}).get("look") or {}
+    return AppearanceRefOut(candidate_id=sel.id, url=_url(sel),
+                            visual_prompt=look.get("visual_prompt") or None,
+                            core_features=look.get("core_features") or None)
+
+
 def character_out(s, c: Character, progress=None, sv=None) -> CharacterOut:
     pc = portrait_of(s, c.id)
     slots = {x.kind: x for x in slots_for(s, "character", c.id)}
@@ -196,7 +209,8 @@ def character_out(s, c: Character, progress=None, sv=None) -> CharacterOut:
         "design_options": list(c.design_options or []),
         "active_jobs": [job_brief(j, progress) for j in jobs],
         "last_failure": job_brief(failed, failed=True) if failed else None,
-        "turnaround": turnaround_out(s, c, slots, sv)})
+        "turnaround": turnaround_out(s, c, slots, sv),
+        "appearance_ref": appearance_ref_out(slots.get(APPEARANCE_REF))})
 
 
 @router.get("/projects/{slug}/characters", response_model=list[CharacterOut])
@@ -228,22 +242,26 @@ def patch_character(char_id: int, body: CharacterPatch, request: Request):
         return character_out(s, c, sv=services(request))
 
 
-@router.post("/characters/{char_id}/portrait", response_model=CharacterOut)
-async def upload_portrait(char_id: int, request: Request):
-    """设定妆照：multipart 上传 file 字段，或 JSON {"path": 本机图片路径}。新图成为选定候选。"""
+async def read_image_upload(request: Request) -> tuple[bytes, str]:
+    """multipart 上传的 file 字段，或 JSON {"path": 本机图片路径}（只读图片扩展名）。"""
     if request.headers.get("content-type", "").startswith("multipart/form-data"):
         form = await request.form()
         up = form.get("file")
         if up is None or isinstance(up, str):
             raise JobError("缺少上传文件字段 file")
-        data, name = await up.read(), up.filename or ""
-    else:
-        body = PortraitPathIn.model_validate(await request.json())
-        src = Path(body.path)
-        portrait_ext(src.name)  # 先校验扩展名，只读图片
-        if not src.is_file():
-            raise LookupError(f"找不到文件：{body.path}")
-        data, name = src.read_bytes(), src.name
+        return await up.read(), up.filename or ""
+    body = PortraitPathIn.model_validate(await request.json())
+    src = Path(body.path)
+    portrait_ext(src.name)  # 先校验扩展名，只读图片
+    if not src.is_file():
+        raise LookupError(f"找不到文件：{body.path}")
+    return src.read_bytes(), src.name
+
+
+@router.post("/characters/{char_id}/portrait", response_model=CharacterOut)
+async def upload_portrait(char_id: int, request: Request):
+    """设定妆照：multipart 上传 file 字段，或 JSON {"path": 本机图片路径}。新图成为选定候选。"""
+    data, name = await read_image_upload(request)
     sv = services(request)
     with sv.db.session() as s:
         c = get_or_404(s, Character, char_id, "角色")

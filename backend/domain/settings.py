@@ -27,6 +27,7 @@ LLM_STEPS: dict[str, str] = {
     "character.suggest": "推荐造型",
     "character.recommend": "推荐角色",
     "character.turnaround_look": "三视图全身描述",
+    "character.from_photo": "从参考图写外观（要能看图的模型）",
     "dialogue.fit_khmer": "高棉语台词适配",
     "subtitles.translate": "字幕翻译（配音前）",
 }

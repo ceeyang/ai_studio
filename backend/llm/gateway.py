@@ -11,14 +11,15 @@ from __future__ import annotations
 import inspect
 import logging
 import subprocess
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager, nullcontext
+from pathlib import Path
 from typing import Any, TypeVar
 
 from pydantic import BaseModel
 
 from backend.config import LLMCfg, ProviderCfg
-from backend.llm.base import LLMError, LLMProvider
+from backend.llm.base import LLMError, LLMProvider, VisionRejected
 from backend.llm.jsonutil import extract_json
 from backend.queue.errors import NeedsInput
 
@@ -37,6 +38,22 @@ def _wants_last(check) -> bool:
         return "last" in inspect.signature(check).parameters
     except (TypeError, ValueError):
         return False
+
+
+def step_label(step: str) -> str:
+    try:
+        from backend.domain.settings import STEP_LABEL
+    except Exception:  # pragma: no cover - 只为了出错信息好看
+        return step
+    return STEP_LABEL.get(step, step)
+
+
+def no_vision_error(pid: str, step: str, detail: str = "") -> LLMError:
+    """provider 看不了图时的提示：去设置页把这一步的文本模型换成能看图的。"""
+    why = f"（{detail}）" if detail else ""
+    return LLMError(f"文本模型 {pid} 看不了图片{why}。到「设置 → 按步骤单独设置」把「{step_label(step)}」"
+                    "这一步的文本模型换成能看图的（如本机 Claude，或支持视觉的 OpenAI 兼容模型），"
+                    "或换成「手动粘贴」自己去网页上问")
 
 
 def parse_output(text: str, schema: type[T], check: Callable[..., None] | None = None, *,
@@ -91,29 +108,40 @@ class LLMGateway:
                  check: Callable[[T], None] | None = None,
                  log: Callable[[str], None] | None = None,
                  manual: dict | None = None, key: str | None = None,
-                 step: str | None = None) -> T:
+                 step: str | None = None, images: Sequence[Path | str] | None = None,
+                 image_urls: Sequence[str] | None = None) -> T:
+        """images：要让模型看的本机图片（附在第一条用户消息上）；image_urls 只给手动粘贴的页面显示用。"""
         emit = log or (lambda m: None)
         key = key or task
+        images = [Path(p) for p in (images or [])]
         pcfg = self.provider_cfg(task, step, emit)
         if pcfg.kind == "manual":
-            return self._manual(task, key, system, user, schema, check, manual or {})
+            return self._manual(task, key, system, user, schema, check, manual or {},
+                                images, list(image_urls or []))
         provider = self.providers.get(pcfg.id)
         if provider is None:
             raise LLMError(f"LLM provider {pcfg.id} 没有初始化")
+        if images and (pcfg.vision is False or not getattr(provider, "supports_images", False)):
+            raise no_vision_error(pcfg.id, step or task)
         guard = self.gpu_guard() if (pcfg.local_gpu and self.gpu_guard) else nullcontext()
         with guard:
             try:
-                return self._loop(provider, pcfg, system, user, schema, check, emit)
+                return self._loop(provider, pcfg, system, user, schema, check, emit, images)
+            except VisionRejected as e:
+                raise no_vision_error(pcfg.id, step or task, str(e)) from None
             finally:
                 if pcfg.local_gpu and pcfg.unload_cmd:
                     self._unload(pcfg, emit)
 
     def _loop(self, provider: LLMProvider, pcfg: ProviderCfg, system: str, user: str,
-              schema: type[T], check, emit) -> T:
+              schema: type[T], check, emit, images: list[Path] | None = None) -> T:
         messages = [{"role": "user", "content": user}]
         last_err, last_raw = "", ""
         for attempt in range(1 + MAX_RETRIES):
-            res = provider.complete(system, messages, json_mode=True)
+            if images:
+                res = provider.complete(system, messages, json_mode=True, images=images)
+            else:
+                res = provider.complete(system, messages, json_mode=True)
             emit(f"LLM {pcfg.id}（{res.model or pcfg.model or '-'}）第 {attempt + 1} 次，"
                  f"{res.seconds:.1f}s，usage={res.usage}")
             try:
@@ -130,9 +158,15 @@ class LLMGateway:
                        f"最后一次原始输出：\n{last_raw[:3000]}")
 
     def _manual(self, task: str, key: str, system: str, user: str, schema: type[T], check,
-                manual: dict) -> T:
+                manual: dict, images: list[Path] | None = None,
+                image_urls: list[str] | None = None) -> T:
         request = {"key": key, "task": task, "system": system, "user": user,
                    "schema": schema.model_json_schema()}
+        if images:
+            # 手动粘贴：把图片的本机路径（和能在页面上打开的地址）给人看，让人连图一起发给模型
+            request["images"] = [str(p) for p in images]
+            if image_urls:
+                request["image_urls"] = list(image_urls)
         text = manual.get(key)
         if text is None:
             raise NeedsInput(request)

@@ -41,6 +41,42 @@ def portrait_of(s: Session, char_id: int) -> Candidate | None:
     return selected_candidate(s, "character", char_id, "portrait")
 
 
+# ---------------------------------------------------------------- 外观参考照片
+# 「从参考图写外观」上传的照片：只给 LLM 看、让它写外观提示词，不是出图参考图（refs.py 不读它）。
+# 一个角色一张（新传的换掉旧的选定），LLM 写好的外观记在这张照片候选的 params["look"] 里，等用户确认填入。
+APPEARANCE_REF = "appearance_ref"
+
+
+def set_appearance_ref(s: Session, media: MediaStore, char: Character, data: bytes,
+                       filename: str) -> Candidate:
+    ext = Path(filename or "").suffix.lower()
+    if ext not in PORTRAIT_EXTS:
+        raise ValueError(f"参考照片只支持 {', '.join(sorted(PORTRAIT_EXTS))}，收到：{filename}")
+    if not data:
+        raise ValueError("参考照片是空的")
+    dst = media.new_media_path(char.project.slug, APPEARANCE_REF, ext)
+    dst.write_bytes(data)
+    slot = get_or_create_slot(s, "character", char.id, APPEARANCE_REF)
+    c = add_candidate(s, slot, file_path=media.rel(dst), engine="upload",
+                      params={"source": Path(filename).name},
+                      input_hash=hashlib.sha256(data).hexdigest()[:16], job_id=None,
+                      auto_select=False)
+    return select_candidate(s, c.id)
+
+
+def appearance_ref_of(s: Session, char_id: int) -> Candidate | None:
+    return selected_candidate(s, "character", char_id, APPEARANCE_REF)
+
+
+def set_photo_look(s: Session, cand: Candidate, look: dict | None) -> None:
+    """记下（或清掉）LLM 按这张照片写的外观：{"visual_prompt", "core_features", "job_id"}。"""
+    params = {k: v for k, v in (cand.params or {}).items() if k != "look"}
+    if look:
+        params["look"] = look
+    cand.params = params
+    s.flush()
+
+
 def add_portrait(s: Session, char_id: int, *, file_path: str, engine: str, params: dict,
                  input_hash: str, job_id: int | None) -> Candidate:
     """AI 抽出来的定妆照：加成候选。已经选定了定妆照就不动（换脸会让出场镜头过期），没有才自动选定。"""
