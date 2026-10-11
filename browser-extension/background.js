@@ -17,14 +17,18 @@
  *    跳转、调 content/dom.js 的函数（只许 lib/protocol.js 的 RPC_DOM_OPS 里那些）。流程和选择器都在 studio
  *    那边（backend/engines/browser/chat.py），改了不用重新加载扩展。
  *
- * 不读、不拷、不上传任何 cookie 的值；只在 ChatGPT / Gemini / Muse / Claude 的页面里操作。
+ * 6. 生成器页出视频（v0.5 起）：即梦 / Dreamina、可灵（国内 / 国际）不是聊天页，job.site 是这几个网站时按
+ *    lib/flow.js 的 runGenerator 走：打开生成页 → 选模型 / 参考方式 / 画幅 / 时长 → 传首帧（尾帧）→ 输提示词 →
+ *    点生成 → 等结果区新卡片里的视频 → 页面里取原视频，同样分块传回。
+ *
+ * 不读、不拷、不上传任何 cookie 的值；只在 ChatGPT / Gemini / Muse / Claude / 即梦 / 可灵的页面里操作。
  */
-import { Canceled, FlowError, generate } from './lib/flow.js';
+import { Canceled, FlowError, generate, runGenerator } from './lib/flow.js';
 import {
   DEFAULT_SERVER, FEATURES, PING_SECONDS, REPLACED_CODE, backoffMs, bufferToB64, imageMessages, loggedIn, onSite,
   rankTabs, rpcProblem,
 } from './lib/protocol.js';
-import { IMAGE_SITES, SITES, VIDEO_SITES } from './sites/index.js';
+import { GENERATOR_SITES, IMAGE_SITES, SITES, VIDEO_SITES } from './sites/index.js';
 
 const VERSION = chrome.runtime.getManifest().version;
 const ALARM = 'ai-studio-keepalive';
@@ -284,6 +288,15 @@ class TabDriver {
   async text(sel, exclude) { const t = await this.op('text', sel, exclude); return typeof t === 'string' ? t : ''; }
   async images(sel) { const r = await this.op('images', sel); return Array.isArray(r) ? r : []; }
   async videos(sel) { const r = await this.op('videos', sel); return Array.isArray(r) ? r : []; }
+  // 生成器页（即梦 / 可灵）
+  async options(sel) { const r = await this.op('options', sel); return Array.isArray(r) ? r : []; }
+  async clickAt(sel, i) { return !!(await this.op('clickAt', sel, i)); }
+  async fillInput(sel, value) { return !!(await this.op('fillInput', sel, value)); }
+  async setFilesAt(sel, i, files) { return !!(await this.op('setFilesAt', sel, i, files)); }
+  async cards(sel, videoSel, failedSel) {
+    const r = await this.op('cards', sel, videoSel, failedSel);
+    return Array.isArray(r) ? r : [];
+  }
   async cookieNames(url) {
     try {
       return (await chrome.cookies.getAll({ url })).map((c) => c.name);
@@ -429,7 +442,7 @@ async function handleRpc(msg) {
 function runJob(msg) {
   const spec = SITES[msg.site];
   const video = msg.kind === 'video';
-  const allowed = video ? VIDEO_SITES : IMAGE_SITES;
+  const allowed = video ? [...VIDEO_SITES, ...GENERATOR_SITES] : IMAGE_SITES;
   if (!spec || !allowed.includes(spec.key)) {
     send({
       type: 'error', job_id: msg.job_id, kind: 'browser',
@@ -457,6 +470,18 @@ async function doJob(msg, spec, job) {
     const { tabId, fresh, how } = await acquireTab(spec, opts);
     log(`${spec.label}：${how}`);
     if (opts.activate_tab) await chrome.tabs.update(tabId, { active: true });
+    if (spec.kind === 'generator') {
+      // 即梦 / 可灵：生成器页流程，没有对话可续接
+      const videos = await runGenerator(
+        spec,
+        { prompt: msg.prompt, refs: msg.refs || [], aspect: msg.aspect, timeout: msg.timeout, generator: msg.generator || {} },
+        new TabDriver(tabId),
+        { isCanceled: () => job.canceled, log, progress, poll: 1 },
+      );
+      videos.forEach((v, i) => imageMessages(id, i, v).forEach(send));
+      send({ type: 'result', job_id: id, count: videos.length, conversation: null });
+      return;
+    }
     let conversation = null;
     const images = await generate(
       new TabDriver(tabId), spec,

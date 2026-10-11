@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { FoldPanel } from './FoldPanel';
 import { errorText } from '../../api/client';
 import { useAppSettings, useBrowserStatus, useOpenBrowserLogin, useSaveSettings } from '../../api/queries';
-import type { BrowserSiteStatus, BrowserStatus } from '../../api/types';
+import type { BrowserSiteStatus, BrowserStatus, WebRegion } from '../../api/types';
 import { engineLabel } from '../../format';
 
 const PAGE_TEXT: Record<string, string> = {
@@ -14,7 +14,13 @@ const PAGE_TEXT: Record<string, string> = {
 const FEATURE_TEXT: Record<string, string> = {
   rpc: '网页文本模型（ChatGPT / Gemini / Claude / Muse 网页）',
   video: '网页出视频（Gemini / Muse）',
+  generator: '即梦 / 可灵网页出视频',
 };
+
+const REGION_SITES: { key: 'web_region_jimeng' | 'web_region_kling'; label: string; cn: string; global: string }[] = [
+  { key: 'web_region_jimeng', label: '即梦区域', cn: '国内（即梦 jimeng.jianying.com）', global: '海外（Dreamina dreamina.capcut.com）' },
+  { key: 'web_region_kling', label: '可灵区域', cn: '国内（klingai.com）', global: '海外（kling.ai）' },
+];
 
 /** 老扩展缺的能力 → 「网页出视频（Gemini / Muse）、同一集接着用之前的对话」；后端没给就按最老的说 */
 export function missingText(missing: string[] | undefined): string {
@@ -50,7 +56,7 @@ function InstallSteps({ dir }: { dir: string }) {
         </button>
       </li>
       <li>
-        在这个浏览器里登录要用的网站：ChatGPT（chatgpt.com）、Gemini（gemini.google.com）、Muse（muse.ai，Meta 账号），只需一次；要用 Claude 网页写文本的再登录 Claude（claude.ai）。
+        在这个浏览器里登录要用的网站：ChatGPT（chatgpt.com）、Gemini（gemini.google.com）、Muse（muse.ai，Meta 账号），只需一次；要用 Claude 网页写文本的再登录 Claude（claude.ai）；要用即梦 / 可灵网页出视频的登录即梦（jimeng.jianying.com）/ 可灵（klingai.com），海外站见下面的区域设置。
       </li>
       <li>保持浏览器开着。扩展会自动连上 studio（{window.location.host}），这里会显示「扩展已连上」。</li>
     </ol>
@@ -196,6 +202,37 @@ function ReuseConversation({ hint }: { hint?: string | null }) {
   );
 }
 
+/** 即梦 / 可灵网页出视频用国内站还是海外站：读写 /api/settings 的 web_region_jimeng / web_region_kling
+ *  （老后端没有这两项时不显示） */
+function WebRegions() {
+  const settings = useAppSettings();
+  const save = useSaveSettings();
+  const d = settings.data;
+  if (!d || (d.web_region_jimeng === undefined && d.web_region_kling === undefined)) return null;
+  return (
+    <div className="web-regions" data-testid="web-regions">
+      {REGION_SITES.map((s) => (
+        <label key={s.key} className="row">
+          {s.label}{' '}
+          <select
+            aria-label={s.label}
+            value={d[s.key] ?? 'cn'}
+            disabled={save.isPending}
+            onChange={(e) => save.mutate({ [s.key]: e.target.value as WebRegion })}
+          >
+            <option value="cn">{s.cn}</option>
+            <option value="global">{s.global}</option>
+          </select>
+        </label>
+      ))}
+      <p className="muted small">
+        即梦 / 可灵网页出视频打开哪个站点（在装了扩展的浏览器里登录对应的站）。默认国内；海外站要用海外账号。
+      </p>
+      {save.error && <p className="error small">保存失败：{errorText(save.error)}</p>}
+    </div>
+  );
+}
+
 /** 设置页「网页出图」：扩展方式显示连接、各网站登录和安装步骤；cdp 方式保留「打开浏览器登录」。 */
 export function BrowserPanel() {
   const status = useBrowserStatus();
@@ -212,6 +249,7 @@ export function BrowserPanel() {
       {st?.transport === 'extension' && <ExtensionBody st={st} />}
       {st?.transport === 'cdp' && <CdpBody st={st} />}
       <ReuseConversation hint={st?.conversation && !st.conversation.supported ? st.conversation.hint : null} />
+      <WebRegions />
     </FoldPanel>
   );
 }

@@ -91,8 +91,13 @@ def build_services(cfg: Config, db: Database, manager: Any) -> Services:
         rh = RunningHubRunner(RunningHubClient(cfg.runninghub.base_url, cfg.runninghub.api_key(),
                                                api_key_env=cfg.runninghub.api_key_env,
                                                poll_interval=cfg.runninghub.poll_interval))
+    engines = EngineRegistry(cfg, api_creds=keys.resolve)
+    # 即梦 / 可灵网页出视频：build() 时现读设置页的区域（国内 / 海外）
+    for e in engines.all().values():
+        if hasattr(e, "set_region_source"):
+            e.set_region_source(store.web_region)
     return Services(cfg=cfg, db=db, media=MediaStore(cfg.data_dir),
-                    engines=EngineRegistry(cfg, api_creds=keys.resolve),
+                    engines=engines,
                     llm=llm, ffmpeg=FFmpeg(cfg.ffmpeg.ffmpeg, cfg.ffmpeg.ffprobe),
                     comfy=runner, comfy_client=client,
                     browser=browser, runninghub=rh, settings=store,

@@ -63,6 +63,16 @@ def engine_note_fn(sv):
             cache["browser"] = None if b["ok"] else b["message"]
         return cache["browser"]
 
+    def ext_feature(feature: str) -> str | None:
+        """连着的扩展太老、没有这个能力（即梦 / 可灵要 generator，v0.5 起）：提示重新加载扩展。"""
+        from backend.engines.browser.extension import GENERATOR_FEATURE, GENERATOR_RELOAD_WHY, reload_text
+
+        b = sv.browser
+        if b is None or b.transport != "extension" or not b.hub.connected or b.hub.supports(feature):
+            return None
+        why = GENERATOR_RELOAD_WHY if feature == GENERATOR_FEATURE else f"还不支持 {feature}"
+        return reload_text(b.hub.version(), why)
+
     def note(e) -> str | None:
         pre = getattr(e, "preflight", None)
         msg = pre() if callable(pre) else None
@@ -72,10 +82,18 @@ def engine_note_fn(sv):
         if rt == "comfyui":
             return comfy()
         if rt == "browser":
-            return browser()
+            feat = getattr(e, "ext_feature", None)
+            return browser() or (ext_feature(feat) if feat else None)
         return None
 
     return note
+
+
+def engine_hint(note: str | None) -> str | None:
+    """引擎下拉框括号里的短说明（前端没有对应写法时用）：扩展太老 →「扩展需要重新加载」。"""
+    if note and note.startswith("浏览器扩展需要重新加载"):
+        return "扩展需要重新加载"
+    return None
 
 
 @router.get("/engines")
@@ -88,7 +106,8 @@ def engines(request: Request):
         e = reg.get(name)
         note = engine_note(e)
         out = {"name": name, "label": getattr(e, "label", None) or name, "family": e.family,
-               "runtime": runtime_of(e), "caps": asdict(e.caps), "ready": note is None, "note": note}
+               "runtime": runtime_of(e), "caps": asdict(e.caps), "ready": note is None, "note": note,
+               "hint": engine_hint(note)}
         if runtime_of(e) == "api":
             out["service"] = e.service
             out["model"] = e.model()

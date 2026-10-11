@@ -49,6 +49,8 @@ export const ENGINE_LABEL: Record<string, string> = {
   muse_image: 'Muse 网页',
   gemini_video: 'Gemini 网页（Veo · 有声）',
   muse_video: 'Muse 网页（有声）',
+  jimeng_video: '即梦网页（Seedance · 有声）',
+  kling_web_video: '可灵网页（有声）',
   h3_video: 'H3 视频（有声）',
   wan22_i2v: 'Wan2.2 图生视频（无声）',
   // 官方 API（Key 在设置页「API 服务」里填）
@@ -63,14 +65,18 @@ export const ENGINE_LABEL: Record<string, string> = {
 };
 
 /** 下拉框里引擎的写法：API 引擎没配 Key 时后面写明（同时 disabled），别的不可用写「现在不可用」 */
-export function engineOptionText(e: { name: string; runtime?: string; label?: string; ready?: boolean }): string {
+export function engineOptionText(e: {
+  name: string; runtime?: string; label?: string; ready?: boolean; hint?: string | null;
+}): string {
   const hint = engineUnreadyHint(e);
   return hint ? `${engineLabel(e)}（${hint}）` : engineLabel(e);
 }
 
-/** 引擎现在用不了时的短说明（下拉框括号里、表单下面的提示用）；能用时返回 null */
-export function engineUnreadyHint(e: { runtime?: string; ready?: boolean }): string | null {
+/** 引擎现在用不了时的短说明（下拉框括号里、表单下面的提示用）；能用时返回 null。
+ *  后端给了 hint 就用它（即梦 / 可灵在老扩展上是「扩展需要重新加载」） */
+export function engineUnreadyHint(e: { runtime?: string; ready?: boolean; hint?: string | null }): string | null {
   if (e.ready !== false) return null;
+  if (e.hint) return e.hint;
   if (e.runtime === 'api') return '先在 API 服务里填 Key';
   if (e.runtime === 'comfyui') return '未配置：ComfyUI 没连上';
   if (e.runtime === 'browser') return '未配置：浏览器扩展没连上';

@@ -76,6 +76,8 @@ export interface EngineRow {
   /** false：现在提交会被拒绝（比如 API 引擎没配 Key），原因在 note */
   ready?: boolean;
   note?: string | null;
+  /** 不可用时下拉里括号里的短说明（后端给了就用，比如即梦 / 可灵在老扩展上是「扩展需要重新加载」） */
+  hint?: string | null;
   /** API 引擎：用哪家的 Key（openai / gemini）、现在用的模型名 */
   service?: string;
   model?: string;
@@ -132,6 +134,8 @@ export interface EngineChoice {
   /** false：现在提交会被拒绝（比如 RunningHub 没有 API key），原因在 note */
   ready: boolean;
   note?: string | null;
+  /** 不可用时下拉里括号里的短说明（后端给了就用） */
+  hint?: string | null;
 }
 
 export interface AppSettings {
@@ -144,7 +148,13 @@ export interface AppSettings {
   choices: { llm: LlmChoice[]; image: EngineChoice[]; video: EngineChoice[] };
   /** 重新生成时续接之前的网页会话（网页出图、网页文本模型）；老后端没有这一项时按开着算 */
   web_reuse_conversation?: boolean;
+  /** 即梦 / 可灵网页出视频用国内站还是海外站；老后端没有这一项时按国内算 */
+  web_region_jimeng?: WebRegion;
+  web_region_kling?: WebRegion;
 }
+
+/** 生成器页网站（即梦 / 可灵）的区域：cn 国内站、global 海外站 */
+export type WebRegion = 'cn' | 'global';
 
 /** GET /api/api-services 的一项：一家 API 服务。只有掩码（sk-…abcd），没有明文 Key */
 export type ApiModelKind = 'text' | 'image' | 'video';
@@ -200,6 +210,9 @@ export interface AppSettingsIn {
   steps?: Record<string, string | null>;
   /** 重新生成时续接之前的网页会话 */
   web_reuse_conversation?: boolean;
+  /** 即梦 / 可灵网页出视频的区域（null = 恢复默认国内） */
+  web_region_jimeng?: WebRegion | null;
+  web_region_kling?: WebRegion | null;
 }
 
 /** POST /api/browser/login。extension：让扩展在用户自己的浏览器里打开两个网站；

@@ -9,18 +9,18 @@ PUT 只改传了的字段，null = 跟随默认。改完立即生效，不用重
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Request
 from pydantic import BaseModel, ConfigDict
 
 from backend.app.deps import project_by_slug, services
-from backend.domain.settings import (GLOBAL_KEYS, STEP_KIND, STEP_LABEL, AppSettings,
+from backend.domain.settings import (GLOBAL_KEYS, REGION_KEYS, STEP_KIND, STEP_LABEL, AppSettings,
                                      default_image_engine, default_video_engine, location_engine,
                                      prop_engine,
                                      portrait_engine,
                                      sheet_engine)
-from backend.app.routes.system import engine_note_fn
+from backend.app.routes.system import engine_hint, engine_note_fn
 from backend.engines.registry import runtime_of
 from backend.queue.errors import JobError
 
@@ -40,6 +40,9 @@ class SettingsIn(BaseModel):
     steps: dict[str, str | None] | None = None
     # 网页出图 / 网页文本模型重新生成时续接之前的网页会话（默认开）
     web_reuse_conversation: bool | None = None
+    # 即梦 / 可灵网页出视频用国内站还是海外站（null = 恢复默认国内）
+    web_region_jimeng: Literal["cn", "global"] | None = None
+    web_region_kling: Literal["cn", "global"] | None = None
 
 
 def _engine_rows(sv, kind: str) -> list[dict]:
@@ -50,7 +53,7 @@ def _engine_rows(sv, kind: str) -> list[dict]:
         note = engine_note(e)
         rows.append({"name": name, "label": getattr(e, "label", None) or name,
                      "runtime": runtime_of(e), "family": e.family, "enabled": True,
-                     "ready": note is None, "note": note})
+                     "ready": note is None, "note": note, "hint": engine_hint(note)})
     return rows
 
 
@@ -170,6 +173,8 @@ def build_settings_out(sv, st: AppSettings, project=None) -> dict[str, Any]:
                                    default_video_engine(sv, st=bare)),
         "steps": steps,
         "web_reuse_conversation": bool(st.web_reuse_conversation),
+        "web_region_jimeng": st.web_region_jimeng,
+        "web_region_kling": st.web_region_kling,
         "project": project.slug if project is not None else None,
         "choices": {
             "llm": [llm_choice(sv, p) for p in cfg.llm.providers],
@@ -226,6 +231,9 @@ def put_settings(body: SettingsIn, request: Request):
         values[f"step:{step}"] = v
     if data.get("web_reuse_conversation") is not None:
         values["web_reuse_conversation"] = bool(data["web_reuse_conversation"])
+    for key in REGION_KEYS:
+        if key in data:
+            values[key] = data[key] or None   # null = 恢复默认（国内）
     sv.settings.save(values)
     return _out(sv, None)
 

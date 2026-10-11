@@ -219,7 +219,8 @@ def test_api_get_defaults(api):
     assert img["krea2"]["label"] == "Krea2 人像" and img["krea2"]["runtime"] == "comfyui"
     assert img["gpt_image"]["runtime"] == "browser" and img["zimage"]["ready"] is True
     assert {e["name"] for e in d["choices"]["video"]} == {"h3_video", "wan22_i2v", "sora_video", "veo_video",
-                                                          "gemini_video", "muse_video"}
+                                                          "gemini_video", "muse_video", "jimeng_video",
+                                                          "kling_web_video"}
 
 
 def test_api_put_validates_and_saves(api):

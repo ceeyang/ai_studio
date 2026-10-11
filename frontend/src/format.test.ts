@@ -86,5 +86,10 @@ describe('engineOptionText', () => {
     expect(engineOptionText({ name: 'h3_video', runtime: 'comfyui', ready: true })).toBe('H3 视频（有声）');
     expect(engineOptionText({ name: 'h3_video', runtime: 'comfyui', ready: false })).toBe('H3 视频（有声）（未配置：ComfyUI 没连上）');
     expect(engineOptionText({ name: 'x', label: 'X', runtime: 'api', ready: false })).toBe('X（先在 API 服务里填 Key）');
+    // 后端给了短说明就用它：即梦 / 可灵在老扩展上要重新加载扩展
+    expect(engineOptionText({ name: 'jimeng_video', runtime: 'browser', ready: false, hint: '扩展需要重新加载' }))
+      .toBe('即梦网页（Seedance · 有声）（扩展需要重新加载）');
+    expect(engineOptionText({ name: 'kling_web_video', runtime: 'browser', ready: false }))
+      .toBe('可灵网页（有声）（未配置：浏览器扩展没连上）');
   });
 });

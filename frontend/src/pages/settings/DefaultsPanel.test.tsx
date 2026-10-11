@@ -257,6 +257,33 @@ describe('设置页「网页出图」里的会话续接开关', () => {
     await waitFor(() => expect(box.checked).toBe(false));
   });
 
+  it('即梦 / 可灵区域：显示当前值，改成海外时 PUT { web_region_jimeng: "global" }；老后端没有这两项时不显示', async () => {
+    let region: 'cn' | 'global' = 'cn';
+    const calls = base({
+      ...BROWSER,
+      'GET /api/settings': () => settings({ web_region_jimeng: region, web_region_kling: 'cn' }),
+      'PUT /api/settings': (c: { body: unknown }) => {
+        region = (c.body as { web_region_jimeng: 'cn' | 'global' }).web_region_jimeng;
+        return settings({ web_region_jimeng: region, web_region_kling: 'cn' });
+      },
+    });
+    renderAt(<SettingsPage />, { route: '/settings', path: '/settings' });
+    const user = userEvent.setup();
+    const jimeng = (await screen.findByRole('combobox', { name: '即梦区域' })) as HTMLSelectElement;
+    expect(jimeng.value).toBe('cn');
+    expect((screen.getByRole('combobox', { name: '可灵区域' }) as HTMLSelectElement).value).toBe('cn');
+    await user.selectOptions(jimeng, 'global');
+    await waitFor(() => expect(calls.find((c) => c.method === 'PUT')?.body).toEqual({ web_region_jimeng: 'global' }));
+    await waitFor(() => expect(jimeng.value).toBe('global'));
+  });
+
+  it('老后端没有区域设置：不显示区域下拉', async () => {
+    base({ ...BROWSER, 'GET /api/settings': settings() });
+    renderAt(<SettingsPage />, { route: '/settings', path: '/settings' });
+    await screen.findByRole('checkbox', { name: '重新生成时续接之前的网页会话' });
+    expect(screen.queryByTestId('web-regions')).toBeNull();
+  });
+
   it('设置里是关着的：开关不勾', async () => {
     base({ ...BROWSER, 'GET /api/settings': settings({ web_reuse_conversation: false }) });
     renderAt(<SettingsPage />, { route: '/settings', path: '/settings' });
