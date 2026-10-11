@@ -53,6 +53,9 @@ export const GEMINI = {
   user_images: 'user-query img, uploader-file-preview img',
   busy_marker: '',
   reply_exclude: '',
+  // 网页文本模型读回复用（studio 驱动，见 backend/engines/browser/chat.py）：回复正文在 message-content 里
+  text_reply: 'model-response message-content, model-response .model-response-text, model-response',
+  text_exclude: 'model-thoughts, .thoughts-container, button, .code-block-decoration, .sr-only',
   dismiss_buttons:
     'mat-dialog-container button:has-text("Agree"), mat-dialog-container button:has-text("同意"), ' +
     'mat-dialog-container button:has-text("Got it"), mat-dialog-container button:has-text("知道了")',

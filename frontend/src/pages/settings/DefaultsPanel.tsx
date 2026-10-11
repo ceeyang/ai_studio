@@ -79,7 +79,7 @@ function Options({ kind, data }: { kind: SettingKind; data: AppSettings }) {
       <>
         {data.choices.llm.map((c) => (
           <option key={c.id} value={c.id} disabled={c.ready === false} title={c.note ?? undefined}>
-            {c.ready === false ? `${c.label}（先在 API 服务里填 Key）` : c.label}
+            {c.ready === false ? `${c.label}（${c.hint ?? '先在 API 服务里填 Key'}）` : c.label}
           </option>
         ))}
       </>
@@ -154,6 +154,14 @@ export function DefaultsPanel() {
     save.mutate(patch, { onSuccess: () => setJustSaved(true) });
   };
   const overridden = data.steps.filter((s) => s.value).length;
+  // 网页文本模型（ChatGPT / Gemini / Claude 网页）：用不了的写明原因（扩展没连上 / 要重新加载 / 没登录）
+  const web = data.choices.llm.filter((c) => c.kind === 'web');
+  // 几家原因一样（扩展没连上、要重新加载）合成一条：「ChatGPT / Gemini / Claude 网页用不了：…」
+  const webNotes = new Map<string, string[]>();
+  for (const c of web) {
+    if (c.ready !== false || !c.note) continue;
+    webNotes.set(c.note, [...(webNotes.get(c.note) ?? []), c.label.split('（')[0]]);
+  }
   // API 引擎没配 Key 不在这里一条条列（下拉里禁用并写明，「API 服务」那块说清楚）
   const bad = [...data.choices.image, ...data.choices.video].filter((e) => !e.ready && e.note && e.runtime !== 'api');
   const stateText = save.isPending ? '保存中…' : dirty ? '有改动，还没保存' : justSaved ? '已保存，马上生效' : '';
@@ -200,6 +208,16 @@ export function DefaultsPanel() {
           </select>
           <InvalidNote v={data.text_model} now={nameOf('llm', data.text_model.effective)} id="text_model" />
           <small className="muted">剧本、分镜、角色推荐、台词适配、字幕翻译都用它（下面可以单独改）</small>
+          {web.length > 0 && (
+            <small className="muted" data-testid="web-llm-advice">
+              ChatGPT / Gemini / Claude 网页走浏览器扩展、用网页的免费额度，较慢：适合写梗概、角色推荐这类短文本；剧本、分镜输出长，网页版可能截断，优先用 API 或本机 Claude。
+            </small>
+          )}
+          {Array.from(webNotes, ([note, names]) => (
+            <small key={note} className="muted" data-testid="web-llm-note">
+              {names.join(' / ')}现在用不了：{note}
+            </small>
+          ))}
         </label>
         <label className="field">
           <span>新项目的图片来源</span>

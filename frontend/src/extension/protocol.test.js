@@ -1,9 +1,9 @@
 // 扩展的纯函数：重连退避、分块、图片类型、选标签页、登录判断、Gemini 原尺寸地址。
 import { describe, expect, it } from 'vitest';
 import {
-  backoffMs, imageMessages, loggedIn, onSite, rankTabs, sniffMime,
+  FEATURES, RPC_DOM_OPS, backoffMs, imageMessages, loggedIn, onSite, rankTabs, rpcProblem, siteOfUrl, sniffMime,
 } from '../../../browser-extension/lib/protocol.js';
-import { CHATGPT, GEMINI, SITES } from '../../../browser-extension/sites/index.js';
+import { CHATGPT, CLAUDE, GEMINI, IMAGE_SITES, SITES } from '../../../browser-extension/sites/index.js';
 import { PNG_B64 } from './fakePage.js';
 
 describe('extension protocol helpers', () => {
@@ -70,6 +70,25 @@ describe('extension protocol helpers', () => {
     ]);
     expect(GEMINI.fullSize('blob:https://gemini.google.com/1')).toEqual(['blob:https://gemini.google.com/1']);
     expect(CHATGPT.fullSize('x')).toEqual(['x']);
-    expect(Object.keys(SITES)).toEqual(['chatgpt', 'gemini']);
+    expect(Object.keys(SITES)).toEqual(['chatgpt', 'gemini', 'claude']);
+  });
+
+  it('rpc（网页文本模型）：hello 报 rpc 能力；只许对交出去的标签页、白名单里的页面操作、支持的网站', () => {
+    expect(FEATURES).toContain('rpc');
+    expect(RPC_DOM_OPS).toContain('replyText');
+    expect(IMAGE_SITES).toEqual(['chatgpt', 'gemini']);
+    expect(siteOfUrl('https://claude.ai/new', SITES)).toBe('claude');
+    expect(siteOfUrl('https://evil.example/', SITES)).toBe('');
+    const ctx = { tabs: new Set([5]), sites: SITES };
+    expect(rpcProblem('acquire_tab', { site: 'claude' }, ctx)).toBe('');
+    expect(rpcProblem('acquire_tab', { site: 'bing' }, ctx)).toMatch('不认识网站');
+    expect(rpcProblem('dom', { tab_id: 5, op: 'replyText' }, ctx)).toBe('');
+    expect(rpcProblem('dom', { tab_id: 5, op: 'fetchB64' }, ctx)).toMatch('不允许');
+    expect(rpcProblem('dom', { tab_id: 6, op: 'visible' }, ctx)).toMatch('不是扩展给 studio 用的');
+    expect(rpcProblem('goto', { tab_id: 5, url: 'https://claude.ai/new' }, ctx)).toBe('');
+    expect(rpcProblem('goto', { tab_id: 5, url: 'https://evil.example/' }, ctx)).toMatch('只能打开');
+    expect(rpcProblem('cookie_names', { url: 'https://evil.example/' }, ctx)).toMatch('只能查');
+    expect(rpcProblem('eval', {}, ctx)).toMatch('不认识 rpc 方法');
+    expect(CLAUDE.new_chat_url).toBe('https://claude.ai/new');
   });
 });

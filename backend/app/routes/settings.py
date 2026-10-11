@@ -58,13 +58,21 @@ def llm_choice(sv, p) -> dict:
 
     row = {"id": p.id, "label": p.display_name(), "kind": p.kind, "model": p.model,
            "ready": True, "note": None}
+    if p.kind == "web":
+        # 网页文本模型：扩展没连上 / 版本太旧要重新加载 / 没登录时不可选，hint 是下拉里括号里的短说明
+        from backend.llm.web_providers import WEB_HINT, web_status
+
+        ready, note, hint = web_status(getattr(sv, "browser", None), p.site or "")
+        row.update(site=p.site, ready=ready, note=note, hint=hint, advice=WEB_HINT)
+        return row
     svc = KIND_SERVICE.get(p.kind)
     if svc:
         keys = getattr(sv, "api_keys", None)
         c = keys.resolve(svc) if keys is not None else env_creds(svc)
         model = c.model("text", p.model)
         row.update(model=model, service=svc, ready=c.configured,
-                   note=None if c.configured else no_key_hint(svc))
+                   note=None if c.configured else no_key_hint(svc),
+                   hint=None if c.configured else "先在 API 服务里填 Key")
         if not p.label:
             row["label"] = f"{API_LABEL[p.kind]}（API · {model}）"
     return row

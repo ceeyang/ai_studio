@@ -7,7 +7,7 @@ browser-extension/ 是一个 MV3 扩展，装在用户日常用的 Chrome/Edge �
 
 协议（JSON 文本帧）：
   扩展 → studio
-    hello    {version, sites: [...], browser, ext_id}         连上后第一条
+    hello    {version, sites: [...], features: [...], browser, ext_id}   连上后第一条（features 里有 rpc 才支持网页文本模型，v0.2 起）
     ping     {t}                                              每 ~20 秒，studio 回 pong（也让 MV3 的 SW 不被挂起）
     status   {sites: {key: {tabs, logged_in, cookie, page}}}  各网站开着几个标签页、像不像已登录
     progress {job_id, value, max}
@@ -16,12 +16,18 @@ browser-extension/ 是一个 MV3 扩展，装在用户日常用的 Chrome/Edge �
     result   {job_id, count}                                  全部分块发完
     error    {job_id, kind, message}                          中文原因，kind 同 BrowserError
     opened   {urls}                                           open 的回执
+    rpc_result {id, ok, result | kind+error}                  rpc 的回执
   studio → 扩展
     welcome  {server_version, options}
     job      {job_id, site, prompt, refs: [{name, mime, b64}], aspect, timeout, options}
     cancel   {job_id}
     status_request {}
     open     {urls}                                           在用户浏览器里打开这些网址（登录用）
+    rpc      {id, method, params}                             网页文本模型一步步驱动页面（v0.2 起）：
+             acquire_tab {site} → {tab_id, fresh, how}        专门写文本的标签页（不用出图的那个）
+             goto {tab_id, url} → url / url {tab_id} → url
+             dom {tab_id, op, args} → content/dom.js 的 op 的返回值（只许 RPC_DOM_OPS 里那些）
+             cookie_names {url} → [名字]
 
 一次只认一个扩展连接：新连接来了，旧的关掉（同一个浏览器里扩展重载、或换了个浏览器）。
 等结果的是队列的网页通道线程（同步），WebSocket 在事件循环里（异步）：中间用每个任务一个 queue.Queue。
@@ -47,6 +53,8 @@ from backend.engines.browser.errors import EXT_INSTALL_HINT, BrowserError, excer
 from backend.queue.errors import JobCanceled
 
 PROTOCOL = 1
+RPC_FEATURE = "rpc"          # 扩展 hello 里报的能力：有它才能用网页文本模型（v0.2 起）
+RPC_TIMEOUT = 90.0
 KINDS = {"not_logged_in", "quota", "refused", "timeout", "no_image", "page", "browser"}
 # 扩展那边开标签页、等页面加载、传参考图都不算在 timeout（等出图）里，多给这么久再判超时
 JOB_GRACE_SECONDS = 120.0
@@ -111,6 +119,7 @@ class ExtensionHub:
         h = c.hello
         return {"connected": True, "version": h.get("version"), "browser": h.get("browser"),
                 "ext_id": extension_id_of(c.origin), "sites": h.get("sites") or [],
+                "features": h.get("features") or [],
                 "connected_at": c.connected_at, "last_seen": c.last_seen,
                 "status_at": self._status_at}
 
@@ -163,6 +172,10 @@ class ExtensionHub:
             if isinstance(sites, dict):
                 self._sites = {str(k): dict(v) for k, v in sites.items() if isinstance(v, dict)}
                 self._status_at = time.time()
+        elif t == "rpc_result":
+            q = self._jobs.get(str(msg.get("id")))
+            if q is not None:
+                q.put(msg)
         elif t in ("progress", "log", "image", "result", "error"):
             q = self._jobs.get(str(msg.get("job_id")))
             if q is not None:
@@ -191,6 +204,52 @@ class ExtensionHub:
                 self.send({"type": "status_request"})
             except BrowserError:
                 pass
+
+    # ------------------------------------------------------------ rpc（网页文本模型）
+    def text_problem(self, site: str, label: str) -> str | None:
+        """这个网站现在能不能用网页文本模型；不能时返回中文原因（扩展没连上 / 版本太旧要重新加载）。"""
+        c = self._conn
+        if c is None:
+            return not_connected_text()
+        h = c.hello or {}
+        ver = h.get("version") or "?"
+        if RPC_FEATURE not in (h.get("features") or []):
+            return reload_text(ver, "还不支持网页文本模型")
+        if site not in (h.get("sites") or []):
+            return reload_text(ver, f"还不认识 {label} 网页")
+        return None
+
+    def rpc(self, method: str, params: dict | None = None, *, timeout: float = RPC_TIMEOUT) -> Any:
+        """让扩展做一步页面操作，等它回执（同步，在调用线程里等）。失败抛 BrowserError（中文原因）。"""
+        conn = self._conn
+        if conn is None:
+            raise BrowserError("browser", not_connected_text())
+        if RPC_FEATURE not in (conn.hello.get("features") or []):
+            raise BrowserError("browser", reload_text(conn.hello.get("version") or "?", "还不支持网页文本模型"))
+        rid = uuid.uuid4().hex
+        q: queue.Queue = queue.Queue()
+        self._jobs[rid] = q
+        try:
+            self.send({"type": "rpc", "id": rid, "method": method, "params": dict(params or {})}, conn)
+            deadline = time.monotonic() + timeout
+            while True:
+                left = deadline - time.monotonic()
+                if left <= 0:
+                    raise BrowserError("timeout", f"浏览器扩展 {timeout:.0f} 秒没回应（{method}），重试一次")
+                try:
+                    msg = q.get(timeout=min(left, 0.5))
+                except queue.Empty:
+                    continue
+                if msg.get("type") == "_disconnected":
+                    raise BrowserError("browser", f"{msg.get('why', '扩展连接断开了')}，重试一次")
+                if msg.get("type") != "rpc_result":
+                    continue
+                if msg.get("ok"):
+                    return msg.get("result")
+                kind = msg.get("kind") if msg.get("kind") in KINDS else "browser"
+                raise BrowserError(kind, str(msg.get("error") or f"浏览器扩展执行 {method} 失败（没说原因）"))
+        finally:
+            self._jobs.pop(rid, None)
 
     def open_urls(self, urls: list[str]) -> None:
         self.send({"type": "open", "urls": list(urls)})
@@ -293,6 +352,11 @@ def decode(img: ExtImage, label: str):
         raise BrowserError("page", f"{label} 浏览器扩展传回来的不是能解开的图片（{img.mime or '未知类型'}，"
                            f"{len(img.data)} 字节，{type(e).__name__}）：{excerpt(img.src, 120)}") from None
     return im.width, im.height, (im.format or "PNG").upper()
+
+
+def reload_text(version: str, why: str) -> str:
+    return (f"浏览器扩展需要重新加载：现在连着的是 v{version}，{why}。在 chrome://extensions（Edge 是 edge://extensions）"
+            "里找到「AI Studio 网页出图桥」点「重新加载」（转圈箭头），再重试")
 
 
 def not_connected_text() -> str:

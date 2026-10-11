@@ -13,7 +13,7 @@
  */
 (function (root) {
   'use strict';
-  const VERSION = 1;
+  const VERSION = 2; // 加了 replyText（网页文本模型）：版本变了，老版本注入过的页面会换成新的
   if (root.__aiStudioDom && root.__aiStudioDom.VERSION === VERSION) return;
 
   // ---------------------------------------------------------------- 选择器
@@ -325,6 +325,23 @@
         return String(copy.textContent || '').replace(/\s+/g, ' ').trim();
       }
       return String(typeof el.innerText === 'string' ? el.innerText : el.textContent || '');
+    },
+    /** 网页文本模型读回复：最后一个命中元素的全文（保留换行，代码块的原文也在里面）。exclude：去掉这些子元素
+     *  的文字（用户那条消息、按钮、「ChatGPT said:」之类的标题）。返回 {text, count}：count 是命中元素个数，
+     *  studio 用它判断发送后有没有出现新回复。 */
+    replyText(sel, exclude) {
+      const els = queryAll(sel);
+      if (!els.length) return { text: '', count: 0 };
+      const el = els[els.length - 1];
+      let text = typeof el.innerText === 'string' ? el.innerText : '';
+      if (!text.trim()) text = el.textContent || '';
+      if (exclude) {
+        for (const x of el.querySelectorAll(exclude)) {
+          const xt = typeof x.innerText === 'string' && x.innerText.trim() ? x.innerText : x.textContent || '';
+          if (xt.trim()) text = text.replace(xt, '');
+        }
+      }
+      return { text: String(text).replace(/\n{3,}/g, '\n\n').trim(), count: els.length };
     },
     images(sel) {
       return queryAll(sel)

@@ -32,7 +32,7 @@ class ComfyCfg(BaseModel):
 
 class ProviderCfg(BaseModel):
     id: str
-    kind: Literal["openai", "claude", "manual", "openai_api", "anthropic", "gemini"]
+    kind: Literal["openai", "claude", "manual", "openai_api", "anthropic", "gemini", "web"]
     label: str | None = None           # 设置页上显示的名字；不写按类型给一个
     base_url: str | None = None
     model: str | None = None
@@ -45,6 +45,7 @@ class ProviderCfg(BaseModel):
     # 不写按支持处理（OpenAI 兼容接口发 image_url，claude 发图片内容块），模型不支持时接口报错再提示
     vision: bool | None = None
     timeout: float = 1800.0
+    site: str | None = None            # 仅 web：在哪个网站的网页里问（chatgpt / gemini / claude，走浏览器扩展）
 
     def api_key(self) -> str | None:
         return os.environ.get(self.api_key_env) if self.api_key_env else None
@@ -56,6 +57,9 @@ class ProviderCfg(BaseModel):
             return f"Claude（本机 Claude Code{' · ' + self.model if self.model else ''}）"
         if self.kind == "manual":
             return "手动粘贴（自己去网页上问，再把结果贴回来）"
+        if self.kind == "web":
+            site = {"chatgpt": "ChatGPT", "gemini": "Gemini", "claude": "Claude"}.get(self.site or "", self.site or "?")
+            return f"{site} 网页（浏览器扩展，免费额度，较慢）"
         api = {"openai_api": "OpenAI GPT", "anthropic": "Anthropic Claude", "gemini": "Google Gemini"}
         if self.kind in api:
             return f"{api[self.kind]}（API{' · ' + self.model if self.model else ''}）"

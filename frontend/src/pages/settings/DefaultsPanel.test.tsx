@@ -196,5 +196,32 @@ describe('设置页「默认模型」', () => {
     expect(help.textContent).toContain('和项目的风格预设合得来');
     expect(help.textContent).toContain('真人写实、商业广告推荐 krea2');
   });
-});
 
+  it('网页文本模型（ChatGPT / Gemini / Claude 网页）在文本模型和按步骤设置的下拉里；用不了的禁用并写原因；有使用建议', async () => {
+    const reload = '浏览器扩展需要重新加载：现在连着的是 v0.1.0，还不支持网页文本模型。在 chrome://extensions 里点「重新加载」';
+    const llm = [
+      ...settings().choices.llm,
+      { id: 'web_chatgpt', label: 'ChatGPT 网页（浏览器扩展，免费额度，较慢）', kind: 'web', site: 'chatgpt', ready: true, note: null, hint: null },
+      { id: 'web_gemini', label: 'Gemini 网页（浏览器扩展，免费额度，较慢）', kind: 'web', site: 'gemini', ready: false, note: reload, hint: '扩展需要重新加载' },
+      { id: 'web_claude', label: 'Claude 网页（浏览器扩展，免费额度，较慢）', kind: 'web', site: 'claude', ready: false, note: reload, hint: '扩展需要重新加载' },
+      { id: 'openai_api', label: 'OpenAI GPT（API · gpt-5）', kind: 'openai_api', ready: false, note: '没填 Key', hint: '先在 API 服务里填 Key' },
+    ];
+    base({ 'GET /api/settings': settings({ choices: { ...settings().choices, llm } }) });
+    renderAt(<SettingsPage />, { route: '/settings', path: '/settings' });
+    const text = (await screen.findByLabelText('文本模型')) as HTMLSelectElement;
+    const gpt = within(text).getByRole('option', { name: 'ChatGPT 网页（浏览器扩展，免费额度，较慢）' }) as HTMLOptionElement;
+    expect(gpt.disabled).toBe(false);
+    const gem = within(text).getByRole('option', { name: 'Gemini 网页（浏览器扩展，免费额度，较慢）（扩展需要重新加载）' }) as HTMLOptionElement;
+    expect(gem.disabled).toBe(true);
+    expect(gem.title).toBe(reload);
+    expect((within(text).getByRole('option', { name: 'Claude 网页（浏览器扩展，免费额度，较慢）（扩展需要重新加载）' }) as HTMLOptionElement).disabled).toBe(true);
+    expect((within(text).getByRole('option', { name: 'OpenAI GPT（API · gpt-5）（先在 API 服务里填 Key）' }) as HTMLOptionElement).disabled).toBe(true);
+    expect(screen.getByTestId('web-llm-advice').textContent).toMatch(/剧本、分镜输出长，网页版可能截断，优先用 API 或本机 Claude/);
+    const notes = screen.getAllByTestId('web-llm-note');
+    expect(notes).toHaveLength(1);                 // 原因一样的合成一条
+    expect(notes[0].textContent).toBe(`Gemini 网页 / Claude 网页现在用不了：${reload}`);
+    const step = screen.getByLabelText('剧本用什么');
+    expect(within(step).getByRole('option', { name: 'ChatGPT 网页（浏览器扩展，免费额度，较慢）' })).toBeTruthy();
+    expect((within(step).getByRole('option', { name: 'Gemini 网页（浏览器扩展，免费额度，较慢）（扩展需要重新加载）' }) as HTMLOptionElement).disabled).toBe(true);
+  });
+});

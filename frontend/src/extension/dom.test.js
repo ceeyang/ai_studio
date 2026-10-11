@@ -1,7 +1,7 @@
 // 页面里的 DOM 助手（browser-extension/content/dom.js）：Playwright 风格的选择器、可见性、取文字和图片、输入。
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import '../../../browser-extension/content/dom.js';
-import { CHATGPT, GEMINI } from '../../../browser-extension/sites/index.js';
+import { CHATGPT, CLAUDE, GEMINI } from '../../../browser-extension/sites/index.js';
 
 let D;
 beforeAll(() => {
@@ -125,5 +125,37 @@ describe('content/dom.js', () => {
   it('probe：登录按钮、输入框、是否在生成、输入框里有没有草稿', () => {
     document.body.innerHTML = '<div id="prompt-textarea" contenteditable="true">写了一半</div><button data-testid="stop-button">停</button>';
     expect(D.probe(CHATGPT)).toMatchObject({ loginWall: false, prompt: true, busy: true, draft: true });
+  });
+
+  it('replyText（网页文本模型）：取最后一条回复的全文，保留换行和代码块原文，去掉用户消息和按钮；count 是命中数', () => {
+    document.body.innerHTML = `
+      <main><div data-talvt-turn-state="complete">
+        <div data-user-message-bubble="">写个梗概</div>
+        <h4 data-conversation-role="assistant">ChatGPT said:</h4>
+        <div class="markdown"><p>好的</p><pre><div>json<button>Copy code</button></div><code>{
+  "text": "第一集"
+}</code></pre></div>
+      </div></main>`;
+    const r = D.replyText(CHATGPT.text_reply, CHATGPT.text_exclude);
+    expect(r.count).toBeGreaterThan(0);
+    expect(r.text).toContain('{\n  "text": "第一集"\n}');
+    expect(r.text).not.toContain('Copy code');
+    expect(r.text).not.toContain('写个梗概');
+    expect(D.replyText('.nothing', '')).toEqual({ text: '', count: 0 });
+  });
+
+  it('Gemini / Claude 回复正文的选择器', () => {
+    document.body.innerHTML = `
+      <model-response><message-content>旧的回复</message-content></model-response>
+      <model-response><model-thoughts>想一想</model-thoughts><message-content>{"text": "新的"}</message-content></model-response>`;
+    expect(D.replyText(GEMINI.text_reply, GEMINI.text_exclude).text).toBe('{"text": "新的"}');
+    document.body.innerHTML = `
+      <div data-is-streaming="true"><div class="font-claude-response">{"text": "写到一半</div></div>
+      <button aria-label="Stop response">停</button>
+      <div class="ProseMirror" contenteditable="true"></div>`;
+    expect(D.replyText(CLAUDE.text_reply, CLAUDE.text_exclude).text).toBe('{"text": "写到一半');
+    expect(D.visible(CLAUDE.busy_marker)).toBe(true);
+    expect(D.visible(CLAUDE.stop_button)).toBe(true);
+    expect(D.visible(CLAUDE.prompt_box)).toBe(true);
   });
 });

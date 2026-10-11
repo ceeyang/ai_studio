@@ -165,7 +165,7 @@ def test_login_status_from_cookies(tmp_path, monkeypatch):
     monkeypatch.setattr(runner.session, "cookies", lambda: [
         {"name": "__Secure-1PSID", "domain": ".google.com"},
         {"name": "other", "domain": "chatgpt.com"}])
-    assert runner.login_status() == {"chatgpt": False, "gemini": True}
+    assert runner.login_status() == {"chatgpt": False, "gemini": True, "claude": False}
     assert cookie_names_for([{"name": "a", "domain": ".google.com"}], "gemini.google.com") == {"a"}
     assert cookie_names_for([{"name": "a", "domain": "evilgoogle.com"}], "google.com") == set()
 
@@ -339,10 +339,10 @@ def test_api_engines_and_browser_routes(api, monkeypatch):
     monkeypatch.setattr(runner.session, "open_login", lambda urls: opened.append(urls) or True)
     r = api.post("/api/browser/login")
     assert r.status_code == 200 and r.json()["launched"] is True
-    assert opened == [["https://chatgpt.com/", "https://gemini.google.com/app"]]
+    assert opened == [["https://chatgpt.com/", "https://gemini.google.com/app", "https://claude.ai/"]]
     monkeypatch.setattr(runner.session, "version", lambda: None)
     st = api.get("/api/browser/status").json()
-    assert st["running"] is False and st["logged_in"] == {"chatgpt": None, "gemini": None}
+    assert st["running"] is False and st["logged_in"] == {"chatgpt": None, "gemini": None, "claude": None}
 
 
 def test_api_portrait_draw_with_engine(api):

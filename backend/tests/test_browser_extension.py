@@ -115,7 +115,7 @@ def test_hello_ping_status_and_doctor(api):
     hub = api.app.state.services.browser.hub
     st = api.get("/api/browser/status").json()
     assert st["transport"] == "extension" and st["connected"] is False
-    assert st["logged_in"] == {"chatgpt": None, "gemini": None}
+    assert st["logged_in"] == {"chatgpt": None, "gemini": None, "claude": None}
     assert st["extension_dir"].replace("\\", "/").endswith("/browser-extension")
     rows = {c["name"]: c for c in api.get("/api/doctor").json() if c["group"] == "浏览器"}
     assert rows["扩展连接"]["status"] == "warn" and "加载已解压的扩展程序" in rows["扩展连接"]["detail"]
@@ -136,7 +136,7 @@ def test_hello_ping_status_and_doctor(api):
         assert ws.receive_json() == {"type": "status_request"}     # 状态旧了，查状态时让扩展再报一次
         assert st["connected"] and st["extension"]["version"] == "0.1.0"
         assert st["extension"]["ext_id"] == "abcdefghijklmnop" and st["extension"]["browser"] == "Chrome 141"
-        assert st["logged_in"] == {"chatgpt": True, "gemini": False}
+        assert st["logged_in"] == {"chatgpt": True, "gemini": False, "claude": None}
         assert st["sites"]["chatgpt"]["tabs"] == 2
         rows = {c.name: c for c in check_browser(api.app.state.services.engines, api.app.state.services.browser)}
         assert rows["扩展连接"].status == "ok" and "v0.1.0" in rows["扩展连接"].detail
@@ -154,7 +154,8 @@ def test_login_button_asks_extension_to_open_sites(api):
         hello(ws)
         r = api.post("/api/browser/login")
         assert r.status_code == 200 and r.json()["transport"] == "extension" and r.json()["launched"] is False
-        assert ws.receive_json() == {"type": "open", "urls": ["https://chatgpt.com/", "https://gemini.google.com/app"]}
+        assert ws.receive_json() == {"type": "open", "urls": ["https://chatgpt.com/", "https://gemini.google.com/app",
+                                                              "https://claude.ai/"]}
 
 
 def test_new_connection_replaces_old(api):

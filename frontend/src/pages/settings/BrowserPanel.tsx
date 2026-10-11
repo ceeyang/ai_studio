@@ -38,7 +38,9 @@ function InstallSteps({ dir }: { dir: string }) {
           {copied ? '已复制' : '复制路径'}
         </button>
       </li>
-      <li>在这个浏览器里登录 ChatGPT（chatgpt.com）和 Gemini（gemini.google.com），只需一次。</li>
+      <li>
+        在这个浏览器里登录 ChatGPT（chatgpt.com）和 Gemini（gemini.google.com），只需一次；要用 Claude 网页写文本的再登录 Claude（claude.ai）。
+      </li>
       <li>保持浏览器开着。扩展会自动连上 studio（{window.location.host}），这里会显示「扩展已连上」。</li>
     </ol>
   );
@@ -95,17 +97,24 @@ function ExtensionBody({ st }: { st: BrowserStatus }) {
         出图在你平时用的浏览器里进行：扩展在已登录的 ChatGPT / Gemini 标签页里开新对话、传参考图、输提示词，出完把原图传回来。studio
         不启动浏览器，也不读取 cookie。
       </p>
+      {connected && st.needs_reload && (
+        <p className="error" role="alert" data-testid="extension-needs-reload">
+          扩展需要重新加载：现在连着的是 v{ext?.version ?? '?'}，还不支持网页文本模型（ChatGPT / Gemini / Claude 网页）。在{' '}
+          <code>chrome://extensions</code>（Edge 是 <code>edge://extensions</code>）里找到「AI Studio 网页出图桥」点「重新加载」。出图不受影响。
+        </p>
+      )}
+      <p className="muted">Claude 网页只用来写文本（网页文本模型），不出图。</p>
       {connected && st.sites && <SiteRows sites={st.sites} />}
       {connected && (
         <div className="row">
           <button type="button" disabled={login.isPending} onClick={() => login.mutate()}>
-            {login.isPending ? '正在打开…' : '在浏览器里打开 ChatGPT / Gemini'}
+            {login.isPending ? '正在打开…' : '在浏览器里打开 ChatGPT / Gemini / Claude'}
           </button>
         </div>
       )}
       {login.data && (
         <p className="notice" data-testid="browser-login-notice">
-          已在你的浏览器里打开 ChatGPT 和 Gemini：没登录的就在那里登录，登录后这里会自动刷新。
+          已在你的浏览器里打开 ChatGPT、Gemini 和 Claude：没登录的就在那里登录，登录后这里会自动刷新。
         </p>
       )}
       {login.error && <p className="error">打开失败：{errorText(login.error)}</p>}

@@ -59,6 +59,12 @@ export const CHATGPT = {
   // 新界面（2026-10）没有 article / data-message-author-role 了：取最后一轮（data-talvt-turn-state），去掉用户那条消息
   assistant_turn: 'article[data-turn="assistant"], [data-message-author-role="assistant"], [data-talvt-turn-state]',
   reply_exclude: '[data-user-message-bubble]',
+  // 网页文本模型读回复用（studio 驱动，见 backend/engines/browser/chat.py）：优先取回复正文 .markdown，没有再取整条/整轮
+  text_reply:
+    '[data-message-author-role="assistant"] .markdown, article[data-turn="assistant"] .markdown, ' +
+    '[data-talvt-turn-state] .markdown, [data-message-author-role="assistant"], article[data-turn="assistant"], ' +
+    '[data-talvt-turn-state]',
+  text_exclude: '[data-user-message-bubble], [data-conversation-role], button, .sr-only',
   result_images:
     // 2026-10 实测的新界面：结果图在 generated-image-gallery 里，alt 是「Generated image 1」，地址是 blob:
     '[data-testid="generated-image-gallery"] img, img[alt^="Generated image"], ' +

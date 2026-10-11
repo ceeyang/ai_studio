@@ -91,3 +91,41 @@ export function loggedIn(cookie, page) {
   if (page === 'login_wall') return false;
   return !!cookie || page === 'logged_in';
 }
+
+// ---------------------------------------------------------------- rpc（网页文本模型）
+/**
+ * 扩展支持的能力，hello 里报给 studio。studio 看到 'rpc' 才会用网页文本模型（老版本扩展没有，要重新加载）。
+ * rpc：studio 一步步驱动页面操作（开标签页、跳转、调 content/dom.js 的函数），文本流程在 studio 那边
+ * （backend/engines/browser/chat.py），选择器也从 studio 发过来——改流程、改选择器不用重新加载扩展。
+ */
+export const FEATURES = ['rpc'];
+
+/** rpc 能调的 content/dom.js 函数（只读页面和往输入框里输入、点按钮、传图，别的不让调）。 */
+export const RPC_DOM_OPS = [
+  'url', 'visible', 'count', 'enabled', 'click', 'typeText', 'press', 'setFiles', 'pasteFiles', 'dropFiles',
+  'fileInputs', 'composerImages', 'text', 'replyText', 'probe',
+];
+
+/** 网址属于哪个网站（SITES 里的 key），都不是返回 ''。 */
+export function siteOfUrl(url, sites) {
+  for (const spec of Object.values(sites)) {
+    if (onSite(url, spec)) return spec.key;
+  }
+  return '';
+}
+
+/**
+ * 检查一次 rpc 调用合不合规矩，返回中文原因（合规返回 ''）：
+ * - dom / goto / url 只能对扩展通过 acquire_tab 交出去的标签页（tabs 里有）；
+ * - dom 只能调 RPC_DOM_OPS 里的函数；goto 只能去支持的网站。
+ */
+export function rpcProblem(method, params, { tabs, sites }) {
+  const p = params || {};
+  if (method === 'acquire_tab') return sites[p.site] ? '' : `扩展不认识网站 ${p.site}`;
+  if (method === 'cookie_names') return siteOfUrl(String(p.url || ''), sites) ? '' : '只能查支持的网站的 cookie';
+  if (!['dom', 'goto', 'url'].includes(method)) return `扩展不认识 rpc 方法 ${method}`;
+  if (!tabs.has(p.tab_id)) return '这个标签页不是扩展给 studio 用的';
+  if (method === 'dom' && !RPC_DOM_OPS.includes(p.op)) return `不允许的页面操作 ${p.op}`;
+  if (method === 'goto' && !siteOfUrl(String(p.url || ''), sites)) return `只能打开支持的网站：${p.url}`;
+  return '';
+}

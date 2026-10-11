@@ -138,10 +138,10 @@ class LLMGateway:
         messages = [{"role": "user", "content": user}]
         last_err, last_raw = "", ""
         for attempt in range(1 + MAX_RETRIES):
-            if images:
-                res = provider.complete(system, messages, json_mode=True, images=images)
-            else:
-                res = provider.complete(system, messages, json_mode=True)
+            kw: dict[str, Any] = {"images": images} if images else {}
+            if getattr(provider, "accepts_log", False):   # 网页文本模型：等回复时往任务日志写进度
+                kw["log"] = emit
+            res = provider.complete(system, messages, json_mode=True, **kw)
             emit(f"LLM {pcfg.id}（{res.model or pcfg.model or '-'}）第 {attempt + 1} 次，"
                  f"{res.seconds:.1f}s，usage={res.usage}")
             try:

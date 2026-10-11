@@ -13,6 +13,7 @@ import psutil
 
 from backend.config import Config
 from backend.engines.browser.errors import EXT_INSTALL_HINT, EXT_LOGIN_HINT, LOGIN_HINT
+from backend.engines.browser.extension import RPC_FEATURE, reload_text
 from backend.engines.comfyui.errors import ComfyError
 from backend.engines.registry import runtime_of
 
@@ -87,6 +88,11 @@ def check_browser(engines, browser) -> list[Check]:
     return out
 
 
+@dataclass
+class _TextOnly:
+    name: str
+
+
 def _check_extension(used: dict, browser) -> list[Check]:
     """transport=extension：扩展连没连上、各网站在那个浏览器里有没有登录（扩展报的，不开页面、不出图）。"""
     info = browser.hub.info()
@@ -98,7 +104,13 @@ def _check_extension(used: dict, browser) -> list[Check]:
         out.append(Check("浏览器", "扩展连接", "ok",
                          f"已连上 · 扩展 v{info.get('version') or '?'} · {info.get('browser') or '浏览器'}"
                          f" · id {info.get('ext_id') or '?'}"))
+        if RPC_FEATURE not in (info.get("features") or []):
+            out.append(Check("浏览器", "扩展版本", "warn",
+                             reload_text(info.get("version") or "?", "还不支持网页文本模型（ChatGPT / Gemini / Claude 网页）")))
     st = browser.hub.site_status()
+    # Claude 网页只做文本（web_claude），没有出图引擎：单独报一行登录状态
+    if "claude" in browser.sites and "claude" not in used:
+        used = {**used, "claude": _TextOnly("网页文本模型")}
     for key, eng in sorted(used.items()):
         site = browser.sites.get(key)
         label = site.label if site else key
@@ -111,12 +123,13 @@ def _check_extension(used: dict, browser) -> list[Check]:
             out.append(Check("浏览器", name, "warn", f"扩展还没报 {host} 的状态，稍后重新检查"))
         else:
             tabs = s.get("tabs")
-            tab_text = f"开着 {tabs} 个标签页" if tabs else "没有开着的标签页（出图时扩展会在后台新开一个）"
+            tab_text = f"开着 {tabs} 个标签页" if tabs else "没有开着的标签页（用到时扩展会在后台新开一个）"
             if s.get("logged_in"):
                 out.append(Check("浏览器", name, "ok", f"已登录 {host} · {tab_text}"))
             else:
+                what = "用不了" if isinstance(eng, _TextOnly) else "出图会失败"
                 out.append(Check("浏览器", name, "warn",
-                                 f"没登录 {host}，{eng.name} 出图会失败。{EXT_LOGIN_HINT} · {tab_text}"))
+                                 f"没登录 {host}，{eng.name}{what}。在装了扩展的浏览器里登录 {host} · {tab_text}"))
     return out
 
 
@@ -243,6 +256,12 @@ def run_doctor(cfg: Config, engines, comfy, ffmpeg, *, browser=None, api_keys=No
             out.append(Check("LLM", p.id, "ok" if exe else "fail", exe or "找不到 claude 命令"))
         elif p.kind == "manual":
             out.append(Check("LLM", p.id, "ok", "手动粘贴结果"))
+        elif p.kind == "web":
+            from backend.llm.web_providers import web_status
+
+            ok, note, _hint = web_status(browser, p.site or "")
+            out.append(Check("LLM", p.id, "ok" if ok else "warn",
+                             f"{p.display_name()} · 可以用" if ok else f"{p.display_name()} · {note}"))
         # openai_api / anthropic / gemini：见上面「API 服务」
 
     try:

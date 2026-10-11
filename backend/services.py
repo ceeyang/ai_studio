@@ -50,6 +50,7 @@ def build_services(cfg: Config, db: Database, manager: Any) -> Services:
     from backend.llm.api_providers import ensure_api_providers
     from backend.llm.gateway import LLMGateway
     from backend.llm.providers import build_providers
+    from backend.llm.web_providers import ensure_web_providers
 
     client = ComfyClient(cfg.comfyui.url, timeout=cfg.comfyui.timeout,
                          max_retries=cfg.comfyui.max_retries)
@@ -60,9 +61,12 @@ def build_services(cfg: Config, db: Database, manager: Any) -> Services:
     keys = ApiKeyStore(db)
     # OpenAI / Anthropic / Gemini 的 API 文本模型：config.yaml 没写也加上（没配 Key 时设置页里不可选）
     ensure_api_providers(cfg.llm)
+    # ChatGPT / Gemini / Claude 网页文本模型（走浏览器扩展）：config.yaml 没写也加上（扩展没连上时设置页里不可选）
+    ensure_web_providers(cfg.llm)
+    browser = BrowserRunner(BrowserSession(cfg.browser))
     # 每次调用 LLM 时现读设置：按步骤单独设置 → 全局默认文本模型 → config.yaml
-    llm = LLMGateway(cfg.llm, build_providers(cfg.llm, creds=keys.resolve), gpu_guard=manager.gpu_exclusive,
-                     override=store.llm_provider)
+    llm = LLMGateway(cfg.llm, build_providers(cfg.llm, creds=keys.resolve, browser=browser),
+                     gpu_guard=manager.gpu_exclusive, override=store.llm_provider)
     # 换模型族、或本机 LLM 要用显卡时，先让 ComfyUI 把模型卸掉
     manager.on_family_switch = lambda old, new: runner.free()
     manager.on_gpu_handover = runner.free
@@ -88,5 +92,5 @@ def build_services(cfg: Config, db: Database, manager: Any) -> Services:
                     engines=EngineRegistry(cfg, api_creds=keys.resolve),
                     llm=llm, ffmpeg=FFmpeg(cfg.ffmpeg.ffmpeg, cfg.ffmpeg.ffprobe),
                     comfy=runner, comfy_client=client,
-                    browser=BrowserRunner(BrowserSession(cfg.browser)), runninghub=rh, settings=store,
+                    browser=browser, runninghub=rh, settings=store,
                     api=ApiRunner(keys.resolve), api_keys=keys)

@@ -46,6 +46,9 @@ GEMINI = SiteSpec(
     result_images=('model-response generated-image img, model-response single-image img, '
                    'model-response img.image'),
     user_images='user-query img, uploader-file-preview img',
+    # 网页文本模型读回复：回复正文在 message-content 里
+    text_reply='model-response message-content, model-response .model-response-text, model-response',
+    text_exclude='model-thoughts, .thoughts-container, button, .code-block-decoration, .sr-only',
     download_buttons=('button[aria-label="Download full size image"], button[aria-label="下载原尺寸图片"], '
                       'button[aria-label="下载完整尺寸的图片"], button[data-test-id="download-generated-image-button"], '
                       'download-generated-image-button button',),

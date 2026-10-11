@@ -10,4 +10,6 @@ browser.transport=cdp（备用）：studio 自己带调试端口启动独立配�
 - sites/：每个网站的选择器和文案匹配，网站改版时只改这里
 - runner.py：任务执行入口（每个网站一把锁、一个标签页，按 transport 分派），落盘、按画幅裁切
 - engines.py：gpt_image / gemini_image 两个图像引擎（把请求拼成网页出图请求）
+- chat.py：网页文本模型（web_chatgpt / web_gemini / web_claude，见 backend/llm/web_providers.py）的页面流程，
+  studio 通过扩展的 rpc 一步步驱动（扩展 v0.2 起），选择器在 sites/ 里
 """

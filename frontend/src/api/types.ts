@@ -111,10 +111,16 @@ export interface LlmChoice {
   label: string;
   kind: string;
   model?: string | null;
-  /** false：API 文本模型还没配 Key（下拉里禁用），原因在 note */
+  /** false：API 文本模型还没配 Key、网页文本模型扩展没连上 / 要重新加载 / 没登录（下拉里禁用），原因在 note */
   ready?: boolean;
   note?: string | null;
+  /** 不可用时下拉里括号里的短说明（「先在 API 服务里填 Key」「扩展需要重新加载」…） */
+  hint?: string | null;
   service?: string;
+  /** 网页文本模型（kind=web）：chatgpt / gemini / claude */
+  site?: string;
+  /** 网页文本模型的使用建议（适合短文本，长输出优先 API） */
+  advice?: string;
 }
 
 export interface EngineChoice {
@@ -232,6 +238,8 @@ export interface BrowserStatus {
   extension?: BrowserExtensionInfo;
   extension_dir?: string;
   sites?: Record<string, BrowserSiteStatus>;
+  /** 连着的扩展版本太旧（没有 rpc）：网页文本模型用不了，要在扩展管理页重新加载 */
+  needs_reload?: boolean;
   // cdp
   executable?: string | null;
   endpoint?: string;

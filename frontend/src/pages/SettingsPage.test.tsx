@@ -82,7 +82,7 @@ describe('SettingsPage', () => {
     expect(steps.textContent).toContain(`studio（${window.location.host}）`);
     // 引擎 id 不当主文案
     expect(screen.getByTestId('extension-status').textContent).toContain('ChatGPT 网页 / Gemini 网页出图会失败');
-    expect(screen.queryByRole('button', { name: '在浏览器里打开 ChatGPT / Gemini' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '在浏览器里打开 ChatGPT / Gemini / Claude' })).toBeNull();
     expect(screen.queryByRole('button', { name: '打开浏览器登录' })).toBeNull();
   });
 
@@ -109,7 +109,9 @@ describe('SettingsPage', () => {
     expect(screen.getByTestId('browser-site-chatgpt').textContent).toContain('已登录');
     expect(screen.getByTestId('browser-site-chatgpt').textContent).toContain('2 个');
     expect(screen.getByTestId('browser-site-gemini').textContent).toContain('没登录');
-    await user.click(screen.getByRole('button', { name: '在浏览器里打开 ChatGPT / Gemini' }));
+    // 老版本扩展（v0.1.0，没有 rpc）：提示重新加载，网页文本模型才能用
+    expect(screen.queryByTestId('extension-needs-reload')).toBeNull();
+    await user.click(screen.getByRole('button', { name: '在浏览器里打开 ChatGPT / Gemini / Claude' }));
     expect((await screen.findByTestId('browser-login-notice')).textContent).toContain('已在你的浏览器里打开');
     expect(calls.some((c) => c.method === 'POST' && c.url === '/api/browser/login')).toBe(true);
   });
@@ -149,5 +151,29 @@ describe('SettingsPage', () => {
     const cell = screen.getByText('Z-Image 快速').closest('td')!;
     expect(cell.querySelector('.engine-id')?.textContent).toBe('zimage');
     expect(table.textContent).toContain('H3 视频（有声）');
+  });
+
+  it('连着的扩展太旧（不支持网页文本模型）：提示去扩展管理页重新加载', async () => {
+    installFetch({
+      'GET /api/doctor': [],
+      'GET /api/engines': BROWSER_ENGINES,
+      'GET /api/config': {},
+      'GET /api/browser/status': {
+        transport: 'extension', running: true, connected: true, needs_reload: true,
+        extension: { connected: true, version: '0.1.0', browser: 'Google Chrome 141' },
+        extension_dir: 'D:/works/ai_studio/browser-extension',
+        sites: {
+          chatgpt: { label: 'ChatGPT', host: 'chatgpt.com', tabs: 1, logged_in: true, cookie: true, page: 'logged_in' },
+          claude: { label: 'Claude', host: 'claude.ai', tabs: null, logged_in: null, cookie: null, page: null },
+        },
+        logged_in: { chatgpt: true, claude: null },
+      },
+    });
+    renderAt(<SettingsPage />, { route: '/settings', path: '/settings' });
+    const warn = await screen.findByTestId('extension-needs-reload');
+    expect(warn.textContent).toContain('扩展需要重新加载');
+    expect(warn.textContent).toContain('v0.1.0');
+    expect(warn.textContent).toContain('chrome://extensions');
+    expect(screen.getByTestId('browser-site-claude').textContent).toContain('未知');
   });
 });

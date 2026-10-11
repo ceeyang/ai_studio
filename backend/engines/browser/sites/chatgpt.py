@@ -55,6 +55,11 @@ CHATGPT = SiteSpec(
     assistant_turn=('article[data-turn="assistant"], [data-message-author-role="assistant"], '
                     '[data-talvt-turn-state]'),
     reply_exclude='[data-user-message-bubble]',
+    # 网页文本模型读回复：优先取回复正文 .markdown，没有再取整条/整轮
+    text_reply=('[data-message-author-role="assistant"] .markdown, article[data-turn="assistant"] .markdown, '
+                '[data-talvt-turn-state] .markdown, [data-message-author-role="assistant"], article[data-turn="assistant"], '
+                '[data-talvt-turn-state]'),
+    text_exclude='[data-user-message-bubble], [data-conversation-role], button, .sr-only',
     result_images=(  # 2026-10 实测的新界面：结果图在 generated-image-gallery 里，alt 是「Generated image 1」，地址是 blob:
                    '[data-testid="generated-image-gallery"] img, img[alt^="Generated image"], '
                    'article[data-turn="assistant"] img, [data-message-author-role="assistant"] img, '

@@ -13,8 +13,8 @@ from __future__ import annotations
 import io
 import json
 import threading
-from collections.abc import Callable
-from contextlib import AbstractContextManager
+from collections.abc import Callable, Iterator
+from contextlib import AbstractContextManager, contextmanager
 from pathlib import Path
 
 from PIL import Image
@@ -23,7 +23,7 @@ from backend.engines.base import EngineCall
 from backend.engines.browser import flow
 from backend.engines.browser.driver import PageDriver, PlaywrightDriver
 from backend.engines.browser.errors import EXT_DIR, BrowserError
-from backend.engines.browser.extension import ExtensionHub, decode
+from backend.engines.browser.extension import RPC_FEATURE, ExtensionHub, decode
 from backend.engines.browser.session import BrowserSession, cookie_names_for
 from backend.engines.browser.sites import SITES
 from backend.engines.browser.sites.base import SiteSpec
@@ -71,6 +71,26 @@ class BrowserRunner:
     @property
     def transport(self) -> str:
         return self.session.cfg.transport
+
+    @contextmanager
+    def site_lock(self, key: str, label: str, log: Callable[[str], None],
+                  cancel: threading.Event | None = None, wait_timeout: float | None = None) -> Iterator[None]:
+        """同一个网站同时只跑一件事（出图、网页文本模型共用这把锁）：被占着时在日志里说一声再排队等。
+        wait_timeout：最多等这么多秒，超过抛 BrowserError（None = 一直等）。"""
+        lock = self._locks.setdefault(key, threading.Lock())
+        if not lock.acquire(blocking=False):
+            log(f"{label} 的标签页正被另一个任务用着，排队等它")
+            waited = 0
+            while not lock.acquire(timeout=1):
+                waited += 1
+                if cancel is not None and cancel.is_set():
+                    raise JobCanceled()
+                if wait_timeout is not None and waited >= wait_timeout:
+                    raise BrowserError("timeout", f"{label} 的标签页被别的任务占了 {waited} 秒还没让出来，已放弃，稍后重试")
+        try:
+            yield
+        finally:
+            lock.release()
 
     # ------------------------------------------------------------ 标签页
     def _playwright_page(self, spec: SiteSpec):
@@ -120,8 +140,11 @@ class BrowserRunner:
                          "logged_in": (bool(st[k].get("logged_in")) if k in st else None),
                          "cookie": st.get(k, {}).get("cookie"), "page": st.get(k, {}).get("page")}
                      for k, s in self.sites.items()}
+            # 连着的是 v0.1 的扩展（没有 rpc）：网页文本模型用不了，要在扩展管理页重新加载
+            needs_reload = bool(info["connected"]) and RPC_FEATURE not in (info.get("features") or [])
             return {"transport": "extension", "running": info["connected"], "connected": info["connected"],
                     "extension": info, "extension_dir": str(EXT_DIR), "sites": sites,
+                    "needs_reload": needs_reload,
                     "logged_in": {k: v["logged_in"] for k, v in sites.items()}}
         sess = self.session
         exe = sess.executable()
@@ -143,8 +166,9 @@ class BrowserRunner:
         log = log or (lambda m: None)
         req = call.workflow
         spec = self.sites.get(req.get("site", ""))
-        if spec is None:
-            raise BrowserError("browser", f"未知网站 {req.get('site')!r}，可选：{', '.join(self.sites)}")
+        if spec is None or not spec.result_images:
+            can = [k for k, s in self.sites.items() if s.result_images]
+            raise BrowserError("browser", f"网站 {req.get('site')!r} 不能出图，可选：{', '.join(can)}")
         run_dir = Path(run_dir)
         run_dir.mkdir(parents=True, exist_ok=True)
         (run_dir / "workflow.api.json").write_text(
@@ -155,23 +179,15 @@ class BrowserRunner:
              "dropped_refs": call.dropped_refs},
             ensure_ascii=False, indent=2, default=str), encoding="utf-8")
 
-        lock = self._locks[spec.key]
-        if not lock.acquire(blocking=False):
-            log(f"{spec.label} 的标签页正被另一个任务用着，排队等它")
-            while not lock.acquire(timeout=1):
-                if cancel.is_set():
-                    raise JobCanceled()
         refs = [Path(p) for p in req.get("refs") or []]
         timeout = float(req.get("timeout") or 300)
-        try:
+        with self.site_lock(spec.key, spec.label, log, cancel):
             if self.transport == "extension":
                 got = self._via_extension(spec, req, refs, timeout, cancel, log, on_progress)
             else:
                 with self._page_factory(spec) as driver:
                     got = flow.generate(driver, spec, req["prompt"], refs, timeout=timeout, cancel=cancel,
                                         log=log, progress=on_progress, poll=self.poll)
-        finally:
-            lock.release()
         return self._save(got, run_dir, spec, req.get("aspect"), bool(req.get("fit_aspect", True)), log)
 
     def _via_extension(self, spec: SiteSpec, req: dict, refs: list[Path], timeout: float,

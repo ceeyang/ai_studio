@@ -10,14 +10,18 @@
  *    等待和轮询在这里做：后台标签页里的定时器会被浏览器节流，service worker 里的不会。
  * 3. 报状态：每个网站开着几个标签页、登录 cookie 在不在（chrome.cookies，只看名字不读值）、开着的标签页上
  *    有没有登录按钮。
+ * 4. rpc（v0.2 起，网页文本模型）：studio 一步步驱动页面——开一个专门写文本的标签页（不用出图的那个）、
+ *    跳转、调 content/dom.js 的函数（只许 lib/protocol.js 的 RPC_DOM_OPS 里那些）。流程和选择器都在 studio
+ *    那边（backend/engines/browser/chat.py），改了不用重新加载扩展。
  *
  * 不读、不拷、不上传任何 cookie 的值；只在 ChatGPT / Gemini 的页面里操作。
  */
 import { Canceled, FlowError, generate } from './lib/flow.js';
 import {
-  DEFAULT_SERVER, PING_SECONDS, REPLACED_CODE, backoffMs, bufferToB64, imageMessages, loggedIn, onSite, rankTabs,
+  DEFAULT_SERVER, FEATURES, PING_SECONDS, REPLACED_CODE, backoffMs, bufferToB64, imageMessages, loggedIn, onSite,
+  rankTabs, rpcProblem,
 } from './lib/protocol.js';
-import { SITES } from './sites/index.js';
+import { IMAGE_SITES, SITES } from './sites/index.js';
 
 const VERSION = chrome.runtime.getManifest().version;
 const ALARM = 'ai-studio-keepalive';
@@ -100,7 +104,10 @@ async function connect() {
   await setState({ state: 'connecting', url });
   sock.onopen = () => {
     attempt = 0;
-    send({ type: 'hello', version: VERSION, sites: Object.keys(SITES), browser: browserName(), ext_id: chrome.runtime.id });
+    send({
+      type: 'hello', version: VERSION, sites: Object.keys(SITES), features: FEATURES,
+      browser: browserName(), ext_id: chrome.runtime.id,
+    });
     setState({ state: 'connected', url, error: '' });
     clearInterval(pingTimer);
     pingTimer = setInterval(() => send({ type: 'ping', t: Date.now() }), PING_SECONDS * 1000);
@@ -159,6 +166,9 @@ function onMessage(msg) {
       break;
     case 'job':
       runJob(msg);
+      break;
+    case 'rpc':
+      handleRpc(msg);
       break;
     case 'cancel': {
       const j = jobs.get(msg.job_id);
@@ -312,8 +322,11 @@ async function rememberTab(key, tabId) {
 }
 
 async function acquireTab(spec, opts) {
-  const mineId = (await studioTabs())[spec.key];
-  const tabs = await chrome.tabs.query({});
+  const all = await studioTabs();
+  const mineId = all[spec.key];
+  // 专门写文本的标签页（rpc）不拿来出图
+  const textIds = new Set(textTabIds(all));
+  const tabs = (await chrome.tabs.query({})).filter((t) => !textIds.has(t.id));
   const ranked = rankTabs(tabs, spec, { studioTabId: mineId ?? null, reuseUserTabs: opts.reuse_user_tabs !== false });
   for (const t of ranked) {
     const isMine = t.id === mineId;
@@ -337,10 +350,86 @@ async function acquireTab(spec, opts) {
   return { tabId: tab.id, fresh: true, how: `没有空闲的 ${spec.label} 标签页，在后台新开了一个` };
 }
 
+// ---------------------------------------------------------------- rpc（网页文本模型）
+function textTabIds(all) {
+  return Object.entries(all).filter(([k]) => k.endsWith(':text')).map(([, v]) => v);
+}
+
+/** 写文本用的标签页：上次写文本用过、还开着、还在这个网站上的那个；没有就在后台新开一个。不借用你开着的标签页。 */
+async function acquireTextTab(spec, opts) {
+  const slot = `${spec.key}:text`;
+  const mineId = (await studioTabs())[slot];
+  if (mineId != null) {
+    try {
+      const t = await chrome.tabs.get(mineId);
+      if (t && !t.discarded && t.url && onSite(t.url, spec)) {
+        return { tab_id: t.id, fresh: false, how: `用上次写文本的那个 ${spec.label} 标签页` };
+      }
+    } catch (_e) {
+      /* 关掉了，新开一个 */
+    }
+  }
+  const tab = await chrome.tabs.create({ url: spec.new_chat_url, active: !!opts.activate_tab });
+  try {
+    await chrome.tabs.update(tab.id, { autoDiscardable: false });
+  } catch (_e) {
+    /* 老版本浏览器没有这个选项 */
+  }
+  await rememberTab(slot, tab.id);
+  await waitTabComplete(tab.id);
+  return { tab_id: tab.id, fresh: true, how: `在后台新开了一个 ${spec.label} 标签页（专门写文本，不动出图用的那个）` };
+}
+
+const RPC = {
+  acquire_tab: (p) => acquireTextTab(SITES[p.site], { ...options, ...(p.options || {}) }),
+  async goto(p) {
+    await chrome.tabs.update(p.tab_id, { url: p.url });
+    await waitTabComplete(p.tab_id);
+    return (await chrome.tabs.get(p.tab_id)).url || '';
+  },
+  async url(p) {
+    try {
+      return (await chrome.tabs.get(p.tab_id)).url || '';
+    } catch (_e) {
+      throw new FlowError('browser', '写文本用的标签页被关掉了，重试一次');
+    }
+  },
+  async dom(p) {
+    const r = await exec(p.tab_id, p.op, Array.isArray(p.args) ? p.args : []);
+    return r === undefined ? null : r;
+  },
+  async cookie_names(p) {
+    try {
+      return (await chrome.cookies.getAll({ url: p.url })).map((c) => c.name);
+    } catch (_e) {
+      return [];
+    }
+  },
+};
+
+async function handleRpc(msg) {
+  const id = msg.id;
+  const method = String(msg.method || '');
+  const params = msg.params || {};
+  const reply = (patch) => send({ type: 'rpc_result', id, ...patch });
+  try {
+    const tabs = new Set(textTabIds(await studioTabs()));
+    const why = rpcProblem(method, params, { tabs, sites: SITES });
+    if (why) {
+      reply({ ok: false, kind: 'browser', error: why });
+      return;
+    }
+    reply({ ok: true, result: await RPC[method](params) });
+  } catch (e) {
+    const kind = e instanceof FlowError ? e.kind : 'browser';
+    reply({ ok: false, kind, error: String((e && e.message) || e) });
+  }
+}
+
 // ---------------------------------------------------------------- 出图任务
 function runJob(msg) {
   const spec = SITES[msg.site];
-  if (!spec) {
+  if (!spec || !IMAGE_SITES.includes(spec.key)) {
     send({
       type: 'error', job_id: msg.job_id, kind: 'browser',
       message: `扩展不认识网站 ${msg.site}（支持 ${Object.keys(SITES).join('、')}）：扩展版本太旧，在扩展管理页重新加载一下`,

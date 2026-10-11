@@ -219,9 +219,11 @@ class ClaudeProvider:
                          seconds=time.monotonic() - t0)
 
 
-def build_providers(cfg: LLMCfg, *, creds=None) -> dict[str, LLMProvider]:
-    """creds：API 服务的 Key 解析（ApiKeyStore.resolve），不给只看环境变量。"""
+def build_providers(cfg: LLMCfg, *, creds=None, browser=None) -> dict[str, LLMProvider]:
+    """creds：API 服务的 Key 解析（ApiKeyStore.resolve），不给只看环境变量。
+    browser：BrowserRunner（网页文本模型走它的浏览器扩展），不给时网页文本模型调用会报错。"""
     from backend.llm.api_providers import PROVIDER_CLASSES
+    from backend.llm.web_providers import WebChatProvider
 
     out: dict[str, LLMProvider] = {}
     for p in cfg.providers:
@@ -231,4 +233,6 @@ def build_providers(cfg: LLMCfg, *, creds=None) -> dict[str, LLMProvider]:
             out[p.id] = ClaudeProvider(p)
         elif p.kind in PROVIDER_CLASSES:
             out[p.id] = PROVIDER_CLASSES[p.kind](p, creds=creds)
+        elif p.kind == "web":
+            out[p.id] = WebChatProvider(p, browser=browser)
     return out
