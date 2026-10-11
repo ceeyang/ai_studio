@@ -10,8 +10,8 @@ from backend.pipeline.common import job_services
 from backend.pipeline.keyframes import load_shot, ref_labels, run_comfy
 from backend.domain.models import Location, SceneBlock
 from backend.pipeline.prompting import (Speaker, compose_video_prompt, first_frame_locked_face,
-                                        join_negative,
-                                        location_summary, short_ref, shot_seed, video_input_hash,
+                                        join_negative, location_summary, short_ref,
+                                        shot_image_prompt, shot_seed, video_input_hash,
                                         video_inputs, with_continuity)
 from backend.queue.errors import JobCanceled, JobError
 from backend.queue.handlers import HANDLERS
@@ -77,7 +77,8 @@ def run_video(ctx, payload: dict) -> dict:
             raise JobError(str(e)) from None
         has_audio = engine.caps.has_audio
         # 发给引擎的版本：说话人用英文简称、画外音写明；输入哈希仍按老写法算（见 compose_video_prompt）
-        prompt = compose_video_prompt(shot.motion_prompt, shot.image_prompt, shot.audio_prompt,
+        prompt = compose_video_prompt(shot.motion_prompt, shot_image_prompt(shot, proj),
+                                      shot.audio_prompt,
                                       shot.dialogue, anchor=style.anchor_text if style else "",
                                       has_audio=has_audio, speakers=_speakers(proj, shot))
         negative = join_negative(proj.negative, style.negative if style else "")

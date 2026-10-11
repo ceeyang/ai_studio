@@ -36,7 +36,7 @@ def shot(**kw):
 
 def test_shot_rules():
     assert ShotOut.model_validate(shot()).transition_out == "hard_cut"
-    with pytest.raises(ValidationError, match="80–150"):
+    with pytest.raises(ValidationError, match="60–120"):
         ShotOut.model_validate(shot(image_prompt="too short"))
     with pytest.raises(ValidationError, match="same as before"):
         ShotOut.model_validate(shot(image_prompt=WORDS + " same as before"))

@@ -57,6 +57,67 @@ def upper_body_look(visual_prompt: str) -> str:
     return " ".join(kept) if kept else (visual_prompt or "").strip()
 
 
+# ------------------------------------------------------------ 角色外貌占位符
+# 分镜里 image_prompt 用 {{char:<角色 id>}} 占位，出图时按角色当前的外貌提示词、按景别取舍后填进去：
+# 外貌只有一个来源，角色换造型后镜头自动跟上（首帧输入哈希按填好的文字算，换造型就过期）。
+CHAR_TOKEN = re.compile(r"\{\{\s*char\s*:\s*(\d+)\s*\}\}")
+_FACE = re.compile(r"face|hair|eyes?\b|eyebrows?|brows?\b|nose|lips?\b|mouth|jaw|cheek|chin|skin"
+                   r"|complexion|beard|stubble|mustache|moustache|glasses|spectacles|earrings?"
+                   r"|freckles?|mole|scar|wrinkle|forehead|bangs|ponytail|bun\b|braid", re.I)
+FACE_SIZES = ("大特写", "特写")
+UPPER_SIZES = ("近景",)
+
+
+def char_token(char_id: int) -> str:
+    return "{{char:%d}}" % char_id
+
+
+def face_look(visual_prompt: str) -> str:
+    """特写用的外貌：第一句（性别、年龄、族裔）加上写脸、头发、皮肤、眼镜这些的句子。"""
+    sentences = [x for x in re.split(r"(?<=[.!?])\s+", (visual_prompt or "").strip()) if x]
+    if not sentences:
+        return ""
+    kept = [sentences[0]] + [x for x in sentences[1:] if _FACE.search(x)]
+    return " ".join(kept)
+
+
+def look_for_size(visual_prompt: str, shot_size: str = "") -> str:
+    """按景别取舍外貌：大特写、特写只要脸和头发；近景去掉只写下半身的句子；中景、全景用全文。"""
+    if shot_size in FACE_SIZES:
+        return face_look(visual_prompt)
+    if shot_size in UPPER_SIZES:
+        return upper_body_look(visual_prompt)
+    return (visual_prompt or "").strip()
+
+
+def resolve_char_tokens(text: str, looks: dict[int, str], shot_size: str = "") -> str:
+    """把 {{char:<id>}} 换成该角色按景别取舍后的外貌（句末补句号）；没有占位符时原样返回。
+    找不到的角色（删了）或外貌是空的、或是中文的，占位符直接去掉（中文进英文提示词会被画成字）。"""
+    if not text or "{{" not in text:
+        return text or ""
+
+    def sub(m: re.Match) -> str:
+        look = look_for_size(looks.get(int(m.group(1)), "") or "", shot_size).strip()
+        if not look or _CJK_ANY.search(look):
+            return ""
+        return look if look[-1] in ".!?" else look + "."
+
+    out = CHAR_TOKEN.sub(sub, text)
+    return re.sub(r"[ \t]{2,}", " ", out).strip()
+
+
+def project_looks(project) -> dict[int, str]:
+    return {c.id: c.visual_prompt or "" for c in getattr(project, "characters", None) or []}
+
+
+def shot_image_prompt(shot, project) -> str:
+    """镜头的 image_prompt，占位符换成角色当前的外貌（按这一镜的景别取舍）。"""
+    text = shot.image_prompt or ""
+    if "{{" not in text:
+        return text
+    return resolve_char_tokens(text, project_looks(project), shot.shot_size or "")
+
+
 _STILL_WORDS = re.compile(r"\b(?:cinematic\s+)?(?:still(?:\s+(?:image|frame|photo(?:graph)?))?"
                           r"|photograph|photo)s?\b", re.I)
 VIDEO_STYLE_WORDS = 25
@@ -203,7 +264,7 @@ def _refs(ref_ids) -> dict:
 
 def keyframe_input_hash(shot, project, style, engine_name: str, ref_ids=()) -> str:
     """ref_ids：引擎实际用到的定妆照候选 id，换了定妆照首帧就过期。"""
-    return input_hash("first_frame", compose_image_prompt(shot.image_prompt, _anchor(style)),
+    return input_hash("first_frame", compose_image_prompt(shot_image_prompt(shot, project), _anchor(style)),
                       _negative(project, style), engine_name, project.aspect, **_refs(ref_ids))
 
 
@@ -221,7 +282,8 @@ def first_frame_locked_face(ff_params: dict | None, image_max_refs: int) -> bool
 
 def video_input_hash(shot, project, style, first_frame_candidate_id: int, engine_name: str,
                      has_audio: bool, ref_ids=()) -> str:
-    prompt = compose_video_prompt(shot.motion_prompt, shot.image_prompt, shot.audio_prompt,
+    prompt = compose_video_prompt(shot.motion_prompt, shot_image_prompt(shot, project),
+                                  shot.audio_prompt,
                                   shot.dialogue, anchor=_anchor(style), has_audio=has_audio)
     return input_hash("video", prompt, first_frame_candidate_id, engine_name, project.aspect,
                       round(float(shot.duration), 2), **_refs(ref_ids))
@@ -238,14 +300,15 @@ def ref_inputs(refs) -> list[dict]:
 
 def keyframe_inputs(shot, project, style, engine_name: str, refs=()) -> dict:
     """refs：引擎实际用到的参考图（domain.refs.Ref），与 keyframe_input_hash 的 ref_ids 一一对应。"""
-    return {"prompt": compose_image_prompt(shot.image_prompt, _anchor(style)),
+    return {"prompt": compose_image_prompt(shot_image_prompt(shot, project), _anchor(style)),
             "negative": _negative(project, style), "engine": engine_name,
             "aspect": project.aspect, "refs": ref_inputs(refs)}
 
 
 def video_inputs(shot, project, style, first_frame_candidate_id: int, engine_name: str,
                  has_audio: bool, refs=()) -> dict:
-    prompt = compose_video_prompt(shot.motion_prompt, shot.image_prompt, shot.audio_prompt,
+    prompt = compose_video_prompt(shot.motion_prompt, shot_image_prompt(shot, project),
+                                  shot.audio_prompt,
                                   shot.dialogue, anchor=_anchor(style), has_audio=has_audio)
     return {"prompt": prompt, "negative": _negative(project, style), "engine": engine_name,
             "aspect": project.aspect, "refs": ref_inputs(refs),

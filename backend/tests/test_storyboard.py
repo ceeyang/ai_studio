@@ -12,7 +12,9 @@ LOOK = ("a woman in her late twenties with an oval face and shoulder length blac
 
 
 def shots_json(n, cast=("林夏",), duration=5):
-    img = "medium close-up, 85mm, eye level. " + LOOK + " " + " ".join(["detail"] * 50)
+    # 林夏是每个测试库里第一个角色（id=1）：cast 里有她就写她的外貌占位符
+    who = "{{char:1}} The young woman sits still. " if "林夏" in cast else ""
+    img = "medium close-up, 85mm, eye level. " + who + " ".join(["detail"] * 60)
     return {"shots": [{
         "shot_size": "近景", "camera_move": "static", "action": f"动作{i}", "cast": list(cast),
         "dialogue": ([{"speaker": "林夏", "zh": "词被改了", "start": 0.5, "end": 2.0}] if i == 0 else []),
@@ -102,7 +104,7 @@ def test_duration_clamped_to_engine_max(tmp_path, db):
 
 
 def test_duration_clamp_trims_dialogue_past_new_duration(tmp_path, db):
-    img = "medium close-up, 85mm, eye level. " + LOOK + " " + " ".join(["detail"] * 50)
+    img = "medium close-up, 85mm, eye level. {{char:1}} The young woman sits. " + " ".join(["detail"] * 50)
     block1 = {"shots": [
         {"shot_size": "近景", "camera_move": "static", "action": "动作0", "cast": ["林夏"],
          "dialogue": [{"speaker": "林夏", "zh": "第一句", "start": 0.5, "end": 6.5},
@@ -529,7 +531,7 @@ def test_storyboard_prompt_rules_v2():
         known_props=["a battered red scooter"])
     assert "输出前自检" in system and system.index("输出前自检") > system.index("transition_out")
     assert "不要自己抄进来" in system and "风格锚点" not in system
-    assert "the stocky man" in system and "按景别取舍" in system
+    assert "the stocky man" in system and "按这一镜的景别" in system
     assert "off-screen voice" in system and "lips closed" in system
     assert "这 3 个镜头之内" in system and "不能额外多出镜头" in system
     assert '"老周修车"' in system
@@ -565,7 +567,7 @@ def test_shrink_fallback_with_manual_provider(tmp_path, db):
 
 # ---------------------------------------------------------------- 第二轮评审
 # 内置分镜模板的内容哈希（统一成 LF 后 sha256 前 16 位）和规则版本绑在一起
-TEMPLATE_HASH_FOR_RULES = {2: "7357bca01548d446"}
+TEMPLATE_HASH_FOR_RULES = {2: "7357bca01548d446", 3: "82bf8c0712f702c9"}
 
 
 def test_builtin_template_hash_is_bound_to_rules_version():
@@ -598,12 +600,12 @@ def test_storyboard_prompt_round2_rules():
     system, _ = PromptLibrary(BUILTIN_DIR, BUILTIN_DIR / "none").render(
         "storyboard", anchor="A", characters=[], location=None, text="x", count=3,
         shot_seconds=5, max_seconds=10, prev_action="", block_seconds=15.0)
-    # 外貌并进「主体」那一步：第一次出现就带外貌，排在环境前面
-    assert "2. 主体 + 动作瞬间：主体第一次出现就带上外貌" in system
+    # 外貌并进「主体」那一步：第一次出现写外貌占位符，排在环境前面
+    assert "2. 主体 + 动作瞬间：人物第一次出现时写他的外貌占位符" in system
+    assert "{{char:3}}" in system and "不要再自己写他的脸" in system
     assert "4. 外貌" not in system and system.index("2. 主体") < system.index("4. 环境")
     assert "镜头数固定；放不下时优先保留插入镜头和主线动作，次要动作省略" in system
     assert "镜头不够就把次要的动作合并" not in system
-    assert "每人的外貌各压缩成一句" in system
     assert "motion_prompt 里用简短指代就够了" in system
     assert "image_prompt 和 motion_prompt 都逐字重复" not in system
 
@@ -632,3 +634,123 @@ def test_same_as_error_text_matches_short_reference_rule():
         ShotOut(action="a", image_prompt="same as before " + "word " * 80, motion_prompt="m")
     msg = str(ei.value)
     assert "简短指代" in msg and "完整复述外貌" not in msg
+
+
+# ---------------------------------------------------------------- v3：拼音名、外貌占位符、说话人、语速
+def test_pinyin_patterns():
+    from backend.pipeline.storyboard import pinyin_hits, pinyin_variants
+
+    assert pinyin_variants("老周") == [["lao", "zhou"]]
+    assert pinyin_variants("林小满") == [["lin", "xiao", "man"], ["xiao", "man"]]
+    assert pinyin_variants("周") == [] and pinyin_variants("Tom") == []
+    text = "Lao Zhou rolls the scooter; LAOZHOU nods; lao-zhou waits; Lin Xiaoman and xiaoman"
+    hits = [w for _, w in pinyin_hits(text, ["老周", "林小满"])]
+    assert hits == ["Lao Zhou", "LAOZHOU", "lao-zhou", "Lin Xiaoman", "xiaoman"]
+    # 正常英文不误伤
+    assert pinyin_hits("the man at the linen shop, a slow zoom", ["老周", "林小满"]) == []
+
+
+def test_pinyin_name_in_motion_prompt_is_rejected_then_retried(tmp_path, db):
+    bad = shots_json(2)
+    bad["shots"][1]["motion_prompt"] = "Lin Xia looks up slowly"
+    ctx, ep_id, prov = setup(tmp_path, db, [bad, shots_json(2), shots_json(2)])
+    run_storyboard(ctx, {"episode_id": ep_id})
+    err = prov.calls[1]["messages"][2]["content"]
+    assert "第 2 镜 motion_prompt 里写了角色名的拼音 Lin Xia（林夏）" in err
+
+
+def test_pinyin_name_is_replaced_on_last_attempt(tmp_path, db):
+    from backend.llm.gateway import MAX_RETRIES
+
+    bad = shots_json(2)
+    bad["shots"][0]["audio_prompt"] = "quiet hum, Linxia speaks softly"
+    ctx, ep_id, prov = setup(tmp_path, db, ["不是 JSON"] * MAX_RETRIES + [bad, shots_json(2)])
+    run_storyboard(ctx, {"episode_id": ep_id})
+    with db.session() as s:
+        a = s.get(Episode, ep_id).shots[0].audio_prompt
+    assert "Linxia" not in a and "the woman in her late twenties speaks softly" in a
+    assert any("已换成英文外貌简称" in m for m in ctx.logs)
+
+
+def test_cast_member_needs_placeholder(tmp_path, db):
+    bad = shots_json(2)
+    bad["shots"][0]["image_prompt"] = bad["shots"][0]["image_prompt"].replace("{{char:1}}", "")
+    bad["shots"][1]["motion_prompt"] = "{{char:1}} looks up"
+    ctx, ep_id, prov = setup(tmp_path, db, [bad, shots_json(2), shots_json(2)])
+    run_storyboard(ctx, {"episode_id": ep_id})
+    err = prov.calls[1]["messages"][2]["content"]
+    assert "第 1 镜 cast 里有 林夏，image_prompt 里要写他的外貌占位符（{{char:1}}）" in err
+    assert "第 2 镜 motion_prompt 里不能写外貌占位符" in err
+
+
+def test_unknown_speaker_and_fast_dialogue_are_rejected(tmp_path, db):
+    bad = shots_json(2)
+    bad["shots"][0]["dialogue"] = [{"speaker": "路人", "zh": "让一让", "start": 0.5, "end": 1.5}]
+    bad["shots"][1]["dialogue"] = [{"speaker": "林夏", "zh": "我早就知道是你改了提词器", "start": 0.5,
+                                    "end": 2.0}]
+    ctx, ep_id, prov = setup(tmp_path, db, [bad, shots_json(2), shots_json(2)])
+    run_storyboard(ctx, {"episode_id": ep_id})
+    err = prov.calls[1]["messages"][2]["content"]
+    assert "说话人 路人 不在角色表里" in err
+    assert "在 1.5 秒里说 12 个字太快" in err
+
+
+def test_prompt_lists_placeholders_and_bans_pinyin(tmp_path, db):
+    ctx, ep_id, prov = setup(tmp_path, db, [shots_json(2), shots_json(2)])
+    run_storyboard(ctx, {"episode_id": ep_id})
+    system, user = prov.calls[0]["system"], prov.calls[0]["messages"][0]["content"]
+    assert "- 林夏｜{{char:1}}｜" + LOOK in user
+    assert "拼音也不行" in system and "Lao Zhou" in system
+    assert "slow push in" in system and "orbit" not in system
+    assert "不要写胶片型号、颗粒" in system
+
+
+def test_placeholder_resolves_by_shot_size_and_look_change_reaches_keyframes(tmp_path, db):
+    """镜头里是占位符：首帧提示词按当前外貌、按景别填；换造型后首帧过期，分镜不用重写。"""
+    from backend.pipeline.prompting import keyframe_input_hash, resolve_char_tokens, shot_image_prompt
+    from backend.pipeline.impact import rerun_impact
+
+    look = ("Chinese woman in her late twenties with an oval face and shoulder length black hair. "
+            "Charcoal wool blazer over a white silk blouse. Black slim trousers and white sneakers.")
+    assert resolve_char_tokens("x. {{char:1}} She sits.", {1: look}, "全景") == f"x. {look} She sits."
+    close = resolve_char_tokens("x. {{char:1}} She sits.", {1: look}, "特写")
+    assert "oval face" in close and "blazer" not in close and "sneakers" not in close
+    mid = resolve_char_tokens("x. {{char:1}} She sits.", {1: look}, "近景")
+    assert "blazer" in mid and "sneakers" not in mid
+    assert resolve_char_tokens("x. {{char:9}} She sits.", {1: look}) == "x. She sits."
+
+    ctx, ep_id, prov = setup(tmp_path, db, [shots_json(2), shots_json(2)])
+    run_storyboard(ctx, {"episode_id": ep_id})
+    with db.session() as s:
+        ep = s.get(Episode, ep_id)
+        sh, proj = ep.shots[0], ep.project
+        assert "{{char:1}}" in sh.image_prompt
+        assert LOOK in shot_image_prompt(sh, proj) and "{{" not in shot_image_prompt(sh, proj)
+        before = keyframe_input_hash(sh, proj, proj.style_bible, "zimage")
+        s.scalar(select(Character)).visual_prompt = "a tall man in his forties with a shaved head"
+    with db.session() as s:
+        ep = s.get(Episode, ep_id)
+        sh, proj = ep.shots[0], ep.project
+        assert "shaved head" in shot_image_prompt(sh, proj)
+        assert keyframe_input_hash(sh, proj, proj.style_bible, "zimage") != before
+    # 外貌不进新格式的分镜指纹：换造型不会让分镜重写（不删镜头）
+    with db.session() as s:
+        assert rerun_impact(s, ctx.services, ep_id, "storyboard", False).will_run is False
+    assert run_storyboard(ctx, {"episode_id": ep_id}) == {"blocks_done": 0, "blocks_skipped": 2}
+
+
+def test_old_v2_records_still_compare_looks(tmp_path, db):
+    """v2（外貌抄进 image_prompt）出的分镜：记录里没有 placeholders，外貌仍按老格式进指纹。"""
+    from backend.pipeline.storyboard import block_fps, build_storyboard_plan, pick_fp
+
+    ctx, ep_id, prov = setup(tmp_path, db, [shots_json(2), shots_json(2)])
+    run_storyboard(ctx, {"episode_id": ep_id})
+    with db.session() as s:
+        ep = s.get(Episode, ep_id)
+        recs = {k: v for k, v in ep.stage_hashes.items() if k.startswith("storyboard:")}
+        assert all(r["placeholders"] is True for r in recs.values())
+        plan = build_storyboard_plan(s, ctx.services, ep_id)
+        blk = plan.blocks[0]
+        new, old = block_fps(plan, blk, "")
+        assert new != old and pick_fp({"inputs": "x"}, new, old) == old
+        assert pick_fp({"placeholders": True}, new, old) == new

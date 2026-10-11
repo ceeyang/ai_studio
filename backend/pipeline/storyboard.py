@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
@@ -12,6 +12,7 @@ from backend.domain.models import Episode, Shot
 from backend.domain.shots import renumber_shots
 from backend.domain.slots import delete_slots
 from backend.llm.schemas import StoryboardOut
+from backend.pipeline.prompting import char_token, short_ref
 from backend.pipeline.common import (clean_note, continue_chain, load_episode, render_with_note,
                                      template_rules)
 from backend.queue.errors import JobError
@@ -74,6 +75,132 @@ def cjk_problems(shots, names=()) -> list[str]:
         bad = "".join(cjk_outside_quotes(p, names) for p in (getattr(sh, "props", None) or []))
         if bad:
             out.append(f"第 {i} 镜 props 里有中文「{bad[:20]}」")
+    return out
+
+
+# ------------------------------------------------------------ 角色名拼音
+# CJK 校验拦不住拼音名（Lao Zhou rolls the scooter…），拼音名进了视频提示词，模型不知道是谁，
+# 还会和「the stocky man」这种外貌简称并存。按角色表把名字转成拼音，几种写法都查。
+PROMPT_FIELDS = ("image_prompt", "motion_prompt", "audio_prompt")
+
+
+def pinyin_variants(name: str) -> list[list[str]]:
+    """名字的拼音音节组合：全名（老周 → lao zhou），三个字及以上再加去掉姓的名（林小满 → xiao man）。
+    单音节（一个字、英文名）不查：太容易误伤正常英文单词。"""
+    from pypinyin import lazy_pinyin
+
+    syl = [x.lower() for x in lazy_pinyin(name or "") if x.isascii() and x.isalpha()]
+    if len(syl) != len(name or "") or len(syl) < 2:
+        return []
+    out = [syl]
+    if len(syl) >= 3:
+        out.append(syl[1:])
+    return out
+
+
+def pinyin_pattern(name: str) -> re.Pattern | None:
+    """不分大小写，音节之间可以有空格、连字符或撇号，也可以连写（Lao Zhou / Laozhou / lao-zhou）。"""
+    alts = [r"[\s\-']?".join(re.escape(s) for s in v) for v in pinyin_variants(name)]
+    if not alts:
+        return None
+    return re.compile(r"(?<![A-Za-z])(?:" + "|".join(alts) + r")(?![A-Za-z])", re.I)
+
+
+def pinyin_hits(text: str, names) -> list[tuple[str, str]]:
+    """[(角色名, 原文里写的拼音)]。"""
+    out = []
+    for name in names:
+        pat = pinyin_pattern(name)
+        if pat is None:
+            continue
+        for m in pat.finditer(text or ""):
+            out.append((name, m.group(0)))
+    return out
+
+
+def pinyin_problems(shots, names) -> list[str]:
+    out = []
+    for i, sh in enumerate(shots, start=1):
+        fields = [(f, getattr(sh, f, "") or "") for f in PROMPT_FIELDS]
+        fields += [("props", " | ".join(getattr(sh, "props", None) or []))]
+        for field, text in fields:
+            for name, written in pinyin_hits(text, names):
+                out.append(f"第 {i} 镜 {field} 里写了角色名的拼音 {written}（{name}），"
+                           "换成英文外貌简称（如 the stocky man）")
+    return out
+
+
+def replace_pinyin(shots, refs: dict[str, str]) -> int:
+    """最后一次机会还写了拼音名：直接换成英文外貌简称（不为这个让整段失败）。返回替换次数。"""
+    n = 0
+    for sh in shots:
+        for field in PROMPT_FIELDS:
+            text = getattr(sh, field, "") or ""
+            for name, ref in refs.items():
+                pat = pinyin_pattern(name)
+                if pat is not None:
+                    text, k = pat.subn(ref, text)
+                    n += k
+            setattr(sh, field, text)
+    return n
+
+
+# ------------------------------------------------------------ 外貌占位符、说话人、语速
+MAX_CHARS_PER_SECOND = 5.5
+_PUNCT = re.compile(r"[\s，。、；：？！…—「」『』“”‘’（）《》,.;:?!'\"()\-~～·]")
+
+
+def token_problems(shots, char_ids: dict[str, int]) -> list[str]:
+    """image_prompt 里的外貌占位符：只能指向角色表里的人、cast 里的每个人都要有、不在 cast 里的不要写；
+    motion_prompt / audio_prompt / props 里不能有占位符（视频提示词不会替换它们）。"""
+    from backend.pipeline.prompting import CHAR_TOKEN, char_token
+
+    known = {cid: name for name, cid in char_ids.items()}
+    out = []
+    for i, sh in enumerate(shots, start=1):
+        ids = {int(x) for x in CHAR_TOKEN.findall(sh.image_prompt or "")}
+        bad = sorted(ids - set(known))
+        if bad:
+            out.append(f"第 {i} 镜 image_prompt 里的占位符 {', '.join(char_token(x) for x in bad)} "
+                       "不在角色表里")
+        cast_ids = {char_ids[c] for c in sh.cast if c in char_ids}
+        missing = [known[c] for c in sorted(cast_ids - ids)]
+        if missing:
+            out.append(f"第 {i} 镜 cast 里有 {'、'.join(missing)}，image_prompt 里要写他的外貌占位符"
+                       f"（{'、'.join(char_token(char_ids[n]) for n in missing)}），单独成句，"
+                       "放在描写他的句子前面")
+        extra = [known[c] for c in sorted((ids & set(known)) - cast_ids)]
+        if extra:
+            out.append(f"第 {i} 镜 image_prompt 里写了 {'、'.join(extra)} 的占位符，但 cast 里没有他；"
+                       "看得见就加进 cast，看不见就删掉占位符")
+        for field in ("motion_prompt", "audio_prompt"):
+            if CHAR_TOKEN.search(getattr(sh, field, "") or ""):
+                out.append(f"第 {i} 镜 {field} 里不能写外貌占位符，用英文外貌简称（如 the stocky man）")
+        if any(CHAR_TOKEN.search(p) for p in sh.props or []):
+            out.append(f"第 {i} 镜 props 里不能写外貌占位符")
+    return out
+
+
+def speaker_problems(shots, names) -> list[str]:
+    known = set(names)
+    out = []
+    for i, sh in enumerate(shots, start=1):
+        for d in sh.dialogue:
+            if d.speaker not in known:
+                out.append(f"第 {i} 镜台词「{d.zh}」的说话人 {d.speaker} 不在角色表里；说话人只能用角色表里的"
+                           f"名字（{'、'.join(sorted(known)) or '本集没有角色'}），路人要说话先在剧本角色里补上")
+    return out
+
+
+def speech_rate_problems(shots) -> list[str]:
+    out = []
+    for i, sh in enumerate(shots, start=1):
+        for d in sh.dialogue:
+            chars = len(_PUNCT.sub("", d.zh))
+            span = float(d.end) - float(d.start)
+            if span > 0 and chars / span > MAX_CHARS_PER_SECOND:
+                out.append(f"第 {i} 镜台词「{d.zh}」在 {span:.1f} 秒里说 {chars} 个字太快"
+                           f"（每秒不超过 {MAX_CHARS_PER_SECOND:g} 个字），放宽 start/end 或删字")
     return out
 
 
@@ -158,6 +285,8 @@ class StoryboardPlan:
     blocks: list[dict]   # [{"id", "order", "text", "location", "count", "seconds"}]，按段落顺序
     prompts: object       # PromptLibrary
     aspect: str = "9:16"
+    # 发给模板的角色表：比 characters 多了 id 和外貌占位符 token（characters 保持老样子，算老记录的指纹）
+    char_table: list[dict] = field(default_factory=list)
 
 
 def build_storyboard_plan(s: Session, sv, episode_id: int) -> StoryboardPlan:
@@ -182,6 +311,8 @@ def build_storyboard_plan(s: Session, sv, episode_id: int) -> StoryboardPlan:
     characters = [{"name": c.name, "visual_prompt": c.visual_prompt or c.description}
                  for c in proj.characters]
     char_ids = {c.name: c.id for c in proj.characters}
+    char_table = [{**ch, "id": c.id, "token": char_token(c.id)}
+                  for ch, c in zip(characters, proj.characters)]
     locs = {l.id: {"name": l.name, "time_of_day": l.time_of_day, "atmosphere": l.atmosphere,
                    "visual_prompt": l.visual_prompt} for l in proj.locations}
     plan = [{"id": b.id, "order": b.order, "text": b.text, "location": locs.get(b.location_id),
@@ -189,7 +320,8 @@ def build_storyboard_plan(s: Session, sv, episode_id: int) -> StoryboardPlan:
             for b, n in zip(blocks, counts)]
     return StoryboardPlan(ep=ep, shot_seconds=shot_seconds, max_seconds=max_seconds, anchor=anchor,
                           characters=characters, char_ids=char_ids, blocks=plan,
-                          prompts=sv.prompts(proj.slug), aspect=proj.aspect or "9:16")
+                          prompts=sv.prompts(proj.slug), aspect=proj.aspect or "9:16",
+                          char_table=char_table)
 
 
 def previous_shot_lines(db, block_id: int) -> list[str]:
@@ -211,7 +343,9 @@ def previous_shot_lines(db, block_id: int) -> list[str]:
 # 不强制的运行只比较输入指纹（风格锚、角色表、场景、段落文本、镜头数、时长预算、上一镜动作），
 # 规则版本不同只提示「规则已更新」、不自动重跑——否则每改一次模板，所有剧集下一次整集运行
 # 都会删光镜头、选定的首帧/视频和手改的内容，重新跑一遍 GPU。
-STORYBOARD_RULES_VERSION = 2
+#   v3：image_prompt 里用外貌占位符 {{char:<id>}}（出图时按景别填当前外貌）、不写拼音名、
+#       说话人和语速校验、规则 6 不再和风格锚重叠、低风险的镜头运动词表
+STORYBOARD_RULES_VERSION = 3
 RULES_OUTDATED_HINT = "分镜规则已更新，要按新规则重出请强制重跑"
 
 # 镜头上会被用户改动的字段：生成时记下每镜的哈希，之后对不上就是改过（含拆分出来的新镜头）
@@ -236,6 +370,25 @@ def storyboard_inputs_fp(anchor, characters, location, text, count, shot_seconds
                       prev_action=prev_action or "",
                       block_seconds=float(block_seconds) if block_seconds else None,
                       aspect=aspect or "9:16")
+
+
+def placeholder_characters(characters: list[dict]) -> list[dict]:
+    """用外貌占位符出的分镜，角色外貌不进指纹：换造型时镜头靠占位符自动跟上，不用重写分镜
+    （以前外貌抄进每镜 image_prompt，外貌一改，整集分镜要么不跟、要么全删重出）。"""
+    return [{"name": c.get("name", "")} for c in characters]
+
+
+def block_fps(plan: "StoryboardPlan", blk: dict, prev_action: str) -> tuple[str, str]:
+    """(新格式指纹, 老格式指纹)：新格式（用占位符的分镜）的角色表只有名字，老格式带外貌。"""
+    args = (blk["location"], blk["text"], blk["count"], plan.shot_seconds, plan.max_seconds,
+            prev_action, blk["seconds"], plan.aspect)
+    return (storyboard_inputs_fp(plan.anchor, placeholder_characters(plan.characters), *args),
+            storyboard_inputs_fp(plan.anchor, plan.characters, *args))
+
+
+def pick_fp(record, fp_new: str, fp_old: str) -> str:
+    """按记录当时的格式选指纹比：用占位符出的（记录里 placeholders=True）比新格式，其余比老格式。"""
+    return fp_new if isinstance(record, dict) and record.get("placeholders") else fp_old
 
 
 def shot_content_hash(sh) -> str:
@@ -310,7 +463,9 @@ def storyboard_prompt_fp(prompts, anchor, characters, location, text, count, sho
         count=count, shot_seconds=shot_seconds, max_seconds=max_seconds, prev_action=prev_action,
         block_seconds=block_seconds, previous_shots=[], known_props=list(props or []),
         aspect=aspect)
-    fp = storyboard_inputs_fp(anchor, characters, location, text, count, shot_seconds,
+    legacy = [{"name": c.get("name", ""), "visual_prompt": c.get("visual_prompt", "")}
+              for c in characters]
+    fp = storyboard_inputs_fp(anchor, legacy, location, text, count, shot_seconds,
                               max_seconds, prev_action, block_seconds, aspect)
     return system, user, fp
 
@@ -342,21 +497,25 @@ def run_storyboard(ctx, payload: dict) -> dict:
         label = f"段落 {blk['order'] + 1}"
         previous = previous_shot_lines(sv.db, blk["id"]) if note else []
         props = known_props(sv.db, [b["id"] for b in plan[:idx]])
-        system, user, fp = storyboard_prompt_fp(prompts, anchor, characters, blk["location"],
+        system, user, _ = storyboard_prompt_fp(prompts, anchor, plan_data.char_table,
+                                               blk["location"],
                                                blk["text"], n, shot_seconds, max_seconds,
                                                prev_action, note, previous,
                                                block_seconds=blk["seconds"], props=props,
                                                aspect=plan_data.aspect)
+        # 模板里写了占位符的说明才按占位符校验（项目目录里的老覆盖模板不知道占位符）
+        placeholders = "{{char:" in system
+        fp_new, fp_old = block_fps(plan_data, blk, prev_action)
         key = f"storyboard:{blk['id']}"
         with sv.db.session() as s:
             ep = s.get(Episode, episode_id)
             existing = s.scalar(select(func.count()).select_from(Shot)
                                 .where(Shot.scene_block_id == blk["id"], Shot.origin == "llm"))
             record = (ep.stage_hashes or {}).get(key)
-            judged = judge_block(record, fp, rules, existing > 0)
+            judged = judge_block(record, pick_fp(record, fp_new, fp_old), rules, existing > 0)
             if judged.legacy and not force:
                 # 旧格式指纹没法按新算法重算：当作没变，换成新格式，不重跑（不删镜头和选定的首帧/视频）
-                ep.stage_hashes = {**(ep.stage_hashes or {}), key: upgraded_record(fp)}
+                ep.stage_hashes = {**(ep.stage_hashes or {}), key: upgraded_record(fp_old)}
         if judged.unchanged and not force:
             if judged.legacy:
                 ctx.log(f"{label}：旧版记录，无法判断有没有变，先不动（已换成新格式）；"
@@ -369,6 +528,8 @@ def run_storyboard(ctx, payload: dict) -> dict:
             prev_action = _last_action(sv.db, blk["id"]) or prev_action
             continue
 
+        short_refs = {c["name"]: short_ref(c.get("visual_prompt")) for c in characters}
+
         def check(out: StoryboardOut, n: int = n, target: float = blk["seconds"], *,
                   last: bool = True) -> None:
             if len(out.shots) != n:
@@ -379,9 +540,21 @@ def run_storyboard(ctx, payload: dict) -> dict:
             cjk = cjk_problems(out.shots, list(char_ids))
             if cjk:
                 raise ValueError("；".join(cjk) + "。image_prompt、motion_prompt、audio_prompt 和 props "
-                                 "必须全英文，不能有任何中文字符：角色名要换成角色表里该角色的英文外貌"
-                                 "描述（如 a stocky man in his fifties）；画面里要出现的招牌、字条上的字"
-                                 "写在英文双引号里（如 a sign reading \"老周修车\"）或改成英文描述")
+                                 "必须全英文，不能有任何中文字符：人物在 image_prompt 里第一次出现写他的"
+                                 "外貌占位符，其他地方用英文外貌简称（如 the stocky man）；画面里要出现的"
+                                 "招牌、字条上的字写在英文双引号里（如 a sign reading \"老周修车\"）或改成"
+                                 "英文描述")
+            problems = speaker_problems(out.shots, list(char_ids))
+            if placeholders:
+                problems += token_problems(out.shots, char_ids)
+            if not last:
+                problems += pinyin_problems(out.shots, list(char_ids))
+                problems += speech_rate_problems(out.shots)
+            elif replace_pinyin(out.shots, short_refs):
+                # 最后一次机会：拼音名直接换成英文外貌简称，不为这个让整段失败
+                ctx.log(f"{label}：镜头提示词里还有角色名拼音，已换成英文外貌简称")
+            if problems:
+                raise ValueError("；".join(problems))
             # 最后一次机会（网关按真实调用次数告诉我们；手工粘贴的输出也算）不再因为「差得太多」打回，
             # 按比例缩放兜底（台词放不下的照样打回）
             _, err = budget_durations(out.shots, target, max_seconds, rewrite_over=not last)
@@ -427,7 +600,8 @@ def run_storyboard(ctx, payload: dict) -> dict:
                 ctx.log(f"{label}：时长截断后裁掉 {trimmed} 句超出的台词")
             ep = s.get(Episode, episode_id)
             ep.stage_hashes = {**(ep.stage_hashes or {}), key: {
-                "inputs": fp, "rules": rules,
+                "inputs": fp_new if placeholders else fp_old, "rules": rules,
+                "placeholders": placeholders,
                 "shots": {str(x.id): shot_content_hash(x) for x in added}}}
         done += 1
         prev_action = out.shots[-1].action

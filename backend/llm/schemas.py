@@ -1,6 +1,7 @@
 """各 LLM 任务的输出结构。校验失败的错误信息会原样喂回模型让它改。"""
 from __future__ import annotations
 
+import re
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -109,9 +110,10 @@ class ShotOut(BaseModel):
     @field_validator("image_prompt")
     @classmethod
     def _image_prompt_rules(cls, v: str) -> str:
-        words = len(v.split())
-        if words < 60 or words > 180:
-            raise ValueError(f"image_prompt 要写 80–150 个英文单词，现在是 {words} 个")
+        # 外貌占位符 {{char:3}} 出图时才换成外貌，不算字数
+        words = len(re.sub(r"\{\{\s*char\s*:\s*\d+\s*\}\}", " ", v).split())
+        if words < 40 or words > 170:
+            raise ValueError(f"image_prompt 你写的部分要 60–120 个英文单词（占位符不算），现在是 {words} 个")
         if "same as" in v.lower():
             raise ValueError("image_prompt 里不能写 same as before / same as previous：每个镜头都要独立写全"
                              "（角色第一次出现带上按景别取舍的外貌，之后用 the stocky man 这样的简短指代；"

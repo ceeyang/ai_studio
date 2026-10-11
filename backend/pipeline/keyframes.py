@@ -10,7 +10,7 @@ from backend.engines.base import ImageRequest
 from backend.engines.runninghub.client import RunningHubError
 from backend.pipeline.common import load_episode
 from backend.pipeline.prompting import (compose_image_prompt, join_negative, keyframe_input_hash,
-                                        keyframe_inputs, shot_seed)
+                                        keyframe_inputs, shot_image_prompt, shot_seed)
 from backend.queue.errors import JobError
 from backend.queue.handlers import HANDLERS
 
@@ -72,7 +72,7 @@ def run_keyframe(ctx, payload: dict) -> dict:
         except KeyError as e:
             raise JobError(str(e)) from None
         anchor = style.anchor_text if style else ""
-        prompt = compose_image_prompt(shot.image_prompt, anchor)
+        prompt = compose_image_prompt(shot_image_prompt(shot, proj), anchor)
         negative = join_negative(proj.negative, style.negative if style else "")
         packed = shot_refs(s, shot)
         refs = [sv.media.abs(r.file_path) for r in packed]

@@ -15,8 +15,8 @@ from backend.domain.models import Shot, Slot
 from backend.pipeline.common import check_scene_blocks, clean_note, load_episode
 from backend.pipeline.script import (judge_script, structure_inputs, structure_rules,
                                      visual_chars_and_locations, visual_prompt_fp, visual_rules)
-from backend.pipeline.storyboard import (build_storyboard_plan, edited_shot_ids, judge_block,
-                                         storyboard_inputs_fp, storyboard_rules)
+from backend.pipeline.storyboard import (block_fps, build_storyboard_plan, edited_shot_ids,
+                                         judge_block, pick_fp, storyboard_rules)
 from backend.queue.errors import JobError
 
 
@@ -75,11 +75,8 @@ def scan_storyboard(s: Session, sv, episode_id: int, force: bool,
             # 按段重写：其他段不动（和 run_storyboard 里跳过 only 之外的段一致）
             prev_action = _last_action(s, blk["id"]) or prev_action
             continue
-        fp = storyboard_inputs_fp(plan_data.anchor, plan_data.characters, blk["location"],
-                                  blk["text"], blk["count"], plan_data.shot_seconds,
-                                  plan_data.max_seconds, prev_action, blk["seconds"],
-                                  plan_data.aspect)
         record = stage_hashes.get(f"storyboard:{blk['id']}")
+        fp = pick_fp(record, *block_fps(plan_data, blk, prev_action))
         llm_shots = list(s.scalars(select(Shot).where(Shot.scene_block_id == blk["id"],
                                                       Shot.origin == "llm")))
         judged = judge_block(record, fp, rules, bool(llm_shots))
