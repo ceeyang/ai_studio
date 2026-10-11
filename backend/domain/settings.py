@@ -7,7 +7,7 @@
 - 文本模型（LLM provider）：这一步的单独设置 → 全局默认文本模型 → config.yaml（llm.routes[任务] → llm.default）
 - 首帧 / 视频：镜头上单独选的引擎 → 项目的引擎。设置页的「新项目的图片/视频来源」只在新建项目时
   用来填项目引擎（不给就 zimage / h3_video），不影响已有项目。
-- 定妆照 / 三视图 / 场景图：这次手选的引擎 → 设置页这一步的单独设置 → （三视图：有 H3 用 H3）→ 项目的图像引擎。
+- 定妆照 / 三视图 / 场景图 / 道具图：这次手选的引擎 → 设置页这一步的单独设置 → （三视图：有 H3 用 H3）→ 项目的图像引擎。
   这几步没有项目级的选择，项目的图像引擎就是它们的「默认」，所以这一步的设置排在它前面。
   定妆照另外看项目的风格预设：设置页的定妆照引擎和预设合不来（不在预设推荐的引擎里）时不用它，
   改用预设推荐的定妆照引擎，再退到项目的图像引擎（见 portrait_engine）。
@@ -36,7 +36,8 @@ LLM_STEPS: dict[str, str] = {
     "subtitles.translate": "字幕翻译（配音前）",
 }
 # 首帧 / 视频没有按步骤设置：它们跟项目和镜头走（项目引擎就是它们的设置）
-IMAGE_STEPS: dict[str, str] = {"portrait": "角色定妆照", "turnaround": "三视图", "location": "场景图"}
+IMAGE_STEPS: dict[str, str] = {"portrait": "角色定妆照", "turnaround": "三视图", "location": "场景图",
+                               "prop": "道具图"}
 VIDEO_STEPS: dict[str, str] = {}
 STEP_KIND = {**{k: "llm" for k in LLM_STEPS}, **{k: "image" for k in IMAGE_STEPS},
              **{k: "video" for k in VIDEO_STEPS}}
@@ -171,3 +172,12 @@ def location_engine(sv, project_engine: str, explicit: str | None = None,
         return explicit
     names = sv.engines.names("image")
     return _first(names, (st or _settings(sv)).step("location")) or project_engine
+
+
+def prop_engine(sv, project_engine: str, explicit: str | None = None,
+                st: AppSettings | None = None) -> str:
+    """道具图：明确指定 → 道具图这一步的设置 → 项目的图像引擎。"""
+    if explicit:
+        return explicit
+    names = sv.engines.names("image")
+    return _first(names, (st or _settings(sv)).step("prop")) or project_engine

@@ -738,6 +738,62 @@ export interface Location {
 
 export type LocationPatch = Partial<Pick<Location, 'name' | 'time_of_day' | 'atmosphere' | 'visual_prompt'>>;
 
+/** 道具（分镜里镜头 props 的英文说法）和它的道具图（只拍道具、白底，首帧参考图里排在出场角色后面） */
+export interface Prop {
+  id: number;
+  project_id: number;
+  /** 英文说法，和镜头 props 里的写法一致 */
+  name: string;
+  description: string;
+  /** 英文补充描述（材质、颜色……），出道具图时接在说法后面 */
+  visual_prompt: string;
+  image_candidate_id?: number | null;
+  image_url?: string | null;
+  /** 选定的道具图是按改之前的说法 / 描述出的 */
+  image_stale?: boolean;
+  images?: Candidate[];
+  /** 排队 / 生成中的道具图任务（image.prop） */
+  active_jobs?: JobBrief[];
+  last_failure?: JobBrief | null;
+  /** 哪几集的哪几个镜头用到 */
+  uses?: { episode_number: number; shot_code: string }[];
+}
+
+export type PropPatch = Partial<Pick<Prop, 'description' | 'visual_prompt'>>;
+
+/** 资产选择器的分类 */
+export type AssetKind = 'character' | 'location' | 'prop' | 'shot' | 'archived' | 'shot_ref';
+
+/** GET /api/episodes/{id}/assets 的一项：本项目 / 本集已经有的图片或视频 */
+export interface Asset {
+  /** cand-<候选 id> 或 arch-<历史候选 id> */
+  id: string;
+  kind: AssetKind;
+  /** 槽位：portrait / location_image / first_frame / video …… */
+  slot_kind: string;
+  media: 'image' | 'video';
+  /** 「陈师傅 定妆照」「S03 首帧」 */
+  label: string;
+  /** 角色名 / 场景名 / 道具说法 / 镜头号 */
+  source: string;
+  url: string;
+  thumb_url: string;
+  width?: number | null;
+  height?: number | null;
+  /** 在原来的槽位里是选定的那张 */
+  selected?: boolean;
+  shot_id?: number | null;
+  owner_id?: number | null;
+  engine?: string;
+  created_at?: string | null;
+}
+
+/** 选中的资产：视频要说取首帧还是尾帧 */
+export interface AssetPick {
+  id: string;
+  frame?: 'first' | 'last';
+}
+
 export interface Style {
   anchor_text: string;
   palette: string;

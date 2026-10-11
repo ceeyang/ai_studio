@@ -150,6 +150,7 @@ def delete_project(slug: str, request: Request):
                                           .where(Episode.project_id == p.id)).all())
         delete_slots(s, "character", [c.id for c in p.characters])
         delete_slots(s, "location", [x.id for x in p.locations])
+        delete_slots(s, "prop", [x.id for x in p.props])
         delete_slots(s, "episode", [e.id for e in p.episodes])
         s.delete(p)
     return Response(status_code=204)

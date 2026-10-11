@@ -17,6 +17,7 @@ from pydantic import BaseModel, ConfigDict
 from backend.app.deps import project_by_slug, services
 from backend.domain.settings import (GLOBAL_KEYS, STEP_KIND, STEP_LABEL, AppSettings,
                                      default_image_engine, default_video_engine, location_engine,
+                                     prop_engine,
                                      portrait_engine,
                                      sheet_engine)
 from backend.engines.registry import runtime_of
@@ -121,6 +122,8 @@ def build_settings_out(sv, st: AppSettings, project=None) -> dict[str, Any]:
             return portrait_engine(sv, proj_image, st=x, preset=proj_preset)
         if key == "location":
             return location_engine(sv, proj_image, st=x)
+        if key == "prop":
+            return prop_engine(sv, proj_image, st=x)
         return sheet_engine(sv, proj_image, st=x)
 
     def image_eff_for(key, x):
@@ -128,6 +131,8 @@ def build_settings_out(sv, st: AppSettings, project=None) -> dict[str, Any]:
             return portrait_engine(sv, _PROJECT, st=x)
         if key == "location":
             return location_engine(sv, _PROJECT, st=x)
+        if key == "prop":
+            return prop_engine(sv, _PROJECT, st=x)
         return sheet_engine(sv, _PROJECT, st=x)
 
     steps = []

@@ -48,6 +48,10 @@ import type {
   FitKhmerIn,
   TranslateIn,
   TurnaroundSheetKey,
+  Asset,
+  AssetPick,
+  Prop,
+  PropPatch,
 } from './types';
 
 export const keys = {
@@ -63,6 +67,9 @@ export const keys = {
   projectOverview: (slug: string) => ['episode', 'overview', slug] as const,
   characters: (slug: string) => ['characters', slug] as const,
   locations: (slug: string) => ['locations', slug] as const,
+  props: (slug: string) => ['props', slug] as const,
+  // 挂在 ['episode', id] 下：任何任务结束、镜头候选变了都跟着刷新
+  assets: (episodeId: number) => ['episode', episodeId, 'assets'] as const,
   style: (slug: string) => ['style', slug] as const,
   endCard: (slug: string) => ['endCard', slug] as const,
   exports: (episodeId: number) => ['exports', episodeId] as const,
@@ -586,6 +593,84 @@ export function useUseLocationImage(slug: string) {
     mutationFn: ({ id, candidateId }: { id: number; candidateId: number }) =>
       api.post<Location>(`/api/locations/${id}/images/${candidateId}/use`),
     onSuccess: () => invalidate(qc, keys.locations(slug), ['episode']),
+  });
+}
+
+/** 本项目分镜里出现过的道具（第一次列出时后端给每个道具建一行） */
+export function useProps(slug: string, enabled = true) {
+  return useQuery({
+    queryKey: keys.props(slug),
+    queryFn: () => api.get<Prop[]>(`/api/projects/${enc(slug)}/props`),
+    enabled: enabled && slug !== '',
+  });
+}
+
+export function usePatchProp(slug: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...body }: PropPatch & { id: number }) => api.patch<Prop>(`/api/props/${id}`, body),
+    onSuccess: () => invalidate(qc, keys.props(slug)),
+  });
+}
+
+/** 出道具图：每张一个任务（只拍道具、白底）。engine 不给：设置页道具图这一步 → 项目的图像引擎。 */
+export function useDrawPropImages(slug: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, count, engine }: { id: number; count: number; engine?: string }) =>
+      api.post<RunOut>(`/api/props/${id}/images/draw`, { count, ...(engine ? { engine } : {}) }),
+    onSuccess: () => invalidate(qc, keys.props(slug), ['jobs'], keys.queue),
+  });
+}
+
+/** 上传道具图：新图成为选定的道具图（带这个道具的镜头首帧会过期）。 */
+export function useUploadPropImage(slug: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, file }: { id: number; file: File }) => {
+      const form = new FormData();
+      form.append('file', file);
+      return api.post<Prop>(`/api/props/${id}/image`, form);
+    },
+    onSuccess: () => invalidate(qc, keys.props(slug), ['episode']),
+  });
+}
+
+export function useUsePropImage(slug: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, candidateId }: { id: number; candidateId: number }) =>
+      api.post<Prop>(`/api/props/${id}/images/${candidateId}/use`),
+    onSuccess: () => invalidate(qc, keys.props(slug), ['episode']),
+  });
+}
+
+/** 资产选择器：本项目 / 本集已有的图片和视频（打开选择器时才请求） */
+export function useEpisodeAssets(episodeId: number, enabled = true) {
+  return useQuery({
+    queryKey: keys.assets(episodeId),
+    queryFn: () => api.get<Asset[]>(`/api/episodes/${episodeId}/assets`),
+    enabled: enabled && episodeId > 0,
+  });
+}
+
+/** 把选中的资产复制成镜头的构图参考图（每镜最多 2 张，和上传的共用名额） */
+export function useShotRefsFromAssets(episodeId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, assets }: { id: number; assets: AssetPick[] }) =>
+      api.post<ShotDetail>(`/api/shots/${id}/refs/from-assets`, { assets }),
+    onSuccess: () => invalidate(qc, keys.episode(episodeId)),
+  });
+}
+
+/** 用已有图片当首帧：加成首帧候选（来源记成 asset），select 时设为选定；crop 时居中裁成项目画幅 */
+export function useFirstFrameFromAsset(episodeId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ shotId, ...body }: AssetPick & { shotId: number; crop?: boolean; select?: boolean }) =>
+      api.post<ShotDetail>(`/api/shots/${shotId}/first-frame/from-asset`, body),
+    onSuccess: () => invalidate(qc, keys.episode(episodeId)),
   });
 }
 

@@ -278,6 +278,66 @@ class LocationPatch(BaseModel):
     visual_prompt: str | None = None
 
 
+class PropUse(BaseModel):
+    episode_number: int
+    shot_code: str
+
+
+class PropOut(ORM):
+    """道具（分镜里镜头 props 的英文说法）和它的道具图（只拍道具、白底，首帧参考图里排在角色后面）。"""
+    id: int
+    project_id: int
+    name: str
+    description: str
+    visual_prompt: str
+    image_candidate_id: int | None = None
+    image_url: str | None = None
+    image_stale: bool = False
+    images: list[CandidateOut] = Field(default_factory=list)
+    active_jobs: list[JobBrief] = Field(default_factory=list)
+    last_failure: JobBrief | None = None
+    uses: list[PropUse] = Field(default_factory=list)       # 哪几集的哪几个镜头用到
+
+
+class PropPatch(BaseModel):
+    description: str | None = None
+    visual_prompt: str | None = None
+
+
+class AssetOut(BaseModel):
+    """资产选择器的一项：本项目 / 本集已经有的图片或视频。id 是 "cand-<候选 id>" 或 "arch-<历史候选 id>"。"""
+    id: str
+    kind: str
+    slot_kind: str
+    media: str
+    label: str
+    source: str
+    url: str
+    thumb_url: str
+    width: int | None = None
+    height: int | None = None
+    selected: bool = False
+    shot_id: int | None = None
+    owner_id: int | None = None
+    engine: str = ""
+    created_at: datetime | None = None
+
+
+class AssetPick(BaseModel):
+    id: str
+    # 视频资产取哪一帧：first / last
+    frame: str | None = Field(None, pattern="^(first|last)$")
+
+
+class ShotRefsFromAssetsIn(BaseModel):
+    assets: list[AssetPick] = Field(min_length=1, max_length=2)
+
+
+class FirstFrameFromAssetIn(AssetPick):
+    crop: bool = False       # 画幅和项目不一样时居中裁成项目画幅
+    select: bool = True
+
+
 class EpisodeIn(BaseModel):
     title: str = ""
     source_text: str = ""

@@ -1,8 +1,18 @@
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { errorText } from '../../api/client';
-import { useDeleteShotRef, useEngines, usePatchShot, useProject, useSelectCandidate, useUploadShotRef } from '../../api/queries';
-import { type DialogueLine, type EngineRow, type ShotDetail, type ShotPatch, TRANSITIONS, type Transition } from '../../api/types';
+import {
+  useDeleteShotRef,
+  useEngines,
+  useFirstFrameFromAsset,
+  usePatchShot,
+  useProject,
+  useSelectCandidate,
+  useShotRefsFromAssets,
+  useUploadShotRef,
+} from '../../api/queries';
+import { type Asset, type DialogueLine, type EngineRow, type ShotDetail, type ShotPatch, TRANSITIONS, type Transition } from '../../api/types';
+import { AssetPicker, aspectMismatch } from '../../components/AssetPicker';
 import { useConfirm } from '../../components/ConfirmDialog';
 import { confirmDiscard } from '../../components/confirmDiscard';
 import { EditableFields, type FieldSpec, type FieldValues, type FieldsState, useUnsavedGuard } from '../../components/EditableFields';
@@ -119,11 +129,27 @@ function ContinueToggle({
   );
 }
 
+/** 引擎最多吃几张参考图（引擎表里的 caps.max_refs）；不知道这个引擎时 null */
+export function engineMaxRefs(rows: EngineRow[] | undefined, name: string | undefined): number | null {
+  const row = name ? rows?.find((r) => r.name === name) : undefined;
+  const n = row?.caps?.max_refs;
+  return typeof n === 'number' ? n : null;
+}
+
 /** 首帧参考图的两条提示：参考图上限装不下所有定妆照（哪几个人的脸没锁上）；镜头所在场景还没有场景图。 */
-function RefHints({ shot, missingLocationImage }: { shot: ShotDetail; missingLocationImage?: { name: string; to: string } | null }) {
+function RefHints({
+  shot,
+  maxRefs,
+  missingLocationImage,
+}: {
+  shot: ShotDetail;
+  /** 按抽屉里正在选的图像引擎（草稿）算的参考图上限 */
+  maxRefs: number | null | undefined;
+  missingLocationImage?: { name: string; to: string } | null;
+}) {
   if (shot.continue_from_prev) return null; // 首帧取上一镜尾帧，不打包参考图
   const dropped = shot.first_frame_portraits_dropped ?? [];
-  const showLoc = !!missingLocationImage && shot.image_max_refs !== 0;
+  const showLoc = !!missingLocationImage && maxRefs !== 0;
   if (dropped.length === 0 && !showLoc) return null;
   return (
     <>
@@ -142,18 +168,26 @@ function RefHints({ shot, missingLocationImage }: { shot: ShotDetail; missingLoc
   );
 }
 
-/** 构图参考：每镜最多 2 张构图 / 动作参考图，首帧参考图里排在场景图后面；引擎不吃参考图时提示用不上。 */
-function ShotRefs({ shot, episodeId }: { shot: ShotDetail; episodeId: number }) {
+/**
+ * 构图参考：每镜最多 2 张构图 / 动作参考图，首帧参考图里排在场景图后面；引擎不吃参考图时提示用不上。
+ * 可以上传，也可以从资产里选（角色定妆照、场景图、别的镜头的首帧……，复制一份过来）。
+ * maxRefs 按抽屉里正在选的图像引擎算（还没保存也算），选了吃参考图的引擎就不再提示。
+ */
+function ShotRefs({ shot, episodeId, maxRefs }: { shot: ShotDetail; episodeId: number; maxRefs: number | null | undefined }) {
   const upload = useUploadShotRef(episodeId);
   const del = useDeleteShotRef(episodeId);
+  const fromAssets = useShotRefsFromAssets(episodeId);
+  const [picking, setPicking] = useState(false);
   const refs = shot.shot_refs ?? [];
   const full = refs.length >= MAX_SHOT_REFS;
   const error = upload.error ?? del.error;
   return (
     <section className="shot-refs" aria-label="构图参考">
       <h4>构图参考</h4>
-      <p className="muted small">上传 1–2 张构图或动作参考图（比如同样机位的剧照），出首帧时排在场景图后面一起给引擎。</p>
-      {shot.image_max_refs === 0 && (
+      <p className="muted small">
+        上传 1–2 张构图或动作参考图（比如同样机位的剧照），也可以从已有的角色、场景、道具、镜头图里选，出首帧时排在场景图后面一起给引擎。
+      </p>
+      {maxRefs === 0 && (
         <p className="warn small" data-testid="refs-unsupported">
           这个镜头的图像引擎不吃参考图，构图参考用不上；要用就在下面「图像引擎」换成 H3 图像或 ChatGPT / Gemini 网页。
         </p>
@@ -167,7 +201,9 @@ function ShotRefs({ shot, episodeId }: { shot: ShotDetail; episodeId: number }) 
                 <img src={c.url} alt={`构图参考 ${i + 1}`} loading="lazy" />
               </a>
               <figcaption>
-                <span className="muted small">构图参考 {i + 1}</span>
+                <span className="muted small" title={typeof c.params?.from === 'string' ? `来自 ${c.params.from}` : undefined}>
+                  构图参考 {i + 1}
+                </span>
                 <button
                   type="button"
                   className="sm ghost"
@@ -182,23 +218,123 @@ function ShotRefs({ shot, episodeId }: { shot: ShotDetail; episodeId: number }) 
           ))}
         </div>
       )}
-      <label className={`btn sm${upload.isPending || full ? ' is-disabled' : ''}`} title={full ? `每镜最多 ${MAX_SHOT_REFS} 张，先删一张` : undefined}>
-        {upload.isPending ? '上传中…' : full ? `已有 ${MAX_SHOT_REFS} 张` : '上传构图参考'}
-        <input
-          type="file"
-          accept="image/png,image/jpeg,image/webp"
-          aria-label="上传构图参考"
-          hidden
-          disabled={upload.isPending || full}
-          onChange={(ev) => {
-            const f = ev.target.files?.[0];
-            ev.target.value = '';
-            if (f) upload.mutate({ id: shot.id, file: f });
+      <div className="shot-ref-actions">
+        <label className={`btn sm${upload.isPending || full ? ' is-disabled' : ''}`} title={full ? `每镜最多 ${MAX_SHOT_REFS} 张，先删一张` : undefined}>
+          {upload.isPending ? '上传中…' : full ? `已有 ${MAX_SHOT_REFS} 张` : '上传构图参考'}
+          <input
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            aria-label="上传构图参考"
+            hidden
+            disabled={upload.isPending || full}
+            onChange={(ev) => {
+              const f = ev.target.files?.[0];
+              ev.target.value = '';
+              if (f) upload.mutate({ id: shot.id, file: f });
+            }}
+          />
+        </label>
+        <button
+          type="button"
+          className="sm"
+          disabled={full || fromAssets.isPending}
+          title={full ? `每镜最多 ${MAX_SHOT_REFS} 张，先删一张` : '从本项目已有的角色、场景、道具、镜头图里选'}
+          onClick={() => {
+            fromAssets.reset();
+            setPicking(true);
+          }}
+        >
+          从资产里选
+        </button>
+      </div>
+      {error && <p className="error small">{errorText(error)}</p>}
+      {picking && (
+        <AssetPicker
+          episodeId={episodeId}
+          title={`给 ${shot.code} 选构图参考`}
+          subtitle={`还能加 ${MAX_SHOT_REFS - refs.length} 张；选中的图复制一份给这个镜头，原图删了也不影响。`}
+          max={MAX_SHOT_REFS - refs.length}
+          confirmLabel="用作构图参考"
+          busy={fromAssets.isPending}
+          error={fromAssets.error}
+          onClose={() => setPicking(false)}
+          onConfirm={(picks) => fromAssets.mutate({ id: shot.id, assets: picks }, { onSuccess: () => setPicking(false) })}
+        />
+      )}
+    </section>
+  );
+}
+
+/**
+ * 「用已有图片当首帧」：从资产里挑一张（别的镜头的首帧、某个视频的尾帧、场景图……）加成这一镜的首帧候选，
+ * 默认设为选定。画幅和项目不一样时提示，可以居中裁成项目画幅。
+ */
+function FirstFrameFromAsset({ shot, episodeId, aspect }: { shot: ShotDetail; episodeId: number; aspect?: string }) {
+  const use = useFirstFrameFromAsset(episodeId);
+  const [picking, setPicking] = useState(false);
+  const [crop, setCrop] = useState(true);
+  const [select, setSelect] = useState(true);
+  const own = new Set(shot.slots.filter((s) => s.kind === 'first_frame').flatMap((s) => s.candidates.map((c) => `cand-${c.id}`)));
+  const footer = (picked: Asset[]) => {
+    const a = picked[0];
+    const off = !!a && a.media === 'image' && aspectMismatch(a, aspect);
+    return (
+      <div className="asset-options">
+        {off && (
+          <p className="warn small" data-testid="aspect-mismatch">
+            这张图是 {a.width}×{a.height}，和项目画幅 {aspect} 不一样，直接当首帧出视频会被拉伸或加黑边。
+          </p>
+        )}
+        {a?.media === 'video' && <p className="muted small">从视频里截一帧；视频和项目画幅一样时不会裁。</p>}
+        {(off || a?.media === 'video') && (
+          <label className="small">
+            <input type="checkbox" checked={crop} onChange={(ev) => setCrop(ev.target.checked)} /> 居中裁切成项目画幅（{aspect}）
+          </label>
+        )}
+        <label className="small">
+          <input type="checkbox" checked={select} onChange={(ev) => setSelect(ev.target.checked)} /> 设为这一镜选定的首帧
+        </label>
+      </div>
+    );
+  };
+  return (
+    <div className="ff-from-asset">
+      <button
+        type="button"
+        className="sm"
+        disabled={shot.continue_from_prev || use.isPending}
+        title={
+          shot.continue_from_prev
+            ? '开了「接上一镜」：首帧取上一镜尾帧'
+            : '从本项目已有的图片里选一张当首帧（比如别的镜头的首帧、某个视频的尾帧、场景图）'
+        }
+        onClick={() => {
+          use.reset();
+          setPicking(true);
+        }}
+      >
+        用已有图片当首帧
+      </button>
+      {picking && (
+        <AssetPicker
+          episodeId={episodeId}
+          title={`给 ${shot.code} 选一张首帧`}
+          subtitle="选中的图复制一份加进这一镜的首帧候选（来源记成「已有图片」），出视频就从它开始。"
+          max={1}
+          confirmLabel="用作首帧"
+          exclude={(a) => own.has(a.id)}
+          footer={footer}
+          busy={use.isPending}
+          error={use.error}
+          onClose={() => setPicking(false)}
+          onConfirm={(picks, assets) => {
+            const a = assets[0];
+            const needCrop = crop && (a.media === 'video' || aspectMismatch(a, aspect));
+            use.mutate({ shotId: shot.id, ...picks[0], crop: needCrop, select }, { onSuccess: () => setPicking(false) });
           }}
         />
-      </label>
-      {error && <p className="error small">{errorText(error)}</p>}
-    </section>
+      )}
+    </div>
   );
 }
 
@@ -248,6 +384,7 @@ export function ShotDrawer({
   // 留空 = 跟项目的引擎（设置页只管新项目的默认，镜头上没选时就是项目的）
   const project = useProject(slug ?? '');
   const imageDefault = project.data?.image_engine;
+  const aspect = project.data?.aspect;
   const videoDefault = project.data?.video_engine;
   const patch = usePatchShot(episodeId);
   const patchDialogue = usePatchShot(episodeId);
@@ -334,6 +471,11 @@ export function ShotDrawer({
     .filter((s) => SLOT_ORDER.includes(s.kind))
     .sort((a, b) => SLOT_ORDER.indexOf(a.kind) - SLOT_ORDER.indexOf(b.kind));
   const waiting = waitsPrevVideo(shot);
+  // 参考图上限按抽屉里正在选的图像引擎算（还没保存也算）；和保存的一样时用后端算好的
+  const savedImage = shot.image_engine ?? '';
+  const draftImage = fields?.values.image_engine ?? savedImage;
+  const imageMaxRefs =
+    draftImage === savedImage ? shot.image_max_refs : engineMaxRefs(engines.data?.image, draftImage || imageDefault);
 
   const failures = STAGES.map((st) => ({ st, job: failedJob(shot, st) })).filter((x) => x.job && !activeJob(shot, x.st));
 
@@ -435,6 +577,7 @@ export function ShotDrawer({
           </section>
         ))}
         {select.error && <p className="error">{errorText(select.error)}</p>}
+        <FirstFrameFromAsset shot={shot} episodeId={episodeId} aspect={aspect} />
         <ArchivedCandidates episodeId={episodeId} shotId={shot.id} />
 
         <ContinueToggle
@@ -445,9 +588,9 @@ export function ShotDrawer({
         />
         {patchContinue.error && <p className="error">{errorText(patchContinue.error)}</p>}
 
-        <RefHints shot={shot} missingLocationImage={missingLocationImage} />
+        <RefHints shot={shot} maxRefs={imageMaxRefs} missingLocationImage={missingLocationImage} />
 
-        <ShotRefs shot={shot} episodeId={episodeId} />
+        <ShotRefs shot={shot} episodeId={episodeId} maxRefs={imageMaxRefs} />
 
         <section>
           <h4>提示词与参数</h4>

@@ -94,6 +94,7 @@ export function CandidateGrid({ slot, onSelect, selecting = false }: CandidateGr
             )}
             <figcaption>
               <span>{engineLabel(c.engine)}</span>
+              {c.engine === 'asset' && typeof c.params.from === 'string' && <span className="muted">来自 {c.params.from}</span>}
               <span className="muted">{fmtTime(c.created_at)}</span>
               {isVideo && qcIssues(c).length > 0 && (
                 <>
