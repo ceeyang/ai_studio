@@ -284,7 +284,9 @@ def run_doctor(cfg: Config, engines, comfy, ffmpeg, *, browser=None, api_keys=No
         if "--enable-libass" in v:
             out.append(Check("工具", "ffmpeg", "ok", first))
         else:
-            out.append(Check("工具", "ffmpeg", "warn", first + "（没有 libass，烧字幕会失败）"))
+            out.append(Check("工具", "ffmpeg", "warn",
+                             first + "（没有 libass，烧字幕会失败、AI 标识角标烧不上；"
+                                     "macOS 可装 brew install ffmpeg-full）"))
     except Exception as e:
         out.append(Check("工具", "ffmpeg", "fail", str(e)))
 

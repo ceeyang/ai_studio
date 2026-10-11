@@ -1,6 +1,8 @@
-"""合成导出：按镜头顺序把选定视频拼成成片；可选按分镜时长裁尾、高棉语配音、配乐、双语字幕、片尾卡。
+"""合成导出：按镜头顺序把选定视频拼成成片；可选按分镜时长裁尾、高棉语配音、配乐、双语字幕、片尾卡，
+默认带 AI 生成内容标识（画面角标 + 文件元数据，post/aigc.py）。
 
-顺序：合成画面（裁尾 + xfade）→ 叠配音（只重编码音轨）→ 叠配乐（只重编码音轨）→ 烧字幕并接片尾卡（一次编码）。
+顺序：合成画面（裁尾 + xfade）→ 叠配音（只重编码音轨）→ 叠配乐（只重编码音轨）→
+烧字幕、烧 AI 角标、接片尾卡、写元数据（一次编码；只写元数据时拷贝流不重编码）。
 字幕时间 = 台词 start/end + 该镜在成片里的起点（xfade 偏移），起点取合成时实际量到的每镜时长。
 """
 from __future__ import annotations
@@ -14,11 +16,12 @@ from backend.pipeline.common import job_services
 from backend.pipeline.post import (OUTPUT_FPS, clip_limits, detected_onsets, episode_has_ai_draft,
                                    lines_missing_km, load_cut, load_dub_manifest, mark_exported)
 from backend.post.dub import build_dub_mix_cmd
+from backend.post.aigc import ai_ratio, build_metadata, episode_title, project_aigc, work_id
 from backend.post.music import build_music_mix_cmd, duck_windows
 from backend.post.options import ExportOptions
-from backend.post.render import CardSpec, build_finish_cmd, stage_fonts
-from backend.post.subtitles import (build_endcard_ass, build_subtitles_ass, dub_cues,
-                                    timeline_cues)
+from backend.post.render import CardSpec, build_finish_cmd, ffmpeg_has_filter, stage_fonts
+from backend.post.subtitles import (build_endcard_ass, build_label_ass, build_subtitles_ass,
+                                    dub_cues, timeline_cues)
 from backend.queue.errors import JobError
 from backend.queue.handlers import HANDLERS
 
@@ -62,6 +65,14 @@ def run_export(ctx, payload: dict) -> dict:
         ctx.log(f"注意：这些选定的视频出片自检有问题（疑似跳切 / 开头没接上首帧），成片里会有画面突变："
                 f"{'；'.join(cut.flagged)}"
                 "（不对就到视频阶段重拍或换一条再导出）")
+    aigc = project_aigc(cut.aigc)
+    # 角标要 ass 滤镜（libass）。这台 ffmpeg 没有时不让整次导出失败，照常出片、写元数据，日志里大声提醒
+    label_ok = opts.aigc_label and ffmpeg_has_filter(sv.ffmpeg.ffmpeg, "ass")
+    if opts.aigc_label and not label_ok:
+        ctx.log("注意：这台机器的 ffmpeg 没有 libass（缺 ass 滤镜），「AI 辅助制作」角标烧不进画面，"
+                "这一版没有角标。"
+                "按规定发布的微短剧要有显式标识：换一个带 libass 的 ffmpeg（如 brew install ffmpeg-full）"
+                "再导出；文件元数据里的隐式标识照常写")
     width, height = OUTPUT_SIZES[cut.aspect]
     variant = cut.aspect.replace(":", "x")
     ctx.check_canceled()
@@ -83,7 +94,7 @@ def run_export(ctx, payload: dict) -> dict:
     work = sv.media.run_dir(cut.slug, ctx.job_id) / "work"
     try:
         post = (manifest is not None or not opts.bed or opts.subtitles != "none" or opts.end_card
-                or music_src is not None)
+                or music_src is not None or label_ok or opts.aigc_metadata)
         trims = [{"code": c, "clip": round(s, 3), "used": round(lim, 3)}
                  for c, s, lim in zip(cut.codes, secs, limits) if lim]
         if trims:
@@ -138,9 +149,16 @@ def run_export(ctx, payload: dict) -> dict:
                 fade_out=opts.music_fade_out, windows=windows, has_audio=sv.ffmpeg.has_audio(cur)))
             cur = scored
         card_seconds = 0.0
-        if opts.subtitles != "none" or opts.end_card:
+        meta = None
+        if opts.aigc_metadata:
+            meta = build_metadata(
+                title=episode_title(cut.title, cut.number, cut.episode_title),
+                producer=aigc["producer"], work=work_id(cut.slug, cut.number),
+                ratio=ai_ratio(cut.engines), created=datetime.now().isoformat(timespec="seconds"))
+        if opts.subtitles != "none" or opts.end_card or label_ok or meta:
             st = sv.cfg.subtitles
-            fonts = stage_fonts(st.fonts_dir, st.font_files, work)
+            fonts = (stage_fonts(st.fonts_dir, st.font_files, work)
+                     if opts.subtitles != "none" or opts.end_card or label_ok else "_fonts")
             subs_name = None
             if opts.subtitles != "none":
                 # 有配音时字幕跟着配音实际播放的位置走，否则按台词时间
@@ -161,9 +179,26 @@ def run_export(ctx, payload: dict) -> dict:
                 spec = CardSpec("card.ass", card_seconds, width, height, OUTPUT_FPS,
                                 color=card_color(card.get("background")))
                 ctx.log(f"接片尾卡 {card_seconds:g}s（{len(card['lines'])} 行）")
+            label_name = None
+            if label_ok:
+                seconds = None if opts.aigc_label_always else opts.aigc_label_seconds
+                (work / "label.ass").write_text(
+                    build_label_ass(aigc["label_text"], width, height,
+                                    position=opts.aigc_label_position, seconds=seconds,
+                                    font=st.zh_font), encoding="utf-8")
+                label_name = "label.ass"
+                ctx.log(f"烧 AI 标识角标「{aigc['label_text']}」（"
+                        + ("整集常显" if seconds is None else f"片头 {seconds:g} 秒") + "）")
+            if meta is not None:
+                ctx.log(f"写隐式标识元数据：作品编号 {meta['aigc_work_id']}，出品方 "
+                        f"{meta['aigc_producer']}，AI 参与 {meta['aigc_ratio']}%")
             ctx.check_canceled()
+            work.mkdir(parents=True, exist_ok=True)
             sv.ffmpeg.run(build_finish_cmd(sv.ffmpeg.ffmpeg, cur, out, subs_ass=subs_name, card=spec,
-                                           has_audio=sv.ffmpeg.has_audio(cur), fonts_dir=fonts),
+                                           has_audio=sv.ffmpeg.has_audio(cur), fonts_dir=fonts,
+                                           label_ass=label_name,
+                                           label_on_card=opts.aigc_label_always,
+                                           metadata=meta),
                           cwd=work)
         elif cur != out:
             shutil.move(str(cur), out)
@@ -180,7 +215,13 @@ def run_export(ctx, payload: dict) -> dict:
     settings = {"width": width, "height": height, "fps": OUTPUT_FPS, "clips": len(cut.clips),
                 "missing": cut.missing, **opts.model_dump(),
                 "duration": round(asm.total + card_seconds, 3), "main_seconds": round(asm.total, 3),
-                "end_card_seconds": card_seconds, "trims": trims}
+                "end_card_seconds": card_seconds, "trims": trims,
+                "aigc_label_burned": bool(label_ok)}
+    if label_ok or meta is not None:
+        settings["aigc"] = {"label_text": aigc["label_text"] if label_ok else None,
+                            "producer": aigc["producer"],
+                            "work_id": work_id(cut.slug, cut.number),
+                            "ai_ratio": ai_ratio(cut.engines)}
     if opts.needs_km:
         settings["km_review"] = "ai_draft" if episode_has_ai_draft(cut.dialogue) else "checked"
     if manifest is not None:

@@ -108,6 +108,7 @@ class FakeFFmpeg:
 
     def __init__(self):
         self.calls: list[dict] = []
+        self.cmds: list[list[str]] = []
 
     def video_duration(self, path) -> float:
         return 5.0
@@ -117,6 +118,13 @@ class FakeFFmpeg:
 
     def sound_end(self, path) -> float | None:
         return 0.0
+
+    def run(self, args, cwd=None) -> str:
+        """收尾等步骤：记下命令，把命令最后的输出文件写出来。"""
+        self.cmds.append([str(a) for a in args])
+        Path(args[-1]).parent.mkdir(parents=True, exist_ok=True)
+        Path(args[-1]).write_bytes(b"out")
+        return ""
 
     def assemble(self, clips, out, *, width, height, fps, transitions, work_dir, max_seconds=None):
         self.calls.append({"clips": list(clips), "out": Path(out), "width": width,
@@ -138,3 +146,8 @@ def give_selected(db, shot_id: int, *kinds: str) -> None:
             add_candidate(s, get_or_create_slot(s, "shot", shot_id, kind),
                           file_path=f"demo/media/{kind}/{shot_id}.bin", engine="zimage",
                           params={}, input_hash="h", job_id=None)
+
+
+# 导出选项里 AI 标识几项的默认值（ExportOptions().model_dump() 里会带上）
+AIGC_DEFAULTS = {"aigc_label": True, "aigc_label_position": "top_left", "aigc_label_seconds": 3.0,
+                 "aigc_label_always": False, "aigc_metadata": True}

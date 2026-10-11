@@ -696,6 +696,12 @@ class EndCardIO(BaseModel):
     lines: list[EndCardLine] = Field(default_factory=list, max_length=16)
 
 
+class AigcIO(BaseModel):
+    """项目的 AI 生成内容标识设置：画面角标文字、出品方（写进成片元数据）。空字符串 = 用默认值。"""
+    label_text: str = Field("本片由 AI 辅助制作", max_length=40)
+    producer: str = Field("AI Studio", max_length=100)
+
+
 class RunOut(BaseModel):
     job_ids: list[int]
     warnings: list[str] = Field(default_factory=list)   # 不拦提交的提醒（如出场角色还没有定妆照）

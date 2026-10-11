@@ -163,3 +163,39 @@ def build_endcard_ass(lines: list[dict], width: int, height: int, seconds: float
                 f"\\fad(500,0)}}{text}")
         y += h
     return "\n".join(_head(width, height, styles) + events) + "\n"
+
+
+# AI 标识角标的位置 → ASS 对齐方式（小键盘布局：7 左上、9 右上、1 左下、3 右下）
+LABEL_ALIGN = {"top_left": 7, "top_right": 9, "bottom_left": 1, "bottom_right": 3}
+LABEL_MAX_CHARS = 40
+# 「整集常显」的结束时间：比任何一集都长
+FOREVER = 99 * 3600.0
+
+
+def ass_plain(text: str) -> str:
+    """把一段纯文本放进 ASS 事件：{ } 会被当成样式块、\\ 会被当成转义（\\N 换行、\\h 空格），
+    换成全角字符；换行压成空格。"""
+    out = (text or "").replace("\\", "＼").replace("{", "｛").replace("}", "｝")
+    return " ".join(out.split())
+
+
+def build_label_ass(text: str, width: int, height: int, *, position: str, seconds: float | None,
+                    font: str) -> str:
+    """AI 生成内容标识角标：白字黑边，放在画面一角，seconds 秒后 0.3 秒淡出；seconds=None 整集常显。
+
+    字号约为画面高度的 2.6%（1080×1920 上 49 像素），离边缘约宽度的 4%、高度的 5%（避开圆角和状态栏）。
+    放在下面两个角时贴边、比字幕块（画面下方约 21% 处）低，不会和底部居中的字幕叠在一起。"""
+    if position not in LABEL_ALIGN:
+        raise ValueError(f"角标位置只能是 {tuple(LABEL_ALIGN)}，收到 {position!r}")
+    body = ass_plain(text)[:LABEL_MAX_CHARS]
+    if not body:
+        raise ValueError("AI 标识文字是空的")
+    size = max(24, int(height * 0.026))
+    margin_x, margin_y = int(width * 0.04), int(height * 0.05)
+    styles = [f"Style: AIGC,{font},{size},&H00FFFFFF,&H000000FF,&H00000000,&H80000000,"
+              f"-1,0,0,0,100,100,0,0,1,2.5,1,{LABEL_ALIGN[position]},{margin_x},{margin_x},"
+              f"{margin_y},1"]
+    end = FOREVER if seconds is None else max(float(seconds), 0.5)
+    fade = "" if seconds is None else "{\\fad(0,300)}"
+    event = f"Dialogue: 1,{ass_time(0)},{ass_time(end)},AIGC,,0,0,0,,{fade}{body}"
+    return "\n".join(_head(width, height, styles) + [event]) + "\n"
