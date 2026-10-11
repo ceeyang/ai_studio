@@ -27,6 +27,7 @@ import type {
   ProjectOverview,
   ProjectPatch,
   QueueState,
+  RefreshLooksOut,
   RerunImpact,
   RunIn,
   RunOut,
@@ -376,6 +377,16 @@ export function useUsePortrait(slug: string) {
     mutationFn: ({ id, candidateId }: { id: number; candidateId: number }) =>
       api.post<Character>(`/api/characters/${id}/portraits/${candidateId}/use`),
     onSuccess: () => invalidate(qc, keys.characters(slug), ['episode']),
+  });
+}
+
+/** 把镜头里的外貌更新为当前造型：镜头里一字不差的旧外貌换成外貌占位符（出图时按景别填当前外貌）。 */
+export function useRefreshShotLooks() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, old }: { id: number; old?: string[] }) =>
+      api.post<RefreshLooksOut>(`/api/characters/${id}/shots/refresh-look`, { old: old ?? [] }),
+    onSuccess: () => invalidate(qc, ['episode']),
   });
 }
 

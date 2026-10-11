@@ -296,6 +296,8 @@ export interface ShotDetail extends Shot {
   failures?: JobBrief[];
   /** 首帧引擎完全不吃参考图时，这个镜头用不上的参考图（如「老周 定妆照」）；吃参考图时为空 */
   first_frame_refs_unused?: string[];
+  /** image_prompt 里有角色外貌占位符时，出图实际用的文字（占位符按景别换成角色当前外貌） */
+  image_prompt_resolved?: string | null;
 }
 
 export interface EpisodeDetail extends Episode {
@@ -508,6 +510,17 @@ export interface RecommendedCharacter {
   description: string;
   visual_prompt: string;
   core_features: string;
+}
+
+/** 「把镜头里的外貌更新为当前造型」的结果；镜头写成「第1集 S03」 */
+export interface RefreshLooksOut {
+  /** 旧外貌换成了外貌占位符的镜头 */
+  updated: string[];
+  replacements: number;
+  /** 本来就用占位符、自动跟着当前造型的镜头 */
+  already: string[];
+  /** 出场但找不到一字不差的旧外貌的镜头（分镜改写过）：要手改或重写分镜 */
+  unmatched: string[];
 }
 
 export type CharacterPatch = Partial<Pick<Character, 'name' | 'description' | 'visual_prompt' | 'core_features' | 'voice'>>;

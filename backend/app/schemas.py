@@ -191,6 +191,17 @@ class PortraitPathIn(BaseModel):
     path: str = Field(min_length=1)
 
 
+class RefreshLooksIn(BaseModel):
+    old: list[str] = Field(default_factory=list)   # 刚换掉的旧外貌（不给就只用定妆照候选、推荐方案里记着的）
+
+
+class RefreshLooksOut(BaseModel):
+    updated: list[str]        # 换成了占位符的镜头（「第1集 S03」）
+    replacements: int
+    already: list[str]        # 本来就用占位符的镜头（自动跟着当前造型）
+    unmatched: list[str]      # 出场但找不到一字不差的旧外貌的镜头（分镜改写过，要手改或重写分镜）
+
+
 class CharacterPatch(BaseModel):
     name: str | None = None
     description: str | None = None
@@ -375,6 +386,8 @@ class ShotDetail(ShotOut):
     failures: list[JobBrief] = Field(default_factory=list)      # 首帧、视频各自最近一次失败（之后没出过新的才给）
     # 首帧引擎完全不吃参考图（max_refs=0）时，这个镜头本该带上却用不上的参考图（如「老周 定妆照」）
     first_frame_refs_unused: list[str] = Field(default_factory=list)
+    # image_prompt 里有外貌占位符 {{char:<id>}} 时，出图实际用的文字（占位符按景别换成角色当前外貌）
+    image_prompt_resolved: str | None = None
 
 
 class EpisodeDetail(EpisodeOut):

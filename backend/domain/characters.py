@@ -70,3 +70,83 @@ def use_portrait(s: Session, char: Character, candidate_id: int) -> Candidate:
         char.visual_prompt = vp
     s.flush()
     return c
+
+
+# ---------------------------------------------------------------- 换造型后把镜头里的旧外貌换掉
+def known_looks(s: Session, char: Character, extra=()) -> list[str]:
+    """这个角色用过的外貌提示词（不含当前的）：调用方给的旧外貌、定妆照候选记着的、AI 推荐方案里的。
+    按长度从长到短，替换时先换长的。"""
+    from sqlalchemy import select
+
+    from backend.domain.models import Slot
+
+    out: list[str] = [x for x in extra if isinstance(x, str)]
+    slot = s.scalar(select(Slot).where(Slot.owner_type == "character", Slot.owner_id == char.id,
+                                       Slot.kind == "portrait"))
+    for c in (slot.candidates if slot is not None else []):
+        out.append((c.params or {}).get("visual_prompt") or "")
+    for opt in char.design_options or []:
+        if isinstance(opt, dict):
+            out.append(opt.get("visual_prompt") or "")
+    cur = (char.visual_prompt or "").strip()
+    seen: set[str] = set()
+    looks = []
+    for x in (y.strip() for y in out if isinstance(y, str)):
+        if len(x) >= 20 and x != cur and x not in seen:
+            seen.add(x)
+            looks.append(x)
+    return sorted(looks, key=len, reverse=True)
+
+
+def _variants(look: str) -> list[str]:
+    from backend.pipeline.prompting import face_look, upper_body_look
+
+    out = []
+    for v in (look, look.rstrip(" ."), upper_body_look(look), upper_body_look(look).rstrip(" ."),
+              face_look(look), face_look(look).rstrip(" .")):
+        v = v.strip()
+        if len(v) >= 20 and v not in out:
+            out.append(v)
+    return sorted(out, key=len, reverse=True)
+
+
+def refresh_shot_looks(s: Session, char: Character, extra_old=()) -> dict:
+    """「把镜头里的外貌更新为当前造型」：镜头 image_prompt 里一字不差抄着旧外貌（整段、去掉下半身的、
+    只留脸的）的地方，换成这个角色的外貌占位符——出图时按景别填当前外貌，以后再换造型也自动跟上。
+    只做精确替换：分镜按景别改写过的外貌对不上，列进 unmatched，让用户手改或重写分镜。"""
+    from sqlalchemy import select
+
+    from backend.domain.models import Episode, Shot
+    from backend.pipeline.prompting import char_token
+
+    token = char_token(char.id)
+    olds = [v for look in known_looks(s, char, extra_old) for v in _variants(look)]
+    olds = sorted(dict.fromkeys(olds), key=len, reverse=True)
+    rows = s.execute(select(Shot, Episode.number).join(Episode, Shot.episode_id == Episode.id)
+                     .where(Episode.project_id == char.project_id)
+                     .order_by(Episode.number, Shot.order, Shot.id)).all()
+    updated, already, unmatched = [], [], []
+    replacements = 0
+    for shot, number in rows:
+        label = f"第{number}集 {shot.code or shot.id}"
+        text = shot.image_prompt or ""
+        n = 0
+        for old in olds:
+            k = text.count(old)
+            if k:
+                text = text.replace(old, token)
+                n += k
+        if n:
+            shot.image_prompt = text
+            replacements += n
+            updated.append(label)
+            continue
+        in_cast = any(isinstance(c, dict) and c.get("character_id") == char.id
+                      for c in shot.cast or [])
+        if token in text:
+            already.append(label)
+        elif in_cast:
+            unmatched.append(label)
+    s.flush()
+    return {"updated": updated, "replacements": replacements, "already": already,
+            "unmatched": unmatched}

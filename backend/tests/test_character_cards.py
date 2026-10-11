@@ -324,3 +324,75 @@ def test_portrait_aspect_falls_back_to_9_16_when_engine_has_no_3_4():
 
     assert portrait_aspect(NS(caps=NS(sizes={"9:16": (1, 2), "3:4": (3, 4)}))) == "3:4"
     assert portrait_aspect(NS(caps=NS(sizes={"9:16": (1, 2), "16:9": (2, 1)}))) == "9:16"
+
+
+# ---------------------------------------------------------------- 把镜头里的外貌更新为当前造型
+OLD = ("Chinese man in his mid-fifties with a weathered square face and grey stubble. "
+       "Faded navy-blue cotton work jacket over a grey T-shirt. Oil-stained khaki trousers and "
+       "worn brown work boots.")
+NEW = "Chinese man in his mid-fifties, clean-shaven, round glasses. Brown corduroy jacket."
+
+
+def test_refresh_shot_looks_replaces_exact_old_text_with_placeholder(tmp_path, db):
+    from backend.domain.characters import refresh_shot_looks
+    from backend.domain.models import Shot
+    from backend.pipeline.prompting import keyframe_input_hash, shot_image_prompt
+    from backend.pipeline.keyframes import load_shot
+
+    ctx, runner, ids = setup(tmp_path, db, look=OLD)
+    cast = [{"character_id": ids["char"], "variation_id": None}]
+    with db.session() as s:
+        s.add_all([
+            Shot(episode_id=ids["episode"], order=0, code="S01", shot_size="中景", cast=cast,
+                 image_prompt=f"medium shot, 35mm. {OLD} He crouches by the scooter."),
+            Shot(episode_id=ids["episode"], order=1, code="S02", shot_size="特写", cast=cast,
+                 image_prompt="close-up. the stocky man with grey stubble frowns."),
+            Shot(episode_id=ids["episode"], order=2, code="S03", shot_size="全景", cast=cast,
+                 image_prompt=f"wide. {{{{char:{ids['char']}}}}} He waits."),
+        ])
+        s.flush()
+        s1 = s.query(Shot).filter_by(code="S01").one()
+        sh, _, proj, style = load_shot(s, s1.id)
+        before = keyframe_input_hash(sh, proj, style, "zimage")
+        ch = s.get(Character, ids["char"])
+        ch.visual_prompt = NEW
+        res = refresh_shot_looks(s, ch, [OLD])
+    assert res == {"updated": ["第1集 S01"], "replacements": 1, "already": ["第1集 S03"],
+                   "unmatched": ["第1集 S02"]}
+    with db.session() as s:
+        s1 = s.query(Shot).filter_by(code="S01").one()
+        assert s1.image_prompt == f"medium shot, 35mm. {{{{char:{ids['char']}}}}} He crouches by the scooter."
+        sh, _, proj, style = load_shot(s, s1.id)
+        assert shot_image_prompt(sh, proj) == f"medium shot, 35mm. {NEW} He crouches by the scooter."
+        # 首帧跟着过期
+        assert keyframe_input_hash(sh, proj, style, "zimage") != before
+
+
+def test_refresh_look_api_uses_portrait_history(api):
+    """不给旧外貌：用定妆照候选里记着的外貌（切换造型时当前外貌会记到切走的那张上）。"""
+    from backend.domain.models import Shot
+    from backend.domain.slots import add_candidate
+
+    sv = api.app.state.services
+    api.post("/api/projects", json={"title": "demo"})
+    ep_id = api.post("/api/projects/demo/episodes", json={"source_text": "x"}).json()["id"]
+    cid = api.post("/api/projects/demo/characters", json={"name": "老周", "visual_prompt": OLD}).json()["id"]
+    with sv.db.session() as s:
+        slot = get_or_create_slot(s, "character", cid, "portrait")
+        a = add_candidate(s, slot, file_path="a.png", engine="zimage", params={"visual_prompt": OLD},
+                          input_hash="a", job_id=None)
+        b = add_candidate(s, slot, file_path="b.png", engine="zimage", params={"visual_prompt": NEW},
+                          input_hash="b", job_id=None, auto_select=False)
+        sh = Shot(episode_id=ep_id, order=0, code="S01", image_prompt=f"wide. {OLD} He waits.",
+                  shot_size="全景", cast=[{"character_id": cid, "variation_id": None}])
+        s.add(sh)
+        s.flush()
+        bid, sid = b.id, sh.id
+    assert api.get(f"/api/shots/{sid}").json()["image_prompt_resolved"] is None
+    assert api.post(f"/api/characters/{cid}/portraits/{bid}/use").json()["visual_prompt"] == NEW
+    r = api.post(f"/api/characters/{cid}/shots/refresh-look", json={})
+    assert r.status_code == 200 and r.json()["updated"] == ["第1集 S01"]
+    d = api.get(f"/api/shots/{sid}").json()
+    assert d["image_prompt"] == f"wide. {{{{char:{cid}}}}} He waits."
+    assert d["image_prompt_resolved"] == f"wide. {NEW} He waits."
+    assert api.post("/api/characters/999/shots/refresh-look", json={}).status_code == 404

@@ -8,12 +8,13 @@ import {
   useEpisode,
   useJob,
   usePatchCharacter,
+  useRefreshShotLooks,
   useStepDefault,
   useSuggestDesigns,
   useUploadPortrait,
   useUsePortrait,
 } from '../../api/queries';
-import type { Candidate, Character, DesignOption } from '../../api/types';
+import type { Candidate, Character, DesignOption, RefreshLooksOut } from '../../api/types';
 import { useConfirm } from '../../components/ConfirmDialog';
 import { ImageEngineSelect } from '../../components/ImageEngineSelect';
 import { engineLabel } from '../../format';
@@ -31,6 +32,19 @@ function promptOf(c: Candidate): string {
 /** 换造型 / 换提示词的确认文案：造型是全项目共用的，只数得到本集的镜头，其他集的一并提醒；本集没有出场镜头时不写过期那句。 */
 function staleTail(shots: number): string {
   return shots > 0 ? `，本集出场的 ${shots} 个镜头首帧会过期，其他集出场的镜头也会过期` : '';
+}
+
+/** 换造型时一起做的事：镜头里一字不差抄着旧外貌的地方换成新造型（出图时按景别取舍）。 */
+const LOOK_SYNC_TAIL = '；镜头提示词里一字不差抄着旧外貌的地方会一起换成新造型';
+
+/** 「把镜头里的外貌更新为当前造型」的结果写成一句话。 */
+export function refreshText(r: RefreshLooksOut): string {
+  const parts: string[] = [];
+  if (r.updated.length) parts.push(`${r.updated.length} 个镜头里的旧外貌换成了当前造型（${r.updated.join('、')}），它们的首帧会过期`);
+  if (r.already.length) parts.push(`${r.already.length} 个镜头本来就自动跟着当前造型`);
+  if (r.unmatched.length)
+    parts.push(`${r.unmatched.length} 个出场镜头找不到一字不差的旧外貌（${r.unmatched.join('、')}），要手改提示词或重新生成这几段分镜`);
+  return parts.length ? parts.join('；') : '没有出场镜头需要更新';
 }
 
 function PortraitStrip({
@@ -185,6 +199,8 @@ export function CharacterLooks({
   const upload = useUploadPortrait(slug);
   const draw = useDrawPortraits(slug);
   const use = useUsePortrait(slug);
+  const refresh = useRefreshShotLooks();
+  const [refreshMsg, setRefreshMsg] = useState<string | null>(null);
   const suggest = useSuggestDesigns(slug);
   const confirm = useConfirm();
   const episode = useEpisode(episodeId);
@@ -208,7 +224,10 @@ export function CharacterLooks({
   const portraits = c.portraits ?? [];
   const suggestFailed = job.data && (job.data.status === 'failed' || job.data.status === 'canceled');
   const waitingInput = job.data?.status === 'waiting_input';
-  const error = [patch.error, upload.error, draw.error, use.error, suggest.error].find(Boolean);
+  const error = [patch.error, upload.error, draw.error, use.error, suggest.error, refresh.error].find(Boolean);
+  /** 外貌换了之后：把镜头里抄着旧外貌（old）的地方换成新造型 */
+  const syncShots = (old: string[]) =>
+    refresh.mutate({ id: c.id, old: old.filter((x) => x.trim()) }, { onSuccess: (r) => setRefreshMsg(refreshText(r)) });
   const drawAgain = () => draw.mutate({ id: c.id, count, engine: engine || undefined });
 
   /** 设为当前造型：资料有没保存的修改时先提示；否则确认后才切换（带提示词的会覆盖外貌描述）。 */
@@ -217,14 +236,16 @@ export function CharacterLooks({
       setHint(DIRTY_HINT);
       return;
     }
+    const changes = !!promptOf(p) && promptOf(p).trim() !== c.visual_prompt.trim();
     const ok = await confirm({
       title: '设为当前造型？',
       body: promptOf(p)
-        ? `用这张的提示词覆盖外貌描述${staleTail(castShots)}`
+        ? `用这张的提示词覆盖外貌描述${staleTail(castShots)}${changes ? LOOK_SYNC_TAIL : ''}`
         : `换成这张定妆照（外貌描述不变）${staleTail(castShots)}`,
       confirmText: '设为当前造型',
     });
-    if (ok) use.mutate({ id: c.id, candidateId: p.id });
+    const old = c.visual_prompt;
+    if (ok) use.mutate({ id: c.id, candidateId: p.id }, { onSuccess: () => changes && syncShots([old]) });
   };
 
   const setPrompt = async (prompt: string) => {
@@ -234,10 +255,11 @@ export function CharacterLooks({
     }
     const ok = await confirm({
       title: '设为角色提示词？',
-      body: `用这个方案的提示词覆盖外貌描述${staleTail(castShots)}`,
+      body: `用这个方案的提示词覆盖外貌描述${staleTail(castShots)}${LOOK_SYNC_TAIL}`,
       confirmText: '设为角色提示词',
     });
-    if (ok) patch.mutate({ id: c.id, visual_prompt: prompt });
+    const old = c.visual_prompt;
+    if (ok) patch.mutate({ id: c.id, visual_prompt: prompt }, { onSuccess: () => syncShots([old]) });
   };
 
   return (
@@ -263,6 +285,18 @@ export function CharacterLooks({
       <p className="muted small">
         单击看大图；点「设为当前造型」才会换（提示词跟着换）。出场镜头的首帧和视频会用选定的这张锁脸（锁脸引擎）。
       </p>
+      <div className="row">
+        <button
+          type="button"
+          className="sm"
+          disabled={refresh.isPending}
+          title="新分镜里的外貌是占位符，自动跟着当前造型；以前的分镜把外貌文字抄进了每个镜头，点这里把一字不差的旧外貌换成当前造型"
+          onClick={() => syncShots([])}
+        >
+          {refresh.isPending ? '更新中…' : '把镜头里的外貌更新为当前造型'}
+        </button>
+      </div>
+      {refreshMsg && <p className="notice small" data-testid="refresh-look-result">{refreshMsg}</p>}
       <div className="row draw-bar">
         <label className="inline-field">
           <span>张数</span>

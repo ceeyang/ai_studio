@@ -290,6 +290,12 @@ export function ShotDrawer({
             onValuesChange={setFields}
             onSave={(_v, changed) => patch.mutate({ id: shot.id, ...toShotPatch(changed) })}
           />
+          {shot.image_prompt_resolved && (
+            <details className="muted small resolved-prompt">
+              <summary>{'图像提示词里的 {{char:N}} 是角色外貌占位符，出图时按景别换成角色当前造型：'}</summary>
+              <p>{shot.image_prompt_resolved}</p>
+            </details>
+          )}
         </section>
 
         {shot.dialogue.length > 0 && (

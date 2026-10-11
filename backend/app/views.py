@@ -15,7 +15,8 @@ from backend.domain.models import Character, Episode, Job, Project, Shot
 from backend.domain.refs import shot_refs
 from backend.domain.slots import slots_for
 from backend.pipeline.prompting import (first_frame_locked_face, keyframe_input_hash,
-                                        keyframe_inputs, stale_reason, video_input_hash,
+                                        keyframe_inputs, shot_image_prompt, stale_reason,
+                                        video_input_hash,
                                         video_inputs)
 from backend.post.options import export_label
 from backend.queue.manager import ACTIVE
@@ -152,13 +153,15 @@ def shot_detail(s: Session, sv, shot, proj, style, *, jobs: OwnerJobs | None = N
                             candidates=[candidate_out(c) for c in sl.candidates]))
     if jobs is None:
         jobs = owner_jobs(s, "shot", [shot.id], SHOT_JOB_SLOTS)[shot.id]
+    resolved = shot_image_prompt(shot, proj)
     failures = [f for t, kind in SHOT_JOB_SLOTS.items()
                 if (f := jobs.failure(t, selected_job.get(kind))) is not None]
     return ShotDetail.model_validate(shot).model_copy(update={
         "slots": outs,
         "active_jobs": [job_brief(j, progress) for j in jobs.active],
         "failures": [job_brief(f, failed=True) for f in sorted(failures, key=lambda x: x.id)],
-        "first_frame_refs_unused": unused})
+        "first_frame_refs_unused": unused,
+        "image_prompt_resolved": resolved if resolved != (shot.image_prompt or "") else None})
 
 
 def episode_detail(s: Session, sv, ep, *, progress: Mapping[int, float] | None = None) -> EpisodeDetail:

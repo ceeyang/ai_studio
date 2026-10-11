@@ -163,13 +163,17 @@ describe('角色抽屉', () => {
   });
 
   it('设为当前造型：先确认（写明覆盖外貌描述和过期的镜头数），确认后才切换', async () => {
-    const { calls, user } = setup(CHEN, { 'POST /api/characters/6/portraits/46/use': { ...CHEN, portrait_candidate_id: 46 } });
+    const { calls, user } = setup(CHEN, {
+      'POST /api/characters/6/portraits/46/use': { ...CHEN, portrait_candidate_id: 46 },
+      'POST /api/characters/6/shots/refresh-look': { updated: ['第1集 S01'], replacements: 1, already: [], unmatched: ['第1集 S02'] },
+    });
     const d = await drawer();
     await user.click(within(d).getByRole('button', { name: '定妆照 #46' }));
     const box = await screen.findByRole('dialog', { name: /陈师傅 定妆照/ });
     await user.click(within(box).getByRole('button', { name: '设为当前造型' }));
     const ask = await screen.findByRole('dialog', { name: '设为当前造型？' });
     expect(ask.textContent).toContain('用这张的提示词覆盖外貌描述，本集出场的 2 个镜头首帧会过期，其他集出场的镜头也会过期');
+    expect(ask.textContent).toContain('镜头提示词里一字不差抄着旧外貌的地方会一起换成新造型');
     await user.click(within(ask).getByRole('button', { name: '取消' }));
     expect(posts(calls)).toHaveLength(0);
     // 卡片悬停按钮同样要确认
@@ -177,8 +181,24 @@ describe('角色抽屉', () => {
     await waitFor(() => expect(screen.queryByRole('dialog', { name: /陈师傅 定妆照/ })).toBeNull());
     await user.click(within(d).getByRole('button', { name: '把定妆照 #46 设为当前造型' }));
     await user.click(within(await screen.findByRole('dialog', { name: '设为当前造型？' })).getByRole('button', { name: '设为当前造型' }));
-    await waitFor(() => expect(posts(calls)).toHaveLength(1));
+    // 换造型成功后，把镜头里抄着旧外貌的地方换成新造型（旧外貌一起带上）
+    await waitFor(() => expect(posts(calls)).toHaveLength(2));
     expect(posts(calls)[0]).toMatchObject({ method: 'POST', url: '/api/characters/6/portraits/46/use' });
+    expect(posts(calls)[1]).toMatchObject({ url: '/api/characters/6/shots/refresh-look', body: { old: ['lean mechanic'] } });
+    const msg = await within(d).findByTestId('refresh-look-result');
+    expect(msg.textContent).toContain('1 个镜头里的旧外貌换成了当前造型（第1集 S01）');
+    expect(msg.textContent).toContain('第1集 S02');
+  });
+
+  it('「把镜头里的外貌更新为当前造型」按钮：不带旧外貌（后端用定妆照记着的历史外貌），显示结果', async () => {
+    const { calls, user } = setup(CHEN, {
+      'POST /api/characters/6/shots/refresh-look': { updated: [], replacements: 0, already: ['第1集 S01'], unmatched: [] },
+    });
+    const d = await drawer();
+    await user.click(within(d).getByRole('button', { name: '把镜头里的外貌更新为当前造型' }));
+    await waitFor(() => expect(posts(calls)).toHaveLength(1));
+    expect(posts(calls)[0]).toMatchObject({ url: '/api/characters/6/shots/refresh-look', body: { old: [] } });
+    expect((await within(d).findByTestId('refresh-look-result')).textContent).toBe('1 个镜头本来就自动跟着当前造型');
   });
 
   it('没有出场镜头时确认框不写过期那句', async () => {
@@ -319,6 +339,7 @@ describe('角色抽屉', () => {
         'GET /api/jobs/71': makeJob({ id: 71, type: 'character.suggest', status: 'queued' }),
         'POST /api/characters/6/portraits/draw': { job_ids: [72, 73] },
         'PATCH /api/characters/6': CHEN,
+        'POST /api/characters/6/shots/refresh-look': { updated: [], replacements: 0, already: [], unmatched: [] },
       },
     );
     const d = await drawer();
@@ -343,8 +364,24 @@ describe('角色抽屉', () => {
     expect(ask.textContent).toContain('用这个方案的提示词覆盖外貌描述，本集出场的 2 个镜头首帧会过期，其他集出场的镜头也会过期');
     expect(posts(calls)).toHaveLength(2);
     await user.click(within(ask).getByRole('button', { name: '设为角色提示词' }));
-    await waitFor(() => expect(posts(calls)).toHaveLength(3));
+    await waitFor(() => expect(posts(calls)).toHaveLength(4));
     expect(posts(calls)[2]).toMatchObject({ method: 'PATCH', url: '/api/characters/6', body: { visual_prompt: 'buzz cut mechanic' } });
+    expect(posts(calls)[3]).toMatchObject({ url: '/api/characters/6/shots/refresh-look', body: { old: ['lean mechanic'] } });
+  });
+
+  it('资料里改外观提示词：保存后把镜头里的旧外貌换成新的', async () => {
+    const { calls, user } = setup(CHEN, {
+      'PATCH /api/characters/6': { ...CHEN, visual_prompt: 'bald mechanic' },
+      'POST /api/characters/6/shots/refresh-look': { updated: [], replacements: 0, already: [], unmatched: [] },
+    });
+    const d = await drawer();
+    await user.click(within(d).getByRole('tab', { name: '资料' }));
+    const vp = within(d).getByLabelText(/外观提示词/);
+    await user.clear(vp);
+    await user.type(vp, 'bald mechanic');
+    await user.click(within(d).getByRole('button', { name: '保存' }));
+    await waitFor(() => expect(posts(calls)).toHaveLength(2));
+    expect(posts(calls)[1]).toMatchObject({ url: '/api/characters/6/shots/refresh-look', body: { old: ['lean mechanic'] } });
   });
 
   it('抽屉里没有主按钮（全页唯一的主按钮在阶段条）', async () => {

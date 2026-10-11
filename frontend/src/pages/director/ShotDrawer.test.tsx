@@ -47,6 +47,16 @@ describe('ShotDrawer', () => {
     expect(patch?.body).toEqual({ image_prompt: 'new prompt', duration: 7 });
   });
 
+  it('图像提示词里有外貌占位符：显示出图时实际用的文字；没有占位符不显示', async () => {
+    installFetch({ 'GET /api/engines': ENGINES });
+    const shot = { ...SHOT, image_prompt: 'wide. {{char:3}} He waits.', image_prompt_resolved: 'wide. Chinese man in his fifties. He waits.' };
+    const { unmount } = renderAt(<ShotDrawer shot={shot} episodeId={1} onClose={() => {}} onGenerate={() => {}} />);
+    expect(screen.getByText('wide. Chinese man in his fifties. He waits.')).toBeTruthy();
+    unmount();
+    renderAt(<ShotDrawer shot={SHOT} episodeId={1} onClose={() => {}} onGenerate={() => {}} />);
+    expect(screen.queryByText(/角色外貌占位符/)).toBeNull();
+  });
+
   it('引擎下拉框：留空写成「默认（项目现在用的引擎）」', async () => {
     installFetch({
       'GET /api/engines': { image: [...ENGINES.image, { name: 'krea2', family: 'krea2', caps: {} }], video: ENGINES.video },

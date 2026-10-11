@@ -64,6 +64,7 @@ CHAR_TOKEN = re.compile(r"\{\{\s*char\s*:\s*(\d+)\s*\}\}")
 _FACE = re.compile(r"face|hair|eyes?\b|eyebrows?|brows?\b|nose|lips?\b|mouth|jaw|cheek|chin|skin"
                    r"|complexion|beard|stubble|mustache|moustache|glasses|spectacles|earrings?"
                    r"|freckles?|mole|scar|wrinkle|forehead|bangs|ponytail|bun\b|braid", re.I)
+_TOKEN_WITH_TAIL = re.compile(CHAR_TOKEN.pattern + r"(\s*[.,;:!?])?")
 FACE_SIZES = ("大特写", "特写")
 UPPER_SIZES = ("近景",)
 
@@ -98,11 +99,14 @@ def resolve_char_tokens(text: str, looks: dict[int, str], shot_size: str = "") -
 
     def sub(m: re.Match) -> str:
         look = look_for_size(looks.get(int(m.group(1)), "") or "", shot_size).strip()
+        tail = m.group(2) or ""   # 占位符后面紧跟的标点（替换旧外貌留下的）：用它代替句号
         if not look or _CJK_ANY.search(look):
             return ""
+        if tail:
+            return look.rstrip(" .") + tail.strip()
         return look if look[-1] in ".!?" else look + "."
 
-    out = CHAR_TOKEN.sub(sub, text)
+    out = _TOKEN_WITH_TAIL.sub(sub, text)
     return re.sub(r"[ \t]{2,}", " ", out).strip()
 
 

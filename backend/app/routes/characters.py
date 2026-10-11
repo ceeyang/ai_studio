@@ -5,10 +5,11 @@ from fastapi import APIRouter, Request
 
 from backend.app.deps import check_engines, get_or_404, manager, services
 from backend.app.routes.projects import character_out
-from backend.app.schemas import (CharacterOut, PortraitDrawIn, RecommendIn, RunOut, SuggestIn,
+from backend.app.schemas import (CharacterOut, PortraitDrawIn, RecommendIn, RefreshLooksIn,
+                                 RefreshLooksOut, RunOut, SuggestIn,
                                  TurnaroundCropIn, TurnaroundGenerateIn, TurnaroundLookPatch,
                                  TurnaroundSelectIn)
-from backend.domain.characters import portrait_of, use_portrait
+from backend.domain.characters import portrait_of, refresh_shot_looks, use_portrait
 from backend.domain.turnaround import (SHEETS, crop_cells, look_of, select_sheet,
                                        sheet_slot_kind)
 from backend.domain.models import Candidate, Character, Episode, Slot
@@ -52,6 +53,16 @@ def use(char_id: int, candidate_id: int, request: Request):
         c = get_or_404(s, Character, char_id, "角色")
         use_portrait(s, c, candidate_id)
         return character_out(s, c, sv=services(request))
+
+
+@router.post("/characters/{char_id}/shots/refresh-look", response_model=RefreshLooksOut)
+def refresh_look(char_id: int, body: RefreshLooksIn, request: Request):
+    """把镜头里的外貌更新为当前造型：镜头 image_prompt 里一字不差的旧外貌换成外貌占位符
+    （出图时按景别填当前外貌），首帧随之过期。"""
+    sv = services(request)
+    with sv.db.session() as s:
+        c = get_or_404(s, Character, char_id, "角色")
+        return RefreshLooksOut(**refresh_shot_looks(s, c, body.old))
 
 
 @router.post("/characters/{char_id}/suggest", response_model=RunOut)

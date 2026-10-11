@@ -1,6 +1,6 @@
 // 角色抽屉的「资料」页签：名字、人物描述、核心特征、配音音色；英文外观提示词收在「高级」里。
 import { errorText } from '../../api/client';
-import { usePatchCharacter } from '../../api/queries';
+import { usePatchCharacter, useRefreshShotLooks } from '../../api/queries';
 import type { Character, CharacterPatch } from '../../api/types';
 import { EditableFields, type FieldSpec, type FieldValues } from '../../components/EditableFields';
 import { VOICES } from '../../format';
@@ -17,7 +17,7 @@ const CHARACTER_FIELDS: FieldSpec[] = [
     customLabel: '其他（手填）',
     placeholder: 'Edge TTS 音色，如 km-KH-PisethNeural',
   },
-  { name: 'visual_prompt', label: '外观提示词（英文，会原样写进每个出场镜头）', kind: 'textarea', rows: 5, advanced: true },
+  { name: 'visual_prompt', label: '外观提示词（英文，出图时按景别填进每个出场镜头）', kind: 'textarea', rows: 5, advanced: true },
 ];
 
 /** 角色资料改动转 PATCH 体：音色留空表示不配音（null）。 */
@@ -40,6 +40,7 @@ export function CharacterProfile({
   onDirtyChange: (dirty: boolean) => void;
 }) {
   const patch = usePatchCharacter(slug);
+  const refresh = useRefreshShotLooks();
   return (
     <div className="char-fields">
       <EditableFields
@@ -55,7 +56,15 @@ export function CharacterProfile({
         saving={patch.isPending}
         error={patch.error ? errorText(patch.error) : null}
         onDirtyChange={onDirtyChange}
-        onSave={(_v, ch) => patch.mutate({ id: c.id, ...toCharacterPatch(ch) })}
+        onSave={(_v, ch) => {
+          const old = c.visual_prompt;
+          // 外貌改了：镜头里一字不差抄着旧外貌的地方一起换成新外貌（占位符，出图时按景别填）
+          const sync = ch.visual_prompt !== undefined && ch.visual_prompt.trim() !== old.trim() && old.trim();
+          patch.mutate(
+            { id: c.id, ...toCharacterPatch(ch) },
+            { onSuccess: () => (sync ? refresh.mutate({ id: c.id, old: [old] }) : undefined) },
+          );
+        }}
       />
     </div>
   );
