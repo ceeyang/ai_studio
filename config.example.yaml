@@ -35,6 +35,8 @@ llm:
 
 engines:
   zimage: {enabled: true, params: {}}
+  # Krea2 人像（moodyCutieMixKrea2 + qwen3vl_4b 文本编码 + qwen_image VAE），文生图，不吃参考图
+  krea2: {enabled: true, params: {}}
   h3_image: {enabled: true, params: {turbo: false}}
   h3_video: {enabled: true, params: {turbo: true}}
   wan22_i2v: {enabled: true, params: {}}

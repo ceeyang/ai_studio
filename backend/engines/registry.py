@@ -8,11 +8,11 @@ from typing import Any
 from backend.config import Config
 from backend.engines.base import ImageCaps, VideoCaps
 from backend.engines.browser.engines import BROWSER_ENGINES
-from backend.engines.comfyui.engines import (H3ImageEngine, H3VideoEngine, Wan22I2VEngine,
-                                             ZImageEngine)
+from backend.engines.comfyui.engines import (H3ImageEngine, H3VideoEngine, Krea2Engine,
+                                             Wan22I2VEngine, ZImageEngine)
 from backend.engines.comfyui.template import WorkflowTemplate
 
-ENGINE_CLASSES = {cls.name: cls for cls in (ZImageEngine, H3ImageEngine, H3VideoEngine,
+ENGINE_CLASSES = {cls.name: cls for cls in (ZImageEngine, Krea2Engine, H3ImageEngine, H3VideoEngine,
                                             Wan22I2VEngine, *BROWSER_ENGINES)}
 
 

@@ -39,7 +39,7 @@ export const ACTIVE_STATUSES: JobStatus[] = ['queued', 'running', 'waiting_input
 export const ENGINE_LABEL: Record<string, string> = {
   zimage: 'Z-Image 快速',
   h3_image: 'H3 图像',
-  krea2: 'Krea2',
+  krea2: 'Krea2 人像',
   gpt_image: 'ChatGPT 网页',
   gemini_image: 'Gemini 网页',
   h3_video: 'H3 视频（有声）',

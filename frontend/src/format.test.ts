@@ -39,7 +39,7 @@ describe('format', () => {
   it('引擎中文名：传 id 或引擎对象都行，没见过的原样返回', () => {
     expect(engineLabel('zimage')).toBe('Z-Image 快速');
     expect(engineLabel('h3_image')).toBe('H3 图像');
-    expect(engineLabel('krea2')).toBe('Krea2');
+    expect(engineLabel('krea2')).toBe('Krea2 人像');
     expect(engineLabel('gpt_image')).toBe('ChatGPT 网页');
     expect(engineLabel('gemini_image')).toBe('Gemini 网页');
     expect(engineLabel('h3_video')).toBe('H3 视频（有声）');

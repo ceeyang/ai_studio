@@ -1,0 +1,26 @@
+# moodyCutieMixKrea2 文生图 + 潜空间放大精修（移植自 vglib build_krea2，zerotwo-dance 实测）
+# 一段 8 步 / cfg1 / euler_ancestral + sgm_uniform；二段 1.5 倍潜空间放大后 4 步 denoise 0.54 精修。
+params:
+  prompt: [["5", "text"]]
+  negative: [["6", "text"]]
+  width: [["7", "width"]]
+  height: [["7", "height"]]
+  seed: [["8", "noise_seed"], ["10", "seed"]]
+  steps: [["8", "steps"]]
+  refine_steps: [["10", "steps"]]
+  refine_denoise: [["10", "denoise"]]
+  upscale: [["9", "scale_by"]]
+  prefix: [["21", "filename_prefix"]]
+  unet: [["1", "unet_name"]]
+  clip: [["2", "clip_name"]]
+  vae: [["3", "vae_name"]]
+defaults:
+  negative: ""
+  steps: 8
+  refine_steps: 4
+  refine_denoise: 0.54
+  upscale: 1.5
+  unet: moodyCutieMixKrea2_v20.safetensors
+  clip: qwen3vl_4b_fp8_scaled.safetensors
+  vae: qwen_image_vae.safetensors
+models: [unet, clip, vae]

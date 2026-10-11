@@ -122,3 +122,20 @@ def test_doctor_does_not_create_data_dir(tmp_path):
 def test_object_info_accepts_tries_and_timeout(fake_comfy):
     fake_comfy.object_info = {"KSampler": {}}
     assert "KSampler" in ComfyClient(fake_comfy.url, backoff=0).object_info(tries=1, timeout=15)
+
+
+def test_doctor_checks_krea2_models(tmp_path, fake_comfy):
+    models = tmp_path / "models"
+    (models / "diffusion_models").mkdir(parents=True)
+    (models / "diffusion_models" / "moodyCutieMixKrea2_v20.safetensors").write_bytes(b"")
+    cfg = Config(server=ServerCfg(data_dir=tmp_path / "data"),
+                 comfyui=ComfyCfg(url=fake_comfy.url, models_dir=models),
+                 engines={**ONLY_ZIMAGE, "zimage": EngineCfg(enabled=False)}, llm=LLMCfg())
+    reg = EngineRegistry(cfg)
+    fake_comfy.object_info = {ct: {} for ct in reg.get("krea2").tpl.class_types()}
+    c = by_key(run_doctor(cfg, reg, ComfyClient(fake_comfy.url, backoff=0), FakeFF(),
+                          http_get=lambda url: {}, which=lambda n: None))
+    assert c[("引擎", "krea2 节点")].status == "ok"
+    miss = c[("引擎", "krea2 模型")]
+    assert miss.status == "fail" and "qwen3vl_4b_fp8_scaled.safetensors" in miss.detail
+    assert "qwen_image_vae.safetensors" in miss.detail and "moodyCutie" not in miss.detail

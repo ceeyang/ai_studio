@@ -1,4 +1,4 @@
-"""第一版四个 ComfyUI 引擎。参数与帧数规则移植自 vglib/engines.py（已实测）。"""
+"""ComfyUI 引擎。参数与帧数规则移植自 vglib/engines.py（已实测）。"""
 from __future__ import annotations
 
 import math
@@ -55,6 +55,27 @@ class ZImageEngine(_ComfyEngine):
         return EngineCall(self.name, wf, "image", self.family,
                           meta={"prompt": req.prompt, "negative": req.negative, "seed": req.seed,
                                 "size": [w, h]},
+                          dropped_refs=[str(p) for p in req.refs])
+
+
+class Krea2Engine(_ComfyEngine):
+    """moodyCutieMixKrea2 文生图（人像向）：8 步出图 → 潜空间放大 1.5 倍 → 4 步 denoise 0.54 精修。
+
+    不吃参考图；最终出图是 EmptyLatent 尺寸的 1.5 倍（9:16 出 1152×2016）。"""
+    name = "krea2"
+    family = "krea2"
+    template_name = "krea2"
+    caps = ImageCaps(max_refs=0, supports_negative=True,
+                     sizes={"9:16": (768, 1344), "16:9": (1344, 768), "1:1": (1024, 1024),
+                            "21:9": (1792, 768)})
+
+    def build(self, req: ImageRequest) -> EngineCall:
+        w, h = size_for(self.caps.sizes, req.aspect)
+        wf = self._render({"prompt": req.prompt, "negative": req.negative, "width": w,
+                           "height": h, "seed": req.seed, "prefix": req.prefix})
+        return EngineCall(self.name, wf, "image", self.family,
+                          meta={"prompt": req.prompt, "negative": req.negative, "seed": req.seed,
+                                "size": [w, h], "steps": wf["8"]["inputs"]["steps"]},
                           dropped_refs=[str(p) for p in req.refs])
 
 

@@ -1,0 +1,13 @@
+{
+  "1": {"class_type": "UNETLoader", "inputs": {"unet_name": "", "weight_dtype": "default"}},
+  "2": {"class_type": "CLIPLoader", "inputs": {"clip_name": "", "type": "krea2", "device": "default"}},
+  "3": {"class_type": "VAELoader", "inputs": {"vae_name": ""}},
+  "5": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["2", 0], "text": ""}},
+  "6": {"class_type": "CLIPTextEncode", "inputs": {"clip": ["2", 0], "text": ""}},
+  "7": {"class_type": "EmptyLatentImage", "inputs": {"width": 768, "height": 1344, "batch_size": 1}},
+  "8": {"class_type": "KSamplerAdvanced", "inputs": {"model": ["1", 0], "add_noise": "enable", "noise_seed": 0, "steps": 8, "cfg": 1.0, "sampler_name": "euler_ancestral", "scheduler": "sgm_uniform", "positive": ["5", 0], "negative": ["6", 0], "latent_image": ["7", 0], "start_at_step": 0, "end_at_step": 10000, "return_with_leftover_noise": "disable"}},
+  "9": {"class_type": "LatentUpscaleBy", "inputs": {"samples": ["8", 0], "upscale_method": "bicubic", "scale_by": 1.5}},
+  "10": {"class_type": "KSampler", "inputs": {"model": ["1", 0], "positive": ["5", 0], "negative": ["6", 0], "latent_image": ["9", 0], "seed": 0, "steps": 4, "cfg": 1.0, "sampler_name": "euler", "scheduler": "simple", "denoise": 0.54}},
+  "20": {"class_type": "VAEDecode", "inputs": {"samples": ["10", 0], "vae": ["3", 0]}},
+  "21": {"class_type": "SaveImage", "inputs": {"images": ["20", 0], "filename_prefix": "studio"}}
+}

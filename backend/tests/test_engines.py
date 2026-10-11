@@ -12,9 +12,9 @@ def reg():
 
 
 def test_all_templates_load(reg):
-    assert reg.names() == ["gemini_image", "gpt_image", "h3_image", "h3_video", "wan22_i2v",
-                           "zimage"]
-    assert reg.names("image") == ["gemini_image", "gpt_image", "h3_image", "zimage"]
+    assert reg.names() == ["gemini_image", "gpt_image", "h3_image", "h3_video", "krea2",
+                           "wan22_i2v", "zimage"]
+    assert reg.names("image") == ["gemini_image", "gpt_image", "h3_image", "krea2", "zimage"]
     assert reg.names("video") == ["h3_video", "wan22_i2v"]
     assert "MiniMaxH3ReferenceToVideo" in reg.get("h3_video").tpl.class_types()
 
@@ -136,3 +136,38 @@ def test_config_override_and_disabled_engine():
         reg.video("wan22_i2v")
     with pytest.raises(KeyError, match="不是视频引擎"):
         reg.video("zimage")
+
+
+def test_krea2_build(reg):
+    """Krea2：8 步出图 → 潜空间放大 1.5 倍 → 4 步 denoise 0.54 精修。参数与 ai_videos 实测工作流一致。"""
+    eng = reg.image("krea2")
+    assert eng.family == "krea2" and eng.caps.max_refs == 0 and eng.caps.supports_negative
+    call = eng.build(ImageRequest(prompt="a girl", negative="lowres", aspect="9:16", seed=7,
+                                  prefix="studio/demo/kf", refs=[]))
+    wf = call.workflow
+    assert wf["1"]["inputs"]["unet_name"] == "moodyCutieMixKrea2_v20.safetensors"
+    assert wf["2"]["inputs"] == {"clip_name": "qwen3vl_4b_fp8_scaled.safetensors", "type": "krea2",
+                                 "device": "default"}
+    assert wf["3"]["inputs"]["vae_name"] == "qwen_image_vae.safetensors"
+    assert wf["5"]["inputs"]["text"] == "a girl" and wf["6"]["inputs"]["text"] == "lowres"
+    assert (wf["7"]["inputs"]["width"], wf["7"]["inputs"]["height"]) == (768, 1344)
+    k1 = wf["8"]["inputs"]
+    assert wf["8"]["class_type"] == "KSamplerAdvanced"
+    assert (k1["noise_seed"], k1["steps"], k1["cfg"], k1["sampler_name"], k1["scheduler"]) ==         (7, 8, 1.0, "euler_ancestral", "sgm_uniform")
+    assert wf["9"]["inputs"]["upscale_method"] == "bicubic" and wf["9"]["inputs"]["scale_by"] == 1.5
+    k2 = wf["10"]["inputs"]
+    assert (k2["seed"], k2["steps"], k2["cfg"], k2["sampler_name"], k2["scheduler"], k2["denoise"]) ==         (7, 4, 1.0, "euler", "simple", 0.54)
+    assert wf["20"]["inputs"]["samples"] == ["10", 0]
+    assert wf["21"]["inputs"]["filename_prefix"] == "studio/demo/kf"
+    assert call.model_family == "krea2" and call.output_kind == "image" and call.runner == "comfyui"
+    wide = eng.build(ImageRequest(prompt="p", aspect="16:9")).workflow
+    assert (wide["7"]["inputs"]["width"], wide["7"]["inputs"]["height"]) == (1344, 768)
+    assert eng.tpl.model_files() == ["moodyCutieMixKrea2_v20.safetensors",
+                                     "qwen3vl_4b_fp8_scaled.safetensors", "qwen_image_vae.safetensors"]
+
+
+def test_krea2_drops_refs_and_steps_override(tmp_path):
+    reg = EngineRegistry(Config(engines={"krea2": EngineCfg(params={"steps": 6})}))
+    call = reg.image("krea2").build(ImageRequest(prompt="p", refs=[tmp_path / "a.png"]))
+    assert call.dropped_refs == [str(tmp_path / "a.png")]
+    assert call.workflow["8"]["inputs"]["steps"] == 6
