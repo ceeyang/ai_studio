@@ -18,6 +18,7 @@ from backend.domain.slots import selected_candidate
 from backend.engines.ffmpeg import xfade_timeline
 from backend.llm.schemas import TranslationOut
 from backend.pipeline.common import job_services, load_episode
+from backend.pipeline.prompting import short_ref
 from backend.post.dub import DubLine, edge_tts_save, fit_rate, plan_dub_lines
 from backend.post.options import ExportOptions
 from backend.post.speech import align_onsets
@@ -167,13 +168,15 @@ def run_translate(ctx, payload: dict) -> dict:
                 todo.append({"id": f"{sh.code}.{j + 1}", "shot_id": sh.id, "index": j,
                              "speaker": d.get("speaker") or "", "zh": d["zh"].strip(),
                              "seconds": max(nxt - float(d.get("start") or 0), 0.5)})
+        speakers = speaker_profiles(proj, [t["speaker"] for t in todo])
     if not todo:
         ctx.log("没有需要翻译的台词")
         return {"translated": 0, "skipped": skipped}
     ctx.log(f"翻译 {len(todo)} 句台词（已有译文跳过 {skipped} 句）")
     km = translate_lines(ctx, slug=slug, title=title, todo=todo,
                          glossary=payload.get("glossary") or {},
-                         manual=payload.get("manual") or {}, key=f"{TRANSLATE_TASK}:{episode_id}")
+                         manual=payload.get("manual") or {}, key=f"{TRANSLATE_TASK}:{episode_id}",
+                         speakers=speakers)
     written = []
     with sv.db.session() as s:
         for t in todo:
@@ -190,12 +193,36 @@ def run_translate(ctx, payload: dict) -> dict:
     return {"translated": len(todo), "skipped": skipped}
 
 
+SPEAKER_DESC_CHARS = 60
+
+
+def speaker_profiles(proj, names) -> list[dict]:
+    """翻译用的说话人身份（按台词里出现的顺序，去重）：外貌的英文简称（性别、年龄、族裔，从 visual_prompt
+    取）和人物描述（中文，看两人关系）。高棉语的称谓（បង / ពូ / អូន）要靠它们选。没有角色卡的说话人
+    也列上，两项留空。"""
+    by_name = {c.name: c for c in proj.characters}
+    out, seen = [], set()
+    for name in names:
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        c = by_name.get(name)
+        ref = short_ref(c.visual_prompt) if c is not None else "the speaker"
+        ref = "" if ref == "the speaker" else re.sub(r"^the\s+", "", ref)
+        desc = re.sub(r"\s+", " ", (c.description or "") if c is not None else "").strip()
+        if len(desc) > SPEAKER_DESC_CHARS:
+            desc = desc[:SPEAKER_DESC_CHARS] + "…"
+        out.append({"name": name, "ref": ref, "description": desc})
+    return out
+
+
 def translate_lines(ctx, *, slug: str, title: str, todo: list[dict], glossary: dict, manual: dict,
-                    key: str) -> dict[str, str]:
-    """todo：[{id, speaker, zh, seconds}] → {id: 高棉语}。dialogue.fit_khmer 也用它补缺的译文。"""
+                    key: str, speakers: list[dict] | None = None) -> dict[str, str]:
+    """todo：[{id, speaker, zh, seconds}] → {id: 高棉语}。dialogue.fit_khmer 也用它补缺的译文。
+    speakers：speaker_profiles 的结果（说话人身份，选称谓用）。"""
     sv = ctx.services
     system, user = sv.prompts(slug).render("subtitles_translate", title=title, glossary=glossary,
-                                           lines=todo)
+                                           lines=todo, speakers=speakers or [])
     want = [t["id"] for t in todo]
 
     def check(out: TranslationOut) -> None:

@@ -4,8 +4,8 @@ import pytest
 from backend.engines.ffmpeg import parse_sound_end, xfade_timeline
 from backend.post.dub import build_dub_mix_cmd, build_trim_silence_cmd, fit_rate, plan_dub_lines
 from backend.post.render import CardSpec, build_finish_cmd
-from backend.post.subtitles import (ass_time, build_endcard_ass, build_subtitles_ass, timeline_cues,
-                                    wrap_zh)
+from backend.post.subtitles import (ass_time, build_endcard_ass, build_subtitles_ass, burned_zh,
+                                    timeline_cues, wrap_zh)
 from backend.post.timeline import trim_limit
 
 
@@ -60,6 +60,16 @@ def test_wrap_zh_breaks_after_punctuation():
     assert wrap_zh("修车、改装、钣金喷漆，保险理赔、买车过户", 12) == "修车、改装、钣金喷漆，\\N保险理赔、买车过户"
 
 
+def test_burned_zh_strips_line_end_punctuation_keeps_question_marks():
+    """烧进画面的中文字幕：句末和折行处的「。，、；：」去掉，问号、叹号、省略号保留。"""
+    assert burned_zh("你终于来了。", 20) == "你终于来了"
+    assert burned_zh("您……认识我？", 20) == "您……认识我？"
+    assert burned_zh("别动！", 20) == "别动！"
+    assert burned_zh("好，", 20) == "好"
+    assert burned_zh("修车、改装、钣金喷漆，保险理赔、买车过户。", 12) == "修车、改装、钣金喷漆\\N保险理赔、买车过户"
+    assert burned_zh("。", 20) == ""
+
+
 def test_timeline_cues_follow_xfade_offsets():
     durs = [4.65, 5.167]
     _, starts, _ = xfade_timeline(durs, ["hard_cut"], 24)
@@ -91,7 +101,7 @@ def test_subtitles_ass_two_lines_zh_on_top_km_below():
     ev = [x for x in ass.splitlines() if x.startswith("Dialogue:")]
     # 两行之间插一行小字号空行拉开间距：高棉文的上标元音不会顶到中文
     assert ev == ["Dialogue: 0,0:00:11.40,0:00:13.80,ZH,,0,0,0,,"
-                  "能修的，我们绝对不换。\\N{\\fs14}\\h\\N{\\rKM}អ្វីដែលជួសជុលបាន យើងមិនដូរឡើយ។"]
+                  "能修的，我们绝对不换\\N{\\fs14}\\h\\N{\\rKM}អ្វីដែលជួសជុលបាន យើងមិនដូរឡើយ។"]
     assert "Style: KM,Khmer UI,59," in ass      # 高棉文比中文小一号，但不能太小（1920 高时 59px）
 
 
@@ -100,7 +110,7 @@ def test_subtitles_ass_zh_only_and_skips_empty():
     ass = build_subtitles_ass(timeline_cues(shots, [0.0], [5.0]), 1080, 1920, mode="zh",
                               zh_font="Microsoft YaHei", km_font="Khmer UI")
     ev = [x for x in ass.splitlines() if x.startswith("Dialogue:")]
-    assert ev == ["Dialogue: 0,0:00:00.50,0:00:01.50,ZH,,0,0,0,,能修的。"]
+    assert ev == ["Dialogue: 0,0:00:00.50,0:00:01.50,ZH,,0,0,0,,能修的"]
 
 
 def test_subtitles_ass_rejects_unknown_mode():

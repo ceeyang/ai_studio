@@ -45,6 +45,18 @@ def wrap_zh(text: str, max_chars: int) -> str:
     return head + ("\\N" + wrap_zh(tail, max_chars) if tail else "")
 
 
+# 烧进画面的中文字幕：行尾的这些标点去掉（字幕习惯，句号逗号挂在行尾很碍眼）；？！…… 表语气，保留
+LINE_END_PUNCT = "。，、；：,;:"
+
+
+def burned_zh(text: str, max_chars: int) -> str:
+    """烧进画面的中文字幕：先去掉句末的「。，、；：」再折行，折行处挂在行尾的逗号顿号也去掉。"""
+    body = (text or "").strip().rstrip(LINE_END_PUNCT).strip()
+    if not body:
+        return ""
+    return "\\N".join(line.rstrip(LINE_END_PUNCT) for line in wrap_zh(body, max_chars).split("\\N"))
+
+
 def subtitle_zh(d: dict) -> str:
     """中文字幕显示原句：按高棉语时长改写过的中文（zh）只是为了让嘴型对上配音，凑长了（「那个、就是说」），
     观众要看的是原意（zh_original）。"""
@@ -110,8 +122,9 @@ def build_subtitles_ass(cues: list[Cue], width: int, height: int, *, mode: str, 
     events = []
     for c in cues:
         parts = []
-        if c.zh:
-            parts.append(wrap_zh(c.zh, max_zh))
+        zh = burned_zh(c.zh, max_zh)
+        if zh:
+            parts.append(zh)
         if mode == "zh+km" and c.km:
             parts.append("{\\rKM}" + c.km)
         if parts:

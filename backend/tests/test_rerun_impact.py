@@ -98,7 +98,34 @@ def test_rerun_impact_script_stage(tmp_path, db):
         forced = rerun_impact(s, sv, ep_id, "script", True)
     assert forced.will_run is True
     assert forced.blocks == []
-    assert set(forced.overwrites) == {"角色描述", "场景氛围", "角色外观", "场景外观", "风格设定"}
+    # 已经有风格锚、没带修改意见：视觉设定重跑不覆盖风格
+    assert set(forced.overwrites) == {"角色描述", "场景氛围", "角色外观", "场景外观"}
+    with db.session() as s:
+        noted = rerun_impact(s, sv, ep_id, "script", False, note="换成冷色调")
+    assert set(noted.overwrites) == {"角色描述", "场景氛围", "角色外观", "场景外观", "风格设定"}
+
+
+def test_rerun_impact_visual_lists_only_what_gets_overwritten(tmp_path, db):
+    """角色都选了定妆照、场景都选了场景图、已有风格锚：视觉设定重跑什么外观都不覆盖。"""
+    from backend.domain.characters import add_portrait
+    from backend.domain.locations import add_location_image
+    from backend.domain.models import Character
+
+    gw, prov = make_gateway([STRUCTURE, VISUAL])
+    sv = make_services(tmp_path, db, llm=gw)
+    _, ep_id = seed_episode(db, source="林夏在直播间发现提词器被人改了。")
+    run_script(FakeCtx(sv), {"episode_id": ep_id})
+    with db.session() as s:
+        for c in s.scalars(select(Character)):
+            add_portrait(s, c.id, file_path="demo/p.png", engine="zimage", params={},
+                         input_hash="h", job_id=None)
+        for loc in s.scalars(select(Location)):
+            add_location_image(s, loc.id, file_path="demo/l.png", engine="zimage", params={},
+                               input_hash="h", job_id=None)
+            loc.atmosphere = "更紧张了"
+    with db.session() as s:
+        impact = rerun_impact(s, sv, ep_id, "script", False)
+    assert impact.will_run is True and impact.overwrites == []
 
 
 def test_rerun_impact_script_visual_only_change(tmp_path, db):
@@ -118,7 +145,7 @@ def test_rerun_impact_script_visual_only_change(tmp_path, db):
         impact = rerun_impact(s, sv, ep_id, "script", False)
     assert impact.will_run is True
     assert impact.shots_deleted == 0  # 段落没清空，不牵连镜头
-    assert set(impact.overwrites) == {"角色外观", "场景外观", "风格设定"}
+    assert set(impact.overwrites) == {"角色外观", "场景外观"}   # 已有风格锚：不覆盖
 
 
 def test_rerun_impact_script_deletes_all_llm_shots_when_structure_changes(tmp_path, db):

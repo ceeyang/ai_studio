@@ -68,6 +68,39 @@ def test_location_prompt_is_people_free_and_positive():
     assert "the whole set is visible and still, wide eye-level view of the bare environment" in p
 
 
+LIVE_ANCHOR = ("Photorealistic live-action cinematic still, shot on 35mm and 50mm prime lenses with "
+               "shallow depth of field, subtle fine film grain and gentle halation on highlights, "
+               "muted desaturated color grade with cool shadows and restrained warm accents, moderate "
+               "contrast with deep but detailed blacks, soft directional light with natural falloff, "
+               "natural skin texture, realistic fabric weave and material detail, grounded documentary "
+               "realism.")
+STAIRWELL = ("A narrow concrete stairwell landing of an old residential building at eleven at night "
+             "during heavy rain. Cracked whitewashed walls and a single caged bulb.")
+
+
+def test_location_prompt_does_not_repeat_time_of_day():
+    """ep 8：「…at eleven at night during heavy rain, unoccupied, night.」时段写了两遍。"""
+    loc = Location(name="楼梯间", time_of_day="夜晚", visual_prompt=STAIRWELL)
+    p = location_prompt(loc, LIVE_ANCHOR)
+    assert p.startswith("Empty narrow concrete stairwell landing of an old residential building at "
+                        "eleven at night during heavy rain, unoccupied.")
+    assert ", night." not in p
+    for word in ("Morning", "dusk", "midnight", "daytime", "noon", "evening", "dawn"):
+        loc = Location(name="x", time_of_day="夜晚", visual_prompt=f"A quiet street at {word}.")
+        assert location_prompt(loc, "").startswith(f"Empty quiet street at {word}, unoccupied.")
+    # 地方里没写时段：照常补
+    loc = Location(name="x", time_of_day="夜晚", visual_prompt="A quiet street. Wet asphalt.")
+    assert location_prompt(loc, "").startswith("Empty quiet street, unoccupied, night.")
+
+
+def test_location_prompt_style_drops_skin_clauses():
+    """空场景用不上「natural skin texture」：风格句里去掉写皮肤的分句，其余成像词保留。"""
+    p = location_prompt(Location(name="x", visual_prompt=STAIRWELL), LIVE_ANCHOR)
+    style = p[p.index("Style: "):]
+    assert "skin" not in style.lower()
+    assert "subtle fine film grain" in style and "realistic fabric weave and material detail" in style
+
+
 def test_location_prompt_needs_english():
     with pytest.raises(JobError, match="英文画面提示词"):
         location_prompt(Location(name="修车行", visual_prompt="狭窄的修车行"), "")

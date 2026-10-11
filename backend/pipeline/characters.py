@@ -18,7 +18,8 @@ from backend.domain.turnaround import (SHEETS, crop_cells, look_of,
 from backend.llm.schemas import CharacterRecommendations, DesignOptions, PhotoLook, TurnaroundLook
 from backend.pipeline.common import load_episode
 from backend.pipeline.keyframes import run_comfy
-from backend.pipeline.prompting import join_negative, photo_style, portrait_look, shot_seed
+from backend.pipeline.prompting import (_UPPER_BODY, join_negative, photo_style, portrait_look,
+                                        shot_seed)
 from backend.queue.errors import JobError
 from backend.queue.handlers import HANDLERS
 
@@ -54,10 +55,32 @@ def portrait_prompt(visual_prompt: str, anchor: str) -> str:
     不整段拼风格锚：锚里的雨夜、灯泡、积水会和「纯色影棚背景」打架，出来的是挂在场景里的背景布，
     这张图再当参考图喂给视频模型时会被剪进镜头。"""
     style = photo_style(anchor)
-    parts = [PORTRAIT_FRAME, portrait_look(visual_prompt), PORTRAIT_REMINDER, PORTRAIT_BACKDROP]
+    parts = [PORTRAIT_FRAME, portrait_upper_look(visual_prompt), PORTRAIT_REMINDER, PORTRAIT_BACKDROP]
     if style:
-        parts.append(f"Photographic style: {style}.")
+        # 写「Style」而不是「Photographic style」（和场景图一致）：动漫 / 国风预设不能被说成照片
+        parts.append(f"Style: {style}.")
     return " ".join(parts)
+
+
+_SENTENCE = re.compile(r"(?<=[.!?])\s+")
+
+
+def _lead(text: str) -> tuple[str, ...]:
+    return tuple(re.findall(r"[a-z0-9'-]+", text.lower())[:3])
+
+
+def portrait_upper_look(visual_prompt: str) -> str:
+    """定妆照用的外貌：portrait_look（去掉下半身、坐蹲姿势、手部细节），再丢掉「主语分句被去掉」的句子。
+
+    「Signature detail: the long cardigan hanging below her hips, a soft warm block of color against
+    cool surroundings.」第一个分句写了 hips 被整段去掉，剩下「A soft warm block of color against cool
+    surroundings.」——主语没了，还和灰背景打架。判断办法：结果里的一句，开头和原文任何一句的开头都
+    对不上（说明它是从句子中间接上来的），而且自己也没写上衣 / 脸 / 发型这类上半身的东西，就丢掉。"""
+    look = portrait_look(visual_prompt)
+    starts = {_lead(s) for s in _SENTENCE.split((visual_prompt or "").strip()) if s}
+    kept = [s for s in _SENTENCE.split(look)
+            if s and (_lead(s) in starts or _UPPER_BODY.search(s))]
+    return " ".join(kept) or look
 
 
 def seed_label(call, seed: int) -> str:
@@ -87,7 +110,8 @@ def run_portrait(ctx, payload: dict) -> dict:
         vp = (payload.get("visual_prompt") or ch.visual_prompt or "").strip()
         if not vp:
             raise JobError(f"角色 {ch.name} 还没有外貌提示词，先写一个或用 AI 推荐造型")
-        engine_name = portrait_engine(sv, proj.image_engine, payload.get("engine"))
+        engine_name = portrait_engine(sv, proj.image_engine, payload.get("engine"),
+                                     preset=proj.style_preset or "")
         try:
             engine = sv.engines.image(engine_name)
         except KeyError as e:

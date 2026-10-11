@@ -9,6 +9,8 @@
   用来填项目引擎（不给就 zimage / h3_video），不影响已有项目。
 - 定妆照 / 三视图 / 场景图：这次手选的引擎 → 设置页这一步的单独设置 → （三视图：有 H3 用 H3）→ 项目的图像引擎。
   这几步没有项目级的选择，项目的图像引擎就是它们的「默认」，所以这一步的设置排在它前面。
+  定妆照另外看项目的风格预设：设置页的定妆照引擎和预设合不来（不在预设推荐的引擎里）时不用它，
+  改用预设推荐的定妆照引擎，再退到项目的图像引擎（见 portrait_engine）。
 """
 from __future__ import annotations
 
@@ -19,6 +21,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 
 from backend.domain.models import AppSetting, utcnow
+from backend.domain.style_presets import get_preset
 
 # 用到 LLM 的步骤：key 就是 LLMGateway.generate 的 step（默认等于任务名）
 LLM_STEPS: dict[str, str] = {
@@ -113,12 +116,25 @@ def default_video_engine(sv, st: AppSettings | None = None) -> str:
 
 
 def portrait_engine(sv, project_engine: str, explicit: str | None = None,
-                    st: AppSettings | None = None) -> str:
-    """定妆照：明确指定 → 定妆照这一步的设置 → 项目的图像引擎。"""
+                    st: AppSettings | None = None, preset: str | None = None) -> str:
+    """定妆照引擎。preset 是项目的风格预设（key）；不给（老调用、全局设置页不带项目）时不看预设。
+
+    1. 这次手选的引擎；
+    2. 设置页「角色定妆照」这一步的设置——只在它和项目的风格预设合得来时用：在预设推荐的定妆照引擎
+       （portrait_engines）或推荐的图片引擎（image_engines）里。设置是全局的，在写实项目里设成 krea2，
+       动漫 / 国风项目也照用的话，抽出来的就是写实照片，再当参考图带进首帧，画风全乱；
+    3. 预设推荐的定妆照引擎里第一个可用的（真人写实、商业广告推荐 krea2：中性影棚半身照质感好）；
+    4. 项目的图像引擎。"""
     if explicit:
         return explicit
     names = sv.engines.names("image")
-    return _first(names, (st or _settings(sv)).step("portrait")) or project_engine
+    chosen = _first(names, (st or _settings(sv)).step("portrait"))
+    if preset is None:
+        return chosen or project_engine
+    p = get_preset(preset)
+    if chosen and chosen in (*p.portrait_engines, *p.image_engines):
+        return chosen
+    return _first(names, *p.portrait_engines) or project_engine
 
 
 def sheet_engine(sv, project_engine: str, explicit: str | None = None,

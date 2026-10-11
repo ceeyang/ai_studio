@@ -12,6 +12,7 @@ from sqlalchemy import select
 
 from backend.domain.characters import portrait_of
 from backend.domain.hashing import input_hash
+from backend.domain.locations import location_image_of
 from backend.domain.models import Character, Location, SceneBlock, StyleBible
 from backend.domain.style_presets import prompt_vars
 from backend.llm.schemas import ScriptStructure, ScriptVisual
@@ -27,8 +28,9 @@ from backend.queue.handlers import HANDLERS
 # 重写剧本结构、清空段落、牵连所有镜头。
 #   v3（结构）：爆款剧本规范（3 秒钩子、冲突、反转、结尾钩子、对白密度和长度、对白格式）、风格预设
 #   v3（视觉）：风格锚按项目的风格预设定画风方向，负面词参考预设
-STRUCTURE_RULES_VERSION = 3
-VISUAL_RULES_VERSION = 3
+#   v4（结构、视觉）：开头的称呼「AI 漫剧」改成「AI 短剧」（真人写实预设不是漫画）
+STRUCTURE_RULES_VERSION = 4
+VISUAL_RULES_VERSION = 4
 SCRIPT_RULES_OUTDATED_HINT = "剧本规则已更新，要按新规则重出请强制重跑（会重写段落、牵连镜头）"
 DEFAULT_SHOT_SECONDS = 5.0
 
@@ -325,22 +327,40 @@ def _visual(ctx, episode_id: int, force: bool, manual: dict, note: str | None = 
             ch.visual_prompt = cv.visual_prompt
             ch.core_features = cv.core_features
         by_loc = {l.name: l for l in proj.locations}
+        kept_locs: list[str] = []
         for lv in out.locations:
-            if lv.name in by_loc:
-                by_loc[lv.name].visual_prompt = lv.visual_prompt
+            loc = by_loc.get(lv.name)
+            if loc is None:
+                continue
+            # 已经选定了场景图：外观提示词不覆盖（覆盖了场景图就过期，这个场景所有镜头的首帧跟着过期）
+            if (loc.visual_prompt or "").strip() and location_image_of(s, loc.id) is not None:
+                kept_locs.append(loc.name)
+                continue
+            loc.visual_prompt = lv.visual_prompt
         sb = proj.style_bible
         if sb is None:
             sb = StyleBible()
             s.add(sb)
             proj.style_bible = sb
         st = out.style
-        sb.anchor_text, sb.palette, sb.lighting = st.anchor_text, st.palette, st.lighting
-        sb.texture, sb.character_rules = st.texture, st.character_rules
-        sb.mood_keywords, sb.negative = list(st.mood_keywords), st.negative
+        # 已经有风格锚、这次又没带修改意见：整套风格不覆盖。锚在所有首帧、三视图、定妆照的输入里，
+        # LLM 每次写的锚都不一样——改一个角色描述触发的重跑会让全片首帧过期。只补空着的字段。
+        keep_style = bool((sb.anchor_text or "").strip()) and not (note or "").strip()
+        new = {"anchor_text": st.anchor_text, "palette": st.palette, "lighting": st.lighting,
+               "texture": st.texture, "character_rules": st.character_rules,
+               "mood_keywords": list(st.mood_keywords), "negative": st.negative}
+        for field, value in new.items():
+            if not keep_style or not getattr(sb, field):
+                setattr(sb, field, value)
         ep.stage_hashes = {**(ep.stage_hashes or {}), "visual": script_record(fp, rules)}
     if kept:
         ctx.log(f"视觉设定：{'、'.join(kept)} 已经选定了定妆照造型，外貌提示词不覆盖"
                 "（要换造型到角色抽屉里改）")
+    if kept_locs:
+        ctx.log(f"视觉设定：{'、'.join(kept_locs)} 已经选定了场景图，场景外观不覆盖"
+                "（要换到「设定」里改，再重出场景图）")
+    if keep_style:
+        ctx.log("视觉设定：已有风格锚，没覆盖；要换风格请带修改意见重新生成")
     ctx.log(f"视觉设定：风格锚 {len(out.style.anchor_text.split())} 词，"
             f"角色 {len(out.characters)}，场景 {len(out.locations)}")
     return "done"

@@ -67,6 +67,38 @@ def test_translate_fills_missing_km_as_ai_draft(tmp_path, db):
     assert d2[1]["km_review"] == "checked"
 
 
+def test_translate_gives_each_speaker_identity_for_khmer_honorifics(tmp_path, db):
+    """高棉语称谓（បង / ពូ / អូន）要看说话人的性别、年龄和两人关系：user 里给每个说话人一句身份。"""
+    gw, prov = make_gateway([{"lines": [{"id": "S01.1", "km": "ក"}, {"id": "S02.1", "km": "ខ"}]}])
+    sv = make_services(tmp_path, db, llm=gw)
+    ep_id, _ = seed(db)
+    with db.session() as s:
+        for c in s.scalars(select(Character)):
+            if c.name == "小雨":
+                c.visual_prompt = ("Cambodian woman in her early twenties, oval face, long black hair. "
+                                   "Wears a white blouse.")
+                c.description = "大学生，车被撞了来修，叫陈师傅「师傅」"
+            else:
+                c.visual_prompt = "A Chinese man in his fifties with a weathered square face."
+                c.description = "五十多岁的修车行老板"
+    run_translate(FakeCtx(sv), {"episode_id": ep_id})
+    system = prov.calls[0]["system"]
+    user = prov.calls[0]["messages"][0]["content"]
+    assert "បង" in system and "ពូ" in system and "អូន" in system
+    assert "小雨｜Cambodian woman in her early twenties｜大学生，车被撞了来修，叫陈师傅「师傅」" in user
+    assert "陈师傅｜Chinese man in his fifties｜五十多岁的修车行老板" in user
+
+
+def test_translate_speaker_without_character_card_still_listed(tmp_path, db):
+    gw, prov = make_gateway([{"lines": [{"id": "S01.1", "km": "ក"}]}])
+    sv = make_services(tmp_path, db, llm=gw)
+    ep_id, _ = seed(db, dialogues=([{"speaker": "路人", "zh": "让一让。", "start": 0.5, "end": 2.0}],),
+                    durations=(4.0,))
+    run_translate(FakeCtx(sv), {"episode_id": ep_id})
+    user = prov.calls[0]["messages"][0]["content"]
+    assert "路人｜（不详）｜（不详）" in user
+
+
 def test_translate_rejects_wrong_ids_and_non_khmer_then_retries(tmp_path, db):
     gw, prov = make_gateway([{"lines": [{"id": "S01.1", "km": "hello"}]},
                              {"lines": [{"id": "S01.1", "km": "ជាង!"}, {"id": "S02.1", "km": "ដូរ?"}]}])

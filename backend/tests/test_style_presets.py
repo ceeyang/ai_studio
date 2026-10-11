@@ -200,3 +200,16 @@ def test_api_lists_portrait_engine_recommendation(api):
     assert live["portrait_engine"] == ("krea2" if "krea2" in names else None)
     if "h3_image" in names:
         assert live["image_engine"] == "h3_image"
+
+
+@pytest.mark.parametrize("key", ["cg_realistic", "anime", "guofeng"])
+def test_negatives_do_not_ban_text_but_logo_and_captions(key):
+    """爆款道具常要画字（外卖单、招牌）：负面词不写 text，改成 logo, captions；watermark 保留。"""
+    neg = [x.strip() for x in PRESETS[key].negative.split(",")]
+    assert "text" not in neg
+    assert "logo" in neg and "captions" in neg and "watermark" in neg
+
+
+def test_cg_realistic_prefers_ref_capable_image_engine():
+    """首帧引擎要能吃参考图才能锁脸、用场景图：3D 写实也先推荐 h3_image。"""
+    assert PRESETS["cg_realistic"].image_engines == ("h3_image", "zimage", "krea2")

@@ -35,7 +35,8 @@ def draw_portraits(char_id: int, body: PortraitDrawIn, request: Request):
         if not vp and not c.visual_prompt.strip():
             raise JobError(f"角色 {c.name} 还没有外貌提示词，先写一个或用 AI 推荐造型")
         project_id = c.project_id
-        engine_name = portrait_engine(sv, c.project.image_engine, body.engine)
+        engine_name = portrait_engine(sv, c.project.image_engine, body.engine,
+                                     preset=c.project.style_preset or "")
     check_engines(sv, engine_name, None)
     eng = sv.engines.image(engine_name)
     check_ready(eng)

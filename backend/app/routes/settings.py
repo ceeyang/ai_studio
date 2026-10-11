@@ -84,10 +84,12 @@ def build_settings_out(sv, st: AppSettings, project=None) -> dict[str, Any]:
         return replace(st, steps={k: v for k, v in st.steps.items() if k != key})
 
     proj_image = project.image_engine if project is not None else default_image_engine(sv, st=st)
+    # 定妆照按项目的风格预设挑引擎；不带项目时没有预设（None = 不看预设）
+    proj_preset = (project.style_preset or "") if project is not None else None
 
     def image_eff(key, x):
         if key == "portrait":
-            return portrait_engine(sv, proj_image, st=x)
+            return portrait_engine(sv, proj_image, st=x, preset=proj_preset)
         if key == "location":
             return location_engine(sv, proj_image, st=x)
         return sheet_engine(sv, proj_image, st=x)
