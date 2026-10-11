@@ -7,7 +7,7 @@
 （见 c8a4f1e2d6b9）。
 
 Revision ID: b9e3d7a1c5f2
-Revises: a3f8c1d5e7b2
+Revises: e4c2a8f6b1d3
 Create Date: 2026-10-12 12:00:00
 
 """
@@ -19,7 +19,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = 'b9e3d7a1c5f2'
-down_revision: Union[str, Sequence[str], None] = 'a3f8c1d5e7b2'
+down_revision: Union[str, Sequence[str], None] = 'e4c2a8f6b1d3'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
