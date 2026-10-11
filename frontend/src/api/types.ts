@@ -390,7 +390,7 @@ export interface RunOut {
 
 /** GET /api/episodes/{id}/rerun-impact：现在重跑剧本 / 分镜会删什么、覆盖什么 */
 export interface RerunImpact {
-  stage: 'script' | 'storyboard';
+  stage: 'script' | 'storyboard' | 'all';
   /** false = 输入没变、没勾强制，会整体跳过 */
   will_run: boolean;
   /** 会重跑的段落序号（从 1 开始） */

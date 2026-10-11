@@ -431,7 +431,7 @@ class RunOut(BaseModel):
 
 
 class RerunImpact(BaseModel):
-    stage: str                 # script / storyboard
+    stage: str                 # script / storyboard / all
     will_run: bool             # False = 输入没变、没勾强制，会整体跳过
     blocks: list[int]          # 会重跑的段落序号（从 1 开始）
     shots_deleted: int         # 会被删掉的镜头数（只算 origin=llm）

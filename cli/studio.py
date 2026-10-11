@@ -169,7 +169,7 @@ def run(stage: str = typer.Argument(..., help="script / storyboard / keyframes /
     ep = _call("GET", f"/api/projects/{project}/episodes/by-number/{episode}")
     body: dict = {"stage": stage, "candidates": candidates, "force": force}
     if stage in ("script", "storyboard", "all") and not force:
-        _print_impact(ep["id"], "script" if stage in ("script", "all") else "storyboard")
+        _print_impact(ep["id"], stage)
     if yes:
         body["confirm"] = True
     if shots:

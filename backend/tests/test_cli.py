@@ -238,3 +238,18 @@ def test_run_storyboard_prints_impact_and_needs_yes_to_delete_selected(cli, api)
     assert "S02" in r.output and "--yes" in r.output
     r = cli("run", "storyboard", "demo", "--yes")
     assert r.exit_code == 0 and "已提交 1 个任务" in r.output
+
+
+def test_run_all_prints_combined_impact(cli, api):
+    """all：打印和服务端兜底同一套判断的合并影响（剧本结构会重跑 → 整集 llm 镜头都会删）。"""
+    from backend.tests.test_api_runs_jobs import _cand, _seed_storyboarded
+
+    ep_id, (a, b) = _seed_storyboarded(api)
+    with api.app.state.services.db.session() as s:
+        _cand(s, a, "first_frame")
+    im = api.get(f"/api/episodes/{ep_id}/rerun-impact", params={"stage": "all"}).json()
+    assert im["stage"] == "all" and im["shots_deleted"] == 2 and im["selected_first_frames"] == 1
+    assert "角色描述" in im["overwrites"]
+    r = cli("run", "all", "demo")
+    assert r.exit_code == 1
+    assert "重跑影响（all）：会重跑整集：删除 2 个镜头（其中 1 个有选定首帧）" in r.output

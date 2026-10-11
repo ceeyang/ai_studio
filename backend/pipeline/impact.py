@@ -184,7 +184,62 @@ def rerun_impact(s: Session, sv, episode_id: int, stage: str, force: bool, *,
         return _storyboard_impact(s, sv, episode_id, force, scene_block_ids)
     if stage == "script":
         return _script_impact(s, sv, episode_id, force)
-    raise JobError(f"未知阶段：{stage}，可选：script、storyboard")
+    if stage == "all":
+        return _all_impact(s, sv, episode_id, force)
+    raise JobError(f"未知阶段：{stage}，可选：script、storyboard、all")
+
+
+@dataclass
+class ChainTargets:
+    """剧本/分镜（可能接着跑）这次会删掉的 llm 镜头，以及其中生成后改过的。"""
+    shot_ids: list[int]
+    edited_ids: list[int]
+    blocks: list[int]          # 只按段重跑分镜时的段落序号；整集都会动时为空
+    will_run: bool
+    overwrites: list[str]
+    rules_outdated: bool
+
+
+def chain_targets(s: Session, sv, episode_id: int, stages: list[str], force: bool,
+                  scene_block_ids: list[int] | None = None) -> ChainTargets:
+    """/run 的兜底、命令行的影响打印、stage=all 的影响预估共用：一串阶段会动哪些镜头。"""
+    ep, _ = load_episode(s, episode_id)
+    if stages[0] == "script":
+        structure, visual = _script_will_run(s, sv, episode_id, force)
+        overwrites = (["角色描述", "场景氛围"] if structure else []) + \
+            (["角色外观", "场景外观", "风格设定"] if visual else [])
+        scan = _try_scan(s, sv, episode_id, force, None) if "storyboard" in stages else None
+        outdated = bool(scan and scan.rules_outdated)
+        # 结构重跑：段落清空，llm 镜头全成孤儿；视觉重跑又接着跑分镜：角色外观变了，每段都会重出
+        if structure or (visual and "storyboard" in stages):
+            ids = list(s.scalars(select(Shot.id).where(Shot.episode_id == episode_id,
+                                                       Shot.origin == "llm")))
+            return ChainTargets(ids, _episode_edited_ids(s, ep), [], True, overwrites, outdated)
+        if scan is not None:
+            return ChainTargets(scan.shot_ids, scan.edited_ids, scan.block_numbers,
+                                bool(visual or scan.block_numbers), overwrites, outdated)
+        return ChainTargets([], [], [], bool(visual), overwrites, False)
+    scan = scan_storyboard(s, sv, episode_id, force, scene_block_ids)
+    return ChainTargets(scan.shot_ids, scan.edited_ids, scan.block_numbers,
+                        bool(scan.block_numbers), [], scan.rules_outdated)
+
+
+def _try_scan(s, sv, episode_id, force, only):
+    try:
+        return scan_storyboard(s, sv, episode_id, force, only)
+    except JobError:
+        return None   # 还没有段落：剧本跑完才有
+
+
+def _all_impact(s: Session, sv, episode_id: int, force: bool) -> RerunImpact:
+    """整集 all（剧本 → 分镜 → …）不强制时会删什么：和 /run 的兜底用同一套判断。"""
+    t = chain_targets(s, sv, episode_id, ["script", "storyboard"], force)
+    first_sel, video_sel = _selected_counts(s, t.shot_ids)
+    return RerunImpact(stage="all", will_run=t.will_run, blocks=t.blocks,
+                       shots_deleted=len(t.shot_ids), selected_first_frames=first_sel,
+                       selected_videos=video_sel, manual_kept=_manual_kept(s, episode_id),
+                       overwrites=t.overwrites, edited_shots=len(set(t.edited_ids)),
+                       rules_outdated=t.rules_outdated)
 
 
 def _selected_ids(s: Session, shot_ids: list[int]) -> set[int]:
@@ -212,22 +267,8 @@ def protected_losses(s: Session, sv, episode_id: int, stages: list[str], *, forc
 
 def _protected_losses(s: Session, sv, episode_id: int, stages: list[str],
                       scene_block_ids: list[int] | None) -> str | None:
-    ep, _ = load_episode(s, episode_id)
-    shot_ids: list[int] = []
-    edited: list[int] = []
-    if stages[0] == "script":
-        structure, visual = _script_will_run(s, sv, episode_id, False)
-        # 结构重跑：段落清空，llm 镜头全成孤儿；视觉重跑又接着跑分镜：角色外观变了，每段都会重出
-        if structure or (visual and "storyboard" in stages):
-            shot_ids = list(s.scalars(select(Shot.id).where(Shot.episode_id == episode_id,
-                                                            Shot.origin == "llm")))
-            edited = _episode_edited_ids(s, ep)
-        elif "storyboard" in stages:
-            scan = scan_storyboard(s, sv, episode_id, False)
-            shot_ids, edited = scan.shot_ids, scan.edited_ids
-    else:
-        scan = scan_storyboard(s, sv, episode_id, False, scene_block_ids)
-        shot_ids, edited = scan.shot_ids, scan.edited_ids
+    t = chain_targets(s, sv, episode_id, stages, False, scene_block_ids)
+    shot_ids, edited = t.shot_ids, t.edited_ids
     selected = _selected_ids(s, shot_ids)
     edited_set = set(edited) & set(shot_ids)
     if not selected and not edited_set:

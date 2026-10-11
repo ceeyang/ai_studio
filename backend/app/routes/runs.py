@@ -25,7 +25,8 @@ def _precheck(sv) -> Precheck:
 
 
 @router.get("/episodes/{episode_id}/rerun-impact", response_model=RerunImpact)
-def get_rerun_impact(episode_id: int, stage: Literal["script", "storyboard"], request: Request,
+def get_rerun_impact(episode_id: int, stage: Literal["script", "storyboard", "all"],
+                     request: Request,
                      force: bool = False, scene_block_ids: str | None = None,
                      note: str | None = Query(None, max_length=500)):
     """现在跑这个阶段会不会动、会删什么——给前端跑之前弹确认用，不调用 LLM。
