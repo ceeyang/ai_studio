@@ -9,8 +9,48 @@
 
 一句话：**在自己电脑上，把一个点子或一份剧本做成一集能发布的 AI 短剧。**
 
-<!-- 截图占位：项目中心 / 剧集工作台 / 导出页各一张，放在 docs/images/ 下，再把下面一行换成图片链接 -->
-> 截图待补。
+![AI Studio 单集工作台：镜头卡片、首帧和视频候选](docs/images/hero.jpg)
+
+[使用手册](docs/guide/README.md) · [引擎选择指南](docs/guide/engines.md) · [运维手册](docs/RUNBOOK.md) · [参与贡献](CONTRIBUTING.md)
+
+## 为什么用它
+
+- **本机运行**：项目、图片、视频都在你自己的电脑上，没有云端账号；Key 只存在本机数据库，界面和日志只显示掩码。
+- **网页额度和 API 混用**：已经有 ChatGPT / Gemini / 即梦 / 可灵等会员或免费额度，可以通过浏览器扩展直接用（不用 Key、不读 cookie）；
+  需要稳定、可控时长时再切到 API 或本机 ComfyUI。项目定默认引擎，每个镜头还能单独换。
+- **角色前后一致**：角色定妆照、三视图（正面 / 3/4 / 侧面 / 背面）、场景图、道具图、每镜构图参考，出首帧时自动带上锁脸锁景；
+  支持的引擎还能「参考图直出」，跳过首帧直接出视频。
+- **从点子到成片一条线**：点子向导出方向和梗概 → 剧本 → 分镜 → 定妆照 → 首帧 → 视频 → 字幕 / 配音 / 配乐 → 导出；
+  「一键出完剩下的」把缺的步骤一次排进队列，出好的镜头跳过。
+- **花额度之前先体检**：剧本体检按规则检查开头 15 秒钩子、结尾卡点、镜头长度，也可以让模型打分给建议。
+- **控成本**：抽卡统计记每个镜头抽了几次、失败几次、按引擎的可用率；引擎建议按镜头难度推荐便宜或更强的引擎（只建议，不自动换）。
+- **合规默认开**：导出默认烧「AI 辅助制作」角标并写文件元数据隐式标识。
+- **有命令行**：网页上的主要操作都有 `studio` 命令，方便脚本和 AI 助手调用。
+
+## 一集是怎么做出来的
+
+| 1. 从一个点子开始 | 2. 剧本与剧本体检 |
+|---|---|
+| ![从一个点子开始](docs/images/02-start.jpg) | ![剧本与剧本体检](docs/images/04-script.jpg) |
+| **3. 角色定妆照 / 三视图** | **4. 首帧** |
+| ![角色抽屉：三视图](docs/images/07-turnaround.jpg) | ![首帧阶段](docs/images/09-keyframes.jpg) |
+| **5. 视频与抽卡统计** | **6. 成片：字幕、配音、配乐、AI 标识** |
+| ![视频阶段](docs/images/11-videos.jpg) | ![成片阶段](docs/images/12-export.jpg) |
+
+更多截图和每一步的说明见 [使用手册](docs/guide/README.md)。
+
+### 成片示例
+
+示例项目「海风吹散的初恋」第 1 集（16:9，3 个镜头约 29 秒，首帧和视频都用 Gemini 网页出）的成片截帧：
+
+![成片截帧](docs/images/sample-strip.jpg)
+
+<details>
+<summary>动图预览（约 4 秒，1.6 MB）</summary>
+
+![成片动图预览](docs/images/sample.gif)
+
+</details>
 
 ## 能做什么
 
@@ -38,6 +78,9 @@
 | 网页版（浏览器扩展） | ChatGPT、Gemini、Muse | Gemini（Veo）、Muse、即梦 / Dreamina（Seedance）、可灵（国内 / 国际） | 在自己的 Chrome / Edge 里装 `browser-extension` 并登录这些网站；用的是你账号的会员或免费额度 |
 | API | OpenAI（gpt-image）、Gemini | Sora、Veo、火山方舟 Seedance（国内 / BytePlus 海外）、可灵开放平台（国内 / 国际） | 对应服务的 API Key，按量付费 |
 | 云端 ComfyUI（可选） | RunningHub 工作流 | RunningHub 工作流 | RunningHub API Key，见 `config.example.yaml` 的 `runninghub` 段 |
+
+即梦 / 可灵网页（页面选择器待实测）和 Seedance / 可灵 API（已实现、还没用真实 Key 实跑）是新接入的；各引擎的时长、声音、尾帧、
+参考图直出能力和实测状态见 [引擎选择指南](docs/guide/engines.md)。
 
 写剧本、分镜用的**文本模型**可以选：本机 Claude Code（Agent SDK / `claude -p`）、本机 LM Studio、OpenAI / Anthropic / Gemini API、
 网页版 ChatGPT / Gemini / Claude / Muse（走浏览器扩展），或者「手动」（自己把提示词贴给任意模型，再把结果贴回来）。
@@ -231,6 +274,13 @@ config.example.yaml 配置模板
 
 没有 ffmpeg 时相关测试会自动跳过；ffmpeg 不带 libass 时，烧字幕的两个导出测试会失败，属于环境问题。
 贡献方式见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+
+## 文档
+
+- [使用手册](docs/guide/README.md)：从安装到导出，每一步配截图
+- [引擎选择指南](docs/guide/engines.md)：本机 ComfyUI、网页额度、API 怎么选，各引擎的时长 / 声音 / 尾帧 / 参考图能力和实测状态
+- [运维手册](docs/RUNBOOK.md)：启动、健康检查、备份与回滚、日志、升级
+- [参与贡献](CONTRIBUTING.md)、[推广素材](docs/PROMO.md)
 
 ## 路线图
 
