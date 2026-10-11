@@ -172,7 +172,7 @@ def test_stale_reason_legacy_candidate(api):
     assert slot["stale"] is True and slot["stale_reason"] == "输入已变化（旧记录无法细分）"
 
 
-def test_stale_reason_prompt_then_engine(api):
+def test_engine_switch_is_not_stale_but_prompt_change_is(api):
     ep_id, ids = seed(api)
     db = api.app.state.services.db
     with db.session() as s:
@@ -186,8 +186,10 @@ def test_stale_reason_prompt_then_engine(api):
                       input_hash=keyframe_input_hash(shot, proj, None, "zimage"), job_id=None)
     slot = api.get(f"/api/shots/{ids[0]}").json()["slots"][0]
     assert slot["stale"] is False and slot["stale_reason"] is None
+    # 多引擎协作：换引擎不让已有候选过期（按候选自己的引擎判断）
     api.patch(f"/api/shots/{ids[0]}", json={"image_engine": "h3_image"})
-    assert api.get(f"/api/shots/{ids[0]}").json()["slots"][0]["stale_reason"] == "引擎换了"
+    slot = api.get(f"/api/shots/{ids[0]}").json()["slots"][0]
+    assert slot["stale"] is False and slot["stale_reason"] is None
     api.patch(f"/api/shots/{ids[0]}", json={"image_prompt": "改了"})
     assert api.get(f"/api/shots/{ids[0]}").json()["slots"][0]["stale_reason"] == "提示词改了"
 

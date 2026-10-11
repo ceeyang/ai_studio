@@ -4,7 +4,7 @@ import { type SlotMark, selectedOf, slotMark, slotOf } from './slots';
 
 export type GenStage = 'keyframes' | 'videos';
 
-export const STALE_TIP = '提示词、引擎或参考图改过，这个结果是按旧输入生成的，需要重新生成';
+export const STALE_TIP = '提示词、参考图、画幅或时长改过，这个结果是按旧输入生成的，需要重新生成';
 
 type CellKind = 'first_frame' | 'video';
 

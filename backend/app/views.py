@@ -14,14 +14,13 @@ from backend.app.schemas import (ArchivedCandidateOut, CandidateOut, ContinuePre
 from backend.domain.models import Character, Episode, Job, Project, Shot
 from backend.domain.assets import ASSET_ENGINE
 from backend.domain.refs import (SHOT_REF_SLOT, legacy_video_refs, shot_ref_images, shot_refs,
-                                 split_refs, without_props)
+                                 split_refs)
 from backend.domain.shots import prev_shot
 from backend.domain.slots import selected_candidate, slots_for
-from backend.pipeline.continuity import continue_hash, continue_inputs, video_ref_plan
-from backend.pipeline.prompting import (keyframe_input_hash,
-                                        keyframe_inputs, shot_image_prompt, stale_reason,
-                                        video_input_hash,
-                                        video_inputs)
+from backend.pipeline.continuity import continue_hash, continue_inputs
+from backend.pipeline.freshness import (first_frame_check, keyframe_expect, video_caps, video_check,
+                                        video_expect)
+from backend.pipeline.prompting import shot_image_prompt, stale_reason
 from backend.post.options import export_label
 from backend.queue.manager import ACTIVE
 
@@ -135,73 +134,52 @@ def shot_detail(s: Session, sv, shot, proj, style, *, jobs: OwnerJobs | None = N
     known_ie = ie in sv.engines.names("image")
     # 首帧引擎完全不吃参考图：定妆照对首帧没有作用，界面要提示（引擎不存在不算，那是另一种错）
     unused = [r.label for r in refs] if ff_cap == 0 and known_ie else []
-    current: dict[str, str] = {
-        "first_frame": keyframe_input_hash(shot, proj, style, ie,
-                                           [r.candidate_id for r in ff_refs])}
-    inputs: dict[str, dict] = {"first_frame": keyframe_inputs(shot, proj, style, ie, ff_refs)}
-    legacy_ok: dict[str, set[str]] = {}
-    if any(r.kind == "prop" for r in ff_refs):
-        # 加道具图之前出的首帧（打包里没有道具图）：不因为后来加了道具图过期
-        old_refs, _ = split_refs(without_props(refs), ff_cap)
-        legacy_ok["first_frame"] = {keyframe_input_hash(shot, proj, style, ie,
-                                                        [r.candidate_id for r in old_refs])}
+    # 过期按候选自己的引擎判断（pipeline.freshness）：换引擎不让已有候选过期
+    ff_exp = keyframe_expect(s, shot, proj, style, ie, ff_cap, refs)
     cont: ContinuePrevOut | None = None
+    cont_hash: str | None = None
+    cont_in: dict = {}
     if shot.continue_from_prev:
         # 接上一镜：首帧是上一镜视频的尾帧，跟上一镜选定的视频走（和 continuity.run_continue_frame 一致）
         prev = prev_shot(s, shot)
         pv = selected_candidate(s, "shot", prev.id, "video") if prev is not None else None
         if prev is not None:
             cont = ContinuePrevOut(shot_id=prev.id, code=prev.code, has_video=pv is not None)
-        current["first_frame"] = continue_hash(pv.id) if pv is not None else "waiting-prev-video"
-        inputs["first_frame"] = continue_inputs(prev.code if prev else "", pv.id if pv else 0)
-        legacy_ok.pop("first_frame", None)
+        cont_hash = continue_hash(pv.id) if pv is not None else "waiting-prev-video"
+        cont_in = continue_inputs(prev.code if prev else "", pv.id if pv else 0)
         unused = []
         lost = []
     ff = next((x for x in slots if x.kind == "first_frame"), None)
-    if ff is not None and ff.selected_candidate_id:
-        ve = shot.video_engine or proj.video_engine
-        try:
-            has_audio = sv.engines.video(ve).caps.has_audio
-        except KeyError:
-            has_audio = None
-        if has_audio is not None:
-            v_cap = _max_refs(sv, "video", ve)
-            ff_sel = next((c for c in ff.candidates if c.id == ff.selected_candidate_id), None)
-            # 和 videos.run_video 同一个规则：首帧没锁脸时视频不带参考图，身份以首帧为准；
-            # 接上一镜沿用上一镜的锁脸状态，新入画的角色带定妆照
-            plan = video_ref_plan(s, shot, ff_sel, lambda n: _max_refs(sv, "image", n))
-            v_refs = plan.refs[:v_cap]
-            current["video"] = video_input_hash(shot, proj, style, ff.selected_candidate_id, ve,
-                                                has_audio, [r.candidate_id for r in v_refs])
-            # 按以前规则出的视频不算过期：一律带参考图；接上一镜一律不带
-            legacy_ok["video"] = {video_input_hash(shot, proj, style, ff.selected_candidate_id, ve,
-                                                   has_audio, [r.candidate_id for r in v_pack[:v_cap]])}
-            old_plan = video_ref_plan(s, shot, ff_sel, lambda n: _max_refs(sv, "image", n),
-                                      packed=v_pack)
-            legacy_ok["video"].add(video_input_hash(
-                shot, proj, style, ff.selected_candidate_id, ve, has_audio,
-                [r.candidate_id for r in old_plan.refs[:v_cap]]))
-            if plan.continued:
-                legacy_ok["video"].add(video_input_hash(shot, proj, style, ff.selected_candidate_id,
-                                                        ve, has_audio, []))
-                prev_rule = video_ref_plan(s, shot, ff_sel, lambda n: _max_refs(sv, "image", n),
-                                           in_frame_only=False)
-                legacy_ok["video"].add(video_input_hash(
-                    shot, proj, style, ff.selected_candidate_id, ve, has_audio,
-                    [r.candidate_id for r in prev_rule.refs[:v_cap]]))
-            inputs["video"] = video_inputs(shot, proj, style, ff.selected_candidate_id, ve,
-                                           has_audio, v_refs)
+    ff_sel = (next((c for c in ff.candidates if c.id == ff.selected_candidate_id), None)
+              if ff is not None and ff.selected_candidate_id else None)
+
+    def judge(kind: str, sel) -> tuple[bool, str | None]:
+        """(选定的是否过期, 过期原因)。"""
+        if kind == "first_frame":
+            if cont_hash is not None:
+                if sel.input_hash == cont_hash:
+                    return False, None
+                return True, stale_reason((sel.params or {}).get("inputs"), cont_in)
+            if sel.engine == ASSET_ENGINE:
+                return False, None   # 用户从已有图片里选的首帧：不按出图输入判过期
+            fresh, exp = first_frame_check(s, sv.engines, shot, proj, style, sel, ff_exp, refs)
+        elif kind == "video" and ff_sel is not None:
+            ve = shot.video_engine or proj.video_engine
+            caps = video_caps(sv.engines, ve)
+            current = (video_expect(s, sv.engines, shot, proj, style, ff_sel, ve, caps.has_audio,
+                                    caps.max_refs, v_pack=v_pack) if caps is not None else None)
+            fresh, exp = video_check(s, sv.engines, shot, proj, style, ff_sel, sel, current)
+        else:
+            return False, None
+        if fresh or exp is None:
+            return False, None
+        return True, stale_reason((sel.params or {}).get("inputs"), exp.inputs)
+
     outs = []
     selected_job: dict[str, int | None] = {}
     for sl in slots:
         sel = next((c for c in sl.candidates if c.id == sl.selected_candidate_id), None)
-        stale = bool(sel is not None and sl.kind in current
-                     and sel.input_hash != current[sl.kind]
-                     and sel.input_hash not in legacy_ok.get(sl.kind, set())
-                     # 用户从已有图片里选的首帧：不按出图输入判过期（开了接上一镜除外）
-                     and not (sl.kind == "first_frame" and sel.engine == ASSET_ENGINE
-                              and not shot.continue_from_prev))
-        reason = stale_reason((sel.params or {}).get("inputs"), inputs[sl.kind]) if stale else None
+        stale, reason = judge(sl.kind, sel) if sel is not None else (False, None)
         newer = sum(1 for c in sl.candidates if c.id > sel.id) if sel is not None else 0
         selected_job[sl.kind] = sel.job_id if sel is not None else None
         outs.append(SlotOut(id=sl.id, kind=sl.kind, selected_candidate_id=sl.selected_candidate_id,

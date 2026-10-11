@@ -3,18 +3,16 @@ from __future__ import annotations
 
 import shutil
 
-from backend.domain.refs import legacy_video_refs
 from backend.domain.slots import add_candidate, get_or_create_slot, selected_candidate
 from backend.engines.base import VideoRequest
 from backend.pipeline.common import job_services
-from backend.pipeline.continuity import video_ref_plan
+from backend.pipeline.freshness import video_caps, video_check, video_expect
 from backend.pipeline.keyframes import load_shot, ref_labels, ref_roles, run_comfy
 from backend.domain.models import Location, SceneBlock
 from backend.pipeline.prompting import (STAY_IN_FRAME, Speaker, compose_video_prompt,
                                         entering_clause, gender_of, insert_kind, token_refs, join_negative,
                                         location_summary, short_ref, voice_refs,
-                                        shot_image_prompt, shot_seed, video_input_hash,
-                                        video_inputs, with_continuity)
+                                        shot_image_prompt, shot_seed, with_continuity)
 from backend.queue.errors import JobCanceled, JobError
 from backend.queue.handlers import HANDLERS
 
@@ -205,10 +203,11 @@ def scene_qc(ctx, sv, path, code: str, first=None, voices: list[dict] | None = N
     return qc or None
 
 
-def clean_selection(s, shot_id: int, fresh_hashes) -> bool:
-    """当前选定的视频是不是「干净的」：出片自检没发现问题（疑似跳切、开头没接上首帧），而且输入没过期。"""
+def clean_selection(s, shot_id: int, is_fresh) -> bool:
+    """当前选定的视频是不是「干净的」：出片自检没发现问题（疑似跳切、开头没接上首帧），而且输入没过期。
+    is_fresh(候选)：按它自己的引擎判断是否最新（_video_fresh）。"""
     cur = selected_candidate(s, "shot", shot_id, "video")
-    if cur is None or cur.input_hash not in fresh_hashes:
+    if cur is None or not is_fresh(cur):
         return False
     return not qc_bad((cur.params or {}).get("qc"))
 
@@ -269,11 +268,17 @@ def _shot_location(s, shot) -> str:
     return location_summary(loc.visual_prompt) if loc is not None else ""
 
 
-def image_max_refs(engines, name: str) -> int:
-    try:
-        return engines.image(name).caps.max_refs
-    except KeyError:
-        return 0
+def _video_fresh(s, engines, shot_id: int, cur) -> bool:
+    """选定视频是否还是最新：按镜头当前的视频引擎，或它自己的引擎（换引擎不算过期）。"""
+    shot, _, proj, style = load_shot(s, shot_id)
+    ff = selected_candidate(s, "shot", shot_id, "first_frame")
+    if ff is None:
+        return False
+    ve = shot.video_engine or proj.video_engine
+    caps = video_caps(engines, ve)
+    current = (video_expect(s, engines, shot, proj, style, ff, ve, caps.has_audio, caps.max_refs)
+               if caps is not None else None)
+    return video_check(s, engines, shot, proj, style, ff, cur, current)[0]
 
 
 @HANDLERS.register("video.shot", gpu=True)
@@ -298,11 +303,10 @@ def run_video(ctx, payload: dict) -> dict:
                                       shot.dialogue, anchor=style.anchor_text if style else "",
                                       has_audio=has_audio, speakers=speakers)
         negative = join_negative(proj.negative, style.negative if style else "")
-        old_pack = legacy_video_refs(s, shot)   # 以前每人带定妆照 + 三视图格（审查 P1-9 之前）
-        legacy = old_pack[:engine.caps.max_refs]   # 更早的规则：不管首帧，一律带定妆照 / 三视图
-        plan = video_ref_plan(s, shot, ff, lambda n: image_max_refs(sv.engines, n))
-        old_plan = video_ref_plan(s, shot, ff, lambda n: image_max_refs(sv.engines, n),
-                                  packed=old_pack)
+        # 期望输入和老规则的哈希（和界面过期判断同一套，见 pipeline.freshness）
+        exp = video_expect(s, sv.engines, shot, proj, style, ff, engine_name, has_audio,
+                           engine.caps.max_refs)
+        plan = exp.plan
         if plan.dropped:
             src = ("首帧是上一镜视频的尾帧，上一镜没用定妆照锁脸" if plan.continued
                    else f"首帧是 {ff.engine} 出的图，没用定妆照锁脸")
@@ -315,27 +319,12 @@ def run_video(ctx, payload: dict) -> dict:
         refs = [sv.media.abs(r.file_path) for r in packed]
         labels = ref_labels(packed, refs)
         kinds = ref_roles(packed, refs)
-        used = packed[:engine.caps.max_refs]
-        h = video_input_hash(shot, proj, style, ff.id, engine_name, has_audio,
-                             [r.candidate_id for r in used])
-        # 按以前规则出的视频（输入哈希按当时带的参考图算）不算过期，不白跑 GPU：
-        # 一律带参考图的老规则；接上一镜以前一律不带参考图
-        h_legacy = video_input_hash(shot, proj, style, ff.id, engine_name, has_audio,
-                                    [r.candidate_id for r in legacy])
-        ok_hashes = {h, h_legacy,
-                     video_input_hash(shot, proj, style, ff.id, engine_name, has_audio,
-                                      [r.candidate_id for r in old_plan.refs[:engine.caps.max_refs]])}
-        if plan.continued:
-            ok_hashes.add(video_input_hash(shot, proj, style, ff.id, engine_name, has_audio, []))
-            # 接上一镜以前不看画面里有没有写这个人（第五次实跑修复之前）
-            prev_rule = video_ref_plan(s, shot, ff, lambda n: image_max_refs(sv.engines, n),
-                                       in_frame_only=False)
-            ok_hashes.add(video_input_hash(shot, proj, style, ff.id, engine_name, has_audio,
-                                           [r.candidate_id for r in prev_rule.refs[:engine.caps.max_refs]]))
-        inputs = video_inputs(shot, proj, style, ff.id, engine_name, has_audio, used)
+        used = exp.used
+        h, inputs = exp.hash, exp.inputs
         if not payload.get("force"):
+            # 「没变」按选定视频自己的引擎判断：换了视频引擎不重出已选的（多引擎协作）
             cur = selected_candidate(s, "shot", shot.id, "video")
-            if cur is not None and cur.input_hash in ok_hashes:  # hash 里含首帧候选 id
+            if cur is not None and video_check(s, sv.engines, shot, proj, style, ff, cur, exp)[0]:
                 ctx.log(f"视频 {shot.code}：输入没变，跳过（要重出用 --force）")
                 return {"skipped": True, "candidate_ids": []}
         slot = get_or_create_slot(s, "shot", shot.id, "video")
@@ -396,6 +385,10 @@ def run_video(ctx, payload: dict) -> dict:
             ctx.log(f"视频 {code}：跳切检测时任务被取消，视频先登记成候选（没做跳切自检）")
         with sv.db.session() as s:
             slot = get_or_create_slot(s, "shot", shot_id, "video")
+
+            def fresh(cur, s=s) -> bool:
+                return _video_fresh(s, sv.engines, shot_id, cur)
+
             params = {**call.meta, "first_frame_candidate_id": ff.id,
                       "identity": plan.identity, "locked_chars": plan.locked_chars,
                       "workflow": sv.media.rel(run_dir / "workflow.api.json"), "inputs": inputs}
@@ -406,7 +399,7 @@ def run_video(ctx, payload: dict) -> dict:
             if retry_of is None:
                 # 新的一条自检有问题（疑似跳切 / 开头没接上首帧）、而当前选定的是干净且没过期的：
                 # 不抢选定（无人值守时坏片不进成片），重拍也一样
-                keep = qc_bad(qc) and clean_selection(s, shot_id, ok_hashes)
+                keep = qc_bad(qc) and clean_selection(s, shot_id, fresh)
                 force_select = bool(payload.get("force")) and not keep   # 重拍：新的一条直接选中
             else:
                 # 自动重拍的这条：干净就换上它（第一条开头没接上）；还是有问题就不抢，留着第一条
@@ -414,7 +407,7 @@ def run_video(ctx, payload: dict) -> dict:
                 force_select = not keep
             c = add_candidate(s, slot, file_path=sv.media.rel(dst), engine=engine_name,
                               params=params, input_hash=h, job_id=ctx.job_id,
-                              auto_select=not keep, force_select=force_select)
+                              auto_select=not keep, force_select=force_select, is_fresh=fresh)
             if keep and retry_of is None:
                 ctx.log(f"视频 {code}：新的一条自检有问题，没有替换当前选定的视频；要用它请手动选")
             if qc_bad(qc):

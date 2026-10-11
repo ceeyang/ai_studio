@@ -6,16 +6,16 @@ import shutil
 import time
 from pathlib import Path
 
-from backend.domain.refs import shot_refs, split_refs, without_props
+from backend.domain.refs import shot_refs, split_refs
 from backend.domain.assets import ASSET_ENGINE
 from backend.domain.models import Shot
 from backend.domain.slots import add_candidate, get_or_create_slot, selected_candidate
 from backend.engines.base import ImageRequest
 from backend.engines.runninghub.client import RunningHubError
 from backend.pipeline.common import load_episode
-from backend.pipeline.prompting import (engine_image_prompt, join_negative, keyframe_input_hash,
-                                        only_people_clause,
-                                        keyframe_inputs, shot_image_prompt, shot_seed)
+from backend.pipeline.freshness import first_frame_check, image_caps, keyframe_expect
+from backend.pipeline.prompting import (engine_image_prompt, join_negative, only_people_clause,
+                                        shot_image_prompt, shot_seed)
 from backend.queue.errors import JobCanceled, JobError
 from backend.queue.handlers import HANDLERS
 from backend.queue.trace import trace_add, trace_rel, trace_update
@@ -169,6 +169,19 @@ def ref_labels(packed, paths) -> dict[str, str]:
     return {str(p): r.label for r, p in zip(packed, paths)}
 
 
+def _first_frame_fresh(s, engines, shot_id: int, cur) -> bool:
+    """选定首帧是否还是最新（新候选抢不抢选定用）：按它自己的引擎判断；从已有图片里选的算最新。"""
+    if cur.engine == ASSET_ENGINE:
+        return True
+    shot, _, proj, style = load_shot(s, shot_id)
+    if shot.continue_from_prev:
+        return False
+    engine_name = shot.image_engine or proj.image_engine
+    caps = image_caps(engines, engine_name)
+    exp = keyframe_expect(s, shot, proj, style, engine_name, caps.max_refs if caps else 0)
+    return first_frame_check(s, engines, shot, proj, style, cur, exp)[0]
+
+
 @HANDLERS.register("image.keyframe", gpu=True)
 def run_keyframe(ctx, payload: dict) -> dict:
     sv = ctx.services
@@ -204,20 +217,15 @@ def run_keyframe(ctx, payload: dict) -> dict:
         refs = [sv.media.abs(r.file_path) for r in used]
         labels = ref_labels(used, refs)
         kinds = ref_roles(used, refs)
-        if engine.caps.max_refs == 0:
-            used = []
-        h = keyframe_input_hash(shot, proj, style, engine_name, [r.candidate_id for r in used])
-        inputs = keyframe_inputs(shot, proj, style, engine_name, used)
-        # 只要一个候选、又不强制时，输入没变就不重出（多候选是用户明确要抽卡）
+        # 输入哈希 / 摘要和界面过期判断同一套（pipeline.freshness）：引擎不吃参考图时不带参考图
+        exp = keyframe_expect(s, shot, proj, style, engine_name, engine.caps.max_refs, packed)
+        h, inputs = exp.hash, exp.inputs
+        # 只要一个候选、又不强制时，输入没变就不重出（多候选是用户明确要抽卡）。
+        # 「没变」按选定候选自己的引擎判断：换了镜头 / 项目的引擎不重出已选的（多引擎协作）
         if not payload.get("force") and int(payload.get("candidates") or 1) == 1:
             cur = selected_candidate(s, "shot", shot.id, "first_frame")
-            ok = {h}
-            if any(r.kind == "prop" for r in used):
-                # 加道具图之前出的首帧不算过期（和 views.shot_detail 同一个规则）
-                old_used = split_refs(without_props(packed), engine.caps.max_refs)[0]
-                ok.add(keyframe_input_hash(shot, proj, style, engine_name,
-                                           [r.candidate_id for r in old_used]))
-            if cur is not None and cur.input_hash in ok:
+            if cur is not None and first_frame_check(s, sv.engines, shot, proj, style, cur, exp,
+                                                     packed)[0]:
                 ctx.log(f"首帧 {shot.code}：输入没变，跳过（要重出用 --force）")
                 return {"skipped": True, "candidate_ids": []}
             if cur is not None and cur.engine == ASSET_ENGINE:
@@ -260,6 +268,7 @@ def run_keyframe(ctx, payload: dict) -> dict:
                           params={**call.meta, "workflow": sv.media.rel(run_dir / "workflow.api.json"),
                                   "inputs": inputs},
                           input_hash=h, job_id=ctx.job_id,
+                          is_fresh=lambda cur: _first_frame_fresh(s, sv.engines, shot_id, cur),
                           # 重拍一张：新的一条直接选中；一次出多张就不抢选定（不然最后完成的那张随机胜出），
                           # 让用户看「N 张新候选」自己挑
                           force_select=bool(payload.get("force"))
