@@ -172,3 +172,33 @@ def test_video_rerun_skip_force_and_new_first_frame(tmp_path, db):
     with db.session() as s:
         s.get(Shot, shot_id).motion_prompt = "she turns away"
     assert run_video(ctx, {"shot_id": shot_id}).get("skipped") is None
+
+
+def test_keyframe_force_retake_selects_new_candidate_even_with_same_input(tmp_path, db):
+    """force 重拍是用户明确要换一条：输入没变（input_hash 一样）也要选中新候选。"""
+    ctx, runner, shot_id = setup(tmp_path, db)
+    first = run_keyframe(ctx, {"shot_id": shot_id})["candidate_ids"][0]
+    new = run_keyframe(ctx, {"shot_id": shot_id, "force": True})["candidate_ids"][0]
+    assert new != first
+    with db.session() as s:
+        assert selected_candidate(s, "shot", shot_id, "first_frame").id == new
+
+
+def test_keyframe_non_forced_extra_candidate_keeps_selection(tmp_path, db):
+    ctx, runner, shot_id = setup(tmp_path, db)
+    first = run_keyframe(ctx, {"shot_id": shot_id})["candidate_ids"][0]
+    run_keyframe(ctx, {"shot_id": shot_id, "candidates": 2})
+    with db.session() as s:
+        assert selected_candidate(s, "shot", shot_id, "first_frame").id == first
+
+
+def test_video_force_retake_selects_new_candidate_even_with_same_input(tmp_path, db):
+    ctx, runner, shot_id = setup(tmp_path, db)
+    run_keyframe(ctx, {"shot_id": shot_id})
+    first = run_video(ctx, {"shot_id": shot_id})["candidate_ids"][0]
+    new = run_video(ctx, {"shot_id": shot_id, "force": True})["candidate_ids"][0]
+    assert new != first
+    with db.session() as s:
+        assert selected_candidate(s, "shot", shot_id, "video").id == new
+        video_slot = next(sl for sl in slots_for(s, "shot", shot_id) if sl.kind == "video")
+        assert len({c.input_hash for c in video_slot.candidates}) == 1   # 确实是同一输入

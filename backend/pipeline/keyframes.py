@@ -104,6 +104,7 @@ def run_keyframe(ctx, payload: dict) -> dict:
         c = add_candidate(s, slot, file_path=sv.media.rel(dst), engine=engine_name,
                           params={**call.meta, "workflow": sv.media.rel(run_dir / "workflow.api.json"),
                                   "inputs": inputs},
-                          input_hash=h, job_id=ctx.job_id)
+                          input_hash=h, job_id=ctx.job_id,
+                          force_select=bool(payload.get("force")))  # 重拍：新的一条直接选中
         cid = c.id
     return {"candidate_ids": [cid], "file": sv.media.rel(dst)}

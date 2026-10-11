@@ -69,6 +69,7 @@ def run_video(ctx, payload: dict) -> dict:
                           params={**call.meta, "first_frame_candidate_id": ff.id,
                                   "workflow": sv.media.rel(run_dir / "workflow.api.json"),
                                   "inputs": inputs},
-                          input_hash=h, job_id=ctx.job_id)
+                          input_hash=h, job_id=ctx.job_id,
+                          force_select=bool(payload.get("force")))  # 重拍：新的一条直接选中
         cid = c.id
     return {"candidate_ids": [cid], "file": sv.media.rel(dst)}

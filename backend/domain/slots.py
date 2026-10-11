@@ -18,12 +18,17 @@ def get_or_create_slot(s: Session, owner_type: str, owner_id: int, kind: str) ->
 
 
 def add_candidate(s: Session, slot: Slot, *, file_path: str, engine: str, params: dict,
-                  input_hash: str, job_id: int | None, auto_select: bool = True) -> Candidate:
+                  input_hash: str, job_id: int | None, auto_select: bool = True,
+                  force_select: bool = False) -> Candidate:
+    """auto_select：还没有选定、或选定的已过期（input_hash 不同）时选中新候选。
+    force_select：用户明确要重拍（force）——不管输入变没变，新候选都选中。"""
     c = Candidate(slot_id=slot.id, file_path=file_path, engine=engine, params=params,
                   input_hash=input_hash, job_id=job_id)
     s.add(c)
     s.flush()
-    if auto_select:
+    if force_select:
+        slot.selected_candidate_id = c.id
+    elif auto_select:
         current = s.get(Candidate, slot.selected_candidate_id) if slot.selected_candidate_id else None
         if current is None or current.input_hash != input_hash:
             slot.selected_candidate_id = c.id
