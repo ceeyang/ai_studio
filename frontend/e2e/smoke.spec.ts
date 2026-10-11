@@ -1,5 +1,5 @@
 import { expect, type Page, test } from '@playwright/test';
-import { answer, STORYBOARD, STRUCTURE, SYNOPSIS, VISUAL } from './fixtures';
+import { answer, fillCharToken, STORYBOARD, STRUCTURE, SYNOPSIS, VISUAL } from './fixtures';
 
 function nav(page: Page, name: string) {
   return page.getByRole('navigation', { name: '阶段导航' }).getByRole('link', { name, exact: true });
@@ -10,7 +10,8 @@ async function answerWaitingJob(page: Page, key: RegExp, text: string) {
   await nav(page, '任务').click();
   await page.getByRole('listbox', { name: '任务列表' }).getByRole('option').filter({ hasText: '等待输入' }).first().click();
   await expect(page.getByTestId('input-key')).toHaveText(key);
-  await page.getByLabel('模型输出').fill(text);
+  const user = (await page.getByLabel('用户提示词（user）').inputValue()) ?? '';
+  await page.getByLabel('模型输出').fill(fillCharToken(text, user));
   await page.getByRole('button', { name: '提交结果' }).click();
 }
 
@@ -153,7 +154,7 @@ test('重新生成分镜（带修改意见）：等待输入的提示词里带�
   await expect(user).toHaveValue(/上一版本段镜头[\s\S]*林夏照着提词器念稿/);
 
   const changed = { shots: [STORYBOARD.shots[0], { ...STORYBOARD.shots[1], action: '林夏猛地站起来' }] };
-  await page.getByLabel('模型输出').fill(JSON.stringify(changed));
+  await page.getByLabel('模型输出').fill(fillCharToken(JSON.stringify(changed), await user.inputValue()));
   await page.getByRole('button', { name: '提交结果' }).click();
   await expect(page.getByTestId('job-status')).toHaveText('完成');
 

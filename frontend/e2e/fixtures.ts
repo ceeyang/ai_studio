@@ -42,8 +42,11 @@ export const VISUAL = {
   ],
 };
 
+// 分镜的 image_prompt 里人物用外貌占位符（{{char:<角色 id>}}），不能自己抄外貌；角色 id 每次跑都不一样，
+// 先写 CHAR，交给模型之前用 fillCharToken 按这次提示词里角色表的占位符换掉。
+export const CHAR = '{{CHAR}}';
 const PROMPT =
-  'medium close-up, 85mm lens, eye level. A young Chinese woman in her twenties with shoulder-length black hair and a grey wool cardigan sits at a cluttered live-streaming desk, reading from a teleprompter, her eyes widening in shock. On the desk: a ring light, a condenser microphone on a boom arm, a half-empty paper coffee cup, and a smartphone on a tripod. Cold blue monitor glow from the front, warm practical lamp behind her as rim light. Muted teal and amber palette, fine film grain, shallow depth of field, photorealistic.';
+  `medium close-up, 85mm lens, eye level. ${CHAR}. The young woman sits at a cluttered live-streaming desk, reading from a teleprompter, her eyes widening in shock as the words on the screen change. On the desk: a ring light, a condenser microphone on a boom arm, a half-empty paper coffee cup, and a smartphone on a tripod. Cold blue monitor glow from the front, warm practical lamp behind her as rim light. Teal and amber accents, focus on her eyes.`;
 
 export const STORYBOARD = {
   shots: [
@@ -74,6 +77,12 @@ export const STORYBOARD = {
   ],
 };
 
+/** 把输出里的 CHAR 换成提示词角色表里「林夏｜{{char:N}}」的那个占位符。 */
+export function fillCharToken(text: string, userPrompt: string) {
+  const m = userPrompt.match(/林夏｜(\{\{char:\d+\}\})/);
+  return m ? text.split(CHAR).join(m[1]) : text;
+}
+
 export async function waitJob(api: APIRequestContext, id: number, until: string[]) {
   for (let i = 0; i < 100; i++) {
     const j = await (await api.get(`/api/jobs/${id}`)).json();
@@ -86,8 +95,9 @@ export async function waitJob(api: APIRequestContext, id: number, until: string[
 /** manual LLM：提交任务后它会停在 waiting_input，按顺序把这些输出喂给它。 */
 export async function answer(api: APIRequestContext, id: number, outputs: unknown[]) {
   for (const out of outputs) {
-    await waitJob(api, id, ['waiting_input']);
-    const r = await api.post(`/api/jobs/${id}/input`, { data: { text: JSON.stringify(out) } });
+    const job = await waitJob(api, id, ['waiting_input']);
+    const text = fillCharToken(JSON.stringify(out), job.result?.input_request?.user ?? '');
+    const r = await api.post(`/api/jobs/${id}/input`, { data: { text } });
     expect(r.ok()).toBeTruthy();
   }
   return waitJob(api, id, ['done', 'failed']);
