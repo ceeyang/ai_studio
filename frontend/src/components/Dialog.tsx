@@ -11,6 +11,10 @@ interface DialogProps {
   guard?: () => boolean;
   /** 提交中：Esc、遮罩、关闭按钮都不关 */
   busy?: boolean;
+  /** 额外加在弹窗框（.modal）上的 class，比如看图弹窗 */
+  className?: string;
+  /** 额外加在遮罩（.modal-scrim）上的 class */
+  scrimClassName?: string;
 }
 
 const FOCUSABLE =
@@ -27,8 +31,10 @@ function focusables(box: HTMLElement): HTMLElement[] {
  * 居中模态框：Esc 或点遮罩关闭；打开时聚焦（优先 data-autofocus，其次第一个输入框，再次第一个可聚焦元素），
  * Tab 只在弹窗里循环，关闭后焦点还给原来的元素。叠了多层时 Esc 只关最上面一层。
  */
-export function Dialog({ title, subtitle, onClose, children, wide = false, guard, busy = false }: DialogProps) {
+export function Dialog({ title, subtitle, onClose, children, wide = false, guard, busy = false, className, scrimClassName }: DialogProps) {
   const titleId = useId();
+  // 后打开的叠在上面：不管在 DOM 里排在哪（portal 到 body 的看图弹窗、路由里的确认框），按打开顺序定层级
+  const [depth] = useState(() => stack.length);
   const box = useRef<HTMLDivElement>(null);
   const [asking, setAsking] = useState(false);
   const latest = useRef({ onClose, guard, busy, asking });
@@ -98,10 +104,14 @@ export function Dialog({ title, subtitle, onClose, children, wide = false, guard
   }, [asking]);
 
   return (
-    <div className="modal-scrim" onMouseDown={(e) => e.target === e.currentTarget && requestClose()}>
+    <div
+      className={`modal-scrim${scrimClassName ? ` ${scrimClassName}` : ''}`}
+      style={depth > 0 ? { zIndex: 40 + depth } : undefined}
+      onMouseDown={(e) => e.target === e.currentTarget && requestClose()}
+    >
       <div
         ref={box}
-        className={`modal${wide ? ' wide' : ''}`}
+        className={`modal${wide ? ' wide' : ''}${className ? ` ${className}` : ''}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}

@@ -3,6 +3,7 @@ import { RouterProvider, createBrowserRouter } from 'react-router-dom';
 import { ConfirmProvider } from './components/ConfirmDialog';
 import { LeaveGuard } from './components/EditableFields';
 import { Layout } from './components/Layout';
+import { MediaViewerHost } from './components/MediaViewer';
 import { NotFound } from './components/NotFound';
 import { RouteError } from './components/RouteError';
 import { EventsProvider } from './ws/EventsContext';
@@ -15,12 +16,14 @@ const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 2000, retry: 1, refetchOnWindowFocus: false } },
 });
 
-/** 根路由：确认框放在路由里面（正文里可以放站内链接），未保存修改的离开拦截全站只挂这一个。 */
+/** 根路由：确认框放在路由里面（正文里可以放站内链接），未保存修改的离开拦截、看图弹窗全站只挂这一个。 */
 function Root() {
   return (
     <ConfirmProvider>
       <Layout />
       <LeaveGuard />
+      {/* 全局看图 / 看视频弹窗：页面里点图片、视频都在这里打开 */}
+      <MediaViewerHost />
     </ConfirmProvider>
   );
 }

@@ -624,7 +624,7 @@ a.pill:hover { text-decoration: none; filter: brightness(1.15); }
 }
 .cand:hover { border-color: var(--border-strong); }
 .cand.selected { border-color: var(--ok); box-shadow: 0 0 0 1px var(--ok), 0 6px 20px rgba(62, 207, 142, 0.12); }
-.cand > a { display: block; }
+.cand > a, .cand > .media-thumb { display: block; }
 .cand img, .cand video {
   width: 100%; aspect-ratio: 9 / 16; object-fit: cover; display: block;
   border-radius: var(--r-xs); background: #000;
@@ -1241,15 +1241,74 @@ div.error.banner.job-notice a { color: #ffd0d1; text-decoration: underline; }
 /* 右上「本集角色」条：头像 + 名字 + 有几个有定妆照，点了去角色页 */
 /* 下拉选「其他（手填）」时出现的输入框 */
 .field-custom { margin-top: calc(var(--s-3) * -1 + 4px); }
-/* 看大图 */
-.lightbox-layer > .modal-scrim { z-index: 39; }
-.lightbox { display: flex; flex-direction: column; gap: var(--s-3); }
-.lightbox-stage { display: flex; align-items: center; gap: var(--s-2); justify-content: center; }
-.lightbox-figure { position: relative; margin: 0; flex: 0 1 auto; min-width: 0; }
-.lightbox-figure img { display: block; width: auto; height: min(70vh, 960px); max-width: 100%; object-fit: contain; border-radius: var(--r-md); background: #000; }
-.lightbox-nav { flex: none; width: 36px; height: 56px; font-size: 24px; line-height: 1; }
-.lightbox-foot { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--s-2) var(--s-3); }
-.lightbox-caption { flex: 1 1 320px; min-width: 0; font-size: 12px; color: var(--text-2); line-height: 1.55; overflow-wrap: anywhere; }
+/* 看图 / 看视频弹窗（MediaViewer）：深色遮罩铺满，图片适应窗口或原始大小拖动查看 */
+.modal-scrim.media-viewer-scrim { padding: var(--s-4); background: rgba(0, 0, 0, 0.84); }
+.modal.media-viewer {
+  width: min(1600px, 100%); height: calc(100vh - 32px); height: calc(100dvh - 32px); max-height: none;
+  display: flex; flex-direction: column; overflow: hidden;
+  padding: var(--s-3) var(--s-4) var(--s-3); background: #0b0c0f;
+}
+.media-viewer .modal-head { margin-bottom: var(--s-3); }
+.media-viewer .modal-head h3 { font-size: 15px; }
+.mv-stage { position: relative; flex: 1 1 auto; min-height: 0; display: flex; }
+.mv-viewport { flex: 1 1 auto; min-width: 0; min-height: 0; border-radius: var(--r-md); background: #000; }
+.mv-viewport:focus { outline: none; }
+.mv-viewport:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
+.mv-viewport.is-fit { display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.mv-viewport.is-fit img, .mv-viewport.is-fit video { display: block; max-width: 100%; max-height: 100%; object-fit: contain; }
+.mv-viewport.is-fit img { cursor: zoom-in; }
+.mv-viewport.is-actual { display: grid; overflow: auto; cursor: grab; touch-action: none; overscroll-behavior: contain; }
+.mv-viewport.is-actual:active { cursor: grabbing; }
+.mv-viewport.is-actual img { margin: auto; max-width: none; max-height: none; cursor: zoom-out; user-select: none; }
+.mv-nav {
+  position: absolute; top: 50%; z-index: 1; transform: translateY(-50%);
+  width: 40px; height: 64px; padding: 0; font-size: 28px; line-height: 1;
+  background: rgba(0, 0, 0, 0.5); border-color: transparent; color: #fff;
+}
+.mv-nav:hover:not(:disabled) { background: rgba(0, 0, 0, 0.75); border-color: transparent; }
+.mv-nav.is-prev { left: var(--s-2); }
+.mv-nav.is-next { right: var(--s-2); }
+.mv-info { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--s-2) var(--s-4); padding-top: var(--s-3); }
+.mv-meta { flex: 1 1 320px; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.mv-line { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; font-size: 13px; }
+.mv-title { font-weight: 500; color: var(--text); overflow-wrap: anywhere; }
+.mv-facts { font-size: 12px; font-variant-numeric: tabular-nums; }
+.mv-caption { font-size: 12px; color: var(--text-2); line-height: 1.55; overflow-wrap: anywhere; max-height: 4.8em; overflow-y: auto; }
+.mv-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2); }
+.mv-newtab { font-size: 12px; color: var(--muted); }
+.mv-newtab:hover { color: var(--text-2); }
+@media (max-width: 640px) {
+  .modal-scrim.media-viewer-scrim { padding: 0; }
+  .modal.media-viewer { width: 100%; height: 100vh; height: 100dvh; border-radius: 0; border: 0; padding: var(--s-2) var(--s-2) var(--s-3); }
+  .mv-nav { width: 32px; height: 52px; font-size: 22px; }
+  .mv-nav.is-prev { left: 4px; }
+  .mv-nav.is-next { right: 4px; }
+}
+/* 点开看大图的缩略图按钮：去掉按钮外观，只留图 */
+.media-thumb {
+  position: relative; display: block; width: 100%; padding: 0; border: 0; border-radius: inherit;
+  background: transparent; cursor: zoom-in; font: inherit; color: inherit; text-align: inherit;
+}
+.media-thumb:hover:not(:disabled) { background: transparent; border: 0; }
+.media-thumb:active:not(:disabled) { transform: none; }
+.media-thumb:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.media-thumb.is-video::after {
+  content: "▶"; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+  width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center;
+  background: rgba(0, 0, 0, 0.6); color: #fff; font-size: 15px; pointer-events: none;
+}
+.media-thumb video { pointer-events: none; }
+.turn-sheet-media .media-thumb, .turn-cell-media .media-thumb { height: 100%; }
+.photo-look-row > .media-thumb { width: auto; flex: none; }
+/* 资产选择器：缩略图点了是选中，右上角单独一个放大镜看大图 */
+.asset-card { position: relative; }
+.asset-zoom {
+  position: absolute; right: 6px; top: 6px; z-index: 1; width: 26px; height: 26px; padding: 0;
+  display: grid; place-items: center; border-radius: 50%;
+  background: rgba(0, 0, 0, 0.62); border-color: transparent; color: #fff;
+}
+.asset-zoom:hover:not(:disabled) { background: rgba(0, 0, 0, 0.85); border-color: transparent; }
+.export-zoom { flex: none; }
 
 /* 只给读屏软件看的文字 */
 .visually-hidden {

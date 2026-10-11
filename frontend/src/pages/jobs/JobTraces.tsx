@@ -3,7 +3,7 @@ import { Fragment, useState } from 'react';
 import { errorText } from '../../api/client';
 import { useJobTraces } from '../../api/queries';
 import type { JobTrace } from '../../api/types';
-import { Lightbox, type LightboxItem } from '../../components/Lightbox';
+import { type MediaItem, useMediaGroup } from '../../components/MediaViewer';
 
 type Data = Record<string, unknown>;
 
@@ -144,14 +144,20 @@ interface Pic {
   note?: string;
 }
 
-/** 参考图 / 产物：能在页面上打开的显示缩略图（点开看大图），其他的只写路径 */
+/** 参考图 / 产物：能在页面上打开的显示缩略图（点开在当前页看大图 / 播视频），其他的只写路径 */
 function Pictures({ title, pics }: { title: string; pics: Pic[] }) {
-  const [open, setOpen] = useState<number | null>(null);
-  if (pics.length === 0) return null;
   const viewable = pics
     .map((p) => ({ p, url: mediaUrl(p.path) }))
-    .filter((x): x is { p: Pic; url: string } => !!x.url && IMAGE_EXT.test(x.p.path));
-  const items: LightboxItem[] = viewable.map(({ p, url }) => ({ url, alt: p.label, caption: `${p.label} · ${p.path}` }));
+    .filter((x): x is { p: Pic; url: string } => !!x.url && (IMAGE_EXT.test(x.p.path) || VIDEO_EXT.test(x.p.path)));
+  const items: MediaItem[] = viewable.map(({ p, url }) => ({
+    url,
+    kind: VIDEO_EXT.test(p.path) ? 'video' : 'image',
+    alt: p.label,
+    title: p.label,
+    caption: p.note ? `${p.note} · ${p.path}` : p.path,
+  }));
+  const view = useMediaGroup(items, { title });
+  if (pics.length === 0) return null;
   return (
     <div className="trace-block">
       <h5>{title}</h5>
@@ -162,13 +168,13 @@ function Pictures({ title, pics }: { title: string; pics: Pic[] }) {
           return (
             <li key={`${p.path}:${i}`} className="trace-pic">
               {url && IMAGE_EXT.test(p.path) ? (
-                <button type="button" className="ghost trace-thumb" aria-label={`看大图：${p.label}`} onClick={() => setOpen(vi)}>
+                <button type="button" className="ghost trace-thumb" aria-label={`看大图：${p.label}`} onClick={() => view(vi)}>
                   <img src={url} alt={p.label} loading="lazy" />
                 </button>
               ) : url && VIDEO_EXT.test(p.path) ? (
-                <a className="trace-thumb trace-thumb-video" href={url} target="_blank" rel="noreferrer">
+                <button type="button" className="ghost trace-thumb trace-thumb-video" aria-label={`播放视频：${p.label}`} onClick={() => view(vi)}>
                   视频
-                </a>
+                </button>
               ) : (
                 <span className="trace-thumb trace-thumb-none">无预览</span>
               )}
@@ -181,9 +187,6 @@ function Pictures({ title, pics }: { title: string; pics: Pic[] }) {
           );
         })}
       </ol>
-      {open !== null && items.length > 0 && (
-        <Lightbox title={title} items={items} index={open} onIndex={setOpen} onClose={() => setOpen(null)} />
-      )}
     </div>
   );
 }

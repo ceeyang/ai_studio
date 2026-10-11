@@ -16,6 +16,7 @@ import {
 import type { Character, JobBrief, TurnaroundCell, TurnaroundSheet, TurnaroundSheetKey } from '../../api/types';
 import { useUnsavedGuard } from '../../components/EditableFields';
 import { ImageEngineSelect } from '../../components/ImageEngineSelect';
+import { type MediaItem, useMediaGroup } from '../../components/MediaViewer';
 import { engineLabel } from '../../format';
 import { useEvents } from '../../ws/EventsContext';
 import { isDecoding } from '../../ws/events';
@@ -54,6 +55,14 @@ function SheetBlock({
       : has
         ? { cls: 'ok', text: '已生成' }
         : { cls: 'none', text: '未生成' };
+  // 设定图和切出来的各视角一组，左右切换着看
+  const shown = cells.filter((x) => !!x.url);
+  const selEngine = sheet.candidates.find((k) => k.id === sheet.selected_candidate_id)?.engine;
+  const items: MediaItem[] = [
+    ...(has ? [{ url: sheet.url!, alt: `${c.name} ${sheet.label}`, title: `${c.name} ${sheet.label}${selEngine ? ` · ${engineLabel(selEngine)}` : ''}` }] : []),
+    ...shown.map((x) => ({ url: x.url!, alt: `${c.name} ${x.label}`, title: `${c.name} ${x.label}（切图）` })),
+  ];
+  const view = useMediaGroup(items, { title: `${c.name} ${sheet.label}` });
 
   return (
     <div className={`turn-sheet${sheet.stale ? ' is-stale' : ''}`} data-testid={`sheet-${sheet.sheet}`}>
@@ -92,9 +101,9 @@ function SheetBlock({
             )}
           </div>
         ) : has ? (
-          <a href={sheet.url!} target="_blank" rel="noreferrer" title="打开原图">
+          <button type="button" className="media-thumb" aria-label={`看大图：${c.name} ${sheet.label}`} onClick={() => view(0)}>
             <img src={sheet.url!} alt={`${c.name} ${sheet.label}`} loading="lazy" />
-          </a>
+          </button>
         ) : (
           <div className="turn-empty">还没出图</div>
         )}
@@ -134,9 +143,14 @@ function SheetBlock({
           >
             <div className="turn-cell-media">
               {cell.url ? (
-                <a href={cell.url} target="_blank" rel="noreferrer" title="打开切图">
+                <button
+                  type="button"
+                  className="media-thumb"
+                  aria-label={`看大图：${c.name} ${cell.label}`}
+                  onClick={() => view((has ? 1 : 0) + shown.indexOf(cell))}
+                >
                   <img src={cell.url} alt={`${c.name} ${cell.label}`} loading="lazy" />
-                </a>
+                </button>
               ) : (
                 <div className="turn-empty">—</div>
               )}

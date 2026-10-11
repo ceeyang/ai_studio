@@ -4,6 +4,7 @@ import type { ReactElement } from 'react';
 import { Outlet, RouterProvider, createMemoryRouter, useLocation } from 'react-router-dom';
 import { ConfirmProvider } from '../components/ConfirmDialog';
 import { LeaveGuard } from '../components/EditableFields';
+import { MediaViewerHost } from '../components/MediaViewer';
 
 export function newQueryClient(): QueryClient {
   return new QueryClient({
@@ -35,6 +36,7 @@ export function renderAt(ui: ReactElement, { route = '/', path = '*', qc = newQu
             <Outlet />
             <LocationProbe />
             <LeaveGuard />
+            <MediaViewerHost />
           </ConfirmProvider>
         ),
         children: [{ path, element: ui }, ...(path !== '*' ? [{ path: '*', element: null }] : [])],

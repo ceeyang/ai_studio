@@ -16,6 +16,7 @@ import { AssetPicker, aspectMismatch } from '../../components/AssetPicker';
 import { useConfirm } from '../../components/ConfirmDialog';
 import { confirmDiscard } from '../../components/confirmDiscard';
 import { EditableFields, type FieldSpec, type FieldValues, type FieldsState, useUnsavedGuard } from '../../components/EditableFields';
+import { useMediaGroup } from '../../components/MediaViewer';
 import { engineLabel, engineOptionDisabled, engineOptionText } from '../../format';
 import { ArchivedCandidates } from './ArchivedCandidates';
 import { CandidateGrid } from './CandidateGrid';
@@ -180,6 +181,14 @@ function ShotRefs({ shot, episodeId, maxRefs }: { shot: ShotDetail; episodeId: n
   const [picking, setPicking] = useState(false);
   const refs = shot.shot_refs ?? [];
   const full = refs.length >= MAX_SHOT_REFS;
+  const viewRef = useMediaGroup(
+    refs.map((c, i) => ({
+      url: c.url,
+      alt: `构图参考 ${i + 1}`,
+      title: `${shot.code} 构图参考 ${i + 1}${typeof c.params?.from === 'string' ? ` · 来自 ${c.params.from}` : ''}`,
+    })),
+    { title: `${shot.code} 构图参考` },
+  );
   const error = upload.error ?? del.error;
   return (
     <section className="shot-refs" aria-label="构图参考">
@@ -197,9 +206,9 @@ function ShotRefs({ shot, episodeId, maxRefs }: { shot: ShotDetail; episodeId: n
         <div className="shot-ref-list" role="list" aria-label="构图参考图">
           {refs.map((c, i) => (
             <figure key={c.id} role="listitem" className="shot-ref">
-              <a href={c.url} target="_blank" rel="noreferrer">
+              <button type="button" className="media-thumb" aria-label={`看大图：构图参考 ${i + 1}`} onClick={() => viewRef(i)}>
                 <img src={c.url} alt={`构图参考 ${i + 1}`} loading="lazy" />
-              </a>
+              </button>
               <figcaption>
                 <span className="muted small" title={typeof c.params?.from === 'string' ? `来自 ${c.params.from}` : undefined}>
                   构图参考 {i + 1}
@@ -573,7 +582,7 @@ export function ShotDrawer({
               {sl.stale && <span className="badge stale">已过期</span>}
             </h4>
             {sl.stale && sl.stale_reason && <p className="muted stale-reason">过期原因：{sl.stale_reason}</p>}
-            <CandidateGrid slot={sl} selecting={select.isPending} onSelect={(cid) => select.mutate(cid)} />
+            <CandidateGrid slot={sl} shotCode={shot.code} selecting={select.isPending} onSelect={(cid) => select.mutate(cid)} />
           </section>
         ))}
         {select.error && <p className="error">{errorText(select.error)}</p>}

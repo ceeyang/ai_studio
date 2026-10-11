@@ -1,13 +1,17 @@
 import { useState } from 'react';
 import { ApiError, detailText, errorText } from '../../api/client';
 import type { Slot } from '../../api/types';
+import { type MediaItem, useMediaGroup } from '../../components/MediaViewer';
 import { engineLabel, fmtTime } from '../../format';
+import { SLOT_LABEL } from './slots';
 import { qcIssues } from './shotStatus';
 
 export interface CandidateGridProps {
   slot: Slot;
   onSelect(candidateId: number): void;
   selecting?: boolean;
+  /** 镜头号（S01）：看大图的标题「S01 首帧候选」 */
+  shotCode?: string;
 }
 
 /** 从 Content-Disposition 头里取 filename="..."；没有就用调用方给的兜底名。 */
@@ -74,23 +78,46 @@ function ExportComfyButton({ candidateId, engine }: { candidateId: number; engin
   );
 }
 
-export function CandidateGrid({ slot, onSelect, selecting = false }: CandidateGridProps) {
-  if (slot.candidates.length === 0) return <p className="muted">还没有候选</p>;
+export function CandidateGrid({ slot, onSelect, selecting = false, shotCode }: CandidateGridProps) {
   const isVideo = slot.kind === 'video';
   const list = [...slot.candidates].reverse(); // 新的在前
+  const groupTitle = `${shotCode ? `${shotCode} ` : ''}${SLOT_LABEL[slot.kind] ?? slot.kind}候选`;
+  // 点缩略图在当前页看大图 / 播视频，同一格的候选一组左右切换；弹窗里也能直接「选定」
+  const items: MediaItem[] = list.map((c) => ({
+    url: c.url,
+    kind: isVideo ? 'video' : 'image',
+    alt: `候选 #${c.id}`,
+    title: `${groupTitle} · ${engineLabel(c.engine)} · ${fmtTime(c.created_at)}`,
+    current: c.id === slot.selected_candidate_id,
+  }));
+  const view = useMediaGroup(items, {
+    title: groupTitle,
+    actions: (_item, i) => {
+      const c = list[i];
+      if (!c || c.id === slot.selected_candidate_id) return null;
+      return (
+        <button type="button" className="sm" disabled={selecting} onClick={() => onSelect(c.id)}>
+          选定
+        </button>
+      );
+    },
+  });
+  if (slot.candidates.length === 0) return <p className="muted">还没有候选</p>;
   return (
     <div className="cands">
-      {list.map((c) => {
+      {list.map((c, i) => {
         const selected = c.id === slot.selected_candidate_id;
         const seed = c.params.seed;
         return (
           <figure key={c.id} className={selected ? 'cand selected' : 'cand'} data-testid={`candidate-${c.id}`}>
             {isVideo ? (
-              <video src={c.url} controls preload="metadata" />
+              <button type="button" className="media-thumb is-video" aria-label={`播放候选 #${c.id}`} onClick={() => view(i)}>
+                <video src={c.url} preload="metadata" muted aria-hidden="true" />
+              </button>
             ) : (
-              <a href={c.url} target="_blank" rel="noreferrer">
+              <button type="button" className="media-thumb" aria-label={`看大图：候选 #${c.id}`} onClick={() => view(i)}>
                 <img src={c.url} alt={`候选 #${c.id}`} loading="lazy" />
-              </a>
+              </button>
             )}
             <figcaption>
               <span>{engineLabel(c.engine)}</span>
