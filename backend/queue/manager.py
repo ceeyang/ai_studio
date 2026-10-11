@@ -365,6 +365,9 @@ class JobManager:
         elif not gpu and self.lanes:
             q = q.where(or_(Job.model_family.is_(None), Job.model_family.not_in(self.lanes)))
         with self._claim_lock, self.db.session() as s:
+            # 循环开头看过一次暂停，到这里之间可能刚按了暂停又提交了任务：领任务前再看一次
+            if self._paused.is_set():
+                return None
             rows = list(s.scalars(q))
             dep_ids = {d for j in rows for d in (j.depends_on or [])}
             statuses: dict[int, str] = {}
