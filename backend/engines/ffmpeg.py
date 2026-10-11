@@ -88,6 +88,22 @@ def build_xfade_graph(durs: list[float], transitions: list[str], fps: int,
     return ";".join(filters), acc
 
 
+SCENE_THRESHOLD = 0.4
+CUT_EDGE = 0.15      # 开头/结尾这么近的突变不算（编码首帧、淡出）
+_SHOWINFO_PTS = re.compile(r"Parsed_showinfo.*?\bpts_time:\s*(-?[\d.]+)")
+
+
+def parse_scene_cuts(showinfo_log: str) -> list[float]:
+    """select='gt(scene,X)',showinfo 的 stderr → 画面突变的时间点（秒）。"""
+    return [float(x) for x in _SHOWINFO_PTS.findall(showinfo_log or "")]
+
+
+def hard_cuts(times: list[float], duration: float | None, edge: float = CUT_EDGE) -> list[float]:
+    """片段内部的硬切：去掉贴着开头、结尾的突变。"""
+    end = duration if duration and duration > 0 else None
+    return [round(t, 2) for t in times if t > edge and (end is None or t < end - edge)]
+
+
 SILENCE_START = re.compile(r"silence_start:\s*(-?[\d.]+)")
 SILENCE_END = re.compile(r"silence_end:\s*(-?[\d.]+)")
 
@@ -233,6 +249,18 @@ class FFmpeg:
         x = np.frombuffer(p.stdout, dtype=np.float32)
         return speech_segments_from_pcm(x, SAMPLE_RATE, min_db=min_db, periodicity=periodicity,
                                         merge_gap=merge_gap, min_len=min_len)
+
+    def scene_cuts(self, path: Path, threshold: float = SCENE_THRESHOLD) -> list[float]:
+        """视频片段内部的硬切（场景突变）时间点。用来查生成视频中途跳到参考图、换场景这种静默失败。"""
+        p = self._exec([self.ffmpeg, "-hide_banner", "-nostats", "-i", str(path), "-an",
+                        "-vf", f"select='gt(scene,{threshold})',showinfo", "-f", "null", "-"])
+        if p.returncode != 0:
+            raise FFmpegError(f"场景检测失败：\n{(p.stderr or '')[-1500:]}")
+        try:
+            dur = self.video_duration(path)
+        except FFmpegError:
+            dur = None
+        return hard_cuts(parse_scene_cuts(p.stderr), dur)
 
     def trim_silence(self, src: Path, dst: Path) -> Path:
         """剪掉音频首尾静音（配音用）。"""

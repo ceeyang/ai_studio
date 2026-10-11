@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { ApiError, detailText, errorText } from '../../api/client';
 import type { Slot } from '../../api/types';
 import { engineLabel, fmtTime } from '../../format';
+import { cutTip, hardCuts } from './shotStatus';
 
 export interface CandidateGridProps {
   slot: Slot;
@@ -94,6 +95,11 @@ export function CandidateGrid({ slot, onSelect, selecting = false }: CandidateGr
             <figcaption>
               <span>{engineLabel(c.engine)}</span>
               <span className="muted">{fmtTime(c.created_at)}</span>
+              {isVideo && hardCuts(c).length > 0 && (
+                <span className="badge warn" title={cutTip(c)}>
+                  疑似跳切
+                </span>
+              )}
               {selected ? (
                 <span className="badge ok">已选定</span>
               ) : (

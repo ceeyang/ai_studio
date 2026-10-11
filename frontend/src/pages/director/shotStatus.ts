@@ -74,6 +74,17 @@ export function cellStatus(shot: ShotDetail, stage: GenStage): CellStatus {
   };
 }
 
+/** 出片自检发现的片段内部硬切（秒）：后端写在候选 params.qc.hard_cuts 里，没检测过或没有就是空数组 */
+export function hardCuts(c?: Candidate): number[] {
+  const qc = c?.params?.qc as { hard_cuts?: unknown } | undefined;
+  return Array.isArray(qc?.hard_cuts) ? qc.hard_cuts.filter((t): t is number => typeof t === 'number') : [];
+}
+
+/** 「疑似跳切」角标的悬停说明 */
+export function cutTip(c: Candidate): string {
+  return c.note || `疑似跳切：${hardCuts(c).map((t) => `${t.toFixed(1)}s`).join('、')} 处画面突变，建议重拍`;
+}
+
 /** 能拿来出视频的首帧：选定了、而且不过期（过期的先回首帧阶段重拍，不拿旧首帧出视频） */
 export function firstFrameReady(shot: ShotDetail): boolean {
   return slotMark(slotOf(shot, 'first_frame')) === 'ok';

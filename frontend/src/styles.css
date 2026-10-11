@@ -433,6 +433,7 @@ input[type='number'] { font-variant-numeric: tabular-nums; }
 .badge { margin-left: 4px; }
 .badge.stale { background: var(--warn-soft); color: var(--warn); border-color: rgba(242, 193, 78, 0.35); }
 .badge.ok { background: var(--ok-soft); color: var(--ok); border-color: rgba(62, 207, 142, 0.35); }
+.badge.warn { background: var(--warn-soft); color: var(--warn); border-color: rgba(242, 193, 78, 0.35); }
 .pill::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .pill.warn, .pill.job-waiting_input { background: var(--warn-soft); color: var(--warn); }
 .pill.job-done { background: var(--ok-soft); color: var(--ok); }
@@ -1417,6 +1418,8 @@ img.rail-avatar { border: 0; }
 }
 .shot-thumb .badge { position: absolute; margin: 0; }
 .shot-thumb .badge.stale { left: 6px; bottom: 6px; background: rgba(30, 22, 4, 0.88); backdrop-filter: blur(4px); }
+.shot-thumb .badge.cut { left: 6px; bottom: 6px; background: rgba(30, 22, 4, 0.88); backdrop-filter: blur(4px); }
+.shot-thumb .badge.stale ~ .badge.cut { bottom: 32px; }
 .shot-thumb .badge.fail { right: 6px; top: 6px; background: rgba(40, 6, 8, 0.9); color: #ff8f93; border-color: rgba(255, 90, 95, 0.45); }
 .shot-thumb .new-cands {
   right: 6px; bottom: 6px; padding: 2px 7px; font-size: 11px; font-weight: 600;

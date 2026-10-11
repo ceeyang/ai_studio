@@ -72,6 +72,20 @@ def compose_video_prompt(motion_prompt: str, image_prompt: str, audio_prompt: st
     return text + ("\nAudio: " + " ".join(parts) if parts else "")
 
 
+# 视频连续性：H3 带参考图时曾在镜头中途切到定妆照（灰色影棚背景、正面站立）。只拼进发给引擎的提示词，
+# 不进输入哈希和 inputs 摘要——否则模板一改，所有已出的视频都会被判过期。
+CONTINUITY_CLAUSE = ("Single continuous shot with no cut: the whole clip stays in the same location "
+                     "as the first frame, no scene change, no jump to a reference image, "
+                     "no studio background, no portrait backdrop.")
+
+
+def with_continuity(video_prompt: str) -> str:
+    """把连续性要求接在画面描述后面、Audio 段前面。"""
+    body, sep, audio = (video_prompt or "").partition("\nAudio:")
+    body = body.rstrip()
+    return f"{body} {CONTINUITY_CLAUSE}".strip() + (sep + audio if sep else "")
+
+
 def join_negative(*parts: str | None) -> str:
     return ", ".join(p.strip() for p in parts if p and p.strip())
 

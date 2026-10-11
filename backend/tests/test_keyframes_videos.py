@@ -3,7 +3,7 @@ import pytest
 from backend.domain.models import Project, Shot, StyleBible
 from backend.domain.slots import selected_candidate, slots_for
 from backend.engines.base import upload_ref
-from backend.pipeline.keyframes import run_keyframe
+from backend.pipeline.keyframes import load_shot, run_keyframe
 from backend.pipeline.prompting import (compose_image_prompt, compose_video_prompt, join_negative,
                                         shot_seed)
 from backend.pipeline.videos import run_video
@@ -90,7 +90,8 @@ def test_h3_video_prompt_has_audio_and_uses_selected_frame(tmp_path, db):
     res = run_video(ctx, {"shot_id": shot_id})
     call = runner.calls[-1]
     prompt = call.workflow["6"]["inputs"]["prompt"]
-    assert prompt.startswith("ANCHOR she looks up slowly\nAudio: quiet hum")
+    assert prompt.startswith("ANCHOR she looks up slowly ")
+    assert "\nAudio: quiet hum" in prompt
     assert "词被改了" in prompt
     with db.session() as s:
         ff = selected_candidate(s, "shot", shot_id, "first_frame")
@@ -202,3 +203,77 @@ def test_video_force_retake_selects_new_candidate_even_with_same_input(tmp_path,
         assert selected_candidate(s, "shot", shot_id, "video").id == new
         video_slot = next(sl for sl in slots_for(s, "shot", shot_id) if sl.kind == "video")
         assert len({c.input_hash for c in video_slot.candidates}) == 1   # 确实是同一输入
+
+
+# ---------------------------------------------------------------- 视频连续性：提示词 + 出片自检
+def test_video_prompt_has_continuity_clause_without_changing_hash(tmp_path, db):
+    """H3 曾在镜头中途切到定妆照：提示词里写明单个连续镜头、和首帧同一地点、不切镜、不要影棚背景。
+    这句不进输入哈希，已有视频不会因为模板更新全部变成过期。"""
+    from backend.pipeline.prompting import CONTINUITY_CLAUSE, video_input_hash
+
+    ctx, runner, shot_id = setup(tmp_path, db)
+    run_keyframe(ctx, {"shot_id": shot_id})
+    run_video(ctx, {"shot_id": shot_id})
+    prompt = runner.calls[-1].workflow["6"]["inputs"]["prompt"]
+    body, audio = prompt.split("\nAudio:", 1)
+    assert CONTINUITY_CLAUSE in body and CONTINUITY_CLAUSE not in audio
+    low = CONTINUITY_CLAUSE.lower()
+    assert "continuous" in low and "same location" in low and "no cut" in low and "studio" in low
+    with db.session() as s:
+        v = selected_candidate(s, "shot", shot_id, "video")
+        assert CONTINUITY_CLAUSE not in v.params["inputs"]["prompt"]
+        shot, _, proj, style = load_shot(s, shot_id)
+        assert v.input_hash == video_input_hash(shot, proj, style,
+                                                v.params["first_frame_candidate_id"], "h3_video", True)
+
+
+class CutFFmpeg:
+    """假 ffmpeg：只有场景检测，返回预设的硬切时间点（或报错）。"""
+
+    def __init__(self, cuts=None, fail=None):
+        self.cuts, self.fail, self.seen = cuts or [], fail, []
+
+    def scene_cuts(self, path):
+        self.seen.append(path)
+        if self.fail:
+            raise self.fail
+        return list(self.cuts)
+
+
+def video_with_ffmpeg(tmp_path, db, ff):
+    ctx, runner, shot_id = setup(tmp_path, db)
+    ctx.services.ffmpeg = ff
+    run_keyframe(ctx, {"shot_id": shot_id})
+    res = run_video(ctx, {"shot_id": shot_id})
+    return ctx, shot_id, res
+
+
+def test_video_qc_flags_hard_cut_on_candidate(tmp_path, db):
+    ff = CutFFmpeg(cuts=[2.04])
+    ctx, shot_id, res = video_with_ffmpeg(tmp_path, db, ff)
+    assert res["qc"] == {"hard_cuts": [2.04]}
+    with db.session() as s:
+        v = selected_candidate(s, "shot", shot_id, "video")
+        assert "疑似跳切" in v.note and "2.0" in v.note
+        assert v.params["qc"]["hard_cuts"] == [2.04]
+        assert ctx.services.media.abs(v.file_path) == ff.seen[0]
+    assert any("疑似跳切" in m and "S01" in m for m in ctx.logs)
+
+
+def test_video_qc_clean_clip_has_no_note(tmp_path, db):
+    ctx, shot_id, res = video_with_ffmpeg(tmp_path, db, CutFFmpeg(cuts=[]))
+    with db.session() as s:
+        v = selected_candidate(s, "shot", shot_id, "video")
+        assert v.note == "" and v.params["qc"] == {"hard_cuts": []}
+    assert not any("疑似跳切" in m for m in ctx.logs)
+
+
+def test_video_qc_failure_does_not_fail_job(tmp_path, db):
+    from backend.engines.ffmpeg import FFmpegError
+
+    ctx, shot_id, res = video_with_ffmpeg(tmp_path, db, CutFFmpeg(fail=FFmpegError("坏文件")))
+    assert res["candidate_ids"]
+    with db.session() as s:
+        v = selected_candidate(s, "shot", shot_id, "video")
+        assert v.note == "" and "qc" not in v.params
+    assert any("跳切检测没跑成" in m for m in ctx.logs)

@@ -169,4 +169,32 @@ describe('ShotCard', () => {
     const { card } = setup({ shot, stage: 'videos' });
     expect(within(card).getByRole('button', { name: '先重拍首帧 S01' }).textContent).toBe('先重拍首帧');
   });
+
+  it('视频阶段：出片自检发现片段内部硬切 → 「疑似跳切」角标，悬停看说明', () => {
+    const note = '疑似跳切：2.0s 处画面突变（可能剪进了参考图或换了场景），建议看一下，不对就重拍';
+    const video = makeSlot({
+      id: 2, kind: 'video', selected_candidate_id: 20,
+      candidates: [makeCandidate({ id: 20, url: '/media/v.mp4', note, params: { qc: { hard_cuts: [2.04] } } })],
+    });
+    const shot = makeShot({ id: 11, code: 'S01', slots: [chosen(1, 'first_frame'), video] });
+    const { card } = setup({ shot, stage: 'videos' });
+    expect(within(card).getByText('疑似跳切').getAttribute('title')).toBe(note);
+  });
+
+  it('没有硬切、或在首帧阶段，不显示「疑似跳切」', () => {
+    const clean = makeSlot({
+      id: 2, kind: 'video', selected_candidate_id: 20,
+      candidates: [makeCandidate({ id: 20, url: '/media/v.mp4', params: { qc: { hard_cuts: [] } } })],
+    });
+    const shot = makeShot({ id: 11, code: 'S01', slots: [chosen(1, 'first_frame'), clean] });
+    const { card, unmount } = setup({ shot, stage: 'videos' });
+    expect(within(card).queryByText('疑似跳切')).toBeNull();
+    unmount();
+    const cut = makeSlot({
+      id: 1, kind: 'first_frame', selected_candidate_id: 10,
+      candidates: [makeCandidate({ id: 10, params: { qc: { hard_cuts: [1] } } })],
+    });
+    const again = setup({ shot: makeShot({ id: 11, code: 'S01', slots: [cut] }) });
+    expect(within(again.card).queryByText('疑似跳切')).toBeNull();
+  });
 });

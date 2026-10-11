@@ -8,7 +8,8 @@ import time
 import pytest
 
 from backend.engines.ffmpeg import (FFmpeg, FFmpegCanceled, FFmpegError, build_normalize_cmd,
-                                    build_xfade_graph, parse_transition, xfade_timeline)
+                                    build_xfade_graph, hard_cuts, parse_scene_cuts,
+                                    parse_transition, xfade_timeline)
 from backend.queue.errors import JobCanceled
 
 needs_ffmpeg = pytest.mark.skipif(not (shutil.which("ffmpeg") and shutil.which("ffprobe")),
@@ -181,3 +182,44 @@ def test_with_cancel_keeps_paths_and_shared_instance_unbound():
     bound = base.with_cancel(threading.Event())
     assert (bound.ffmpeg, bound.ffprobe) == ("ff", "fp")
     assert base.cancel is None and bound is not base
+
+
+# ---------------------------------------------------------------- 出片自检：片段内部硬切
+SHOWINFO_LOG = """\
+[Parsed_showinfo_1 @ 0000019fc0cf4d80] config in time_base: 1/12288, frame_rate: 24/1
+[Parsed_showinfo_1 @ 0000019fc0cf4d80] n:   0 pts:  12288 pts_time:1       duration:    512 \
+duration_time:0.0416667 fmt:yuv420p
+[Parsed_showinfo_1 @ 0000019fc0cf4d80] n:   1 pts:  30720 pts_time:2.5     duration:    512
+[Parsed_showinfo_1 @ 0000019fc0cf4d80] n:   2 pts:  49000 pts_time:3.98    duration:    512
+[out#0/null @ 000001] video:1KiB audio:0KiB pts_time:9.9
+"""
+
+
+def test_parse_scene_cuts_and_edges():
+    assert parse_scene_cuts(SHOWINFO_LOG) == [1.0, 2.5, 3.98]
+    assert parse_scene_cuts("") == []
+    # 贴着结尾（4 秒片段的 3.98 秒）和开头的突变不算硬切
+    assert hard_cuts([0.0, 1.0, 2.5, 3.98], 4.0) == [1.0, 2.5]
+    assert hard_cuts([0.05, 1.0], None) == [1.0]
+
+
+@needs_ffmpeg
+def test_scene_cuts_finds_hard_cut_in_synthetic_clip(tmp_path):
+    """前 1 秒 testsrc、后 1 秒彩条拼成一条：相当于 H3 中途跳到定妆照。"""
+    cut = tmp_path / "cut.mp4"
+    subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "testsrc=size=160x120:rate=24:duration=1",
+                    "-f", "lavfi", "-i", "smptebars=size=160x120:rate=24:duration=1",
+                    "-filter_complex", "[0:v][1:v]concat=n=2:v=1:a=0", "-c:v", "libx264",
+                    "-pix_fmt", "yuv420p", str(cut)], check=True, capture_output=True)
+    ff = FFmpeg()
+    cuts = ff.scene_cuts(cut)
+    assert len(cuts) == 1 and abs(cuts[0] - 1.0) < 0.1
+    smooth = make_clip(tmp_path / "smooth.mp4", 2.0, False)
+    assert ff.scene_cuts(smooth) == []
+
+
+def test_scene_cuts_bad_file_raises(tmp_path):
+    bad = tmp_path / "bad.mp4"
+    bad.write_bytes(b"x")
+    with pytest.raises(FFmpegError):
+        FFmpeg().scene_cuts(bad)

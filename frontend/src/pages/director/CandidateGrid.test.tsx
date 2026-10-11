@@ -94,4 +94,18 @@ describe('CandidateGrid', () => {
     await waitFor(() => expect(screen.getByText(/导出失败/)).toBeTruthy());
     expect(screen.getByText(/RefNode/)).toBeTruthy();
   });
+
+  it('视频候选被出片自检标了硬切 → 「疑似跳切」角标（其他候选不标）', () => {
+    const slot = makeSlot({
+      kind: 'video', selected_candidate_id: 301,
+      candidates: [
+        makeCandidate({ id: 301, url: '/media/a.mp4', note: '疑似跳切：2.0s 处画面突变', params: { qc: { hard_cuts: [2.0] } } }),
+        makeCandidate({ id: 302, url: '/media/b.mp4', params: { qc: { hard_cuts: [] } } }),
+      ],
+    });
+    render(<CandidateGrid slot={slot} onSelect={() => {}} />);
+    const bad = within(screen.getByTestId('candidate-301')).getByText('疑似跳切');
+    expect(bad.getAttribute('title')).toBe('疑似跳切：2.0s 处画面突变');
+    expect(within(screen.getByTestId('candidate-302')).queryByText('疑似跳切')).toBeNull();
+  });
 });

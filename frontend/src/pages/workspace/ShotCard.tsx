@@ -3,7 +3,7 @@
 import { useId } from 'react';
 import type { Character, ShotDetail } from '../../api/types';
 import { Menu } from '../../components/Menu';
-import { type CardAction, type GenStage, activeText, cardAction, cellStatus } from '../director/shotStatus';
+import { type CardAction, type GenStage, activeText, cardAction, cellStatus, cutTip, hardCuts } from '../director/shotStatus';
 
 export interface ShotCardProps {
   shot: ShotDetail;
@@ -97,6 +97,11 @@ export function ShotCard(props: ShotCardProps) {
             {st.mark === 'stale' && (
               <span className="badge stale" title={st.staleReason}>
                 已过期
+              </span>
+            )}
+            {stage === 'videos' && st.cand && hardCuts(st.cand).length > 0 && (
+              <span className="badge warn cut" title={cutTip(st.cand)}>
+                疑似跳切
               </span>
             )}
             {st.failed && <span className="badge fail">失败</span>}

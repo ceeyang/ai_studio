@@ -6,18 +6,42 @@ import shutil
 from backend.domain.refs import shot_refs
 from backend.domain.slots import add_candidate, get_or_create_slot, selected_candidate
 from backend.engines.base import VideoRequest
+from backend.pipeline.common import job_services
 from backend.pipeline.keyframes import load_shot, ref_labels, run_comfy
 from backend.pipeline.prompting import (compose_video_prompt, join_negative, shot_seed,
-                                        video_input_hash, video_inputs)
-from backend.queue.errors import JobError
+                                        video_input_hash, video_inputs, with_continuity)
+from backend.queue.errors import JobCanceled, JobError
 from backend.queue.handlers import HANDLERS
 
 VIDEO_EXTS = (".mp4", ".webm", ".mov", ".mkv")
 
 
+def cut_note(cuts: list[float]) -> str:
+    where = "、".join(f"{t:.1f}s" for t in cuts)
+    return f"疑似跳切：{where} 处画面突变（可能剪进了参考图或换了场景），建议看一下，不对就重拍"
+
+
+def scene_qc(ctx, sv, path, code: str) -> dict | None:
+    """出片自检：找片段内部的硬切。检测本身失败只记日志，不影响出片。"""
+    detect = getattr(sv.ffmpeg, "scene_cuts", None)
+    if detect is None:
+        return None
+    try:
+        cuts = detect(path)
+    except JobCanceled:
+        raise
+    except Exception as e:
+        why = (str(e).strip().splitlines() or [type(e).__name__])[0][:200]
+        ctx.log(f"视频 {code}：跳切检测没跑成，跳过（{why}）")
+        return None
+    if cuts:
+        ctx.log(f"视频 {code}：{cut_note(cuts)}")
+    return {"hard_cuts": cuts}
+
+
 @HANDLERS.register("video.shot", gpu=True)
 def run_video(ctx, payload: dict) -> dict:
-    sv = ctx.services
+    sv = job_services(ctx)
     shot_id = int(payload["shot_id"])
     with sv.db.session() as s:
         shot, ep, proj, style = load_shot(s, shot_id)
@@ -51,7 +75,7 @@ def run_video(ctx, payload: dict) -> dict:
         seconds = max(1.0, min(float(shot.duration), engine.caps.max_seconds))
         first = sv.media.abs(ff.file_path)
         slug, code, aspect = proj.slug, shot.code, proj.aspect
-    call = engine.build(VideoRequest(prompt=prompt, first_frame=first, aspect=aspect, seed=seed,
+    call = engine.build(VideoRequest(prompt=with_continuity(prompt), first_frame=first, aspect=aspect, seed=seed,
                                      seconds=seconds, negative=negative, refs=refs,
                                      prefix=f"studio/{slug}/clip_{code}"))
     ctx.log(f"视频 {code} · {engine_name} · {seconds:.1f}s · seed {seed} · 参考图 {len(refs)} 张"
@@ -63,13 +87,21 @@ def run_video(ctx, payload: dict) -> dict:
         raise JobError(f"镜头 {code} 没有产出视频文件：{[f.name for f in files]}")
     dst = sv.media.new_media_path(slug, "video", video.suffix)
     shutil.copyfile(video, dst)
+    qc = scene_qc(ctx, sv, dst, code)
     with sv.db.session() as s:
         slot = get_or_create_slot(s, "shot", shot_id, "video")
+        params = {**call.meta, "first_frame_candidate_id": ff.id,
+                  "workflow": sv.media.rel(run_dir / "workflow.api.json"), "inputs": inputs}
+        if qc is not None:
+            params["qc"] = qc
         c = add_candidate(s, slot, file_path=sv.media.rel(dst), engine=engine_name,
-                          params={**call.meta, "first_frame_candidate_id": ff.id,
-                                  "workflow": sv.media.rel(run_dir / "workflow.api.json"),
-                                  "inputs": inputs},
+                          params=params,
                           input_hash=h, job_id=ctx.job_id,
                           force_select=bool(payload.get("force")))  # 重拍：新的一条直接选中
+        if qc and qc["hard_cuts"]:
+            c.note = cut_note(qc["hard_cuts"])
         cid = c.id
-    return {"candidate_ids": [cid], "file": sv.media.rel(dst)}
+    out = {"candidate_ids": [cid], "file": sv.media.rel(dst)}
+    if qc is not None:
+        out["qc"] = qc
+    return out
