@@ -265,9 +265,15 @@ def test_continuity_clause_is_positive_and_names_the_location():
                                      "shown in the first frame for the whole clip, as a single "
                                      "uninterrupted shot.")
     # 没冠词、句首大写的场景外观：补冠词、小写
-    assert location_summary("Narrow suburban Chinese e-bike repair shop at night, shutter down.")         == "a narrow suburban Chinese e-bike repair shop at night, shutter down"
+    loc1 = location_summary("Narrow suburban Chinese e-bike repair shop at night, shutter down.")
+    assert loc1 == "a narrow suburban Chinese e-bike repair shop at night, shutter down"
     assert location_summary("Old tea house with lanterns.") == "an old tea house with lanterns"
     assert location_summary("LED-lit corridor.") == "a LED-lit corridor"
+    # 第二次样片：「inside Corner of a narrow old Chinese street…」
+    loc2 = location_summary("Corner of a narrow old Chinese street at dusk, a cobbler's stall.")
+    assert loc2 == "a corner of a narrow old Chinese street at dusk, a cobbler's stall"
+    assert continuity_clause(location_summary("Corner of a street.")).startswith(
+        "One continuous take inside a corner of a street;")
     assert location_summary("直播间") == ""            # 中文的场景名不能进英文提示词
     assert len(location_summary("word " * 80).split()) <= 30
 

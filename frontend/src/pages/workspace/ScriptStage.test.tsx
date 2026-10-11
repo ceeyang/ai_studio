@@ -322,7 +322,7 @@ describe('ScriptStage', () => {
     expect(writes(calls)[0].body).toEqual({ stage: 'script', force: false, confirm: true });
   });
 
-  it('输入没变但分镜规则已更新：提示用「重新生成分镜…」按新规则重出，不提交', async () => {
+  it('输入没变但剧本规则已更新：提示用「重新生成剧本…」按新规则重出，不提交', async () => {
     const calls = installFetch({
       ...ROUTES,
       'GET /api/episodes/4': makeEpisode({ id: 4, scene_blocks: [] }),
@@ -331,7 +331,7 @@ describe('ScriptStage', () => {
     renderAt(<ScriptStage />, AT);
     const user = userEvent.setup();
     await user.click(await screen.findByRole('button', { name: '生成剧本' }));
-    expect(await screen.findByText(/分镜规则已更新，要按新规则重出请用「重新生成分镜…」/)).toBeTruthy();
+    expect(await screen.findByText(/剧本规则已更新，要按新规则重出请用「重新生成剧本…」/)).toBeTruthy();
     expect(writes(calls)).toHaveLength(0);
   });
 
