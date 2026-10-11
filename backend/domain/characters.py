@@ -218,3 +218,12 @@ def refresh_shot_looks(s: Session, char: Character, extra_old=(),
     s.flush()
     return {"updated": updated, "replacements": replacements, "already": already,
             "unmatched": unmatched, "partial": partial}
+
+
+# 剧本结构模板要求只出声的人在 description 里写明「只出声，不出镜」（画外音、电话里的声音）
+_VOICE_ONLY = re.compile(r"只出声|不出镜|只闻其声|只有声音")
+
+
+def voice_only_description(description: str | None) -> bool:
+    """角色描述写明了只出声、不出镜。"""
+    return bool(_VOICE_ONLY.search(description or ""))

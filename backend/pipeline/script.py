@@ -10,7 +10,7 @@ import unicodedata
 
 from sqlalchemy import select
 
-from backend.domain.characters import portrait_of
+from backend.domain.characters import portrait_of, voice_only_description
 from backend.domain.hashing import input_hash
 from backend.domain.locations import location_image_of
 from backend.domain.models import Character, Location, SceneBlock, StyleBible
@@ -29,8 +29,9 @@ from backend.queue.handlers import HANDLERS
 #   v3（结构）：爆款剧本规范（3 秒钩子、冲突、反转、结尾钩子、对白密度和长度、对白格式）、风格预设
 #   v3（视觉）：风格锚按项目的风格预设定画风方向，负面词参考预设
 #   v4（结构、视觉）：开头的称呼「AI 漫剧」改成「AI 短剧」（真人写实预设不是漫画）
+#   v5（视觉）：只出声、不出镜的角色 visual_prompt 只写性别年龄族裔加 voice only（约 10 词）
 STRUCTURE_RULES_VERSION = 4
-VISUAL_RULES_VERSION = 4
+VISUAL_RULES_VERSION = 5
 SCRIPT_RULES_OUTDATED_HINT = "剧本规则已更新，要按新规则重出请强制重跑（会重写段落、牵连镜头）"
 DEFAULT_SHOT_SECONDS = 5.0
 
@@ -43,13 +44,18 @@ def visual_rules(prompts) -> str:
     return template_rules(prompts, "script_visual", VISUAL_RULES_VERSION)
 
 
-def shot_plan(engines, video_engine: str, target_seconds: float) -> tuple[int, float]:
-    """(本集大约几个镜头, 每镜几秒)：和分镜阶段同一个算法（目标时长 ÷ 视频引擎甜区）。
-    引擎不存在时按 5 秒估（剧本阶段不该因为视频引擎没配好而失败）。"""
+def shot_plan(engines, video_engine: str, target_seconds: float,
+              pace: float | None = None) -> tuple[int, float]:
+    """(本集大约几个镜头, 每镜几秒)：和分镜阶段同一个算法（目标时长 ÷ 每镜秒数）。每镜秒数：项目设了
+    镜头节奏（pace）就用它，否则用视频引擎的甜区；引擎不存在时按 5 秒估（剧本阶段不该因为视频引擎没配好
+    而失败）。"""
+    from backend.pipeline.storyboard import pace_seconds
+
     try:
-        seconds = float(engines.video(video_engine).caps.default_seconds)
+        caps = engines.video(video_engine).caps
+        seconds = float(pace_seconds(pace, caps))
     except (KeyError, AttributeError):
-        seconds = DEFAULT_SHOT_SECONDS
+        seconds = float(pace) if pace else DEFAULT_SHOT_SECONDS
     return shot_budget(target_seconds, seconds), seconds
 
 
@@ -95,7 +101,8 @@ def visual_prompt_fp(prompts, project_title: str, characters: list[dict], locati
 
 def structure_inputs(sv, ep, proj, note: str | None = None) -> tuple[str, str, str]:
     """按剧集当前状态渲染剧本结构提示词（带镜头预算），script 阶段和影响预估共用。"""
-    count, seconds = shot_plan(sv.engines, proj.video_engine, ep.target_seconds)
+    count, seconds = shot_plan(sv.engines, proj.video_engine, ep.target_seconds,
+                               getattr(proj, "shot_seconds", None))
     return structure_prompt_fp(sv.prompts(proj.slug), proj.title, ep.target_seconds,
                                ep.source_text, note, shot_count=count, shot_seconds=seconds,
                                aspect=proj.aspect or "9:16", preset=proj.style_preset)
@@ -116,7 +123,10 @@ def visual_chars_and_locations(proj) -> tuple[list[dict], list[dict]]:
 
     script 阶段和重跑影响预估共用，避免两边各自拼一遍而对不上。
     """
-    chars = [{"name": c.name, "description": c.description} for c in proj.characters]
+    # 只出声的角色才多一个 voice_only 键：其余角色的写法和以前一样，老剧集的指纹不变
+    chars = [{"name": c.name, "description": c.description,
+              **({"voice_only": True} if getattr(c, "voice_only", False) else {})}
+             for c in proj.characters]
     locs = [{"name": l.name, "time_of_day": l.time_of_day, "atmosphere": l.atmosphere}
             for l in proj.locations]
     return chars, locs
@@ -178,6 +188,8 @@ def _structure(ctx, episode_id: int, force: bool, manual: dict, note: str | None
                 s.add(ch)
             if c.description:
                 ch.description = c.description
+            if voice_only_description(c.description):
+                ch.voice_only = True   # 只出声、不出镜：不抽定妆照，分镜不给占位符（可在角色卡上改）
         locs: dict[str, Location] = {}
         for lo in out.locations:
             loc = s.scalar(select(Location).where(Location.project_id == proj.id,

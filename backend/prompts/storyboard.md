@@ -7,7 +7,8 @@
 - 关键物件和揭示：剧情要靠某个物件或画面信息才成立时（反转、伏笔、照片、字条、手机屏幕、证件），必须在这 {{ count }} 个镜头之内给它单独一个特写插入镜头（insert shot，大特写或特写）——插入镜头占本段的镜头数，不能额外多出镜头。镜头数固定；放不下时优先保留插入镜头和主线动作，次要动作省略。image_prompt 把物件上看得见的内容写具体（照片里是谁、在做什么、旁边有什么），观众不看台词也能看懂。
 - 道具统一说法：反复出现的关键道具（车、包、照片、手机等）第一次出现时定一个具体的英文说法（颜色、款式、材质、大小），之后每个镜头的 image_prompt 都逐字重复同一个说法，不换同义词（不要一会儿 scooter 一会儿 e-bike）；motion_prompt 里用简短指代就够了（如 the red scooter），但不能换成别的东西。下面给了「已定的道具英文说法」的，这些道具再出现时直接逐字沿用。props 列出本镜出现的关键道具的英文说法（和 image_prompt 里的写法一字不差），没有就写空数组。
 - shot_size 只用：大特写、特写、近景、中景、全景。
-- duration 是秒数，默认 {{ shot_seconds }}，最长 {{ max_seconds }}；台词多的镜头可以长一些。
+- duration 是秒数，默认 {{ shot_seconds }}，最长 {{ max_seconds }}；台词多的镜头可以长一些。{% if first_block is defined and first_block %}
+- 这是全集的第一段：第 1 个镜头是全集最抓人的画面（冲突、悬念或反常的那一瞬间），duration 写 2–3 秒，节奏要快，不要用环境空镜或交代背景开场；省下的时长分给本段后面的镜头。{% endif %}
 - 画外音：说话的人不在画面里（不在这一镜的 cast 里）时，audio_prompt 写 off-screen voice（如 off-screen voice of the stocky man, low and tired），motion_prompt 写明画面里的人闭着嘴在听（lips closed, listening），不要写画面里的人开口说话。
 - 不写人名：image_prompt、motion_prompt、audio_prompt 里提到人时一律用英文外貌简称（如 the stocky man、the young woman），中文名不行，拼音也不行（不能写 Lao Zhou、Lin Xiaoman、Xiaoman 这类）。
 - image_prompt：你写的部分 60–120 个英文单词（外貌占位符不算）；两人及以上同框时控制在 60–90 词（系统要给每个人填外貌和服装，太长会被压缩）。风格锚由系统自动接在每个 image_prompt 前面，不要自己抄进来。按这个顺序写：
@@ -23,8 +24,9 @@
 - 结尾要人物留在画面里的镜头（如最后一镜人站在门口、看着门里）：不要写成 5 秒以上的长静止镜头，控制在 4 秒左右或改成反应特写；motion_prompt 写明人物留在画面里（stays in frame），不要写走开、转身离开。
 - dialogue：只在有人说话时写。speaker 只能是角色表里的名字。zh 是中文台词，每句不超过 16 个字，语速每秒不超过 5 个字（如 10 个字至少给 2 秒）；start / end 是相对本镜开头的秒数，第一句不早于 0.4 秒，最后一句结束后留 0.4 秒。
 - 插入镜头里只露手、腰、口袋、背影局部的人：cast 照样写他、照样写占位符，但紧接着占位符的那一句只写看得见的部位，用所有格开头（如 The young woman's fingers hold …、The young man's right hip fills the frame …），不写脸、眼睛、表情；系统会只给他填服装，不填脸和发型，出视频时也不带定妆照。只有物件、没有人的镜头 cast 写空数组。
-- cast：出场角色名（画面里看得见的人），只能从角色表里选；没有人出场就写空数组。
+- cast：出场角色名（画面里看得见的人），只能从角色表里选；角色表里标了「只出声，不出镜」的人永远不进 cast；没有人出场就写空数组。
 - transition_out 只能是：hard_cut、dissolve_0.5、white_flash_0.2、black_dip_0.3、fade_out_1.0。
+- continue_from_prev：建议这一镜「接上一镜」时写 true（系统会用上一镜视频的最后一帧当这一镜的首帧，画面无缝接上，这种镜头不用换景别和机位）。只有同时满足才写 true：和上一镜是同一个场景；上一镜结尾的动作在这一镜直接延续（同一个动作的下一段，人物位置不变）；cast 和上一镜一样，或只多一个从画外走进来的人。换景别、换机位、跳时间、插入镜头、本段第一镜一律写 false；拿不准就写 false。
 
 输出前自检（逐条检查，不满足就改好再输出）：
 1. 正好 {{ count }} 个镜头。
@@ -34,13 +36,13 @@
 5. image_prompt 你写的部分 60–120 个英文单词，没有抄风格锚。
 
 只输出一个 JSON 对象，不要 markdown 代码块，不要解释：
-{"shots": [{"shot_size": "近景", "camera_move": "slow push in", "action": "这一镜发生了什么（中文）", "cast": ["角色名"], "dialogue": [{"speaker": "角色名", "zh": "台词", "start": 0.6, "end": 2.4}], "image_prompt": "...", "motion_prompt": "...", "audio_prompt": "...", "props": ["a dented red thermos with a chipped lid"], "duration": {{ shot_seconds }}, "transition_out": "hard_cut"}]}
+{"shots": [{"shot_size": "近景", "camera_move": "slow push in", "action": "这一镜发生了什么（中文）", "cast": ["角色名"], "dialogue": [{"speaker": "角色名", "zh": "台词", "start": 0.6, "end": 2.4}], "image_prompt": "...", "motion_prompt": "...", "audio_prompt": "...", "props": ["a dented red thermos with a chipped lid"], "duration": {{ shot_seconds }}, "transition_out": "hard_cut", "continue_from_prev": false}]}
 === user ===
 风格锚（系统会自动接在每个 image_prompt 前面，你不用抄；光线和色彩的写法和它保持一致）：
 {{ anchor or "（暂无）" }}
 
 角色表（名字｜外貌占位符｜英文外貌。image_prompt 里写占位符，系统出图时按景别换成外貌；简短指代从外貌里取）：
-{% for c in characters %}- {{ c.name }}{% if c.token is defined and c.token %}｜{{ c.token }}{% endif %}｜{{ c.visual_prompt }}
+{% for c in characters %}- {{ c.name }}{% if c.voice_only is defined and c.voice_only %}｜（只出声，不出镜：不进 cast、不写占位符，他说话写成画外音）{% elif c.token is defined and c.token %}｜{{ c.token }}{% endif %}｜{{ c.visual_prompt }}
 {% else %}（本集没有固定角色）
 {% endfor %}
 场景：{% if location %}{{ location.name }}（{{ location.time_of_day }}，{{ location.atmosphere }}）

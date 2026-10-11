@@ -4,7 +4,7 @@
 - style.anchor_text：40–70 个英文单词，只写全剧通用的成像风格：画风（如 photorealistic live-action）、镜头与焦段、胶片或数字质感（颗粒、光晕）、调色（整体色彩倾向、对比、饱和度）、光线的质感（软硬、反差），以及皮肤和材质的真实感。它会被拼到每一个首帧提示词里，所以只写放在任何一个镜头都成立的东西；具体的地点、天气（雨、雪、雾）、时间（白天、夜晚）、具体光源（灯泡、霓虹、路灯、窗户）、氛围和时段光（雾气、烟尘、逆光、轮廓光、黄金时段）、道具、人物和故事内容都不写——这些属于场景和镜头。皮肤只写真实感（如 natural skin texture），不写皱纹这类和年龄有关的细节。
 {% if preset_anchor is defined and preset_anchor %}- 本剧的风格预设是「{{ preset_label }}」：anchor_text 的画风按这个方向写——{{ preset_anchor }}。预设只决定画风和质感，上一条「只写成像风格」的限制不变；角色和场景的 visual_prompt 也按这个画风写（不要在写实预设里写成卡通，也不要在漫画预设里写胶片颗粒和皮肤毛孔）。
 {% endif %}- style 的 palette / lighting / texture / character_rules 用中文简述；mood_keywords 是 3–6 个英文关键词；negative 是英文负面词（只有支持负面提示词的引擎会用，多数默认引擎用不上，简短写几个即可{% if preset_negative is defined and preset_negative %}，可参考：{{ preset_negative }}{% endif %}）。
-- characters：每个角色一条，name 必须和给你的角色名完全一致，一个都不能少。visual_prompt 是 60–120 个英文单词，开头先写性别、年龄和族裔（如 Chinese man in his mid-fifties），再写脸型、发型发色、体型、服装及材质、一个标志性细节。标志性细节要大块、一眼看得清、图像模型画得准的东西（如一条红围巾、一副黑框眼镜、一件有反光条的马甲），不写老茧、缠线、刻字、细小饰品、指甲、纹路这类小到容易画错的细节——它们会被画成别的东西（老茧画成戒指、镜腿缠线画成流苏），再通过定妆照带进每个镜头。只写不随剧情变化的外观：不写动作和表情，也不写淋湿、受伤、弄脏这类本集临时状态（那些在镜头里写）。core_features 用中文写 2–4 个最不能变的特征。
+- characters：每个角色一条，name 必须和给你的角色名完全一致，一个都不能少。visual_prompt 是 60–120 个英文单词，开头先写性别、年龄和族裔（如 Chinese man in his mid-fifties），再写脸型、发型发色、体型、服装及材质、一个标志性细节。标志性细节要大块、一眼看得清、图像模型画得准的东西（如一条红围巾、一副黑框眼镜、一件有反光条的马甲），不写老茧、缠线、刻字、细小饰品、指甲、纹路这类小到容易画错的细节——它们会被画成别的东西（老茧画成戒指、镜腿缠线画成流苏），再通过定妆照带进每个镜头。只写不随剧情变化的外观：不写动作和表情，也不写淋湿、受伤、弄脏这类本集临时状态（那些在镜头里写）。core_features 用中文写 2–4 个最不能变的特征。标了「（只出声，不出镜）」的角色（画外音、电话里的声音）不出现在画面里，不抽定妆照：visual_prompt 只写性别、年龄和族裔，最后加 voice only（约 10 个英文单词，如 Chinese man in his late thirties, voice only），不写脸、发型、体型和服装；core_features 写他的声音特点（如 低沉沙哑的中年男声）。
 - locations：每个场景一条，name 必须和给你的场景名完全一致，一个都不能少。visual_prompt 是 50–100 个英文单词，写空间结构、至少三个具体物件、天气和时段、主光源和色调；只写空间和物件，画面里只有环境。
 
 只输出一个 JSON 对象，不要 markdown 代码块，不要解释：
@@ -13,7 +13,7 @@
 项目：{{ project_title }}
 
 角色：
-{% for c in characters %}- {{ c.name }}：{{ c.description }}
+{% for c in characters %}- {{ c.name }}：{{ c.description }}{% if c.voice_only is defined and c.voice_only %}（只出声，不出镜）{% endif %}
 {% endfor %}
 场景：
 {% for l in locations %}- {{ l.name }}（{{ l.time_of_day }}）：{{ l.atmosphere }}

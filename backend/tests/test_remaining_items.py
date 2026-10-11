@@ -79,6 +79,195 @@ def test_no_auto_retry_for_clean_or_cut_only_take(tmp_path, db):
         assert db is not None and s.get(Project, 1).auto_retry_video
 
 
+# ---------------------------------------------------------------- P1-7 只出声的角色
+def _structure_with_voice():
+    from backend.tests.test_script import STRUCTURE
+
+    return {**STRUCTURE, "characters": STRUCTURE["characters"] + [
+        {"name": "站长", "description": "外卖站站长，只出声，不出镜，电话里催单"}]}
+
+
+def _visual_with_voice():
+    from backend.tests.test_script import VISUAL
+
+    return {**VISUAL, "characters": VISUAL["characters"] + [
+        {"name": "站长", "visual_prompt": "Chinese man in his late thirties, voice only",
+         "core_features": "男声"}]}
+
+
+def test_structure_marks_voice_only_characters_and_visual_prompt_says_so(tmp_path, db):
+    from sqlalchemy import select
+
+    from backend.domain.models import Character
+    from backend.pipeline.script import run_script
+    from backend.tests.test_script import setup as script_setup
+
+    ctx, ep_id, prov = script_setup(tmp_path, db, [_structure_with_voice(), _visual_with_voice()])
+    run_script(ctx, {"episode_id": ep_id})
+    with db.session() as s:
+        flags = {c.name: c.voice_only for c in s.scalars(select(Character))}
+    assert flags == {"林夏": False, "老周": False, "站长": True}
+    visual = prov.calls[1]
+    system = visual["system"] if "system" in visual else ""
+    user = visual["messages"][-1]["content"]
+    assert "站长：外卖站站长，只出声，不出镜" in user and "（只出声，不出镜）" in user
+    assert "voice only" in (system + user)
+
+
+def test_voice_only_flag_does_not_change_visual_fingerprint_of_others():
+    from backend.pipeline.script import visual_chars_and_locations
+
+    class C:
+        def __init__(self, name, vo=False):
+            self.name, self.description, self.voice_only = name, "d", vo
+
+    class P:
+        characters = [C("林夏"), C("站长", True)]
+        locations = []
+
+    chars, _ = visual_chars_and_locations(P())
+    assert chars[0] == {"name": "林夏", "description": "d"}       # 老角色的指纹不变
+    assert chars[1] == {"name": "站长", "description": "d", "voice_only": True}
+
+
+def _seed_voice_only(db, ep_id):
+    from backend.domain.models import Character, Episode
+
+    with db.session() as s:
+        proj_id = s.get(Episode, ep_id).project_id
+        ch = Character(project_id=proj_id, name="站长", voice_only=True,
+                       visual_prompt="Chinese man in his late thirties, voice only")
+        s.add(ch)
+        s.flush()
+        return ch.id
+
+
+def test_storyboard_table_gives_voice_only_no_placeholder(tmp_path, db):
+    from backend.pipeline.storyboard import run_storyboard
+    from backend.tests.test_storyboard import setup as sb_setup, shots_json
+
+    ctx, ep_id, prov = sb_setup(tmp_path, db, [shots_json(2), shots_json(2)])
+    cid = _seed_voice_only(db, ep_id)
+    run_storyboard(ctx, {"episode_id": ep_id})
+    user = prov.calls[0]["messages"][0]["content"]
+    line = next(x for x in user.splitlines() if x.startswith("- 站长"))
+    assert "{{char:%d}}" % cid not in user and "只出声，不出镜" in line
+
+
+def test_storyboard_rejects_voice_only_in_cast(tmp_path, db):
+    from backend.pipeline.storyboard import token_problems
+
+    class Sh:
+        cast = ["站长"]
+        image_prompt = "{{char:9}} The man stands."
+        motion_prompt = audio_prompt = ""
+        props: list = []
+
+    problems = token_problems([Sh()], {"站长": 9}, voice_only={"站长"})
+    assert any("只出声" in p for p in problems)
+
+
+def test_character_api_voice_only_toggle(api):
+    api.post("/api/projects", json={"title": "demo"})
+    c = api.post("/api/projects/demo/characters", json={"name": "站长"}).json()
+    assert c["voice_only"] is False
+    r = api.patch(f"/api/characters/{c['id']}", json={"voice_only": True})
+    assert r.status_code == 200 and r.json()["voice_only"] is True
+
+
+def test_portrait_warnings_skip_voice_only(tmp_path, db):
+    from backend.domain.models import Character
+    from backend.pipeline.runs import portrait_warnings
+    from backend.tests.helpers import make_services, seed_episode
+
+    sv = make_services(tmp_path, db)
+    proj_id, ep_id = seed_episode(db, image_engine="h3_image")
+    with db.session() as s:
+        s.add(Character(project_id=proj_id, name="站长", voice_only=True))
+        s.add(Character(project_id=proj_id, name="林夏"))
+    notes = portrait_warnings(db, sv.engines, ep_id, ["keyframes"])
+    assert notes and "林夏" in notes[0] and "站长" not in notes[0]
+
+
+def test_recommend_template_excludes_voice_only():
+    from backend.llm.prompts import BUILTIN_DIR
+
+    text = (BUILTIN_DIR / "character_recommend.md").read_text(encoding="utf-8")
+    assert "只出声" in text
+
+
+# ---------------------------------------------------------------- P2-7 建议接上一镜、P2-9 第一镜和镜头节奏
+def test_storyboard_stores_continue_suggestion_but_never_on_block_first_shot(tmp_path, db):
+    from backend.domain.models import Episode
+    from backend.pipeline.storyboard import run_storyboard, shot_content_hash
+    from backend.tests.test_storyboard import setup as sb_setup, shots_json
+
+    a = shots_json(2)
+    for sh in a["shots"]:
+        sh["continue_from_prev"] = True
+    ctx, ep_id, prov = sb_setup(tmp_path, db, [a, shots_json(2)])
+    run_storyboard(ctx, {"episode_id": ep_id})
+    with db.session() as s:
+        ep = s.get(Episode, ep_id)
+        shots = ep.shots
+        assert [x.suggest_continue for x in shots] == [False, True, False, False]
+        assert not any(x.continue_from_prev for x in shots)    # 只是建议，不自动打开
+        rec = ep.stage_hashes[f"storyboard:{shots[0].scene_block_id}"]
+        assert rec["rules"] == "7"
+        # 建议不进镜头内容哈希：之后用户关掉建议不算「手改过镜头」
+        assert rec["shots"][str(shots[1].id)] == shot_content_hash(shots[1])
+    assert any("建议 1 个镜头接上一镜" in m for m in ctx.logs)
+
+
+def test_first_block_prompt_asks_for_a_short_hook_shot(tmp_path, db):
+    from backend.pipeline.storyboard import run_storyboard
+    from backend.tests.test_storyboard import setup as sb_setup, shots_json
+
+    ctx, ep_id, prov = sb_setup(tmp_path, db, [shots_json(2), shots_json(2)])
+    run_storyboard(ctx, {"episode_id": ep_id})
+    assert "全集的第一段" in prov.calls[0]["system"]
+    assert "全集的第一段" not in prov.calls[1]["system"]
+    assert "continue_from_prev" in prov.calls[0]["system"]
+    assert any("全集第一镜 5 秒，建议 2–3 秒" in m for m in ctx.logs)
+
+
+def test_project_pace_sets_shot_seconds_and_count(tmp_path, db):
+    from backend.domain.models import Episode
+    from backend.pipeline.script import structure_inputs
+    from backend.pipeline.storyboard import block_fps, build_storyboard_plan
+    from backend.tests.test_storyboard import setup as sb_setup
+
+    ctx, ep_id, prov = sb_setup(tmp_path, db, [])
+    sv = ctx.services
+    with db.session() as s:
+        before = build_storyboard_plan(s, sv, ep_id)
+        fps = [block_fps(before, b, "") for b in before.blocks]
+        assert before.shot_seconds == 5.0 and sum(b["count"] for b in before.blocks) == 4
+        s.get(Episode, ep_id).project.shot_seconds = 3
+    with db.session() as s:
+        plan = build_storyboard_plan(s, sv, ep_id)
+        assert plan.shot_seconds == 3.0 and sum(b["count"] for b in plan.blocks) == 7
+        ep = s.get(Episode, ep_id)
+        system, user, _ = structure_inputs(sv, ep, ep.project)
+        assert "大约 7 个镜头" in user and "每个镜头约 3 秒" in system
+        s.get(Episode, ep_id).project.shot_seconds = None
+    with db.session() as s:
+        again = build_storyboard_plan(s, sv, ep_id)
+        # 没设节奏：和以前完全一样，老剧集的分镜指纹不变
+        assert [block_fps(again, b, "") for b in again.blocks] == fps
+
+
+def test_shot_api_exposes_and_dismisses_continue_suggestion(api):
+    api.post("/api/projects", json={"title": "demo"})
+    ep = api.post("/api/projects/demo/episodes", json={"source_text": "x"}).json()
+    sh = api.post(f"/api/episodes/{ep['id']}/shots", json={"image_prompt": "a"}).json()
+    assert sh["suggest_continue"] is False
+    r = api.patch(f"/api/shots/{sh['id']}", json={"suggest_continue": True})
+    assert r.status_code == 200 and r.json()["suggest_continue"] is True
+    r = api.patch(f"/api/shots/{sh['id']}", json={"suggest_continue": False})
+    assert r.json()["suggest_continue"] is False
+
+
 # ---------------------------------------------------------------- P2-5 三视图模板按画风写
 LOOK_A = "Japanese teenage girl, short black bob, navy sailor school uniform with a red ribbon."
 

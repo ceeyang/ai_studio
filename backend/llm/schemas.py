@@ -97,6 +97,8 @@ class ShotOut(BaseModel):
     props: list[str] = Field(default_factory=list, max_length=8)
     duration: float = Field(default=5.0, ge=2, le=10)
     transition_out: Transition = "hard_cut"
+    # 分镜建议这一镜接上一镜（只是建议，存进 Shot.suggest_continue，用户在工作台一键打开）
+    continue_from_prev: bool = False
 
     @field_validator("props", mode="before")
     @classmethod

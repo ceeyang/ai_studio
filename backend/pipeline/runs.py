@@ -218,11 +218,12 @@ def portrait_warnings(db: Database, engines, episode_id: int, stages: list[str],
                         if isinstance(c, dict) and c.get("character_id") is not None:
                             locking.setdefault(c["character_id"], set()).add(eng)
         elif max_refs(proj.image_engine) > 0:
-            locking = {c.id: {proj.image_engine} for c in proj.characters}
+            # 只出声、不出镜的角色不出现在画面里，不用定妆照
+            locking = {c.id: {proj.image_engine} for c in proj.characters if not c.voice_only}
         missing = []
         for cid in sorted(locking):
             ch = s.get(Character, cid)
-            if ch is not None and portrait_of(s, cid) is None:
+            if ch is not None and not ch.voice_only and portrait_of(s, cid) is None:
                 missing.append((ch.name, sorted(locking[cid])))
     if not missing:
         return []

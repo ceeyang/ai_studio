@@ -64,7 +64,7 @@ def missing_portraits(s, shot) -> list[str]:
     for c in shot.cast or []:
         cid = c.get("character_id") if isinstance(c, dict) else None
         ch = s.get(Character, cid) if cid is not None else None
-        if ch is not None and ch.name not in out and portrait_of(s, ch.id) is None:
+        if ch is not None and not ch.voice_only and ch.name not in out                 and portrait_of(s, ch.id) is None:
             out.append(ch.name)
     return out
 

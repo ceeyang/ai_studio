@@ -196,7 +196,11 @@ def run_recommend(ctx, payload: dict) -> dict:
                           manual=payload.get("manual") or {},
                           key=f"character.recommend:{episode_id}", step="character.recommend")
     have = set(existing)
-    chars = [c.model_dump() for c in out.characters if c.name.strip() not in have][:count]
+    from backend.domain.characters import voice_only_description
+
+    # 只出声、不出镜的人不用抽定妆照，不推荐
+    chars = [c.model_dump() for c in out.characters if c.name.strip() not in have
+             and not voice_only_description(c.description)][:count]
     ctx.log(f"推荐角色：{'、'.join(c['name'] for c in chars) or '（没有需要补的）'}")
     return {"characters": chars}
 

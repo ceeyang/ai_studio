@@ -188,15 +188,21 @@ def _copied(text: str, look: str, n: int = COPIED_NGRAM) -> str | None:
     return None
 
 
-def token_problems(shots, char_ids: dict[str, int], looks: dict[str, str] | None = None) -> list[str]:
+def token_problems(shots, char_ids: dict[str, int], looks: dict[str, str] | None = None, *,
+                   voice_only=()) -> list[str]:
     """image_prompt 里的外貌占位符：只能指向角色表里的人、cast 里的每个人都要有、不在 cast 里的不要写；
     motion_prompt / audio_prompt / props 里不能有占位符（视频提示词不会替换它们）。
-    looks（角色名 → 外貌）给了时，image_prompt 里又抄了外貌连续 8 个词以上也报错：出图时占位符会再填一遍。"""
+    looks（角色名 → 外貌）给了时，image_prompt 里又抄了外貌连续 8 个词以上也报错：出图时占位符会再填一遍。
+    voice_only（只出声、不出镜的角色名）不能进 cast。"""
     from backend.pipeline.prompting import CHAR_TOKEN, char_token
 
     known = {cid: name for name, cid in char_ids.items()}
     out = []
     for i, sh in enumerate(shots, start=1):
+        heard = [c for c in sh.cast if c in voice_only]
+        if heard:
+            out.append(f"第 {i} 镜 cast 里有 {'、'.join(heard)}，他只出声、不出镜：不进 cast、不写占位符，"
+                       "他的台词写成画外音（audio_prompt 写 off-screen voice）")
         for name in sh.cast:
             hit = _copied(sh.image_prompt or "", (looks or {}).get(name, ""))
             if hit:
@@ -224,6 +230,22 @@ def token_problems(shots, char_ids: dict[str, int], looks: dict[str, str] | None
         if any(CHAR_TOKEN.search(p) for p in sh.props or []):
             out.append(f"第 {i} 镜 props 里不能写外貌占位符")
     return out
+
+
+def drop_voice_only(shots, voice_only, char_ids: dict[str, int]) -> list[str]:
+    """最后一次机会：只出声的角色还在 cast 里时直接去掉（连同 image_prompt 里他的占位符），不为这个让整段失败。"""
+    from backend.pipeline.prompting import char_token
+
+    dropped: list[str] = []
+    for sh in shots:
+        for name in [c for c in sh.cast if c in voice_only]:
+            sh.cast = [c for c in sh.cast if c != name]
+            if name in char_ids:
+                sh.image_prompt = re.sub(r"\s*" + re.escape(char_token(char_ids[name])) + r"\s*", " ",
+                                         sh.image_prompt or "").strip()
+            if name not in dropped:
+                dropped.append(name)
+    return dropped
 
 
 def speaker_problems(shots, names) -> list[str]:
@@ -334,6 +356,19 @@ class StoryboardPlan:
     char_table: list[dict] = field(default_factory=list)
     # 项目的风格预设：只进提示词，不进指纹（换预设不自动重写分镜）
     preset: str = "live_action"
+    # 只出声、不出镜的角色名：角色表里不给占位符，不能进 cast
+    voice_only: set[str] = field(default_factory=set)
+
+
+def pace_seconds(pace: float | None, caps) -> float:
+    """每镜几秒：项目设了镜头节奏（Project.shot_seconds，3 / 4 / 5 秒）就用它（不超过引擎上限、不低于
+    2 秒），否则跟随视频引擎的甜区。没设时和以前完全一样，老剧集的分镜指纹不变。"""
+    if not pace:
+        return caps.default_seconds
+    return float(min(max(float(pace), MIN_SHOT_SECONDS), caps.max_seconds))
+
+
+FIRST_SHOT_MAX = 3.5   # 全集第一镜：模板要求 2–3 秒，超过这个数只在日志里提醒
 
 
 def build_storyboard_plan(s: Session, sv, episode_id: int) -> StoryboardPlan:
@@ -350,7 +385,7 @@ def build_storyboard_plan(s: Session, sv, episode_id: int) -> StoryboardPlan:
         caps = sv.engines.video(proj.video_engine).caps
     except KeyError as e:
         raise JobError(str(e)) from None
-    shot_seconds, max_seconds = caps.default_seconds, caps.max_seconds
+    shot_seconds, max_seconds = pace_seconds(proj.shot_seconds, caps), caps.max_seconds
     counts = allocate_shots(shot_budget(ep.target_seconds, shot_seconds),
                             [len(b.text) for b in blocks])
     total_count = sum(counts)
@@ -358,7 +393,9 @@ def build_storyboard_plan(s: Session, sv, episode_id: int) -> StoryboardPlan:
     characters = [{"name": c.name, "visual_prompt": c.visual_prompt or c.description}
                  for c in proj.characters]
     char_ids = {c.name: c.id for c in proj.characters}
-    char_table = [{**ch, "id": c.id, "token": char_token(c.id)}
+    # 只出声的角色不给占位符（他不出镜）；characters 不变，老记录的指纹照样对得上
+    char_table = [{**ch, "id": c.id, "token": "" if c.voice_only else char_token(c.id),
+                   "voice_only": bool(c.voice_only)}
                   for ch, c in zip(characters, proj.characters)]
     locs = {l.id: {"name": l.name, "time_of_day": l.time_of_day, "atmosphere": l.atmosphere,
                    "visual_prompt": l.visual_prompt} for l in proj.locations}
@@ -368,7 +405,8 @@ def build_storyboard_plan(s: Session, sv, episode_id: int) -> StoryboardPlan:
     return StoryboardPlan(ep=ep, shot_seconds=shot_seconds, max_seconds=max_seconds, anchor=anchor,
                           characters=characters, char_ids=char_ids, blocks=plan,
                           prompts=sv.prompts(proj.slug), aspect=proj.aspect or "9:16",
-                          char_table=char_table, preset=proj.style_preset or "live_action")
+                          char_table=char_table, preset=proj.style_preset or "live_action",
+                          voice_only={c.name for c in proj.characters if c.voice_only})
 
 
 def previous_shot_lines(db, block_id: int) -> list[str]:
@@ -397,7 +435,9 @@ def previous_shot_lines(db, block_id: int) -> list[str]:
 #       结尾要人物留在画面里的镜头不写成长静止镜头
 #   v6：AI 短剧（不再叫漫剧）；两人同框时正文 60–90 词；占位符后一句用「The + 简短指代」开头、
 #       全镜逐字一致（视频对白按它认说话人）；只露手 / 腰的插入镜头只写部位、系统只填服装
-STORYBOARD_RULES_VERSION = 6
+#   v7：只出声、不出镜的角色不进 cast、不给占位符；每镜给 continue_from_prev（建议接上一镜）；
+#       全集第一镜 2–3 秒
+STORYBOARD_RULES_VERSION = 7
 RULES_OUTDATED_HINT = "分镜规则已更新，要按新规则重出请强制重跑"
 
 # 镜头上会被用户改动的字段：生成时记下每镜的哈希，之后对不上就是改过（含拆分出来的新镜头）
@@ -560,7 +600,8 @@ def storyboard_prompt_fp(prompts, anchor, characters, location, text, count, sho
                          previous_shots: list[str] | None = None,
                          block_seconds: float | None = None,
                          props: list[str] | None = None,
-                         aspect: str = "9:16", preset: str | None = None) -> tuple[str, str, str]:
+                         aspect: str = "9:16", preset: str | None = None,
+                         first_block: bool = False) -> tuple[str, str, str]:
     """某段落这次会用到的分镜提示词及其输入指纹（不调用 LLM）。
 
     note 是修改意见；previous_shots 是这一段上一版的镜头（只在有修改意见时提供）；
@@ -571,7 +612,7 @@ def storyboard_prompt_fp(prompts, anchor, characters, location, text, count, sho
         anchor=anchor, characters=characters, location=location, text=text,
         count=count, shot_seconds=shot_seconds, max_seconds=max_seconds, prev_action=prev_action,
         block_seconds=block_seconds, previous_shots=[], known_props=list(props or []),
-        aspect=aspect, **prompt_vars(preset))
+        aspect=aspect, first_block=first_block, **prompt_vars(preset))
     legacy = [{"name": c.get("name", ""), "visual_prompt": c.get("visual_prompt", "")}
               for c in characters]
     fp = storyboard_inputs_fp(anchor, legacy, location, text, count, shot_seconds,
@@ -636,7 +677,8 @@ def run_storyboard(ctx, payload: dict) -> dict:
                                                blk["text"], n, shot_seconds, max_seconds,
                                                prev_action, note, previous,
                                                block_seconds=blk["seconds"], props=props,
-                                               aspect=plan_data.aspect, preset=plan_data.preset)
+                                               aspect=plan_data.aspect, preset=plan_data.preset,
+                                               first_block=idx == 0)
         # 模板里写了占位符的说明才按占位符校验（项目目录里的老覆盖模板不知道占位符）
         placeholders = "{{char:" in system
         fp_new, fp_old = block_fps(plan_data, blk, prev_action)
@@ -679,9 +721,14 @@ def run_storyboard(ctx, payload: dict) -> dict:
                                  "招牌、字条上的字写在英文双引号里（如 a sign reading \"老周修车\"）或改成"
                                  "英文描述")
             problems = speaker_problems(out.shots, list(char_ids))
+            if last and plan_data.voice_only:
+                dropped = drop_voice_only(out.shots, plan_data.voice_only, char_ids)
+                if dropped:
+                    ctx.log(f"{label}：{'、'.join(dropped)} 只出声、不出镜，已从 cast 和占位符里去掉")
             if placeholders:
                 problems += token_problems(out.shots, char_ids,
-                                           {c["name"]: c.get("visual_prompt") or "" for c in characters})
+                                           {c["name"]: c.get("visual_prompt") or "" for c in characters},
+                                           voice_only=plan_data.voice_only)
             if not last:
                 problems += pinyin_problems(out.shots, list(char_ids))
                 problems += speech_rate_problems(out.shots)
@@ -729,7 +776,9 @@ def run_storyboard(ctx, payload: dict) -> dict:
                     cast=[{"character_id": char_ids[c], "variation_id": None} for c in sh.cast],
                     props=list(sh.props), image_prompt=sh.image_prompt,
                     motion_prompt=sh.motion_prompt, audio_prompt=sh.audio_prompt, duration=dur,
-                    transition_out=sh.transition_out)
+                    transition_out=sh.transition_out,
+                    # 建议接上一镜：本段第一镜不建议（上一镜在别的段落，可能换了场景）
+                    suggest_continue=bool(sh.continue_from_prev) and j > 0)
                 s.add(row)
                 added.append(row)
             s.flush()
@@ -740,6 +789,12 @@ def run_storyboard(ctx, payload: dict) -> dict:
                         f"{'+'.join(f'{d:g}' for d in durs)} = {sum(durs):.1f}s")
             if trimmed:
                 ctx.log(f"{label}：时长截断后裁掉 {trimmed} 句超出的台词")
+            if idx == 0 and durs and durs[0] > FIRST_SHOT_MAX:
+                ctx.log(f"{label}：全集第一镜 {durs[0]:g} 秒，建议 2–3 秒（第一镜是最抓人的画面，"
+                        "节奏要快），可以在镜头抽屉里改时长")
+            hinted = [x for x in added if x.suggest_continue]
+            if hinted:
+                ctx.log(f"{label}：建议 {len(hinted)} 个镜头接上一镜（工作台上一键打开）")
             ep = s.get(Episode, episode_id)
             ep.stage_hashes = {**(ep.stage_hashes or {}), key: {
                 "inputs": fp_new if placeholders else fp_old, "rules": rules,

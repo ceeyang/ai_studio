@@ -104,6 +104,7 @@ class CharacterOut(ORM):
     visual_prompt: str
     core_features: str
     voice: str | None
+    voice_only: bool = False             # 只出声、不出镜：不抽定妆照，分镜里不给外貌占位符
     portrait_candidate_id: int | None = None
     portrait_url: str | None = None
     portraits: list[CandidateOut] = Field(default_factory=list)   # 全部定妆照候选（上传的 + AI 抽的）
@@ -220,6 +221,7 @@ class CharacterIn(BaseModel):
     description: str = ""
     visual_prompt: str = ""
     core_features: str = ""
+    voice_only: bool = False
 
 
 class PortraitPathIn(BaseModel):
@@ -245,6 +247,7 @@ class CharacterPatch(BaseModel):
     visual_prompt: str | None = None
     core_features: str | None = None
     voice: str | None = None
+    voice_only: bool | None = None
 
 
 class LocationOut(ORM):
@@ -428,6 +431,7 @@ class ShotFields(BaseModel):
     duration: float | None = Field(None, gt=0, le=30)
     use_end_frame: bool | None = None
     continue_from_prev: bool | None = None
+    suggest_continue: bool | None = None     # false = 不要这条「建议接上一镜」
     transition_out: Transition | None = None
 
 
@@ -455,6 +459,7 @@ class ShotOut(ORM):
     duration: float
     use_end_frame: bool
     continue_from_prev: bool
+    suggest_continue: bool = False   # 分镜建议这一镜接上一镜（只是建议，用户一键打开）
     transition_out: str
     origin: str = "llm"        # llm = 分镜生成的；manual = 手工添加（含拆分出来的）
 
