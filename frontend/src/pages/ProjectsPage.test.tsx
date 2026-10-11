@@ -52,6 +52,25 @@ describe('ProjectsPage', () => {
     });
   });
 
+  it('新建项目：引擎默认按设置页（首帧/视频这一步 → 图片/视频来源）', async () => {
+    installFetch({
+      'GET /api/projects': [],
+      'GET /api/engines': { image: [...ENGINES.image, { name: 'krea2', family: 'krea2', caps: {} }], video: ENGINES.video },
+      'GET /api/settings': {
+        steps: [
+          { key: 'keyframes', label: '首帧', kind: 'image', value: null, effective: 'krea2', fallback: 'krea2', source: 'default' },
+          { key: 'videos', label: '视频', kind: 'video', value: null, effective: 'h3_video', fallback: 'h3_video', source: 'default' },
+        ],
+      },
+    });
+    renderAt(<ProjectsPage />, { route: '/', path: '/' });
+    const user = userEvent.setup();
+    const empty = (await screen.findByText(/还没有项目/)).closest('section')!;
+    await user.click(within(empty).getByRole('button', { name: '新建项目' }));
+    await waitFor(() => expect((screen.getByLabelText('图像引擎') as HTMLSelectElement).value).toBe('krea2'));
+    expect((screen.getByLabelText('视频引擎') as HTMLSelectElement).value).toBe('h3_video');
+  });
+
   it('新建项目失败时显示后端的原因', async () => {
     installFetch({
       'GET /api/projects': [],

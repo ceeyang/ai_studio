@@ -1,6 +1,6 @@
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { errorText } from '../../api/client';
-import { useEngines, usePatchShot, useSelectCandidate } from '../../api/queries';
+import { useEngines, usePatchShot, useSelectCandidate, useStepDefault } from '../../api/queries';
 import { type DialogueLine, type EngineRow, type ShotDetail, type ShotPatch, TRANSITIONS, type Transition } from '../../api/types';
 import { useConfirm } from '../../components/ConfirmDialog';
 import { confirmDiscard } from '../../components/confirmDiscard';
@@ -22,11 +22,17 @@ const TRANSITION_LABEL: Record<Transition, string> = {
 const SLOT_ORDER = ['first_frame', 'end_frame', 'video'];
 const TEXT_FIELDS = ['action', 'shot_size', 'camera_move', 'image_prompt', 'motion_prompt', 'audio_prompt'] as const;
 
-function engineOptions(rows: EngineRow[] | undefined) {
-  return [{ value: '', label: '项目默认' }, ...(rows ?? []).map((r) => ({ value: r.name, label: engineLabel(r) }))];
+/** 留空 = 跟项目的引擎；知道项目现在用哪个时写成「默认（Z-Image 快速）」 */
+function engineOptions(rows: EngineRow[] | undefined, current?: string) {
+  const label = current ? `默认（${engineLabel(rows?.find((r) => r.name === current) ?? current)}）` : '项目默认';
+  return [{ value: '', label }, ...(rows ?? []).map((r) => ({ value: r.name, label: engineLabel(r) }))];
 }
 
-function shotFields(image: EngineRow[] | undefined, video: EngineRow[] | undefined): FieldSpec[] {
+function shotFields(
+  image: EngineRow[] | undefined,
+  video: EngineRow[] | undefined,
+  defaults: { image?: string; video?: string } = {},
+): FieldSpec[] {
   return [
     { name: 'action', label: '动作', kind: 'textarea', rows: 2 },
     { name: 'shot_size', label: '景别' },
@@ -38,8 +44,8 @@ function shotFields(image: EngineRow[] | undefined, video: EngineRow[] | undefin
       kind: 'select',
       options: TRANSITIONS.map((t) => ({ value: t, label: TRANSITION_LABEL[t] })),
     },
-    { name: 'image_engine', label: '图像引擎', kind: 'select', options: engineOptions(image) },
-    { name: 'video_engine', label: '视频引擎', kind: 'select', options: engineOptions(video) },
+    { name: 'image_engine', label: '图像引擎', kind: 'select', options: engineOptions(image, defaults.image) },
+    { name: 'video_engine', label: '视频引擎', kind: 'select', options: engineOptions(video, defaults.video) },
     { name: 'image_prompt', label: '图像提示词（英文）', kind: 'textarea', rows: 6, advanced: true },
     { name: 'motion_prompt', label: '运动提示词（英文）', kind: 'textarea', rows: 3, advanced: true },
     { name: 'audio_prompt', label: '声音提示词（英文）', kind: 'textarea', rows: 3, advanced: true },
@@ -75,6 +81,8 @@ export interface ShotDrawerProps {
   onDirtyChange?(dirty: boolean): void;
   /** 首帧缺少或过期时点了视频那一格的「先出首帧 / 先重拍首帧」：切到首帧阶段（抽屉留着） */
   onNeedFirstFrame?(): void;
+  /** 项目 slug：引擎下拉框的「默认（…）」按项目和设置页算 */
+  slug?: string;
 }
 
 const STAGES: GenStage[] = ['keyframes', 'videos'];
@@ -90,8 +98,11 @@ export function ShotDrawer({
   notice,
   onDirtyChange,
   onNeedFirstFrame,
+  slug,
 }: ShotDrawerProps) {
   const engines = useEngines();
+  const imageDefault = useStepDefault(slug, 'keyframes');
+  const videoDefault = useStepDefault(slug, 'videos');
   const patch = usePatchShot(episodeId);
   const patchDialogue = usePatchShot(episodeId);
   const select = useSelectCandidate(episodeId);
@@ -270,7 +281,7 @@ export function ShotDrawer({
         <section>
           <h4>提示词与参数</h4>
           <EditableFields
-            fields={shotFields(engines.data?.image, engines.data?.video)}
+            fields={shotFields(engines.data?.image, engines.data?.video, { image: imageDefault, video: videoDefault })}
             initial={initial}
             saving={patch.isPending}
             error={patch.error ? errorText(patch.error) : null}

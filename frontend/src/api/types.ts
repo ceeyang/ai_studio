@@ -34,10 +34,70 @@ export interface ProjectIn {
 
 export interface EngineRow {
   name: string;
+  /** 后端给的中文名（format.ts 的 ENGINE_LABEL 没有时用，比如 RunningHub 云端引擎） */
+  label?: string;
   family: string;
-  /** comfyui：本机显卡；browser：驱动已登录的 ChatGPT / Gemini 网页出图（不占显卡、没有种子） */
-  runtime?: 'comfyui' | 'browser';
+  /** comfyui：本机显卡；browser：驱动已登录的 ChatGPT / Gemini 网页出图（不占显卡、没有种子）；
+   *  runninghub：RunningHub 云端 */
+  runtime?: 'comfyui' | 'browser' | 'runninghub';
   caps: Record<string, unknown>;
+}
+
+/** GET /api/settings 的一项：value 是设置值（null = 跟随默认），effective 是现在实际生效的 */
+export interface SettingValue {
+  value: string | null;
+  effective: string | null;
+  /** 改回「跟随默认」后会用的 */
+  fallback: string | null;
+  /** 文本模型才有：provider 的友好名字 */
+  effective_label?: string | null;
+  fallback_label?: string | null;
+  /** step：这一步单独设置；settings：设置页全局默认；config：config.yaml；default：内置默认 / 项目 */
+  source: string;
+}
+
+export type SettingKind = 'llm' | 'image' | 'video';
+
+export interface SettingStep extends SettingValue {
+  key: string;
+  label: string;
+  kind: SettingKind;
+}
+
+export interface LlmChoice {
+  id: string;
+  label: string;
+  kind: string;
+  model?: string | null;
+}
+
+export interface EngineChoice {
+  name: string;
+  label: string;
+  runtime: 'comfyui' | 'browser' | 'runninghub';
+  family: string;
+  enabled: boolean;
+  /** false：现在提交会被拒绝（比如 RunningHub 没有 API key），原因在 note */
+  ready: boolean;
+  note?: string | null;
+}
+
+export interface AppSettings {
+  text_model: SettingValue;
+  image_engine: SettingValue;
+  video_engine: SettingValue;
+  steps: SettingStep[];
+  /** 带了 ?project= 时：图片/视频步骤的生效值按这个项目算 */
+  project: string | null;
+  choices: { llm: LlmChoice[]; image: EngineChoice[]; video: EngineChoice[] };
+}
+
+/** PUT /api/settings：只传要改的；null = 跟随默认 */
+export interface AppSettingsIn {
+  text_model?: string | null;
+  image_engine?: string | null;
+  video_engine?: string | null;
+  steps?: Record<string, string | null>;
 }
 
 /** POST /api/browser/login。extension：让扩展在用户自己的浏览器里打开两个网站；

@@ -16,6 +16,7 @@ import {
   useProjectOverview,
   useProjects,
   keys,
+  useAppSettings,
 } from '../api/queries';
 import type { Aspect, EngineRow, Episode, EpisodeStats, Project, ProjectOverview } from '../api/types';
 import { useConfirm } from '../components/ConfirmDialog';
@@ -71,14 +72,17 @@ function StatusPill({ status }: { status: string }) {
 
 function NewProjectDialog({ onClose }: { onClose: () => void }) {
   const engines = useEngines();
+  // 设置页「默认模型」：首帧/视频这一步 → 图片/视频来源；拿不到就用 zimage / h3_video
+  const settings = useAppSettings();
+  const step = (k: string) => settings.data?.steps.find((x) => x.key === k)?.effective ?? undefined;
   const create = useCreateProject();
   const navigate = useNavigate();
   const [title, setTitle] = useState('');
   const [aspect, setAspect] = useState<Aspect>('9:16');
   const [imageEngine, setImageEngine] = useState('');
   const [videoEngine, setVideoEngine] = useState('');
-  const image = imageEngine || pickDefault(engines.data?.image, 'zimage');
-  const video = videoEngine || pickDefault(engines.data?.video, 'h3_video');
+  const image = imageEngine || pickDefault(engines.data?.image, step('keyframes') ?? 'zimage');
+  const video = videoEngine || pickDefault(engines.data?.video, step('videos') ?? 'h3_video');
 
   const submit = (e: FormEvent) => {
     e.preventDefault();

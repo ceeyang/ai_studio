@@ -8,6 +8,7 @@ import {
   useEpisode,
   useJob,
   usePatchCharacter,
+  useStepDefault,
   useSuggestDesigns,
   useUploadPortrait,
   useUsePortrait,
@@ -15,6 +16,7 @@ import {
 import type { Candidate, Character, DesignOption } from '../../api/types';
 import { useConfirm } from '../../components/ConfirmDialog';
 import { ImageEngineSelect } from '../../components/ImageEngineSelect';
+import { engineLabel } from '../../format';
 import { Lightbox } from '../../components/Lightbox';
 import { useEvents } from '../../ws/EventsContext';
 import { isDecoding } from '../../ws/events';
@@ -196,6 +198,8 @@ export function CharacterLooks({
   const [preview, setPreview] = useState<number | null>(null);
   const [count, setCount] = useState(2);
   const [engine, setEngine] = useState('');
+  // 「默认」是设置页定妆照这一步的设置，没设置就是项目的图像引擎
+  const portraitDefault = useStepDefault(slug, 'portrait');
   const [suggestJob, setSuggestJob] = useState<number | null>(null);
   const job = useJob(suggestJob);
   const suggesting = (c.active_jobs ?? []).some((j) => j.type === 'character.suggest');
@@ -270,7 +274,12 @@ export function CharacterLooks({
             ))}
           </select>
         </label>
-        <ImageEngineSelect value={engine} onChange={setEngine} defaultLabel="项目图像引擎" ariaLabel="抽卡引擎" />
+        <ImageEngineSelect
+          value={engine}
+          onChange={setEngine}
+          defaultLabel={portraitDefault ? `默认（${engineLabel(portraitDefault)}）` : '项目图像引擎'}
+          ariaLabel="抽卡引擎"
+        />
         <button
           type="button"
           disabled={draw.isPending || !c.visual_prompt.trim()}

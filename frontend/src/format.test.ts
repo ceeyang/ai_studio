@@ -46,6 +46,9 @@ describe('format', () => {
     expect(engineLabel('wan22_i2v')).toBe('Wan2.2 图生视频（无声）');
     expect(engineLabel({ name: 'gpt_image', runtime: 'browser' })).toBe('ChatGPT 网页');
     expect(engineLabel('mystery')).toBe('mystery');
+    expect(engineLabel({ name: 'rh_flux', runtime: 'runninghub', label: 'Flux 云端' })).toBe('Flux 云端（RunningHub 云端）');
+    expect(engineLabel({ name: 'rh_x', runtime: 'runninghub' })).toBe('rh_x（RunningHub 云端）');
+    expect(engineLabel({ name: 'site_x', runtime: 'browser' })).toBe('site_x（浏览器）');
   });
 
   it('常用音色表：有中文普通话和高棉语的音色，各带中文说明', () => {

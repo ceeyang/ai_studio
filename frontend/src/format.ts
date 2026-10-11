@@ -46,12 +46,17 @@ export const ENGINE_LABEL: Record<string, string> = {
   wan22_i2v: 'Wan2.2 图生视频（无声）',
 };
 
-/** 引擎名字：传 id 或 /api/engines 的一行都行；没见过的回退到 id（浏览器引擎再标上「浏览器」）。 */
-export function engineLabel(e: string | { name: string; runtime?: string }): string {
+/** 引擎名字：传 id 或 /api/engines 的一行都行；没见过的用后端给的 label，再回退到 id
+ *  （浏览器引擎标上「浏览器」，RunningHub 云端引擎标上「RunningHub 云端」）。 */
+export function engineLabel(e: string | { name: string; runtime?: string; label?: string }): string {
   const name = typeof e === 'string' ? e : e.name;
   const known = ENGINE_LABEL[name];
   if (known) return known;
-  return typeof e !== 'string' && e.runtime === 'browser' ? `${name}（浏览器）` : name;
+  if (typeof e === 'string') return name;
+  const base = e.label && e.label !== name ? e.label : name;
+  if (e.runtime === 'runninghub') return `${base}（RunningHub 云端）`;
+  if (e.runtime === 'browser') return `${base}（浏览器）`;
+  return base;
 }
 
 export function jobTypeLabel(t: string): string {

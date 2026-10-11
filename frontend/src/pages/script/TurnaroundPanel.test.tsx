@@ -206,6 +206,19 @@ describe('三视图', () => {
     expect(posts(calls)[0]).toMatchObject({ url: '/api/characters/6/turnaround/generate', body: { engine: 'gpt_image' } });
   });
 
+  it('「默认（…）」按设置页三视图这一步算，请求里不带 engine（让后端按设置选）', async () => {
+    const { calls, user } = setup(CHEN, {
+      'GET /api/settings': { steps: [{ key: 'turnaround', label: '三视图', kind: 'image', value: 'gpt_image', effective: 'gpt_image', fallback: 'h3_image', source: 'step' }] },
+      'POST /api/characters/6/turnaround/generate': { job_ids: [70, 71] },
+    });
+    const pick = screen.getByLabelText('三视图引擎');
+    await waitFor(() => expect(within(pick).getByRole('option', { name: '默认（ChatGPT 网页）' })).toBeTruthy());
+    expect(calls.some((c) => c.url === '/api/settings?project=demo')).toBe(true);
+    await user.click(screen.getByRole('button', { name: '全部生成' }));
+    await waitFor(() => expect(posts(calls)).toHaveLength(1));
+    expect((posts(calls)[0].body as { engine?: string }).engine).toBeUndefined();
+  });
+
   it('默认引擎要定妆照锁脸：没有定妆照时不能出图', () => {
     setup({ ...CHEN, portrait_candidate_id: null, portrait_url: null });
     expect((screen.getByRole('button', { name: '全部生成' }) as HTMLButtonElement).disabled).toBe(true);

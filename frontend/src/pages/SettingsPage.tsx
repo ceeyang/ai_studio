@@ -3,6 +3,7 @@ import { useConfig, useDoctor, useEngines } from '../api/queries';
 import type { DoctorCheck, EngineRow } from '../api/types';
 import { engineLabel } from '../format';
 import { BrowserPanel } from './settings/BrowserPanel';
+import { DefaultsPanel } from './settings/DefaultsPanel';
 
 const ICON: Record<DoctorCheck['status'], string> = { ok: '√', warn: '!', fail: '×' };
 
@@ -41,6 +42,8 @@ export function SettingsPage() {
         <h2>设置</h2>
       </header>
       <div className="settings-layout">
+        <DefaultsPanel />
+
         <section className="panel area-doctor">
           <div className="page-head">
             <h2>环境检查</h2>
@@ -107,6 +110,7 @@ export function SettingsPage() {
                   <td>
                     {e.family}
                     {e.runtime === 'browser' && <span className="pill">浏览器</span>}
+                    {e.runtime === 'runninghub' && <span className="pill">云端</span>}
                   </td>
                   <td>{capsText(kind, e)}</td>
                 </tr>

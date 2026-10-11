@@ -10,6 +10,7 @@ import {
   useJob,
   usePatchTurnaroundLook,
   useSelectTurnaroundSheet,
+  useStepDefault,
   useTurnaroundLook,
 } from '../../api/queries';
 import type { Character, JobBrief, TurnaroundCell, TurnaroundSheet, TurnaroundSheetKey } from '../../api/types';
@@ -171,6 +172,8 @@ export function TurnaroundPanel({
   useEffect(() => setLook(t?.look ?? ''), [t?.look]);
   const [lookJobId, setLookJobId] = useState<number | null>(null);
   const [engine, setEngine] = useState('');
+  // 「默认」按设置页三视图这一步的设置算（没设置：有 H3 用 H3，否则项目的图像引擎）
+  const sheetDefault = useStepDefault(slug, 'turnaround');
   const job = useJob(lookJobId);
   // 全身描述改了没保存：换页面先问（和其他编辑框一样走全局拦截）
   const lookDirty = !!t && look.trim() !== t.look.trim();
@@ -228,7 +231,7 @@ export function TurnaroundPanel({
           出场镜头的首帧和视频按景别 / 机位带上最匹配的一格。
         </p>
         <div className="row">
-          <ImageEngineSelect value={engine} onChange={setEngine} defaultLabel={`默认（${engineLabel(t.default_engine)}）`} ariaLabel="三视图引擎" />
+          <ImageEngineSelect value={engine} onChange={setEngine} defaultLabel={`默认（${engineLabel(sheetDefault ?? t.default_engine)}）`} ariaLabel="三视图引擎" />
           <button
             type="button"
             className="soft"

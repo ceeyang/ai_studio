@@ -244,6 +244,16 @@ describe('角色抽屉', () => {
     expect(JSON.parse(init!.body as string)).toEqual({ count: 3 });
   });
 
+  it('抽卡引擎的「默认（…）」按设置页定妆照这一步算（设置页改成 Krea2 就显示 Krea2）', async () => {
+    setup(CHEN, {
+      'GET /api/settings': { steps: [{ key: 'portrait', label: '角色定妆照', kind: 'image', value: 'krea2', effective: 'krea2', fallback: 'zimage', source: 'step' }] },
+    });
+    const d = await drawer();
+    const pick = within(d).getByLabelText('抽卡引擎');
+    await waitFor(() => expect(within(pick).getByRole('option', { name: '默认（Krea2 人像）' })).toBeTruthy());
+    expect((pick as HTMLSelectElement).value).toBe('');
+  });
+
   it('抽卡可以换成浏览器引擎（gpt_image），请求带上 engine', async () => {
     const { calls, user } = setup(CHEN, {
       'GET /api/engines': { image: [{ name: 'zimage', family: 'zimage', runtime: 'comfyui', caps: { max_refs: 0 } }, { name: 'gpt_image', family: 'chatgpt_web', runtime: 'browser', caps: { max_refs: 4 } }], video: [] },

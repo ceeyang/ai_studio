@@ -47,6 +47,27 @@ describe('ShotDrawer', () => {
     expect(patch?.body).toEqual({ image_prompt: 'new prompt', duration: 7 });
   });
 
+  it('引擎下拉框：留空写成「默认（项目现在用的引擎）」，没拿到设置时写「项目默认」', async () => {
+    installFetch({
+      'GET /api/engines': { image: [...ENGINES.image, { name: 'krea2', family: 'krea2', caps: {} }], video: ENGINES.video },
+      'GET /api/settings': {
+        steps: [
+          { key: 'keyframes', label: '首帧', kind: 'image', value: null, effective: 'krea2', fallback: 'krea2', source: 'default' },
+          { key: 'videos', label: '视频', kind: 'video', value: null, effective: 'h3_video', fallback: 'h3_video', source: 'default' },
+        ],
+      },
+    });
+    renderAt(<ShotDrawer shot={SHOT} episodeId={1} slug="demo" onClose={() => {}} onGenerate={() => {}} />);
+    await waitFor(() => expect(within(screen.getByLabelText('图像引擎')).getByRole('option', { name: '默认（Krea2 人像）' })).toBeTruthy());
+    expect(within(screen.getByLabelText('视频引擎')).getByRole('option', { name: '默认（H3 视频（有声））' })).toBeTruthy();
+  });
+
+  it('没有项目 slug 时引擎留空项叫「项目默认」', async () => {
+    installFetch({ 'GET /api/engines': ENGINES });
+    renderAt(<ShotDrawer shot={SHOT} episodeId={1} onClose={() => {}} onGenerate={() => {}} />);
+    expect(within(screen.getByLabelText('图像引擎')).getByRole('option', { name: '项目默认' })).toBeTruthy();
+  });
+
   it('候选排在提示词前面；英文提示词收在「高级」里', async () => {
     installFetch({ 'GET /api/engines': ENGINES });
     renderAt(<ShotDrawer shot={SHOT} episodeId={1} onClose={() => {}} onGenerate={() => {}} />);

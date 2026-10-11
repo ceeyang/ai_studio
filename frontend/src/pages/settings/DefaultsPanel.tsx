@@ -1,0 +1,218 @@
+import { useEffect, useMemo, useState } from 'react';
+import { errorText } from '../../api/client';
+import { useAppSettings, useSaveSettings } from '../../api/queries';
+import type { AppSettings, AppSettingsIn, EngineChoice, LlmChoice, SettingKind } from '../../api/types';
+import { engineLabel } from '../../format';
+
+/** 设置页「默认模型」：默认文本模型 / 图片来源 / 视频来源，按步骤单独设置。null（空串）= 跟随默认。 */
+
+interface Draft {
+  text_model: string;
+  image_engine: string;
+  video_engine: string;
+  steps: Record<string, string>;
+}
+
+function draftOf(d: AppSettings): Draft {
+  return {
+    text_model: d.text_model.value ?? '',
+    image_engine: d.image_engine.value ?? '',
+    video_engine: d.video_engine.value ?? '',
+    steps: Object.fromEntries(d.steps.map((s) => [s.key, s.value ?? ''])),
+  };
+}
+
+/** 只把改过的字段变成 PUT 体；空串 → null（跟随默认） */
+export function settingsPatch(saved: Draft, draft: Draft): AppSettingsIn {
+  const out: AppSettingsIn = {};
+  for (const k of ['text_model', 'image_engine', 'video_engine'] as const) {
+    if (draft[k] !== saved[k]) out[k] = draft[k] || null;
+  }
+  const steps: Record<string, string | null> = {};
+  for (const [k, v] of Object.entries(draft.steps)) {
+    if (v !== (saved.steps[k] ?? '')) steps[k] = v || null;
+  }
+  if (Object.keys(steps).length) out.steps = steps;
+  return out;
+}
+
+function llmName(choices: LlmChoice[], id: string | null | undefined): string {
+  if (!id) return '未配置';
+  return choices.find((c) => c.id === id)?.label ?? id;
+}
+
+function engineName(choices: EngineChoice[], name: string | null | undefined): string {
+  if (!name) return '—';
+  const row = choices.find((c) => c.name === name);
+  return row ? engineLabel(row) : engineLabel(name);
+}
+
+function Options({ kind, data }: { kind: SettingKind; data: AppSettings }) {
+  if (kind === 'llm') {
+    return (
+      <>
+        {data.choices.llm.map((c) => (
+          <option key={c.id} value={c.id}>
+            {c.label}
+          </option>
+        ))}
+      </>
+    );
+  }
+  const rows = kind === 'image' ? data.choices.image : data.choices.video;
+  return (
+    <>
+      {rows.map((e) => (
+        <option key={e.name} value={e.name}>
+          {`${engineLabel(e)}${e.ready ? '' : '（现在不可用）'}`}
+        </option>
+      ))}
+    </>
+  );
+}
+
+export function DefaultsPanel() {
+  const settings = useAppSettings();
+  const save = useSaveSettings();
+  const data = settings.data;
+  const saved = useMemo(() => (data ? draftOf(data) : null), [data]);
+  const [draft, setDraft] = useState<Draft | null>(null);
+  const [justSaved, setJustSaved] = useState(false);
+  useEffect(() => {
+    if (saved) setDraft(saved);
+  }, [saved]);
+
+  if (settings.error) {
+    return (
+      <section className="panel area-defaults" aria-label="默认模型">
+        <h2>默认模型</h2>
+        <p className="error">{errorText(settings.error)}</p>
+      </section>
+    );
+  }
+  if (!data || !draft || !saved) {
+    return (
+      <section className="panel area-defaults" aria-label="默认模型">
+        <h2>默认模型</h2>
+        <p className="muted">加载中…</p>
+      </section>
+    );
+  }
+
+  const patch = settingsPatch(saved, draft);
+  const dirty = Object.keys(patch).length > 0;
+  const set = (k: 'text_model' | 'image_engine' | 'video_engine', v: string) => {
+    setJustSaved(false);
+    setDraft({ ...draft, [k]: v });
+  };
+  const setStep = (key: string, v: string) => {
+    setJustSaved(false);
+    setDraft({ ...draft, steps: { ...draft.steps, [key]: v } });
+  };
+  const onSave = () => {
+    save.mutate(patch, { onSuccess: () => setJustSaved(true) });
+  };
+  const overridden = data.steps.filter((s) => s.value).length;
+  const bad = [...data.choices.image, ...data.choices.video].filter((e) => !e.ready && e.note);
+
+  return (
+    <section className="panel area-defaults" aria-label="默认模型">
+      <div className="page-head">
+        <h2>默认模型</h2>
+        <div className="row">
+          {save.isPending ? (
+            <span className="muted small">保存中…</span>
+          ) : dirty ? (
+            <span className="muted small" data-testid="defaults-state">有改动，还没保存</span>
+          ) : justSaved ? (
+            <span className="saved-text small" data-testid="defaults-state">已保存，马上生效</span>
+          ) : null}
+          <button type="button" className="primary" disabled={!dirty || save.isPending} onClick={onSave}>
+            保存
+          </button>
+        </div>
+      </div>
+      <p className="muted small">
+        新建项目、各步骤没单独指定时用这里的选择；改了马上生效，不用重启。镜头、项目里单独选过的引擎优先。
+      </p>
+      {save.error && <p className="error">{errorText(save.error)}</p>}
+      <div className="defaults-grid">
+        <label className="field">
+          <span>文本模型</span>
+          <select aria-label="文本模型" value={draft.text_model} onChange={(e) => set('text_model', e.target.value)}>
+            <option value="">{`按配置文件（${llmName(data.choices.llm, data.text_model.fallback)}）`}</option>
+            <Options kind="llm" data={data} />
+          </select>
+          <small className="muted">剧本、分镜、角色推荐、台词适配、字幕翻译都用它（下面可以单独改）</small>
+        </label>
+        <label className="field">
+          <span>图片来源</span>
+          <select aria-label="图片来源" value={draft.image_engine} onChange={(e) => set('image_engine', e.target.value)}>
+            <option value="">{`内置默认（${engineName(data.choices.image, data.image_engine.fallback)}）`}</option>
+            <Options kind="image" data={data} />
+          </select>
+          <small className="muted">新建项目的图像引擎；定妆照、三视图没单独设置时跟项目走</small>
+        </label>
+        <label className="field">
+          <span>视频来源</span>
+          <select aria-label="视频来源" value={draft.video_engine} onChange={(e) => set('video_engine', e.target.value)}>
+            <option value="">{`内置默认（${engineName(data.choices.video, data.video_engine.fallback)}）`}</option>
+            <Options kind="video" data={data} />
+          </select>
+          <small className="muted">新建项目的视频引擎</small>
+        </label>
+      </div>
+      {bad.length > 0 && (
+        <ul className="defaults-notes small">
+          {bad.map((e) => (
+            <li key={e.name} className="error">
+              {engineLabel(e)}：{e.note}
+            </li>
+          ))}
+        </ul>
+      )}
+      <details className="step-overrides">
+        <summary>
+          按步骤单独设置{overridden ? `（已单独设置 ${overridden} 步）` : ''}
+        </summary>
+        <table className="table step-table">
+          <thead>
+            <tr>
+              <th>步骤</th>
+              <th>用什么</th>
+              <th>现在生效</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.steps.map((s) => (
+              <tr key={s.key} data-step={s.key}>
+                <td>
+                  {s.label}
+                  <span className="pill">{s.kind === 'llm' ? '文本' : s.kind === 'image' ? '图片' : '视频'}</span>
+                </td>
+                <td>
+                  <select aria-label={`${s.label}用什么`} value={draft.steps[s.key] ?? ''} onChange={(e) => setStep(s.key, e.target.value)}>
+                    <option value="">{`跟随默认（${
+                      s.kind === 'llm'
+                        ? llmName(data.choices.llm, s.fallback)
+                        : engineName(s.kind === 'image' ? data.choices.image : data.choices.video, s.fallback)
+                    }）`}</option>
+                    <Options kind={s.kind} data={data} />
+                  </select>
+                </td>
+                <td className="muted" data-testid={`effective-${s.key}`}>
+                  {s.kind === 'llm'
+                    ? llmName(data.choices.llm, s.effective)
+                    : engineName(s.kind === 'image' ? data.choices.image : data.choices.video, s.effective)}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <p className="muted small">
+          首帧、视频：镜头上单独选的 → 项目的引擎（新建项目时按这里填）。定妆照、三视图：抽卡时手选的 → 这里的设置 → 项目的图像引擎（三视图没设置时有 H3 先用 H3）。
+        </p>
+      </details>
+    </section>
+  );
+}

@@ -313,6 +313,7 @@ export function ShotStage({
 
       {openShot && active && (
         <ShotDrawer
+          slug={slug}
           key={openShot.id}
           shot={openShot}
           episodeId={id}

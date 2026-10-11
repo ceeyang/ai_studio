@@ -2,6 +2,8 @@
 import { type QueryClient, type QueryKey, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, enc } from './client';
 import type {
+  AppSettings,
+  AppSettingsIn,
   BrowserLoginOut,
   BrowserStatus,
   Candidate,
@@ -64,6 +66,8 @@ export const keys = {
   browserStatus: ['browserStatus'] as const,
   config: ['config'] as const,
   health: ['health'] as const,
+  // 设置页「默认模型」；带项目时图片/视频步骤的生效值按项目算
+  settings: (project?: string) => ['settings', project ?? ''] as const,
 };
 
 function invalidate(qc: QueryClient, ...list: QueryKey[]): Promise<void[]> {
@@ -225,6 +229,41 @@ export function useHealth() {
   });
 }
 
+/** 默认模型设置。project 给了就按这个项目算图片/视频步骤的生效值（工作台引擎下拉框的「默认（…）」） */
+export function useAppSettings(project?: string) {
+  return useQuery({
+    queryKey: keys.settings(project),
+    queryFn: () => api.get<AppSettings>(project ? `/api/settings?project=${enc(project)}` : '/api/settings'),
+    staleTime: 30000,
+    retry: false,
+  });
+}
+
+/** 某一步现在生效的图片/视频引擎（拿不到设置时 undefined，调用方用原来的写法兜底） */
+export function useStepDefault(project: string | undefined, step: string): string | undefined {
+  // 没有项目就不问：图片/视频步骤的生效值要按项目算
+  const st = useQuery({
+    queryKey: keys.settings(project),
+    queryFn: () => api.get<AppSettings>(`/api/settings?project=${enc(project ?? '')}`),
+    staleTime: 30000,
+    retry: false,
+    enabled: !!project,
+  });
+  return st.data?.steps.find((x) => x.key === step)?.effective ?? undefined;
+}
+
+export function useSaveSettings() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: AppSettingsIn) => api.put<AppSettings>('/api/settings', body),
+    onSuccess: (data) => {
+      // 先用 PUT 的返回当新的基准（下拉框马上回到「没改动」），再让带项目的那些重新算
+      qc.setQueryData(keys.settings(), data);
+      return invalidate(qc, ['settings']);
+    },
+  });
+}
+
 export function useConfig() {
   return useQuery({
     queryKey: keys.config,
@@ -248,7 +287,8 @@ export function usePatchProject(slug: string) {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: ProjectPatch) => api.patch<Project>(`/api/projects/${enc(slug)}`, body),
-    onSuccess: () => invalidate(qc, keys.projects, keys.project(slug)),
+    // 项目换了引擎：工作台里「默认（…）」要跟着变
+    onSuccess: () => invalidate(qc, keys.projects, keys.project(slug), keys.settings(slug)),
   });
 }
 
