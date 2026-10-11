@@ -19,7 +19,7 @@ import {
   useAppSettings,
   useStylePresets,
 } from '../api/queries';
-import type { Aspect, EngineRow, Episode, EpisodeStats, Project, ProjectOverview, StylePresetKey } from '../api/types';
+import type { Aspect, EngineRow, Episode, EpisodeStats, Project, ProjectOverview, SettingValue, StylePresetKey } from '../api/types';
 import { useConfirm } from '../components/ConfirmDialog';
 import { Dialog } from '../components/Dialog';
 import { ProjectSettingsDialog } from '../components/ProjectSettingsDialog';
@@ -85,27 +85,39 @@ function NewProjectDialog({ onClose }: { onClose: () => void }) {
   const [aspect, setAspect] = useState<Aspect>('9:16');
   const [preset, setPreset] = useState<StylePresetKey>('live_action');
   const presets = useStylePresets();
+  // 用户在下拉框里手动选的引擎（空 = 没动过）：换预设时不覆盖
   const [imageEngine, setImageEngine] = useState('');
   const [videoEngine, setVideoEngine] = useState('');
-  const image = imageEngine || pickDefault(engines.data?.image, settings.data?.image_engine.effective ?? 'zimage');
-  const video = videoEngine || pickDefault(engines.data?.video, settings.data?.video_engine.effective ?? 'h3_video');
+  const rec = presets.data?.find((p) => p.key === preset);
+  const has = (rows: EngineRow[] | undefined, name: string | null | undefined): name is string =>
+    !!name && (rows ?? []).some((r) => r.name === name);
+  // 设置页明确设了（source=settings）、而且和预设合得来（在预设推荐的引擎里；预设没列就都算合得来）才用设置的
+  const fromSettings = (rows: EngineRow[] | undefined, v: SettingValue | undefined, allowed: string[] | undefined) =>
+    v && v.source === 'settings' && has(rows, v.effective) && (!allowed?.length || allowed.includes(v.effective!))
+      ? v.effective!
+      : '';
+  // 默认值：手动选的 → 设置页明确设的（和预设合得来）→ 当前预设推荐的（包括一打开就是的默认预设）→ 设置页 / 内置默认
+  const defaultEngine = (
+    rows: EngineRow[] | undefined,
+    v: SettingValue | undefined,
+    allowed: string[] | undefined,
+    recommended: string | null | undefined,
+    builtin: string,
+  ) => fromSettings(rows, v, allowed) || (has(rows, recommended) ? recommended : '') || pickDefault(rows, v?.effective ?? builtin);
+  const image =
+    imageEngine || defaultEngine(engines.data?.image, settings.data?.image_engine, rec?.image_engines, rec?.image_engine, 'zimage');
+  const video =
+    videoEngine || defaultEngine(engines.data?.video, settings.data?.video_engine, rec?.video_engines, rec?.video_engine, 'h3_video');
 
   // 首帧引擎吃不吃参考图（caps.max_refs）：不吃的话首帧没法用定妆照锁脸、也用不上场景图
   const imageRow = (engines.data?.image ?? []).find((r) => r.name === image);
   const noRefs = imageRow?.caps?.max_refs === 0;
   // 预设推荐的定妆照引擎（如真人写实的 krea2）：和首帧引擎不同时提一句
-  const portraitRec = presets.data?.find((p) => p.key === preset)?.portrait_engine ?? null;
+  const portraitRec = rec?.portrait_engine ?? null;
   const portraitHint = portraitRec && portraitRec !== image ? portraitRec : null;
 
-  // 换预设：预选它推荐的引擎（只是建议，下面的下拉框照样能改）；推荐的都不可用就不动
-  const choosePreset = (key: StylePresetKey) => {
-    setPreset(key);
-    const rec = presets.data?.find((p) => p.key === key);
-    const has = (rows: EngineRow[] | undefined, name: string | null | undefined) =>
-      !!name && (rows ?? []).some((r) => r.name === name);
-    if (has(engines.data?.image, rec?.image_engine)) setImageEngine(rec!.image_engine!);
-    if (has(engines.data?.video, rec?.video_engine)) setVideoEngine(rec!.video_engine!);
-  };
+  // 换预设：没手动选过的引擎跟着预设推荐的走（见上面的 image / video；推荐的不可用就不动）
+  const choosePreset = (key: StylePresetKey) => setPreset(key);
 
   const submit = (e: FormEvent) => {
     e.preventDefault();

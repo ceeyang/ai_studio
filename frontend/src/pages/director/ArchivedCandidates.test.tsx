@@ -29,6 +29,23 @@ describe('ArchivedCandidates', () => {
     expect(items[0].textContent).toContain('她抬头看向镜头');
   });
 
+  it('构图参考图（shot_ref）也列出来，标「构图参考图」，能恢复', async () => {
+    const REF = { ...ROW, id: 9, kind: 'shot_ref', file_path: 'demo/shot_ref/a.png', url: '/media/demo/shot_ref/a.png', engine: 'upload', was_selected: false };
+    const calls = installFetch({
+      'GET /api/episodes/3/archived-candidates': [REF],
+      'POST /api/archived-candidates/9/restore': { id: 100 },
+    });
+    renderAt(<ArchivedCandidates episodeId={3} shotId={5} />);
+    const user = userEvent.setup();
+    await user.click(screen.getByText('历史候选'));
+    const list = await screen.findByRole('list', { name: '历史候选' });
+    const item = within(list).getByRole('listitem');
+    expect(item.querySelector('img')?.getAttribute('src')).toBe('/media/demo/shot_ref/a.png');
+    expect(item.textContent).toContain('构图参考图 · 原 S04');
+    await user.click(within(item).getByRole('button', { name: '恢复到这个镜头' }));
+    await waitFor(() => expect(calls.find((c) => c.method === 'POST')?.url).toBe('/api/archived-candidates/9/restore'));
+  });
+
   it('没有历史候选时说明一句', async () => {
     installFetch({ 'GET /api/episodes/3/archived-candidates': [] });
     renderAt(<ArchivedCandidates episodeId={3} shotId={5} />);

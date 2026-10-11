@@ -5,8 +5,9 @@ import type { ArchivedCandidate } from '../../api/types';
 import { engineLabel, fmtTime } from '../../format';
 import { SLOT_LABEL } from './slots';
 
-/** 能恢复到镜头上的种类：首帧回首帧槽位，视频回视频槽位 */
-const KINDS = ['first_frame', 'video'];
+/** 能恢复到镜头上的种类：首帧回首帧槽位，视频回视频槽位，构图参考图回构图参考图（不选定，每镜最多 2 张） */
+const KINDS = ['first_frame', 'video', 'shot_ref'];
+const KIND_LABEL: Record<string, string> = { ...SLOT_LABEL, shot_ref: '构图参考图' };
 
 export interface ArchivedCandidatesProps {
   episodeId: number;
@@ -38,7 +39,7 @@ export function ArchivedCandidates({ episodeId, shotId }: ArchivedCandidatesProp
       </h4>
       {open && (
         <>
-          <p className="muted small">重新生成分镜或删镜头时，被删镜头的首帧和视频放在这里，可以恢复到当前镜头上。</p>
+          <p className="muted small">重新生成分镜或删镜头时，被删镜头的首帧、视频和构图参考图放在这里，可以恢复到当前镜头上。</p>
           {q.isLoading && <p className="muted small">正在读取…</p>}
           {q.error && <p className="error small">{errorText(q.error)}</p>}
           {q.data && rows.length === 0 && <p className="muted small">这一集没有历史候选。</p>}
@@ -55,7 +56,7 @@ export function ArchivedCandidates({ episodeId, shotId }: ArchivedCandidatesProp
                   )}
                   <figcaption>
                     <span>
-                      {SLOT_LABEL[a.kind] ?? a.kind} · 原 {a.shot_code || '?'}
+                      {KIND_LABEL[a.kind] ?? a.kind} · 原 {a.shot_code || '?'}
                     </span>
                     {a.was_selected && <span className="badge">当时选定</span>}
                     <span className="muted">{engineLabel(a.engine)}</span>

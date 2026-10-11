@@ -113,7 +113,7 @@ export interface QcIssue {
   short: string;
 }
 
-/** 出片自检发现的问题（每个一个角标）：开头没接上首帧、疑似跳切 */
+/** 出片自检发现的问题（每个一个角标）：开头没接上首帧、疑似跳切、疑似声音性别不对 */
 export function qcIssues(c?: Candidate): QcIssue[] {
   if (!c) return [];
   const out: QcIssue[] = [];
@@ -129,7 +129,40 @@ export function qcIssues(c?: Candidate): QcIssue[] {
   if (cuts.length > 0) {
     out.push({ label: '疑似跳切', tip: cutTip(c), short: cuts.map((t) => `${t.toFixed(1)}s`).join('、') });
   }
+  const voices = voiceMismatch(c);
+  if (voices.length > 0) {
+    const want = (g: string) => (g === 'male' ? '男声' : '女声');
+    const heard = (g: string) => (g === 'male' ? '女声' : '男声');
+    const parts = voices.map(
+      (v) => `${v.speakers.join('、') || '这句'}的台词应是${want(v.expected)}，测到的音高约 ${Math.round(v.f0)} Hz（像${heard(v.expected)}）`,
+    );
+    out.push({
+      label: '疑似声音性别不对',
+      tip: `疑似声音性别不对：${parts.join('；')}，可能把台词给了画面里的人，建议听一下，不对就重拍`,
+      short: '声音性别不对',
+    });
+  }
   return out;
+}
+
+export interface VoiceMismatch {
+  speakers: string[];
+  expected: string;
+  f0: number;
+}
+
+/** 出片自检粗查的声音性别：台词说话人是男声 / 女声，音轨里测到的基频明显对不上（后端 params.qc.voice_mismatch） */
+export function voiceMismatch(c?: Candidate): VoiceMismatch[] {
+  const qc = c?.params?.qc as { voice_mismatch?: unknown } | undefined;
+  if (!Array.isArray(qc?.voice_mismatch)) return [];
+  return qc.voice_mismatch
+    .filter((v): v is Record<string, unknown> => !!v && typeof v === 'object')
+    .map((v) => ({
+      speakers: Array.isArray(v.speakers) ? v.speakers.filter((x): x is string => typeof x === 'string') : [],
+      expected: typeof v.expected === 'string' ? v.expected : '',
+      f0: typeof v.f0 === 'number' ? v.f0 : 0,
+    }))
+    .filter((v) => v.expected === 'male' || v.expected === 'female');
 }
 
 /** 能拿来出视频的首帧：选定了、而且不过期（过期的先回首帧阶段重拍，不拿旧首帧出视频） */

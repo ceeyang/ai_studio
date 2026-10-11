@@ -197,6 +197,27 @@ def test_api_list_restore_delete(api):
                     json={"shot_id": shot_id}).status_code == 404
 
 
+def test_api_restore_shot_ref_is_not_selected_and_respects_limit(api):
+    """构图参考图（kind=shot_ref）恢复回构图参考图槽位：不选定（槽位里的图全部都用），每镜最多 2 张。"""
+    db, ep_id, shot_id, _, _ = _api_seed(api)
+    with db.session() as s:
+        for i in range(3):
+            s.add(ArchivedCandidate(project_id=1, episode_id=ep_id, shot_code="S02", kind="shot_ref",
+                                    file_path=f"demo/shot_ref/{i}.png", engine="upload", params={},
+                                    input_hash="", was_selected=False, shot_snapshot={},
+                                    reason="storyboard"))
+    ids = [x["id"] for x in api.get(f"/api/episodes/{ep_id}/archived-candidates?kind=shot_ref").json()]
+    assert len(ids) == 3
+    for i in ids[:2]:
+        assert api.post(f"/api/archived-candidates/{i}/restore", json={"shot_id": shot_id}).status_code == 200
+    r = api.post(f"/api/archived-candidates/{ids[2]}/restore", json={"shot_id": shot_id})
+    assert r.status_code in (400, 409, 422) and "构图参考图" in r.text
+    with db.session() as s:
+        slot = s.scalar(select(Slot).where(Slot.owner_type == "shot", Slot.owner_id == shot_id,
+                                           Slot.kind == "shot_ref"))
+        assert slot.selected_candidate_id is None and len(slot.candidates) == 2
+
+
 def test_api_restore_rejects_shot_of_other_episode(api):
     db, ep_id, shot_id, a_id, _ = _api_seed(api)
     with db.session() as s:

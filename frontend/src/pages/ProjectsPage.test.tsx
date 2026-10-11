@@ -89,6 +89,58 @@ describe('ProjectsPage', () => {
     });
   });
 
+  it('新建项目：不动预设也用默认预设推荐的引擎；手动改过的引擎换预设时不覆盖', async () => {
+    const preset = (key: string, image: string | null, video: string | null) => ({
+      key, label: key, description: '', negative: '', image_engines: [], video_engines: [],
+      has_storyboard_guidance: false, image_engine: image, video_engine: video,
+    });
+    const calls = installFetch({
+      'GET /api/projects': [],
+      'GET /api/engines': ENGINES,
+      'GET /api/style-presets': [preset('live_action', 'h3_image', 'h3_video'), preset('anime', 'h3_image', 'wan22_i2v')],
+      'POST /api/projects': makeProject({ id: 2, slug: '写实', title: '写实' }),
+    });
+    renderAt(<ProjectsPage />, { route: '/', path: '/' });
+    const user = userEvent.setup();
+    await user.click((await screen.findAllByRole('button', { name: '新建项目' }))[0]);
+    await screen.findByRole('option', { name: 'Z-Image 快速' });
+    // 默认预设「真人写实」推荐 h3_image：没点预设也预选它（以前要切一下预设才填）
+    await waitFor(() => expect((screen.getByLabelText('图像引擎') as HTMLSelectElement).value).toBe('h3_image'));
+    // 用户手动改成 zimage，再换预设：手动选的不被覆盖；没手动改的视频引擎跟着新预设走
+    await user.selectOptions(screen.getByLabelText('图像引擎'), 'zimage');
+    await user.click(within(screen.getByRole('group', { name: '风格预设' })).getByRole('radio', { name: /日系动漫/ }));
+    expect((screen.getByLabelText('图像引擎') as HTMLSelectElement).value).toBe('zimage');
+    expect((screen.getByLabelText('视频引擎') as HTMLSelectElement).value).toBe('wan22_i2v');
+    await user.type(screen.getByLabelText('项目标题'), '写实');
+    await user.click(screen.getByRole('button', { name: '创建项目' }));
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST')).toBe(true));
+    expect(calls.find((c) => c.method === 'POST')?.body).toMatchObject({ image_engine: 'zimage', video_engine: 'wan22_i2v', style_preset: 'anime' });
+  });
+
+  it('新建项目：设置页明确设了图片引擎、且在预设推荐的引擎里时用设置的', async () => {
+    const calls = installFetch({
+      'GET /api/projects': [],
+      'GET /api/engines': ENGINES,
+      'GET /api/settings': {
+        image_engine: { value: 'zimage', effective: 'zimage', fallback: 'zimage', source: 'settings' },
+        video_engine: { value: null, effective: 'h3_video', fallback: 'h3_video', source: 'default' },
+        steps: [],
+      },
+      'GET /api/style-presets': [{
+        key: 'live_action', label: '真人写实', description: '', negative: '', image_engines: ['h3_image', 'zimage'],
+        video_engines: ['h3_video'], has_storyboard_guidance: false, image_engine: 'h3_image', video_engine: 'h3_video',
+      }],
+    });
+    renderAt(<ProjectsPage />, { route: '/', path: '/' });
+    const user = userEvent.setup();
+    await user.click((await screen.findAllByRole('button', { name: '新建项目' }))[0]);
+    await screen.findByRole('option', { name: 'Z-Image 快速' });
+    await waitFor(() => expect(calls.some((c) => c.url.endsWith('/api/style-presets'))).toBe(true));
+    await waitFor(() => expect(calls.some((c) => c.url.endsWith('/api/settings'))).toBe(true));
+    await new Promise((r) => setTimeout(r, 20));
+    expect((screen.getByLabelText('图像引擎') as HTMLSelectElement).value).toBe('zimage');
+  });
+
   it('项目设置：改风格预设，提示要重新生成剧本才会按新预设写', async () => {
     const calls = installFetch({
       'GET /api/projects': [makeProject()],

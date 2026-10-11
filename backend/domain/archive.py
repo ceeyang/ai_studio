@@ -68,13 +68,19 @@ def restore_archived(s: Session, archived_id: int, shot_id: int) -> Candidate:
         raise LookupError(f"找不到镜头 {shot_id}")
     if shot.episode_id != a.episode_id:
         raise ValueError("只能恢复到同一集的镜头上")
+    from backend.domain.refs import MAX_SHOT_REFS, SHOT_REF_SLOT, shot_ref_images
+    is_ref = a.kind == SHOT_REF_SLOT
+    if is_ref and len(shot_ref_images(s, shot.id)) >= MAX_SHOT_REFS:
+        raise ValueError(f"这个镜头已经有 {MAX_SHOT_REFS} 张构图参考图，先删掉一张再恢复")
     slot = get_or_create_slot(s, "shot", shot.id, a.kind)
     c = Candidate(slot_id=slot.id, file_path=a.file_path, engine=a.engine,
                   params=dict(a.params or {}), input_hash=a.input_hash, job_id=None,
                   note=a.note, created_at=a.created_at)
     s.add(c)
     s.flush()
-    if slot.selected_candidate_id is None or s.get(Candidate, slot.selected_candidate_id) is None:
+    # 构图参考图槽位里的图全部都用、不选定
+    if not is_ref and (slot.selected_candidate_id is None
+                       or s.get(Candidate, slot.selected_candidate_id) is None):
         slot.selected_candidate_id = c.id
     s.delete(a)
     s.flush()

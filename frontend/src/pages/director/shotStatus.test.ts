@@ -77,4 +77,16 @@ describe('shotStatus', () => {
     expect(both[1].tip).toContain('2.0s');
     expect(both.map((x) => x.short)).toEqual(['开头没接上首帧', '2.0s']);
   });
+
+  it('qcIssues：疑似声音性别不对一个角标，说明写谁的台词、应是男声还是女声、测到多少 Hz', () => {
+    const voice = qcIssues(makeCandidate({
+      params: { qc: { hard_cuts: [], voice_mismatch: [{ speakers: ['店长'], expected: 'male', f0: 251.3 }] } },
+    }));
+    expect(voice.map((x) => x.label)).toEqual(['疑似声音性别不对']);
+    expect(voice[0].tip).toContain('店长');
+    expect(voice[0].tip).toContain('男声');
+    expect(voice[0].tip).toContain('251 Hz');
+    expect(voice[0].short).toBe('声音性别不对');
+    expect(qcIssues(makeCandidate({ params: { qc: { voice_mismatch: [] } } }))).toEqual([]);
+  });
 });
