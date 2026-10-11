@@ -33,6 +33,8 @@ class VideoCaps:
     # 总是 default_seconds。allowed_seconds：只认这几档（空 = 连续可调，到 max_seconds 为止）
     duration_control: Literal["param", "prompt", "fixed"] = "param"
     allowed_seconds: tuple[float, ...] = ()
+    # 能不能不用首帧、只用参考图（场景图 / 构图参考 / 定妆照 / 道具图）出视频（参考图直出）；上限沿用 max_refs
+    ref_mode: bool = False
 
 
 def dedupe_negative(text: str) -> str:
@@ -67,10 +69,20 @@ class ImageRequest:
         self.negative = dedupe_negative(self.negative)
 
 
+def require_first_frame(req: "VideoRequest", engine) -> Path | None:
+    """引擎 build() 开头调：没给首帧（参考图直出）、而引擎不支持 caps.ref_mode 时报清楚。
+    流水线提交前已经拦过，这里兜底（CLI / 测试直接调引擎时）。"""
+    if req.first_frame is None and not getattr(getattr(engine, "caps", None), "ref_mode", False):
+        name = getattr(engine, "name", "") or "这个视频引擎"
+        raise ValueError(f"{name} 只能用首帧出视频，不支持参考图直出（这次没有首帧）")
+    return req.first_frame
+
+
 @dataclass
 class VideoRequest:
     prompt: str
-    first_frame: Path
+    # 首帧：首帧模式必填（流水线保证）；参考图直出时为空，只用 refs（引擎要 caps.ref_mode）
+    first_frame: Path | None = None
     aspect: str = "9:16"
     seed: int = 0
     seconds: float = 5.0

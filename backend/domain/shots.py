@@ -1,4 +1,4 @@
-"""镜头重新编号：order 从 0 连续，code 为 S01、S02…"""
+"""镜头重新编号：order 从 0 连续，code 为 S01、S02…；镜头视频的生成方式（首帧 / 参考图直出）。"""
 from __future__ import annotations
 
 from sqlalchemy import select
@@ -27,3 +27,18 @@ def prev_shot(s: Session, shot) -> Shot | None:
     return s.scalar(select(Shot).where(Shot.episode_id == shot.episode_id,
                                        Shot.order < shot.order)
                     .order_by(Shot.order.desc(), Shot.id.desc()).limit(1))
+
+
+FIRST_FRAME_MODE = "first_frame"
+REFS_MODE = "refs"
+
+
+def refs_mode(shot) -> bool:
+    """这一镜实际按参考图直出：选了 refs、而且没开「接上一镜」（接上一镜要用上一镜尾帧当首帧，
+    两者互斥时接上一镜优先，按首帧模式出）。"""
+    return getattr(shot, "video_mode", None) == REFS_MODE and not getattr(shot, "continue_from_prev", False)
+
+
+def refs_mode_overridden(shot) -> bool:
+    """选了参考图直出、但开了接上一镜，实际按首帧模式出（日志 / 界面说明用）。"""
+    return getattr(shot, "video_mode", None) == REFS_MODE and bool(getattr(shot, "continue_from_prev", False))

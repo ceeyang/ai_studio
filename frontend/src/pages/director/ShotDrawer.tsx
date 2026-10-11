@@ -11,7 +11,7 @@ import {
   useShotRefsFromAssets,
   useUploadShotRef,
 } from '../../api/queries';
-import { type Asset, type DialogueLine, type EngineRow, type ShotDetail, type ShotPatch, TRANSITIONS, type Transition } from '../../api/types';
+import { type Asset, type DialogueLine, type EngineRow, type ShotDetail, type ShotPatch, TRANSITIONS, type Transition, type VideoMode } from '../../api/types';
 import { AssetPicker, aspectMismatch } from '../../components/AssetPicker';
 import { useConfirm } from '../../components/ConfirmDialog';
 import { confirmDiscard } from '../../components/confirmDiscard';
@@ -22,7 +22,7 @@ import { engineLabel, engineOptionText } from '../../format';
 import { ArchivedCandidates } from './ArchivedCandidates';
 import { CandidateGrid } from './CandidateGrid';
 import { DialogueEditor } from './DialogueEditor';
-import { type GenStage, CELL, activeJob, activeText, failedJob, firstFrameReady, genLabel, hasSelected, waitsPrevVideo } from './shotStatus';
+import { type GenStage, CELL, activeJob, activeText, failedJob, firstFrameReady, genLabel, hasSelected, refsMode, waitsPrevVideo } from './shotStatus';
 import { SLOT_LABEL } from './slots';
 
 const TRANSITION_LABEL: Record<Transition, string> = {
@@ -127,6 +127,119 @@ function ContinueToggle({
         </p>
       )}
       {shot.continue_from_prev && !cp && <p className="small warn">这是第一镜，没有上一镜可接，关掉这个开关。</p>}
+    </section>
+  );
+}
+
+/** 视频引擎能不能参考图直出（引擎表里的 caps.ref_mode）；不知道这个引擎时 false */
+export function engineRefMode(rows: EngineRow[] | undefined, name: string | undefined): boolean {
+  const row = rows?.find((r) => r.name === name);
+  return row?.caps?.ref_mode === true;
+}
+
+const VIDEO_MODE_LABEL: Record<VideoMode, string> = { first_frame: '首帧', refs: '参考图直出' };
+
+/**
+ * 「生成方式」：首帧（先出首帧再图生视频）/ 参考图直出（不出首帧，用场景图、构图参考、定妆照、道具图直接出视频）。
+ * 当前视频引擎（抽屉里正在选的，没选就是项目的）不支持参考图直出时禁用并说明；已经选了参考图直出、
+ * 又换成不支持的引擎时仍可改回首帧。开了「接上一镜」时按首帧模式出（两者互斥，接上一镜优先）。
+ */
+export function VideoModeSelect({
+  shot,
+  engine,
+  engineName,
+  saving,
+  onChange,
+}: {
+  shot: ShotDetail;
+  /** 视频引擎表里这一行（不知道这个引擎时 undefined） */
+  engine: EngineRow | undefined;
+  engineName: string | undefined;
+  saving: boolean;
+  onChange(mode: VideoMode | null): void;
+}) {
+  const mode: VideoMode = shot.video_mode === 'refs' ? 'refs' : 'first_frame';
+  const supported = engine?.caps?.ref_mode === true;
+  const name = engine ? engineLabel(engine) : engineName || '当前视频引擎';
+  const disabled = saving || (!supported && mode === 'first_frame');
+  return (
+    <section className="shot-video-mode" aria-label="生成方式">
+      <label>
+        生成方式{' '}
+        <select
+          aria-label="生成方式"
+          value={mode}
+          disabled={disabled}
+          title={supported ? undefined : `${name} 不支持参考图直出`}
+          onChange={(ev) => onChange(ev.target.value === 'refs' ? 'refs' : null)}
+        >
+          <option value="first_frame">{VIDEO_MODE_LABEL.first_frame}</option>
+          <option value="refs" disabled={!supported}>
+            {VIDEO_MODE_LABEL.refs}
+          </option>
+        </select>
+      </label>
+      {!supported && mode === 'first_frame' && (
+        <p className="muted small" data-testid="video-mode-unsupported">
+          {name} 不支持参考图直出（只能用首帧出视频）；要跳过首帧、直接用场景图和定妆照出视频，先在下面「视频引擎」换一个支持参考图直出的引擎。
+        </p>
+      )}
+      {!supported && mode === 'refs' && (
+        <p className="warn small" data-testid="video-mode-unsupported">
+          {name} 不支持参考图直出，出视频时会被拒绝：换一个支持参考图直出的视频引擎，或改回「首帧」。
+        </p>
+      )}
+      {mode === 'refs' && shot.continue_from_prev && (
+        <p className="warn small" data-testid="video-mode-continue">
+          开了「接上一镜」：首帧取上一镜视频的尾帧，这一镜按首帧模式出，参考图直出不生效。
+        </p>
+      )}
+      {refsMode(shot) && (
+        <p className="muted small">不出首帧：视频直接用下面这些参考图出（场景图 → 构图参考 → 定妆照 / 三视图 → 道具图）。</p>
+      )}
+    </section>
+  );
+}
+
+const REF_KIND_LABEL: Record<string, string> = {
+  location: '场景图',
+  shot_ref: '构图参考',
+  portrait: '定妆照',
+  turnaround: '三视图',
+  prop: '道具图',
+};
+
+/** 参考图直出时代替首帧区：这一镜视频要带的参考图（按发给引擎的顺序），装不下的标出来 */
+export function VideoRefsList({ shot }: { shot: ShotDetail }) {
+  const refs = shot.video_refs ?? [];
+  const view = useMediaGroup(
+    refs.map((r) => ({ url: r.url, alt: r.label, title: `${shot.code} ${r.label}` })),
+    { title: `${shot.code} 用到的参考图` },
+  );
+  return (
+    <section className="shot-refs" aria-label="用到的参考图">
+      <h4>用到的参考图</h4>
+      {refs.length === 0 ? (
+        <p className="warn small" data-testid="video-refs-empty">
+          这一镜还没有可用的参考图：先给出场角色抽定妆照、给场景出场景图，或在下面上传构图参考；什么都没有时只能按文字出。
+        </p>
+      ) : (
+        <div className="shot-ref-list" role="list" aria-label="用到的参考图">
+          {refs.map((r, i) => (
+            <figure key={`${r.kind}-${r.candidate_id}`} role="listitem" className={`shot-ref${r.used ? '' : ' is-dropped'}`}>
+              <button type="button" className="media-thumb" aria-label={`看大图：${r.label}`} onClick={() => view(i)}>
+                <img src={r.url} alt={r.label} loading="lazy" />
+              </button>
+              <figcaption>
+                <span className="muted small" title={REF_KIND_LABEL[r.kind] ?? r.kind}>
+                  {r.label}
+                  {!r.used && '（超出视频引擎上限，带不上）'}
+                </span>
+              </figcaption>
+            </figure>
+          ))}
+        </div>
+      )}
     </section>
   );
 }
@@ -401,6 +514,7 @@ export function ShotDrawer({
   const patchDialogue = usePatchShot(episodeId);
   const select = useSelectCandidate(episodeId);
   const patchContinue = usePatchShot(episodeId);
+  const patchMode = usePatchShot(episodeId);
   const confirm = useConfirm();
   const [fields, setFields] = useState<FieldsState | null>(null);
   const [dialogueDirty, setDialogueDirty] = useState(false);
@@ -495,6 +609,11 @@ export function ShotDrawer({
   // 首帧这次要用的图像引擎（镜头上没选就是项目的）：网页引擎时才有「新开对话」
   const frameEngine = draftImage || imageDefault;
   const webFrame = isWebImageEngine(frameEngine, engines.data?.image);
+  // 视频这次要用的引擎（抽屉里正在选的，没选就是项目的）：能不能参考图直出
+  const videoEngine = (fields?.values.video_engine ?? shot.video_engine ?? '') || videoDefault;
+  const videoRow = engines.data?.video.find((r) => r.name === videoEngine);
+  // 参考图直出：不出首帧，首帧区折叠成「用到的参考图」
+  const direct = refsMode(shot);
 
   const failures = STAGES.map((st) => ({ st, job: failedJob(shot, st) })).filter((x) => x.job && !activeJob(shot, x.st));
 
@@ -523,6 +642,14 @@ export function ShotDrawer({
               const label = CELL[st === 'keyframes' ? 'first_frame' : 'video'].label;
               const what = genLabel(shot, st);
               const active = activeJob(shot, st);
+              // 参考图直出：首帧这一格不出图
+              if (st === 'keyframes' && direct && !active) {
+                return (
+                  <button key={st} type="button" className="soft" disabled title="这一镜参考图直出，不出首帧">
+                    参考图直出，不出首帧
+                  </button>
+                );
+              }
               // 接上一镜、上一镜还没有视频：两格都要等
               if (!active && waiting) {
                 return (
@@ -575,14 +702,16 @@ export function ShotDrawer({
               </select>
             </label>
           </div>
-          <WebConversation
-            scopeKind="shot"
-            scopeId={shot.id}
-            engine={frameEngine}
-            newConversation={newConv}
-            onNewConversationChange={setNewConv}
-            label="首帧"
-          />
+          {!direct && (
+            <WebConversation
+              scopeKind="shot"
+              scopeId={shot.id}
+              engine={frameEngine}
+              newConversation={newConv}
+              onNewConversationChange={setNewConv}
+              label="首帧"
+            />
+          )}
           {failures.map(({ st, job }) => (
             <p key={st} className="error">
               {`${CELL[st === 'keyframes' ? 'first_frame' : 'video'].label}上次生成失败：${job?.error || '没有错误信息'}`}
@@ -592,19 +721,35 @@ export function ShotDrawer({
         {notice}
 
         {/* 候选在最前：打开抽屉多半是来挑首帧 / 视频的；英文提示词收在「高级」里 */}
-        {slots.length === 0 && <p className="muted">还没有生成任何首帧或视频。</p>}
-        {slots.map((sl) => (
-          <section key={sl.id}>
-            <h4>
-              {SLOT_LABEL[sl.kind] ?? sl.kind}候选
-              {sl.stale && <span className="badge stale">已过期</span>}
-            </h4>
-            {sl.stale && sl.stale_reason && <p className="muted stale-reason">过期原因：{sl.stale_reason}</p>}
-            <CandidateGrid slot={sl} shotCode={shot.code} selecting={select.isPending} onSelect={(cid) => select.mutate(cid)} />
-          </section>
-        ))}
+        {slots.length === 0 && <p className="muted">{direct ? '还没有生成视频。' : '还没有生成任何首帧或视频。'}</p>}
+        {slots.map((sl) => {
+          const body = (
+            <>
+              {sl.stale && sl.stale_reason && <p className="muted stale-reason">过期原因：{sl.stale_reason}</p>}
+              <CandidateGrid slot={sl} shotCode={shot.code} selecting={select.isPending} onSelect={(cid) => select.mutate(cid)} />
+            </>
+          );
+          // 参考图直出：以前出的首帧用不上，折叠起来
+          if (direct && sl.kind === 'first_frame') {
+            return (
+              <details key={sl.id} className="muted" data-testid="first-frame-collapsed">
+                <summary>以前出的首帧候选（参考图直出用不上）</summary>
+                {body}
+              </details>
+            );
+          }
+          return (
+            <section key={sl.id}>
+              <h4>
+                {SLOT_LABEL[sl.kind] ?? sl.kind}候选
+                {sl.stale && <span className="badge stale">已过期</span>}
+              </h4>
+              {body}
+            </section>
+          );
+        })}
         {select.error && <p className="error">{errorText(select.error)}</p>}
-        <FirstFrameFromAsset shot={shot} episodeId={episodeId} aspect={aspect} />
+        {direct ? <VideoRefsList shot={shot} /> : <FirstFrameFromAsset shot={shot} episodeId={episodeId} aspect={aspect} />}
         <ArchivedCandidates episodeId={episodeId} shotId={shot.id} />
 
         <ContinueToggle
@@ -615,7 +760,16 @@ export function ShotDrawer({
         />
         {patchContinue.error && <p className="error">{errorText(patchContinue.error)}</p>}
 
-        <RefHints shot={shot} maxRefs={imageMaxRefs} missingLocationImage={missingLocationImage} />
+        <VideoModeSelect
+          shot={shot}
+          engine={videoRow}
+          engineName={videoEngine}
+          saving={patchMode.isPending}
+          onChange={(mode) => patchMode.mutate({ id: shot.id, video_mode: mode })}
+        />
+        {patchMode.error && <p className="error">{errorText(patchMode.error)}</p>}
+
+        {!direct && <RefHints shot={shot} maxRefs={imageMaxRefs} missingLocationImage={missingLocationImage} />}
 
         <ShotRefs shot={shot} episodeId={episodeId} maxRefs={imageMaxRefs} />
 

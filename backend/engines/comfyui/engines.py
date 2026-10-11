@@ -4,7 +4,7 @@ from __future__ import annotations
 import math
 from pathlib import Path
 
-from backend.engines.base import (EngineCall, ImageCaps, ImageRequest, VideoCaps, VideoRequest,
+from backend.engines.base import (EngineCall, require_first_frame, ImageCaps, ImageRequest, VideoCaps, VideoRequest,
                                   size_for, upload_ref)
 from backend.engines.comfyui.template import WorkflowTemplate
 
@@ -138,6 +138,7 @@ class H3VideoEngine(_ComfyEngine):
         return f
 
     def build(self, req: VideoRequest) -> EngineCall:
+        require_first_frame(req, self)   # 没有首帧（参考图直出）而引擎不支持 ref_mode 时报清楚
         w, h = size_for(self.caps.sizes, req.aspect)
         turbo = bool(self.overrides.get("turbo", True))
         steps = self.overrides.get("steps") or (4 if turbo else 20)
@@ -177,6 +178,7 @@ class Wan22I2VEngine(_ComfyEngine):
         return f
 
     def build(self, req: VideoRequest) -> EngineCall:
+        require_first_frame(req, self)   # 没有首帧（参考图直出）而引擎不支持 ref_mode 时报清楚
         w, h = size_for(self.caps.sizes, req.aspect)
         frames = self.frames_for(min(req.seconds, self.caps.max_seconds), req.min_seconds)
         values = {"prompt": req.prompt, "first_frame": upload_ref(req.first_frame),

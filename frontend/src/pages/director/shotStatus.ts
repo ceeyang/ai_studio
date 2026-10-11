@@ -46,6 +46,11 @@ export function continues(shot: ShotDetail): boolean {
   return !!shot.continue_from_prev && !!shot.continue_prev;
 }
 
+/** 参考图直出：选了 refs、没开接上一镜（两者互斥时接上一镜优先，按首帧模式出）。不出首帧，视频不等首帧 */
+export function refsMode(shot: Pick<ShotDetail, 'video_mode' | 'continue_from_prev'>): boolean {
+  return shot.video_mode === 'refs' && !shot.continue_from_prev;
+}
+
 /** 接上一镜、上一镜还没有选定视频：首帧没法取，卡片显示「等上一镜视频」 */
 export function waitsPrevVideo(shot: ShotDetail): boolean {
   return continues(shot) && !shot.continue_prev!.has_video;
@@ -195,12 +200,13 @@ export function voiceMismatch(c?: Candidate): VoiceMismatch[] {
 
 /** 能拿来出视频的首帧：选定了、而且不过期（过期的先回首帧阶段重拍，不拿旧首帧出视频） */
 export function firstFrameReady(shot: ShotDetail): boolean {
+  if (refsMode(shot)) return true; // 参考图直出：不要首帧
   // 接上一镜：出视频前后端会先取上一镜的尾帧，只要上一镜有视频就行
   if (continues(shot)) return shot.continue_prev!.has_video;
   return slotMark(slotOf(shot, 'first_frame')) === 'ok';
 }
 
-export type CardActionKind = 'busy' | 'wait_prev' | 'need_first_frame' | 'retry' | 'redo' | 'generate';
+export type CardActionKind = 'busy' | 'wait_prev' | 'refs_direct' | 'need_first_frame' | 'retry' | 'redo' | 'generate';
 
 export interface CardAction {
   kind: CardActionKind;
@@ -219,6 +225,8 @@ export function cardAction(shot: ShotDetail, stage: GenStage): CardAction {
   const label = cellOf(stage).label;
   if (activeJob(shot, stage)) return { kind: 'busy', label: '生成中', aria: `${label}生成中` };
   if (waitsPrevVideo(shot)) return { kind: 'wait_prev', label: '等上一镜视频', aria: '等上一镜视频' };
+  // 参考图直出：首帧这一格不出图（禁用）
+  if (stage === 'keyframes' && refsMode(shot)) return { kind: 'refs_direct', label: '参考图直出', aria: '参考图直出，不出首帧' };
   if (stage === 'videos' && !firstFrameReady(shot)) {
     const what = hasSelected(shot, 'keyframes') ? '先重拍首帧' : '先出首帧';
     return { kind: 'need_first_frame', label: what, aria: what };

@@ -16,7 +16,7 @@ router = APIRouter(prefix="/api", tags=["shots"])
 
 COPY_FIELDS = ("scene_block_id", "shot_size", "camera_move", "action", "cast", "props",
                "image_prompt", "motion_prompt", "audio_prompt", "image_engine", "video_engine",
-               "use_end_frame", "continue_from_prev", "origin")
+               "use_end_frame", "continue_from_prev", "video_mode", "origin")
 
 
 def check_placeholders(text: str, char_ids: set[int]) -> None:
@@ -79,8 +79,8 @@ def patch_shot(shot_id: int, body: ShotFields, request: Request):
             ep = s.get(Episode, shot.episode_id)
             check_placeholders(data["image_prompt"], {c.id for c in ep.project.characters})
         for k, v in data.items():
-            if v is None and k not in ("image_engine", "video_engine"):
-                continue  # 只有引擎覆盖可以清空（回到项目默认）
+            if v is None and k not in ("image_engine", "video_engine", "video_mode"):
+                continue  # 只有引擎覆盖、生成方式可以清空（回到项目默认 / 首帧模式）
             setattr(shot, k, v)
         s.flush()
         return _detail(s, sv, shot)

@@ -108,3 +108,36 @@ def test_single_head_and_new_columns_keep_shots_autoincrement(tmp_path):
         assert c.execute("SELECT suggest_continue FROM shots").fetchone()[0] == 0
     finally:
         c.close()
+
+
+def test_shot_video_mode_column_keeps_shots_autoincrement(tmp_path):
+    """参考图直出（D3）：shots.video_mode 加列不重建表，老镜头为空（= 首帧模式），能降级回去。"""
+    d = Database(tmp_path / "m.db")
+    cfg = _cfg(d)
+    command.upgrade(cfg, "a3f8c1d5e7b2")
+    c = sqlite3.connect(d.path)
+    c.execute("INSERT INTO projects (id, slug, title, aspect, image_engine, video_engine, seed, "
+              "negative, style_preset, archived, created_at) VALUES "
+              "(1,'p','p','9:16','z','w',1,'','live_action',0,'2026-01-01')")
+    c.execute("INSERT INTO episodes (id, project_id, number, title, source_text, target_seconds, "
+              "status, stage_hashes) VALUES (1,1,1,'','',60,'draft','{}')")
+    c.execute("INSERT INTO shots (id, episode_id, \"order\", code, shot_size, camera_move, "
+              "action, dialogue, \"cast\", props, image_prompt, motion_prompt, audio_prompt, "
+              "duration, use_end_frame, continue_from_prev, transition_out, origin) VALUES "
+              "(5,1,0,'','','','','[]','[]','[]','','','',3,0,0,'hard_cut','llm')")
+    c.commit()
+    c.close()
+    command.upgrade(cfg, "b9e3d7a1c5f2")
+    d.engine.dispose()
+    assert "AUTOINCREMENT" in _ddl(d.path, "shots")
+    c = sqlite3.connect(d.path)
+    try:
+        assert c.execute("SELECT video_mode FROM shots WHERE id=5").fetchone()[0] is None
+        c.execute("UPDATE shots SET video_mode='refs' WHERE id=5")
+        c.commit()
+    finally:
+        c.close()
+    command.downgrade(cfg, "a3f8c1d5e7b2")
+    d.engine.dispose()
+    ddl = _ddl(d.path, "shots")
+    assert "video_mode" not in ddl and "AUTOINCREMENT" in ddl

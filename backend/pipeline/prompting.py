@@ -816,6 +816,16 @@ def video_input_hash(shot, project, style, first_frame_candidate_id: int, engine
                       round(float(shot.duration), 2), **_refs(ref_ids))
 
 
+def video_refs_input_hash(shot, project, style, engine_name: str, has_audio: bool, ref_ids=()) -> str:
+    """参考图直出（Shot.video_mode = refs）的视频输入哈希：没有首帧，按参考图（场景图、构图参考、定妆照 /
+    三视图、道具图）算——换了定妆照、场景图，视频就过期。和首帧模式的哈希天然不同（换生成方式要重出）。"""
+    prompt = compose_video_prompt(shot.motion_prompt, fingerprint_image_prompt(shot, project),
+                                  shot.audio_prompt,
+                                  shot.dialogue, anchor=_anchor(style), has_audio=has_audio)
+    return input_hash("video_refs", prompt, engine_name, project.aspect,
+                      round(float(shot.duration), 2), list(ref_ids))
+
+
 # ------------------------------------------------------------ 输入摘要（候选 params["inputs"]）
 # 哈希只能说「变了」，摘要能说「哪里变了」：首帧 / 视频过期时给出原因。
 LEGACY_STALE = "输入已变化（旧记录无法细分）"
@@ -841,6 +851,14 @@ def video_inputs(shot, project, style, first_frame_candidate_id: int, engine_nam
     return {"prompt": prompt, "negative": _negative(project, style), "engine": engine_name,
             "aspect": project.aspect, "refs": ref_inputs(refs),
             "duration": round(float(shot.duration), 2), "first_frame": first_frame_candidate_id}
+
+
+def video_refs_inputs(shot, project, style, engine_name: str, has_audio: bool, refs=()) -> dict:
+    """参考图直出的视频输入摘要：和 video_inputs 同结构，没有 first_frame，mode = refs。"""
+    out = video_inputs(shot, project, style, 0, engine_name, has_audio, refs)
+    out.pop("first_frame", None)
+    out["mode"] = "refs"
+    return out
 
 
 def _refs_reason(old: list, new: list) -> str | None:
@@ -874,6 +892,8 @@ def stale_reason(old, new: dict) -> str:
         return "输入已变化"
     if not isinstance(old, dict) or not old:
         return LEGACY_STALE
+    if old.get("mode", "first_frame") != new.get("mode", "first_frame"):
+        return ("改成了参考图直出" if new.get("mode") == "refs" else "改回了首帧模式")
     r = _refs_reason(old.get("refs") or [], new.get("refs") or [])
     if r:
         return r

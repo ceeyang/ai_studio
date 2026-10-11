@@ -1,4 +1,5 @@
-"""视频阶段：用选定的首帧逐镜出视频。"""
+"""视频阶段：用选定的首帧逐镜出视频；参考图直出（Shot.video_mode = refs）的镜头不要首帧，用场景图、构图参考、
+定妆照 / 三视图、道具图直接出（引擎要 caps.ref_mode）。"""
 from __future__ import annotations
 
 import shutil
@@ -6,7 +7,9 @@ import shutil
 from backend.domain.slots import add_candidate, get_or_create_slot, selected_candidate
 from backend.engines.base import VideoRequest
 from backend.pipeline.common import job_services
-from backend.pipeline.freshness import video_caps, video_check, video_expect
+from backend.domain.refs import FACE_KINDS
+from backend.domain.shots import refs_mode, refs_mode_overridden
+from backend.pipeline.freshness import shot_video_expect, video_caps, video_check, video_refs_expect
 from backend.pipeline.keyframes import load_shot, ref_labels, ref_roles, run_comfy
 from backend.domain.models import Location, SceneBlock
 from backend.pipeline.prompting import (STAY_IN_FRAME, Speaker, compose_video_prompt,
@@ -269,16 +272,25 @@ def _shot_location(s, shot) -> str:
 
 
 def _video_fresh(s, engines, shot_id: int, cur) -> bool:
-    """选定视频是否还是最新：按镜头当前的视频引擎，或它自己的引擎（换引擎不算过期）。"""
+    """选定视频是否还是最新：按镜头当前的视频引擎，或它自己的引擎（换引擎不算过期）。
+    参考图直出的镜头不看首帧，按参考图打包算。"""
     shot, _, proj, style = load_shot(s, shot_id)
     ff = selected_candidate(s, "shot", shot_id, "first_frame")
-    if ff is None:
+    if ff is None and not refs_mode(shot):
         return False
     ve = shot.video_engine or proj.video_engine
-    caps = video_caps(engines, ve)
-    current = (video_expect(s, engines, shot, proj, style, ff, ve, caps.has_audio, caps.max_refs)
-               if caps is not None else None)
+    current = shot_video_expect(s, engines, shot, proj, style, ff, ve, video_caps(engines, ve))
     return video_check(s, engines, shot, proj, style, ff, cur, current)[0]
+
+
+# 参考图直出时查「中段叠入参考图」只比带脸的图和道具图（影棚灰底）：场景图、构图参考本来就该像画面
+GHOST_KINDS = (*FACE_KINDS, "prop")
+
+
+def ref_mode_refusal(engine_name: str) -> str:
+    """视频引擎不支持参考图直出时的说明（提交前、任务里都用这一句）。"""
+    return (f"{engine_name} 不支持参考图直出，换一个支持参考图直出的视频引擎，"
+            "或把这一镜的生成方式改回「首帧」")
 
 
 @HANDLERS.register("video.shot", gpu=True)
@@ -287,14 +299,22 @@ def run_video(ctx, payload: dict) -> dict:
     shot_id = int(payload["shot_id"])
     with sv.db.session() as s:
         shot, ep, proj, style = load_shot(s, shot_id)
-        ff = selected_candidate(s, "shot", shot.id, "first_frame")
-        if ff is None:
-            raise JobError(f"镜头 {shot.code} 还没有选定首帧，先跑 keyframes")
+        direct = refs_mode(shot)   # 参考图直出：不要首帧
         engine_name = shot.video_engine or proj.video_engine
         try:
             engine = sv.engines.video(engine_name)
         except KeyError as e:
             raise JobError(str(e)) from None
+        if refs_mode_overridden(shot):
+            ctx.log(f"视频 {shot.code}：开了「接上一镜」，参考图直出不生效，按首帧模式出（首帧是上一镜视频的尾帧）")
+        if direct:
+            if not getattr(engine.caps, "ref_mode", False):
+                raise JobError(f"镜头 {shot.code}：{ref_mode_refusal(engine_name)}")
+            ff = None
+        else:
+            ff = selected_candidate(s, "shot", shot.id, "first_frame")
+            if ff is None:
+                raise JobError(f"镜头 {shot.code} 还没有选定首帧，先跑 keyframes")
         has_audio = engine.caps.has_audio
         # 发给引擎的版本：说话人用英文简称、画外音写明；输入哈希仍按老写法算（见 compose_video_prompt）
         speakers = _speakers(proj, shot, ep.shots)
@@ -304,18 +324,37 @@ def run_video(ctx, payload: dict) -> dict:
                                       has_audio=has_audio, speakers=speakers)
         negative = join_negative(proj.negative, style.negative if style else "")
         # 期望输入和老规则的哈希（和界面过期判断同一套，见 pipeline.freshness）
-        exp = video_expect(s, sv.engines, shot, proj, style, ff, engine_name, has_audio,
-                           engine.caps.max_refs)
-        plan = exp.plan
-        if plan.dropped:
-            src = ("首帧是上一镜视频的尾帧，上一镜没用定妆照锁脸" if plan.continued
-                   else f"首帧是 {ff.engine} 出的图，没用定妆照锁脸")
-            ctx.log(f"视频 {shot.code}：{src}，身份以首帧为准，"
-                    f"不带{'、'.join(r.label for r in plan.dropped)}（免得首帧和参考图两张脸打架）")
-        if plan.continued and plan.entering and plan.identity == "entering":
-            ctx.log(f"视频 {shot.code}：接上一镜，{'、'.join(r.label for r in plan.refs)} 是新入画的角色，"
-                    "带上定妆照锁脸")
-        packed = plan.refs
+        if direct:
+            # 参考图按出首帧的同一套打包（场景图 → 构图参考 → 定妆照 / 三视图 → 道具图），超出上限时
+            # split_refs 先保住每个角色一张定妆照
+            exp = video_refs_expect(s, shot, proj, style, engine_name, has_audio, engine.caps.max_refs)
+            plan = None
+            packed = exp.used
+            for r in exp.dropped:
+                ctx.log(f"超出引擎参考图上限，已丢弃：{r.label}")
+            lost = [r.label for r in exp.dropped if r.kind == "portrait"]
+            if lost:
+                ctx.log(f"视频 {shot.code}：{engine_name} 最多 {engine.caps.max_refs} 张参考图，装不下所有出场"
+                        f"角色的定妆照，{'、'.join(lost)}没带上，这几个人的脸只能按文字出")
+            if not packed:
+                ctx.log(f"视频 {shot.code}：参考图直出，但这一镜没有可用的参考图（场景图、定妆照都没有），"
+                        "只能按文字出")
+            identity = "refs"
+            locked_chars = sorted({r.character_id for r in packed
+                                   if r.kind in FACE_KINDS and r.character_id is not None})
+        else:
+            exp = shot_video_expect(s, sv.engines, shot, proj, style, ff, engine_name, engine.caps)
+            plan = exp.plan
+            if plan.dropped:
+                src = ("首帧是上一镜视频的尾帧，上一镜没用定妆照锁脸" if plan.continued
+                       else f"首帧是 {ff.engine} 出的图，没用定妆照锁脸")
+                ctx.log(f"视频 {shot.code}：{src}，身份以首帧为准，"
+                        f"不带{'、'.join(r.label for r in plan.dropped)}（免得首帧和参考图两张脸打架）")
+            if plan.continued and plan.entering and plan.identity == "entering":
+                ctx.log(f"视频 {shot.code}：接上一镜，{'、'.join(r.label for r in plan.refs)} 是新入画的角色，"
+                        "带上定妆照锁脸")
+            packed = plan.refs
+            identity, locked_chars = plan.identity, plan.locked_chars
         refs = [sv.media.abs(r.file_path) for r in packed]
         labels = ref_labels(packed, refs)
         kinds = ref_roles(packed, refs)
@@ -333,11 +372,12 @@ def run_video(ctx, payload: dict) -> dict:
         # 最后一句台词说完再留 0.3 秒：帧数网格往下取时不能把台词截掉
         min_seconds = min(max((float(d.get("end") or 0) for d in shot.dialogue or []),
                               default=0.0) + 0.3 if shot.dialogue else 0.0, seconds + 1.0)
-        first = sv.media.abs(ff.file_path)
+        first = sv.media.abs(ff.file_path) if ff is not None else None
+        ff_id = ff.id if ff is not None else None
         slug, code, aspect = proj.slug, shot.code, proj.aspect
         place = _shot_location(s, shot)
         extra = []
-        if plan.continued and plan.entering:
+        if plan is not None and plan.continued and plan.entering:
             looks = {c.id: c.visual_prompt for c in proj.characters}
             extra.append(entering_clause([looks.get(cid) or "" for cid in plan.entering]))
         on_screen = any(isinstance(c, dict) and c.get("character_id") is not None
@@ -349,7 +389,8 @@ def run_video(ctx, payload: dict) -> dict:
         voices = voice_lines(shot.dialogue, speakers) if has_audio else []
         base_seed, taken = proj.seed, len(slot.candidates)
         # 中段叠入参考图的检测：和这条视频实际带的参考图比
-        ghost_refs = [(r.label, sv.media.abs(r.file_path)) for r in used]
+        ghost_refs = [(r.label, sv.media.abs(r.file_path)) for r in used
+                      if not direct or r.kind in GHOST_KINDS]
     cids: list[int] = []
     retry_of: int | None = None
     for attempt in range(2):
@@ -364,7 +405,8 @@ def run_video(ctx, payload: dict) -> dict:
                            negative=negative, refs=refs,
                            prefix=f"studio/{slug}/clip_{code}")
         call = engine.build(req)
-        ctx.log(f"视频 {code} · {engine_name} · {seconds:.1f}s · seed {seed} · 参考图 {len(refs)} 张"
+        ctx.log(f"视频 {code} · {engine_name}{' · 参考图直出（不用首帧）' if direct else ''}"
+                f" · {seconds:.1f}s · seed {seed} · 参考图 {len(refs)} 张"
                 f"{'（原生有声）' if has_audio else '（无声）'}"
                 f"{'（自动重拍）' if attempt else ''}"
                 f"{'：' + '、'.join(labels.values()) if labels else ''}")
@@ -389,9 +431,14 @@ def run_video(ctx, payload: dict) -> dict:
             def fresh(cur, s=s) -> bool:
                 return _video_fresh(s, sv.engines, shot_id, cur)
 
-            params = {**call.meta, "first_frame_candidate_id": ff.id,
-                      "identity": plan.identity, "locked_chars": plan.locked_chars,
+            params = {**call.meta, "first_frame_candidate_id": ff_id,
+                      "video_mode": "refs" if direct else "first_frame",
+                      "identity": identity, "locked_chars": locked_chars,
                       "workflow": sv.media.rel(run_dir / "workflow.api.json"), "inputs": inputs}
+            if direct:
+                # 参考图直出用到的参考图（按发给引擎的顺序），调用明细 / 候选详情里列出
+                params["video_refs"] = [{"id": r.candidate_id, "label": r.label, "kind": r.kind}
+                                        for r in packed]
             if qc is not None:
                 params["qc"] = qc
             if retry_of is not None:

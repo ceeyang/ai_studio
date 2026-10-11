@@ -10,7 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from backend.app.schemas import (ArchivedCandidateOut, CandidateOut, ContinuePrevOut, EpisodeDetail, ExportOut, JobBrief, JobContext,
-                                 SceneBlockOut, ShotDetail, SlotOut)
+                                 SceneBlockOut, ShotDetail, SlotOut, VideoRefOut)
 from backend.domain.models import Character, Episode, Job, Project, Shot
 from backend.domain.assets import ASSET_ENGINE
 from backend.domain.refs import (SHOT_REF_SLOT, legacy_video_refs, shot_ref_images, shot_refs,
@@ -18,8 +18,9 @@ from backend.domain.refs import (SHOT_REF_SLOT, legacy_video_refs, shot_ref_imag
 from backend.domain.shots import prev_shot
 from backend.domain.slots import selected_candidate, slots_for
 from backend.pipeline.continuity import continue_hash, continue_inputs
-from backend.pipeline.freshness import (first_frame_check, keyframe_expect, video_caps, video_check,
-                                        video_expect)
+from backend.domain.shots import refs_mode
+from backend.pipeline.freshness import (first_frame_check, keyframe_expect, shot_video_expect,
+                                        video_caps, video_check)
 from backend.pipeline.prompting import shot_image_prompt, stale_reason
 from backend.post.options import export_label
 from backend.queue.manager import ACTIVE
@@ -149,6 +150,19 @@ def shot_detail(s: Session, sv, shot, proj, style, *, jobs: OwnerJobs | None = N
         cont_in = continue_inputs(prev.code if prev else "", pv.id if pv else 0)
         unused = []
         lost = []
+    refs_on = refs_mode(shot)
+    ve = shot.video_engine or proj.video_engine
+    v_caps = video_caps(sv.engines, ve)
+    video_refs: list[VideoRefOut] = []
+    if refs_on:
+        # 参考图直出：首帧区折叠成「用到的参考图」（按视频引擎的上限截断，和 videos.run_video 一致；
+        # 装不下的也列出来，标 used=false）
+        cap = v_caps.max_refs if v_caps is not None else len(refs)
+        kept = {id(r) for r in (split_refs(refs, cap)[0] if cap > 0 else [])}
+        video_refs = [VideoRefOut(candidate_id=r.candidate_id, label=r.label, kind=r.kind,
+                                  url="/media/" + quote(r.file_path), used=id(r) in kept)
+                      for r in refs]
+        unused, lost = [], []
     ff = next((x for x in slots if x.kind == "first_frame"), None)
     ff_sel = (next((c for c in ff.candidates if c.id == ff.selected_candidate_id), None)
               if ff is not None and ff.selected_candidate_id else None)
@@ -163,11 +177,10 @@ def shot_detail(s: Session, sv, shot, proj, style, *, jobs: OwnerJobs | None = N
             if sel.engine == ASSET_ENGINE:
                 return False, None   # 用户从已有图片里选的首帧：不按出图输入判过期
             fresh, exp = first_frame_check(s, sv.engines, shot, proj, style, sel, ff_exp, refs)
-        elif kind == "video" and ff_sel is not None:
-            ve = shot.video_engine or proj.video_engine
-            caps = video_caps(sv.engines, ve)
-            current = (video_expect(s, sv.engines, shot, proj, style, ff_sel, ve, caps.has_audio,
-                                    caps.max_refs, v_pack=v_pack) if caps is not None else None)
+        elif kind == "video" and (ff_sel is not None or refs_on):
+            # 参考图直出：不看首帧，按参考图打包算（换了定妆照 / 场景图就过期）
+            current = shot_video_expect(s, sv.engines, shot, proj, style, ff_sel, ve, v_caps,
+                                        v_pack=v_pack, packed=refs)
             fresh, exp = video_check(s, sv.engines, shot, proj, style, ff_sel, sel, current)
         else:
             return False, None
@@ -199,6 +212,7 @@ def shot_detail(s: Session, sv, shot, proj, style, *, jobs: OwnerJobs | None = N
         "shot_refs": [candidate_out(c) for c in shot_ref_images(s, shot.id)],
         "image_max_refs": ff_cap if known_ie else None,
         "continue_prev": cont,
+        "video_refs": video_refs,
         "image_prompt_resolved": resolved if resolved != (shot.image_prompt or "") else None,
         "placeholder_names": placeholder_names(shot, proj)})
 
