@@ -1,4 +1,5 @@
 // 角色抽屉的「资料」页签：从参考图写外观、名字、人物描述、核心特征、配音音色；英文外观提示词收在「高级」里。
+// 「只出声，不出镜」勾选即保存：画外音、电话里的声音不用抽定妆照，分镜里不出现在画面里。
 import { useState } from 'react';
 import { errorText } from '../../api/client';
 import { usePatchCharacter, useRefreshShotLooks } from '../../api/queries';
@@ -48,8 +49,19 @@ export function CharacterProfile({
   const [refreshMsg, setRefreshMsg] = useState<string | null>(null);
   // 资料有没保存的修改时，「从参考图写外观」不直接填入
   const [dirty, setDirty] = useState(false);
+  const voiceOnly = usePatchCharacter(slug);
   return (
     <div className="char-fields">
+      <label className="check" title="画外音、电话里的声音：不出现在画面里，不用抽定妆照；分镜不给他外貌占位符，他的台词写成画外音">
+        <input
+          type="checkbox"
+          checked={!!c.voice_only}
+          disabled={voiceOnly.isPending}
+          onChange={(e) => voiceOnly.mutate({ id: c.id, voice_only: e.target.checked })}
+        />
+        只出声，不出镜（画外音、电话里的声音，不用定妆照）
+      </label>
+      {voiceOnly.error && <p className="error small">{errorText(voiceOnly.error)}</p>}
       <PhotoLookPanel c={c} slug={slug} profileDirty={dirty} />
       <EditableFields
         fields={CHARACTER_FIELDS}

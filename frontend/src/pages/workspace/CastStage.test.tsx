@@ -65,6 +65,21 @@ describe('CastStage', () => {
     expect(screen.getByText('1/2 个角色有定妆照')).toBeTruthy();
   });
 
+  it('只出声、不出镜的角色：卡上标「只出声」、不提示缺定妆照、没有「抽定妆照」，也不算进定妆照计数', async () => {
+    installFetch({
+      ...ROUTES,
+      'GET /api/projects/demo/characters': [LIN, { ...LAO, voice_only: true }],
+    });
+    renderAt(<CastStage />, AT);
+    const lao = await screen.findByTestId('character-9');
+    expect(lao.textContent).toContain('只出声');
+    expect(lao.textContent).not.toContain('缺定妆照');
+    expect(lao.classList.contains('is-missing')).toBe(false);
+    expect(within(lao).queryByRole('button', { name: '抽定妆照' })).toBeNull();
+    expect(within(lao).getByRole('button', { name: '编辑 老周' })).toBeTruthy();
+    expect(screen.getByText('1/1 个角色有定妆照')).toBeTruthy();
+  });
+
   it('最近一次抽卡失败：卡片标「抽卡失败」', async () => {
     installFetch({
       ...ROUTES,

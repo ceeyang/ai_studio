@@ -90,9 +90,11 @@ export const STAGE_STATE_TEXT: Record<Stage['state'], string> = {
 
 /** 出场角色：镜头 cast 里出现过的；还没有镜头（或镜头都没标角色）时按项目全部角色算 */
 export function castOf(shots: ShotDetail[], chars: Character[]): Character[] {
+  // 只出声、不出镜的角色（画外音、电话里的声音）不出现在画面里，不用定妆照
+  const seen = chars.filter((c) => !c.voice_only);
   const ids = new Set(shots.flatMap((s) => s.cast.map((c) => c.character_id)));
-  const appearing = chars.filter((c) => ids.has(c.id));
-  return appearing.length > 0 ? appearing : chars;
+  const appearing = seen.filter((c) => ids.has(c.id));
+  return appearing.length > 0 ? appearing : seen;
 }
 
 export const hasPortrait = (c: Character) => !!(c.portrait_url || c.portrait_candidate_id);

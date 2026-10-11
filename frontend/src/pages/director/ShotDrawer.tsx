@@ -66,12 +66,37 @@ export function toShotPatch(changed: FieldValues): ShotPatch {
   return out;
 }
 
-/** 「接上一镜」开关：首帧取上一镜选定视频的最后一帧，背景、人物位置接得上。第一镜不能开。 */
-function ContinueToggle({ shot, saving, onChange }: { shot: ShotDetail; saving: boolean; onChange(on: boolean): void }) {
+/**
+ * 「接上一镜」开关：首帧取上一镜选定视频的最后一帧，背景、人物位置接得上。第一镜不能开。
+ * 分镜建议这一镜接上一镜（同一场景、动作直接延续）而还没打开时，给一条建议：一键打开，或「不用」去掉建议。
+ */
+function ContinueToggle({
+  shot,
+  saving,
+  onChange,
+  onDismiss,
+}: {
+  shot: ShotDetail;
+  saving: boolean;
+  onChange(on: boolean): void;
+  onDismiss(): void;
+}) {
   const first = shot.order === 0;
   const cp = shot.continue_prev;
+  const suggest = !!shot.suggest_continue && !shot.continue_from_prev && !first;
   return (
     <section className="shot-continue" aria-label="接上一镜">
+      {suggest && (
+        <p className="small notice" data-testid="continue-suggest">
+          分镜建议这一镜接上一镜（和上一镜同一场景、动作直接延续）：首帧直接取上一镜视频的最后一帧，画面无缝接上。{' '}
+          <button type="button" className="sm soft" disabled={saving} onClick={() => onChange(true)}>
+            接上一镜
+          </button>{' '}
+          <button type="button" className="sm ghost" disabled={saving} onClick={onDismiss}>
+            不用
+          </button>
+        </p>
+      )}
       <label title={first ? '第一镜没有上一镜可接' : '首帧不出图，直接取上一镜选定视频的最后一帧'}>
         <input
           type="checkbox"
@@ -412,7 +437,12 @@ export function ShotDrawer({
         {select.error && <p className="error">{errorText(select.error)}</p>}
         <ArchivedCandidates episodeId={episodeId} shotId={shot.id} />
 
-        <ContinueToggle shot={shot} saving={patchContinue.isPending} onChange={(on) => patchContinue.mutate({ id: shot.id, continue_from_prev: on })} />
+        <ContinueToggle
+          shot={shot}
+          saving={patchContinue.isPending}
+          onChange={(on) => patchContinue.mutate({ id: shot.id, continue_from_prev: on })}
+          onDismiss={() => patchContinue.mutate({ id: shot.id, suggest_continue: false })}
+        />
         {patchContinue.error && <p className="error">{errorText(patchContinue.error)}</p>}
 
         <RefHints shot={shot} missingLocationImage={missingLocationImage} />

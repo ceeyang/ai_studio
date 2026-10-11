@@ -169,7 +169,9 @@ export function CastStage({
   const chars = characters.data ?? [];
   const locs = locations.data ?? [];
   const st = style.data ?? EMPTY_STYLE;
-  const withPortrait = chars.filter(hasPortrait).length;
+  // 只出声、不出镜的角色不用定妆照，不算进计数
+  const onScreen = chars.filter((c) => !c.voice_only);
+  const withPortrait = onScreen.filter(hasPortrait).length;
   // 轮到的角色：和阶段条下一步的算法一致（缺定妆照、没在抽卡；有提示词的优先）
   const target = nextAct ? castTarget(e.shots, chars) : null;
   const nextCharId = target?.id ?? undefined;
@@ -203,7 +205,7 @@ export function CastStage({
         <RecommendPanel slug={slug} episodeId={id} existing={chars} isNext={!!nextAct && chars.length === 0} />
         {chars.length > 0 && (
           <span className="chip">
-            {withPortrait}/{chars.length} 个角色有定妆照
+            {withPortrait}/{onScreen.length} 个角色有定妆照
           </span>
         )}
         {canUseScenes && toDraw.length > 0 && (

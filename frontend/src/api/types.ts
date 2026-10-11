@@ -35,6 +35,10 @@ export interface Project {
   /** 风格预设；老项目是 live_action（真人写实） */
   style_preset: StylePresetKey;
   style_bible_id: number | null;
+  /** 镜头节奏：每镜几秒（3 / 4 / 5）；null = 跟随视频引擎 */
+  shot_seconds?: number | null;
+  /** 视频开头没接上首帧时自动换种子重拍一次 */
+  auto_retry_video?: boolean;
   /** 归档了的项目默认不在项目中心显示（GET /api/projects?archived=1 才带上） */
   archived: boolean;
   created_at: string;
@@ -46,6 +50,9 @@ export interface ProjectPatch {
   archived?: boolean;
   /** 改风格预设：负面词还是旧预设的默认值时跟着换；风格锚和外观要重新生成视觉设定才变 */
   style_preset?: StylePresetKey;
+  /** 镜头节奏：每镜几秒；0 = 跟随视频引擎 */
+  shot_seconds?: 0 | 3 | 4 | 5;
+  auto_retry_video?: boolean;
 }
 
 export interface ProjectIn {
@@ -331,6 +338,8 @@ export interface Shot {
   duration: number;
   use_end_frame: boolean;
   continue_from_prev: boolean;
+  /** 分镜建议这一镜接上一镜（只是建议，没打开 continue_from_prev） */
+  suggest_continue?: boolean;
   transition_out: string;
   /** llm = 分镜生成的；manual = 手工添加（含拆分出来的） */
   origin: 'llm' | 'manual' | string;
@@ -383,6 +392,8 @@ export interface ShotPatch {
   dialogue?: DialogueLine[];
   /** 接上一镜：首帧取上一镜选定视频的最后一帧 */
   continue_from_prev?: boolean;
+  /** false = 不要「建议接上一镜」这条提示 */
+  suggest_continue?: boolean;
 }
 
 export interface ShotIn extends ShotPatch {
@@ -504,6 +515,8 @@ export interface Character {
   visual_prompt: string;
   core_features: string;
   voice: string | null;
+  /** 只出声、不出镜（画外音、电话里的声音）：不抽定妆照，分镜里不给外貌占位符 */
+  voice_only?: boolean;
   /** 选定的定妆照（首帧/视频按在场角色当参考图），没有时为 null */
   portrait_candidate_id?: number | null;
   portrait_url?: string | null;
@@ -623,7 +636,7 @@ export interface RefreshLooksOut {
   blocks_rebased?: number;
 }
 
-export type CharacterPatch = Partial<Pick<Character, 'name' | 'description' | 'visual_prompt' | 'core_features' | 'voice'>>;
+export type CharacterPatch = Partial<Pick<Character, 'name' | 'description' | 'visual_prompt' | 'core_features' | 'voice' | 'voice_only'>>;
 
 export interface Location {
   id: number;

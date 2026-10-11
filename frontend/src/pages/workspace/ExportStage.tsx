@@ -31,7 +31,8 @@ export function exportTags(settings: Record<string, unknown>): string[] {
   if (subs) tags.push(subs);
   if (settings.dub === 'km') tags.push('高棉语配音');
   if (settings.bed === false) tags.push('无原声底');
-  if (settings.align === 'detected') tags.push('配音对齐说话');
+  // 不配音时对齐的是中文字幕（和配乐压低）
+  if (settings.align === 'detected') tags.push(settings.dub === 'km' ? '配音对齐说话' : '字幕对齐说话');
   if (settings.music === true) tags.push('配乐');
   if (settings.end_card === true) tags.push('片尾卡');
   if (typeof settings.duration === 'number') tags.push(`${settings.duration.toFixed(1)} 秒`);
@@ -122,7 +123,8 @@ export function toOptions(c: Choice, hasBgm = false): ExportOptions {
     dub: c.dubKm ? 'km' : 'off',
     end_card: c.endCard,
     bed: c.bed,
-    align: c.dubKm && c.alignDetected ? 'detected' : 'timeline',
+    // 对齐实际开口：配音版对齐配音；不配音时对齐中文字幕（配乐压低也跟着走）
+    align: c.alignDetected && (c.dubKm || c.subZh) ? 'detected' : 'timeline',
   };
   if (c.music && hasBgm) {
     out.music = true;
@@ -436,6 +438,16 @@ function ExportBody({ slug, id }: { slug: string; id: number }) {
                 onChange={(ev) => set(ev.target.checked ? { subKm: true, subZh: true } : { subKm: false })}
               />{' '}
               高棉语字幕（在中文下面）
+            </label>
+            <label title="不配音时：中文字幕从视频原声里实际开口的位置开始（检测不到就用台词时间）；配音版的字幕跟着配音走">
+              <input
+                type="checkbox"
+                aria-label="字幕对齐实际说话"
+                checked={!choice.dubKm && choice.subZh && choice.alignDetected}
+                disabled={choice.dubKm || !choice.subZh}
+                onChange={(ev) => set({ alignDetected: ev.target.checked })}
+              />{' '}
+              字幕对齐实际说话
             </label>
           </fieldset>
           <fieldset className="export-group">

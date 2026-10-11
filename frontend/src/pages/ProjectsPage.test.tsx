@@ -112,6 +112,45 @@ describe('ProjectsPage', () => {
     expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({ style_preset: 'guofeng' });
   });
 
+  it('项目设置：镜头节奏和自动重拍，只发改了的字段；节奏改回跟随视频引擎发 0', async () => {
+    const calls = installFetch({
+      'GET /api/projects': [makeProject({ shot_seconds: 4, auto_retry_video: false })],
+      'GET /api/projects/demo/overview': { episode_count: 0, cover_url: null, episodes: [] },
+      'PATCH /api/projects/demo': makeProject({ shot_seconds: 3, auto_retry_video: true }),
+    });
+    renderAt(<ProjectsPage />, { route: '/', path: '/' });
+    const user = userEvent.setup();
+    const card = await screen.findByTestId('project-demo');
+    await user.click(within(card).getByRole('button', { name: '更多操作 demo' }));
+    await user.click(screen.getByRole('menuitem', { name: '项目设置' }));
+    const dialog = screen.getByRole('dialog', { name: '项目设置' });
+    const pace = within(dialog).getByRole('combobox', { name: '镜头节奏' }) as HTMLSelectElement;
+    expect(pace.value).toBe('4');
+    expect(within(dialog).getAllByRole('button').filter((b) => b.classList.contains('primary'))).toHaveLength(1);
+    await user.selectOptions(pace, '3');
+    await user.click(within(dialog).getByRole('checkbox', { name: /自动重拍一次/ }));
+    await user.click(within(dialog).getByRole('button', { name: '保存' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({ shot_seconds: 3, auto_retry_video: true });
+  });
+
+  it('项目设置：节奏改回「跟随视频引擎」发 0', async () => {
+    const calls = installFetch({
+      'GET /api/projects': [makeProject({ shot_seconds: 4 })],
+      'GET /api/projects/demo/overview': { episode_count: 0, cover_url: null, episodes: [] },
+      'PATCH /api/projects/demo': makeProject(),
+    });
+    renderAt(<ProjectsPage />, { route: '/', path: '/' });
+    const user = userEvent.setup();
+    const card = await screen.findByTestId('project-demo');
+    await user.click(within(card).getByRole('button', { name: '更多操作 demo' }));
+    await user.click(screen.getByRole('menuitem', { name: '项目设置' }));
+    const dialog = screen.getByRole('dialog', { name: '项目设置' });
+    await user.selectOptions(within(dialog).getByRole('combobox', { name: '镜头节奏' }), '0');
+    await user.click(within(dialog).getByRole('button', { name: '保存' }));
+    await waitFor(() => expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({ shot_seconds: 0 }));
+  });
+
   it('新建项目：说明首帧引擎要能吃参考图；选了不吃参考图的引擎再提醒一句；预设推荐的定妆照引擎写出来', async () => {
     installFetch({
       'GET /api/projects': [],

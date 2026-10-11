@@ -68,6 +68,17 @@ describe('episodeStages', () => {
     expect(r.next).toEqual({ label: '抽定妆照（1 个角色缺）', stage: 'cast', action: 'run', count: 1, stale: false });
   });
 
+  it('只出声、不出镜的角色不用定妆照：不算进角色阶段，也不是下一步的目标', () => {
+    const ep = makeEpisode({ id: 4, scene_blocks: ONE_BLOCK, shots: [shot(1, 'none', 'none', [1, 2])] });
+    const voice = char(2, false, { voice_only: true });
+    const r = episodeStages(ep, [char(1, true), voice], []);
+    expect(byKey(r).cast).toMatchObject({ state: 'done', detail: '1/1' });
+    expect(castTarget(ep.shots, [char(1, false), voice])).toMatchObject({ kind: 'draw', id: 1, missing: 1 });
+    // 没有镜头时按全部角色算，也不算只出声的
+    const bare = makeEpisode({ id: 4, scene_blocks: ONE_BLOCK });
+    expect(byKey(episodeStages(bare, [char(1, true), voice], [])).cast.detail).toBe('1/1');
+  });
+
   it('剧本完成但项目里没有角色：下一步按剧本推荐角色', () => {
     const ep = makeEpisode({ id: 4, scene_blocks: ONE_BLOCK, shots: [shot(1, 'none', 'none', [])] });
     const r = episodeStages(ep, [], []);

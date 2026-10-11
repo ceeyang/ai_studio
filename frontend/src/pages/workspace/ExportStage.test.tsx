@@ -5,7 +5,7 @@ import type { ExportRow } from '../../api/types';
 import { installFetch } from '../../test/fetch';
 import { makeCandidate, makeEpisode, makeShot, makeSlot } from '../../test/factories';
 import { renderAt } from '../../test/render';
-import { ExportStage, OPTIONS_KEY } from './ExportStage';
+import { ExportStage, OPTIONS_KEY, exportTags } from './ExportStage';
 
 /** 有选定视频的镜头；stale 表示视频已过期 */
 function withVideo(id: number, code: string, stale = false) {
@@ -126,6 +126,33 @@ describe('ExportStage', () => {
       stage: 'export',
       export: { subtitles: 'none', dub: 'km', end_card: false, bed: false, align: 'detected' },
     });
+  });
+
+  it('不配音也能让中文字幕对齐实际开口：只在勾了中文字幕、没勾配音时可选', async () => {
+    localStorage.clear();
+    const calls = installFetch(routes({ 'POST /api/episodes/4/run': { job_ids: [45] } }));
+    renderAt(<ExportStage />, AT);
+    const user = userEvent.setup();
+    await screen.findByTestId('readiness');
+    const subAlign = screen.getByLabelText('字幕对齐实际说话') as HTMLInputElement;
+    expect(subAlign.disabled).toBe(true);
+    await user.click(screen.getByLabelText('中文字幕'));
+    expect(subAlign.disabled).toBe(false);
+    await user.click(subAlign);
+    await user.click(screen.getByRole('button', { name: '合成导出' }));
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST')).toBe(true));
+    expect(calls.find((c) => c.method === 'POST')?.body).toEqual({
+      stage: 'export',
+      export: { subtitles: 'zh', dub: 'off', end_card: false, bed: true, align: 'detected' },
+    });
+    // 勾了配音：字幕跟着配音走，这一项不可选
+    await user.click(screen.getByLabelText('高棉语配音'));
+    expect(subAlign.disabled).toBe(true);
+  });
+
+  it('旧成片标签：不配音时对齐写「字幕对齐说话」', () => {
+    expect(exportTags({ subtitles: 'zh', align: 'detected' })).toContain('字幕对齐说话');
+    expect(exportTags({ dub: 'km', align: 'detected' })).toContain('配音对齐说话');
   });
 
   it('导出被后端拒绝时就地显示原因', async () => {

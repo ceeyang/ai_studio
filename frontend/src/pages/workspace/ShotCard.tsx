@@ -108,6 +108,11 @@ export function ShotCard(props: ShotCardProps) {
             {st.failed && <span className="badge fail">失败</span>}
             {st.active && <span className="media-busy">{activeText(st.active)}</span>}
             {st.fresh > 0 && <span className="badge new-cands">{st.fresh} 张新候选</span>}
+            {shot.suggest_continue && !shot.continue_from_prev && shot.order > 0 && (
+              <span className="badge" title="分镜建议这一镜接上一镜（同一场景、动作直接延续）：打开镜头抽屉一键接上">
+                建议接上一镜
+              </span>
+            )}
             {shot.continue_from_prev && shot.continue_prev && (
               <span
                 className={`badge${shot.continue_prev.has_video ? '' : ' warn'}`}

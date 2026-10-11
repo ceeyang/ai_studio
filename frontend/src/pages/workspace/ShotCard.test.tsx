@@ -48,6 +48,18 @@ describe('ShotCard', () => {
     expect(within(card).getByRole('img', { name: '老周' }).textContent).toBe('老');
   });
 
+  it('分镜建议接上一镜、还没打开：卡上标「建议接上一镜」；打开了或是第一镜不标', () => {
+    const { card, unmount } = setup({ shot: makeShot({ id: 12, code: 'S02', order: 1, suggest_continue: true }) });
+    expect(within(card).getByText('建议接上一镜')).toBeTruthy();
+    unmount();
+    const on = makeShot({ id: 12, code: 'S02', order: 1, suggest_continue: true, continue_from_prev: true, continue_prev: { shot_id: 11, code: 'S01', has_video: true } });
+    const r2 = setup({ shot: on });
+    expect(within(r2.card).queryByText('建议接上一镜')).toBeNull();
+    r2.unmount();
+    const first = setup({ shot: makeShot({ id: 11, code: 'S01', order: 0, suggest_continue: true }) });
+    expect(within(first.card).queryByText('建议接上一镜')).toBeNull();
+  });
+
   it('首帧阶段：没有首帧 = 「未生成」+「生成首帧」；按钮不是主按钮', async () => {
     const { h, card } = setup();
     expect(within(card).getByText('未生成')).toBeTruthy();

@@ -1,4 +1,5 @@
 // 角色阶段的角色卡：当前定妆照大图、名字、音色、状态角标；一个按钮（普通样式，全页唯一的主按钮在阶段条）：
+// 只出声、不出镜的角色不用定妆照，只有「编辑」；
 // 缺定妆照时「抽定妆照」（默认 2 张、项目默认引擎；没有外观提示词时换成「补外观提示词」，打开抽屉的资料页签），
 // 否则「编辑」打开角色抽屉。点卡片也打开抽屉。
 import { useId } from 'react';
@@ -49,9 +50,11 @@ export function CastCard({
   const failed = !drawing && !!c.last_failure;
   const turn = turnaroundText(c);
   const noPrompt = !c.visual_prompt.trim();
+  // 只出声、不出镜：不用定妆照，卡上只能编辑
+  const voiceOnly = !!c.voice_only;
 
   const cls = ['cast-card'];
-  if (!portrait) cls.push('is-missing');
+  if (!portrait && !voiceOnly) cls.push('is-missing');
   if (failed) cls.push('is-failed');
 
   return (
@@ -70,7 +73,7 @@ export function CastCard({
           {c.portrait_url ? (
             <img src={c.portrait_url} alt={`${c.name} 定妆照`} loading="lazy" />
           ) : (
-            <span className="cast-empty">还没有定妆照</span>
+            <span className="cast-empty">{voiceOnly ? '只出声，不出镜' : '还没有定妆照'}</span>
           )}
         </span>
         <span className="cast-meta">
@@ -81,7 +84,15 @@ export function CastCard({
         </span>
       </button>
       <div id={ids.status} className="cast-chips">
-        {portrait ? <span className="badge ok">已定妆</span> : <span className="badge warn">缺定妆照</span>}
+        {voiceOnly ? (
+          <span className="badge" title="画外音、电话里的声音：不出现在画面里，不用抽定妆照">
+            只出声
+          </span>
+        ) : portrait ? (
+          <span className="badge ok">已定妆</span>
+        ) : (
+          <span className="badge warn">缺定妆照</span>
+        )}
         {turn && <span className="badge">{turn}</span>}
         {busy && <span className="badge busy">生成中</span>}
         {failed && (
@@ -90,10 +101,10 @@ export function CastCard({
           </span>
         )}
       </div>
-      {!portrait && noPrompt && <p className="muted small">还没有外观提示词，先补上（也可以在抽屉里用 AI 推荐造型）</p>}
+      {!portrait && !voiceOnly && noPrompt && <p className="muted small">还没有外观提示词，先补上（也可以在抽屉里用 AI 推荐造型）</p>}
       {draw.error && <p className="error small">{errorText(draw.error)}</p>}
       <div className="cast-actions">
-        {portrait ? (
+        {portrait || voiceOnly ? (
           <button type="button" className="sm soft" aria-label={`编辑 ${c.name}`} onClick={() => onOpen()}>
             编辑
           </button>

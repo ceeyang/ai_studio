@@ -62,6 +62,34 @@ describe('ShotDrawer 接上一镜', () => {
     expect(btns.every((b) => b.disabled)).toBe(true);
   });
 
+  it('分镜建议接上一镜：一键打开；也可以不要这条建议', async () => {
+    const shot = makeShot({ id: 5, code: 'S02', order: 1, suggest_continue: true });
+    const calls = installFetch({ 'GET /api/engines': ENGINES, 'PATCH /api/shots/5': shot });
+    renderAt(<ShotDrawer shot={shot} episodeId={1} onClose={() => {}} onGenerate={() => {}} />);
+    const user = userEvent.setup();
+    const hint = screen.getByTestId('continue-suggest');
+    expect(hint.textContent).toContain('分镜建议这一镜接上一镜');
+    await user.click(within(hint).getByRole('button', { name: '接上一镜' }));
+    await waitFor(() => expect(calls.filter((c) => c.method === 'PATCH').map((c) => c.body)).toEqual([{ continue_from_prev: true }]));
+    await user.click(within(hint).getByRole('button', { name: '不用' }));
+    await waitFor(() => expect(calls.filter((c) => c.method === 'PATCH').map((c) => c.body)).toEqual([
+      { continue_from_prev: true }, { suggest_continue: false },
+    ]));
+  });
+
+  it('没有建议、已经打开、或是第一镜：不显示建议', () => {
+    installFetch({ 'GET /api/engines': ENGINES });
+    const { unmount } = renderAt(<ShotDrawer shot={makeShot({ id: 5, order: 1 })} episodeId={1} onClose={() => {}} onGenerate={() => {}} />);
+    expect(screen.queryByTestId('continue-suggest')).toBeNull();
+    unmount();
+    const on = makeShot({ id: 5, order: 1, suggest_continue: true, continue_from_prev: true, continue_prev: { shot_id: 4, code: 'S01', has_video: true } });
+    const r2 = renderAt(<ShotDrawer shot={on} episodeId={1} onClose={() => {}} onGenerate={() => {}} />);
+    expect(screen.queryByTestId('continue-suggest')).toBeNull();
+    r2.unmount();
+    renderAt(<ShotDrawer shot={makeShot({ id: 1, order: 0, suggest_continue: true })} episodeId={1} onClose={() => {}} onGenerate={() => {}} />);
+    expect(screen.queryByTestId('continue-suggest')).toBeNull();
+  });
+
   it('上一镜有视频：说明首帧取哪一镜的尾帧；第一镜不能开', () => {
     installFetch({ 'GET /api/engines': ENGINES });
     const shot = makeShot({ id: 5, code: 'S02', order: 1, continue_from_prev: true, continue_prev: { shot_id: 4, code: 'S01', has_video: true } });
