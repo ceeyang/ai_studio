@@ -61,7 +61,8 @@ def _storyboard_impact(s: Session, sv, episode_id: int, force: bool,
             continue
         _, _, fp = storyboard_prompt_fp(plan_data.prompts, plan_data.anchor, plan_data.characters,
                                         blk["location"], blk["text"], blk["count"],
-                                        plan_data.shot_seconds, plan_data.max_seconds, prev_action)
+                                        plan_data.shot_seconds, plan_data.max_seconds, prev_action,
+                                        block_seconds=blk["seconds"])
         key = f"storyboard:{blk['id']}"
         existing = s.scalar(select(func.count()).select_from(Shot)
                             .where(Shot.scene_block_id == blk["id"], Shot.origin == "llm"))

@@ -259,3 +259,82 @@ def test_scene_block_ids_only_replaces_that_block(tmp_path, db):
         new_b2 = [x.id for x in ep.shots if x.scene_block_id == b2 and x.origin == "llm"]
         assert len(new_b2) == 2 and not set(new_b2) & set(b2_ids)
         assert manual_id in [x.id for x in ep.shots]
+
+
+# ---------------------------------------------------------------- 质量规则：中文字符、时长预算
+def test_cjk_detection():
+    from backend.pipeline.storyboard import cjk_chars
+
+    assert cjk_chars("老周 at the shutter") == "老周"
+    assert cjk_chars("A grizzled repairman，rain") == "，"
+    assert cjk_chars("ナイト and 한국") == "ナイト한국"
+    assert cjk_chars("A 35mm close-up — café, naïve “quotes”") == ""
+
+
+def test_cjk_in_prompts_retries_with_error(tmp_path, db):
+    bad = shots_json(2)
+    bad["shots"][1]["image_prompt"] = "林夏 " + bad["shots"][1]["image_prompt"]
+    bad["shots"][0]["motion_prompt"] = "林夏 looks up slowly"
+    ctx, ep_id, prov = setup(tmp_path, db, [bad, shots_json(2), shots_json(2)])
+    run_storyboard(ctx, {"episode_id": ep_id})
+    err = prov.calls[1]["messages"][2]["content"]
+    assert "中文" in err and "林夏" in err and "外貌" in err
+    assert "第 2 镜 image_prompt" in err and "第 1 镜 motion_prompt" in err
+    with db.session() as s:
+        assert all("林夏" not in x.image_prompt for x in s.get(Episode, ep_id).shots)
+
+
+def test_fit_durations_scales_into_budget_within_limits():
+    from backend.pipeline.storyboard import fit_durations
+
+    # 实跑：目标 25 秒，给了 6+7+5+5+8=31 秒 → 按比例缩到 25 秒左右
+    out = fit_durations([6, 7, 5, 5, 8], [2] * 5, 25.0, hi=10.0)
+    assert abs(sum(out) - 25.0) <= 0.3 and all(2 <= d <= 10 for d in out)
+    assert out[4] > out[2]  # 长短关系保留
+    # 有台词的镜头不能缩到台词说完之前：下限顶住，其他镜头多缩一点
+    out = fit_durations([6, 6], [5.5, 2], 8.0, hi=10.0)
+    assert out[0] == 5.5 and abs(sum(out) - 8.0) <= 0.1
+    # 加长时不超过引擎上限
+    out = fit_durations([3, 3], [2, 2], 14.0, hi=5.0)
+    assert out == [5.0, 5.0]
+
+
+def test_block_target_share():
+    from backend.pipeline.storyboard import block_seconds
+
+    assert block_seconds(25.0, 3, 5) == 15.0 and block_seconds(25.0, 2, 5) == 10.0
+
+
+def test_storyboard_rescales_block_to_target_and_logs(tmp_path, db):
+    # target 20 秒、两段各 2 镜 → 每段 10 秒；LLM 给了 7+7=14 秒
+    ctx, ep_id, prov = setup(tmp_path, db, [shots_json(2, duration=7), shots_json(2)])
+    run_storyboard(ctx, {"episode_id": ep_id})
+    with db.session() as s:
+        shots = s.get(Episode, ep_id).shots
+        assert abs(sum(x.duration for x in shots) - 20.0) <= 2.0
+        assert [x.duration for x in shots[:2]] == [5.0, 5.0]
+    assert any("14.0" in m and "10.0" in m for m in ctx.logs)
+    assert "10 秒" in prov.calls[0]["messages"][0]["content"]
+
+
+def test_storyboard_duration_unfittable_because_of_dialogue_retries(tmp_path, db):
+    # 每镜台词说到 6.5 秒，两镜最少 2×6.9 秒，本段只给 10 秒（±10%）：缩不下，要 LLM 重写
+    long = shots_json(2, duration=7)
+    for sh in long["shots"]:
+        sh["dialogue"] = [{"speaker": "林夏", "zh": "词被改了", "start": 0.5, "end": 6.5}]
+    ctx, ep_id, prov = setup(tmp_path, db, [long, shots_json(2), shots_json(2)])
+    run_storyboard(ctx, {"episode_id": ep_id})
+    err = prov.calls[1]["messages"][2]["content"]
+    assert "总时长" in err and "10" in err
+
+
+def test_storyboard_prompt_has_quality_rules():
+    from backend.llm.prompts import PromptLibrary
+    from backend.services import BUILTIN_DIR
+
+    system, user = PromptLibrary(BUILTIN_DIR, BUILTIN_DIR / "none").render(
+        "storyboard", anchor="A", characters=[], location=None, text="x", count=2,
+        shot_seconds=5, max_seconds=10, prev_action="", block_seconds=10.0)
+    assert "中文字符" in system and "一个主动作" in system
+    assert "特写插入镜头" in system and "逐字重复" in system
+    assert "10.0 秒" in user or "10 秒" in user
