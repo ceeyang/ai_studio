@@ -23,14 +23,23 @@ cd frontend && npm install && cd ..
 
 ## 测试
 
-提 PR 前请跑：
+提 PR 前请跑下表里标「PR 前必跑」的四项（和 CI `.github/workflows/ci.yml` 跑的一致），其余按改动范围选跑：
 
-```bash
-uv run pytest backend/tests                # 后端
-cd frontend && npm run typecheck           # 类型检查
-cd frontend && npx vitest run              # 前端组件测试，也包括浏览器扩展的页面脚本测试（src/extension/）
-cd frontend && npm run build               # 确认能构建
-```
+<!-- AUTO-GENERATED:dev-commands START -->
+<!-- 来源：pyproject.toml（[project.scripts]、[tool.pytest.ini_options]）、frontend/package.json 的 scripts、browser-extension/dev/smoke.py、start.ps1 -->
+| 命令 | 在哪跑 | 作用 | PR 前必跑 |
+|---|---|---|---|
+| `uv run pytest backend/tests` | 仓库根目录 | 后端测试（单个测试超时 60 秒） | 是 |
+| `npm run typecheck` | `frontend/` | TypeScript 类型检查（`tsc --noEmit`） | 是 |
+| `npx vitest run`（或 `npm test`） | `frontend/` | 前端组件测试，也包括浏览器扩展的页面脚本测试（`src/extension/`） | 是 |
+| `npm run build` | `frontend/` | 类型检查 + 构建到 `frontend/dist` | 是 |
+| `npm run e2e` | `frontend/` | 先构建，再跑 Playwright 冒烟（临时数据目录，不需要显卡）；设 `STUDIO_REAL_URL` 时对着已在跑的服务跑 `real-*.spec.ts` | 改界面流程时 |
+| `uv run --no-sync python browser-extension/dev/smoke.py` | 仓库根目录 | 浏览器扩展冒烟（临时后端端口 18799 + Playwright 自带 Chromium） | 改扩展时 |
+| `npm run proxy-soak -- [前端地址] [秒数] [后端地址]` | `frontend/` | 开发代理回归检查（502 / ECONNRESET / 超时退出码 1） | 改 Vite 代理时 |
+| `uv run studio-server` | 仓库根目录 | 启动后端（http://127.0.0.1:8700） | — |
+| `npm run dev` | `frontend/` | Vite 开发服务器（http://127.0.0.1:5173，热更新） | — |
+| `uv run studio doctor` | 仓库根目录 | 环境检查（要先启动后端），有失败项时退出码 1 | — |
+<!-- AUTO-GENERATED:dev-commands END -->
 
 - 测试不碰真实的网站、显卡和付费 API：ComfyUI、网页、API 都有假实现（`backend/tests/fakes/`、`frontend/src/extension/fakePage.js`）。
 - 没有 ffmpeg 时相关测试自动跳过；ffmpeg 不带 libass 时有两个烧字幕的导出测试会失败，属于环境问题（CI 用的 Ubuntu ffmpeg 带 libass）。
