@@ -306,4 +306,24 @@ describe('ShotDrawer', () => {
     await user.click(within(dlg).getByRole('button', { name: '留下' }));
     expect(screen.getByTestId('location').textContent).toBe('/d');
   });
+
+  it('抽屉里有「历史候选」：展开后按这一集查，恢复到当前镜头', async () => {
+    const calls = installFetch({
+      'GET /api/engines': ENGINES,
+      'GET /api/episodes/1/archived-candidates': [
+        {
+          id: 3, episode_id: 1, shot_code: 'S09', kind: 'first_frame', file_path: 'a.png', url: '/media/a.png', engine: 'zimage',
+          params: {}, note: '', was_selected: false, shot_snapshot: {}, reason: 'storyboard',
+          created_at: '2026-10-01T10:00:00', archived_at: '2026-10-01T10:00:00',
+        },
+      ],
+      'POST /api/archived-candidates/3/restore': { id: 50 },
+    });
+    renderAt(<ShotDrawer shot={SHOT} episodeId={1} onClose={() => {}} onGenerate={() => {}} />);
+    const user = userEvent.setup();
+    expect(calls.some((c) => c.url.includes('archived'))).toBe(false);
+    await user.click(screen.getByRole('button', { name: '历史候选' }));
+    await user.click(await screen.findByRole('button', { name: '恢复到这个镜头' }));
+    await waitFor(() => expect(calls.find((c) => c.method === 'POST')?.body).toEqual({ shot_id: 5 }));
+  });
 });

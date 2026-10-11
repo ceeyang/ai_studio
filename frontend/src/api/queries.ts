@@ -4,6 +4,7 @@ import { api, enc, request } from './client';
 import type {
   AppSettings,
   AppSettingsIn,
+  ArchivedCandidate,
   Bgm,
   BrowserLoginOut,
   BrowserStatus,
@@ -63,6 +64,8 @@ export const keys = {
   endCard: (slug: string) => ['endCard', slug] as const,
   exports: (episodeId: number) => ['exports', episodeId] as const,
   bgm: (episodeId: number) => ['bgm', episodeId] as const,
+  // 挂在 ['episode', id] 下：任务结束（分镜重出删了镜头）时跟着刷新
+  archivedCandidates: (episodeId: number) => ['episode', episodeId, 'archived'] as const,
   rerunImpact: (episodeId: number, stage: string, blockIds: number[] | null) => ['rerunImpact', episodeId, stage, blockIds] as const,
   jobs: (status: string, limit: number) => ['jobs', status, limit] as const,
   job: (id: number) => ['job', id] as const,
@@ -613,6 +616,25 @@ export function useReorderShots(episodeId: number) {
   return useMutation({
     mutationFn: (shotIds: number[]) =>
       api.post<Shot[]>(`/api/episodes/${episodeId}/shots/reorder`, { shot_ids: shotIds }),
+    onSuccess: () => invalidate(qc, keys.episode(episodeId)),
+  });
+}
+
+/** 同一集的历史候选（新归档的在前）；enabled=false 时不请求（抽屉里收着的时候） */
+export function useArchivedCandidates(episodeId: number, enabled = true) {
+  return useQuery({
+    queryKey: keys.archivedCandidates(episodeId),
+    queryFn: () => api.get<ArchivedCandidate[]>(`/api/episodes/${episodeId}/archived-candidates`),
+    enabled,
+  });
+}
+
+/** 把历史候选恢复到镜头同类槽位上（槽位还没选定时就选它），并从历史里去掉 */
+export function useRestoreArchived(episodeId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, shotId }: { id: number; shotId: number }) =>
+      api.post<Candidate>(`/api/archived-candidates/${id}/restore`, { shot_id: shotId }),
     onSuccess: () => invalidate(qc, keys.episode(episodeId)),
   });
 }

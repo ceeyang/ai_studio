@@ -290,5 +290,6 @@ def _protected_losses(s: Session, sv, episode_id: int, stages: list[str],
     if edited_set:
         parts.append(f"{names(edited_set)} 生成后改过")
     return (f"这次运行会删掉 {len(shot_ids)} 个镜头重新生成，其中{'；'.join(parts)}。"
+            "删掉的镜头的首帧/视频会放进「历史候选」（镜头详情里可以恢复），删之前会自动备份数据库；"
             "确认要删就再提交一次并带 confirm=true（界面上点确认，命令行加 --yes）；"
             "不想动现有镜头就不要跑这一步")

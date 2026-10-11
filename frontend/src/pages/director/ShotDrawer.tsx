@@ -7,6 +7,7 @@ import { useConfirm } from '../../components/ConfirmDialog';
 import { confirmDiscard } from '../../components/confirmDiscard';
 import { EditableFields, type FieldSpec, type FieldValues, type FieldsState, useUnsavedGuard } from '../../components/EditableFields';
 import { engineLabel } from '../../format';
+import { ArchivedCandidates } from './ArchivedCandidates';
 import { CandidateGrid } from './CandidateGrid';
 import { DialogueEditor } from './DialogueEditor';
 import { type GenStage, CELL, activeJob, activeText, failedJob, firstFrameReady, genLabel, hasSelected, waitsPrevVideo } from './shotStatus';
@@ -409,6 +410,7 @@ export function ShotDrawer({
           </section>
         ))}
         {select.error && <p className="error">{errorText(select.error)}</p>}
+        <ArchivedCandidates episodeId={episodeId} shotId={shot.id} />
 
         <ContinueToggle shot={shot} saving={patchContinue.isPending} onChange={(on) => patchContinue.mutate({ id: shot.id, continue_from_prev: on })} />
         {patchContinue.error && <p className="error">{errorText(patchContinue.error)}</p>}

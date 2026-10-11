@@ -7,10 +7,11 @@ from dataclasses import dataclass, field
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
+from backend.domain.archive import archive_and_delete_slots
+from backend.domain.backup import BACKUP_KEEP, backup_database
 from backend.domain.hashing import input_hash
 from backend.domain.models import Episode, Shot
 from backend.domain.shots import renumber_shots
-from backend.domain.slots import delete_slots
 from backend.domain.style_presets import prompt_vars
 from backend.llm.schemas import StoryboardOut
 from backend.pipeline.prompting import char_token, short_ref
@@ -578,6 +579,30 @@ def storyboard_prompt_fp(prompts, anchor, characters, location, text, count, sho
     return system, user, fp
 
 
+class ShotDiscarder:
+    """分镜重出删旧镜头的唯一入口：真要删东西时先自动备份数据库（一次任务只备份一次），
+    再把旧镜头的候选挪进「历史候选」，最后删槽位（镜头行由调用方删）。"""
+
+    def __init__(self, ctx, reason: str = "storyboard"):
+        self.ctx, self.reason, self.backed_up = ctx, reason, False
+
+    def __call__(self, s: Session, shot_ids) -> None:
+        ids = list(shot_ids)
+        if not ids:
+            return
+        if not self.backed_up:
+            self.backed_up = True
+            path = backup_database(self.ctx.services.db, self.reason)
+            if path is not None:
+                self.ctx.log(f"已自动备份数据库：{path.name}（保留最近 {BACKUP_KEEP} 份）")
+            else:
+                self.ctx.log("自动备份数据库失败（详见服务日志），继续执行")
+        n = archive_and_delete_slots(s, ids, self.reason)
+        if n:
+            self.ctx.log(f"删掉的 {len(ids)} 个旧镜头有 {n} 个首帧/视频候选，已放进「历史候选」，"
+                         "可以在镜头详情里恢复")
+
+
 @HANDLERS.register("storyboard")
 def run_storyboard(ctx, payload: dict) -> dict:
     sv = ctx.services
@@ -593,6 +618,7 @@ def run_storyboard(ctx, payload: dict) -> dict:
         plan = plan_data.blocks
         prompts = plan_data.prompts
     rules = storyboard_rules(prompts)
+    discard = ShotDiscarder(ctx)
 
     done = skipped = 0
     prev_action = ""
@@ -682,7 +708,7 @@ def run_storyboard(ctx, payload: dict) -> dict:
         with sv.db.session() as s:
             gone = s.scalars(select(Shot.id).where(Shot.scene_block_id == blk["id"],
                                                    Shot.origin == "llm")).all()
-            delete_slots(s, "shot", gone)
+            discard(s, gone)
             s.execute(delete(Shot).where(Shot.scene_block_id == blk["id"], Shot.origin == "llm"))
             trimmed = 0
             durs, _ = budget_durations(out.shots, blk["seconds"], max_seconds, rewrite_over=False)
@@ -729,7 +755,7 @@ def run_storyboard(ctx, payload: dict) -> dict:
             if not only:
                 orphan = (Shot.episode_id == episode_id, Shot.scene_block_id.is_(None),
                          Shot.origin == "llm")
-                delete_slots(s, "shot", s.scalars(select(Shot.id).where(*orphan)).all())
+                discard(s, s.scalars(select(Shot.id).where(*orphan)).all())
                 s.execute(delete(Shot).where(*orphan))
             block_order = {b.id: b.order for b in ep.scene_blocks}
             shots = list(s.scalars(select(Shot).where(Shot.episode_id == episode_id)))

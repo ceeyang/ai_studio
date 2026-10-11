@@ -362,6 +362,7 @@ def test_unforced_storyboard_run_refuses_to_delete_selected_shots(api):
     assert r.status_code == 400
     d = r.json()["detail"]
     assert "S02" in d and "选定" in d and "confirm=true" in d and "--yes" in d and "S01" not in d
+    assert "历史候选" in d and "自动备份" in d
     assert api.post(url, json={"stage": "storyboard", "confirm": True}).status_code == 200
     # 强制 / 带修改意见：用户明确要重出（界面上的「重新生成」对话框已经先给看过影响）
     assert api.post(url, json={"stage": "storyboard", "force": True}).status_code == 200

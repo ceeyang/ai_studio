@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { installFetch } from '../test/fetch';
 import { renderAt } from '../test/render';
-import { RegenerateDialog, impactText } from './RegenerateDialog';
+import { ARCHIVE_NOTE, RegenerateDialog, impactText } from './RegenerateDialog';
 
 const IMPACT = {
   stage: 'storyboard', will_run: true, blocks: [3, 5], shots_deleted: 12, selected_first_frames: 10,
@@ -56,6 +56,21 @@ describe('RegenerateDialog', () => {
     expect(ta.maxLength).toBe(500);
     expect(ta.placeholder).toBe('例如「第 3 段改成在车底对话」「镜头更紧凑，少用远景」');
     expect(within(dlg).getByRole('button', { name: '重新生成' }).className).toContain('danger');
+  });
+
+  it('会删镜头时说明删掉的首帧/视频进「历史候选」、删前自动备份；不删镜头时不说', async () => {
+    setup();
+    const dlg = await screen.findByRole('dialog');
+    expect(await within(dlg).findByText(ARCHIVE_NOTE)).toBeTruthy();
+    expect(ARCHIVE_NOTE).toContain('历史候选');
+    expect(ARCHIVE_NOTE).toContain('自动备份');
+  });
+
+  it('不删镜头时不提历史候选', async () => {
+    setup({ stage: 'script' }, { 'GET /api/episodes/4/rerun-impact': NOTHING });
+    const dlg = await screen.findByRole('dialog');
+    await within(dlg).findByText('不会删除镜头，也不会覆盖已有设定');
+    expect(within(dlg).queryByText(ARCHIVE_NOTE)).toBeNull();
   });
 
   it('会删掉有选定首帧的镜头（没有选定视频）时也是危险样式', async () => {

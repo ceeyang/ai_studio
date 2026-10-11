@@ -200,7 +200,8 @@ describe('EpisodeWorkspace', () => {
     // 左栏点角色打开角色抽屉
     expect(await screen.findByRole('dialog', { name: '角色 老周' })).toBeTruthy();
     await user.click(within(stageBar()).getByRole('button', { name: /成片/ }));
-    expect(where()).toBe('/projects/demo/episodes/4?stage=export');
+    // 切阶段要先异步问一下当前块（抽屉里有没保存的修改），地址稍后才变
+    await waitFor(() => expect(where()).toBe('/projects/demo/episodes/4?stage=export'));
     expect(screen.queryByRole('dialog')).toBeNull();
   });
 

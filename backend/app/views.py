@@ -9,7 +9,7 @@ from urllib.parse import quote
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from backend.app.schemas import (CandidateOut, ContinuePrevOut, EpisodeDetail, ExportOut, JobBrief, JobContext,
+from backend.app.schemas import (ArchivedCandidateOut, CandidateOut, ContinuePrevOut, EpisodeDetail, ExportOut, JobBrief, JobContext,
                                  SceneBlockOut, ShotDetail, SlotOut)
 from backend.domain.models import Character, Episode, Job, Project, Shot
 from backend.domain.refs import SHOT_REF_SLOT, shot_ref_images, shot_refs, split_refs
@@ -30,6 +30,11 @@ SHOT_JOB_SLOTS = {"image.keyframe": "first_frame", "image.continue_frame": "firs
 
 def candidate_out(c) -> CandidateOut:
     return CandidateOut.model_validate(c).model_copy(update={"url": "/media/" + quote(c.file_path)})
+
+
+def archived_out(a) -> ArchivedCandidateOut:
+    return ArchivedCandidateOut.model_validate(a).model_copy(
+        update={"url": "/media/" + quote(a.file_path)})
 
 
 def export_out(e) -> ExportOut:
