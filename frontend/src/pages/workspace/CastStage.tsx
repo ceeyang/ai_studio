@@ -15,6 +15,7 @@ import {
 } from '../../api/queries';
 import type { LocationPatch, Style } from '../../api/types';
 import { useConfirm } from '../../components/ConfirmDialog';
+import { ImportAssetsButton } from '../../components/ImportAssetsDialog';
 import { type LeaveCheck, confirmDiscard } from '../../components/confirmDiscard';
 import { EpisodeLoadError, nextActionProps, useNextAction } from '../../components/EpisodeHeader';
 import { castTarget, hasPortrait, scenesToDraw } from '../stages';
@@ -217,6 +218,7 @@ export function CastStage({
     <div className="stage-body cast-stage">
       <div className="toolbar">
         <RecommendPanel slug={slug} episodeId={id} existing={chars} isNext={!!nextAct && chars.length === 0} />
+        <ImportAssetsButton slug={slug} />
         {chars.length > 0 && (
           <span className="chip">
             {withPortrait}/{onScreen.length} 个角色有定妆照

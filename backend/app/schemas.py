@@ -21,6 +21,17 @@ class ORM(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+AssetKindKey = Literal["character", "location", "prop"]
+
+
+class ProjectImportFrom(BaseModel):
+    """新建项目时「从已有项目导入资产」（续季）：源项目里这几类资产全部复制过来。"""
+    source: str                                       # 源项目 slug
+    kinds: list[AssetKindKey] = ["character", "location", "prop"]
+    with_style: bool = True                           # 沿用源项目的风格设定（复制一份）
+    candidates: Literal["selected", "all"] = "selected"
+
+
 class ProjectIn(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     slug: str | None = None
@@ -30,6 +41,7 @@ class ProjectIn(BaseModel):
     seed: int = 12345
     negative: str | None = None         # 不给就用风格预设的默认负面词
     style_preset: StylePresetKey = "live_action"
+    import_from: ProjectImportFrom | None = None   # 续季：建好后从已有项目导入资产
 
 
 class ProjectPatch(BaseModel):
@@ -646,6 +658,59 @@ class RetryIn(BaseModel):
 
 class InputIn(BaseModel):
     text: str = Field(min_length=1)
+
+
+class AssetImportIn(BaseModel):
+    """从别的项目导入角色 / 场景 / 道具。all=True 时忽略各 *_ids，三类（或 kinds 里的）全部导入。"""
+    source: str                                       # 源项目 slug
+    character_ids: list[int] | None = None
+    location_ids: list[int] | None = None
+    prop_ids: list[int] | None = None
+    all: bool = False
+    kinds: list[AssetKindKey] | None = None
+    on_conflict: Literal["skip", "rename"] = "skip"
+    rename_suffix: str = Field("（续）", max_length=20)
+    candidates: Literal["selected", "all"] = "selected"
+    with_style: bool = False                          # 沿用源项目的风格设定（复制一份，覆盖本项目的）
+
+
+class ImportedAssetOut(BaseModel):
+    kind: AssetKindKey
+    source_id: int
+    id: int
+    name: str
+    renamed_from: str | None = None
+    files: int = 0
+
+
+class SkippedAssetOut(BaseModel):
+    kind: AssetKindKey
+    source_id: int
+    name: str
+    reason: str
+
+
+class AssetImportOut(BaseModel):
+    imported: list[ImportedAssetOut] = []
+    skipped: list[SkippedAssetOut] = []
+    warnings: list[str] = []
+    files_copied: int = 0
+    style_copied: bool = False
+
+
+class AssetSummaryItem(BaseModel):
+    id: int
+    name: str
+    detail: str = ""                 # 角色的简介 / 场景的时段 / 道具的补充描述
+    thumb_url: str | None = None     # 选定的定妆照 / 场景图 / 道具图
+    image_count: int = 0             # 这个资产各槽位里的候选总数（选「全部候选」时会复制这么多张）
+
+
+class AssetSummaryOut(BaseModel):
+    characters: list[AssetSummaryItem] = []
+    locations: list[AssetSummaryItem] = []
+    props: list[AssetSummaryItem] = []
+    has_style: bool = False
 
 
 TurnaroundSheetOut.model_rebuild()

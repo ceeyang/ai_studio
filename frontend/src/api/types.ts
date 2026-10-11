@@ -62,6 +62,60 @@ export interface ProjectIn {
   image_engine: string;
   video_engine: string;
   style_preset: StylePresetKey;
+  /** 续季：建好后从已有项目导入这几类资产（全部）和风格设定 */
+  import_from?: ProjectImportFrom;
+}
+
+// ------------------------------------------------------------ 续季 / 跨项目导入资产
+
+export type AssetKindKey = 'character' | 'location' | 'prop';
+
+export interface ProjectImportFrom {
+  /** 源项目 slug */
+  source: string;
+  kinds: AssetKindKey[];
+  /** 沿用源项目的风格设定（复制一份，连同负面提示词） */
+  with_style: boolean;
+  candidates?: 'selected' | 'all';
+}
+
+/** GET /api/projects/{slug}/asset-summary 的一项 */
+export interface AssetSummaryItem {
+  id: number;
+  name: string;
+  detail: string;
+  /** 选定的定妆照 / 场景图 / 道具图 */
+  thumb_url: string | null;
+  /** 各槽位里的候选总数 */
+  image_count: number;
+}
+
+export interface AssetSummary {
+  characters: AssetSummaryItem[];
+  locations: AssetSummaryItem[];
+  props: AssetSummaryItem[];
+  has_style: boolean;
+}
+
+/** POST /api/projects/{slug}/import-assets */
+export interface AssetImportIn {
+  source: string;
+  character_ids?: number[];
+  location_ids?: number[];
+  prop_ids?: number[];
+  all?: boolean;
+  on_conflict: 'skip' | 'rename';
+  rename_suffix?: string;
+  candidates: 'selected' | 'all';
+  with_style?: boolean;
+}
+
+export interface AssetImportOut {
+  imported: { kind: AssetKindKey; source_id: number; id: number; name: string; renamed_from: string | null; files: number }[];
+  skipped: { kind: AssetKindKey; source_id: number; name: string; reason: string }[];
+  warnings: string[];
+  files_copied: number;
+  style_copied: boolean;
 }
 
 export interface EngineRow {

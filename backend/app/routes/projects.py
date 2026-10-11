@@ -15,6 +15,7 @@ from backend.app.schemas import (AppearanceRefOut, CharacterIn, CharacterOut, Ch
                                  ProjectOverview, ProjectPatch, StyleIO, StylePresetOut,
                                  TurnaroundCellOut,
                                  TurnaroundOut, TurnaroundSheetOut)
+from backend.domain.asset_import import import_assets
 from backend.domain.characters import (APPEARANCE_REF, portrait_ext, portrait_of,
                                        set_portrait)
 from backend.domain.style_presets import PRESETS, get_preset, recommended
@@ -67,7 +68,7 @@ def create_project(body: ProjectIn, request: Request):
     if not SLUG_RE.match(slug):
         raise JobError("slug 只能包含文字、数字、下划线和短横线，最长 64 个字符")
     check_engines(sv, body.image_engine, body.video_engine)
-    data = body.model_dump(exclude={"slug"})
+    data = body.model_dump(exclude={"slug", "import_from"})
     if body.negative is None:
         data["negative"] = get_preset(body.style_preset).negative
     # 没指定引擎：按风格预设推荐（设置页明确设了、和预设合得来时用设置的），和前端新建项目对话框一致
@@ -80,6 +81,12 @@ def create_project(body: ProjectIn, request: Request):
         p = Project(slug=slug, **data)
         s.add(p)
         s.flush()
+        imp = body.import_from
+        if imp is not None:
+            # 续季：建好就把源项目的角色 / 场景 / 道具（和风格设定）复制过来；出错整个建项目回滚
+            source = project_by_slug(s, imp.source)
+            import_assets(s, sv.media, source=source, target=p, all_assets=True, kinds=imp.kinds,
+                          candidates=imp.candidates, with_style=imp.with_style)
         out = ProjectOut.model_validate(p)
     sv.media.project_dir(slug).mkdir(parents=True, exist_ok=True)
     return out
