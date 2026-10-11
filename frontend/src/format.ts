@@ -53,6 +53,15 @@ export const ENGINE_LABEL: Record<string, string> = {
   gemini_api_image: 'Gemini 图像（API）',
   veo_video: 'Google Veo（API · 有声）',
   sora_video: 'OpenAI Sora（API · 有声）',
+  // 任务列表里显示的是模型族：和引擎 id 不同的补上中文名
+  h3: 'H3',
+  wan22: 'Wan2.2',
+  gemini_web: 'Gemini 网页',
+  chatgpt_web: 'ChatGPT 网页',
+  claude_web: 'Claude 网页',
+  openai_api_image: 'OpenAI 图像（API）',
+  sora_api: 'OpenAI Sora（API）',
+  veo_api: 'Google Veo（API）',
   // 不是引擎：候选的来源
   upload: '上传',
   continue: '接上一镜尾帧',
