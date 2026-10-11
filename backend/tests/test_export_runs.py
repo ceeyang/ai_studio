@@ -218,3 +218,43 @@ def test_export_job_cancel_through_manager_ends_canceled(tmp_path, db):
     finally:
         release.set()
         m.stop()
+
+
+def test_export_cancel_removes_partial_output_and_work_dir(tmp_path, db):
+    """取消时不留半成品：exports/ 里不能有像正式导出那样命名的坏 mp4，runs/<任务>/work 也要删掉。"""
+    holder = {}
+
+    class CancelAfterAssemble(FakeFFmpeg):
+        def assemble(self, clips, out, **kw):
+            res = super().assemble(clips, out, **kw)
+            (kw["work_dir"]).mkdir(parents=True, exist_ok=True)
+            (kw["work_dir"] / "seg0.mp4").write_bytes(b"x")
+            holder["ctx"].cancel_event.set()
+            return res
+
+    sv = make_services(tmp_path, db, ffmpeg=CancelAfterAssemble())
+    ep_id, ids = seed_shots(db)
+    for i, sid in enumerate(ids):
+        add_video(sv, sid, f"h{i}")
+    ctx = holder["ctx"] = FakeCtx(sv, job_id=7)
+    with pytest.raises(JobCanceled):
+        run_export(ctx, {"episode_id": ep_id})
+    exports = sv.media.root / "demo" / "exports"
+    assert not exports.exists() or list(exports.iterdir()) == []
+    assert not (sv.media.run_dir("demo", 7) / "work").exists()
+
+
+def test_export_failure_also_removes_partial_output(tmp_path, db):
+    class Boom(FakeFFmpeg):
+        def assemble(self, clips, out, **kw):
+            super().assemble(clips, out, **kw)
+            raise JobError("ffmpeg 合成失败")
+
+    sv = make_services(tmp_path, db, ffmpeg=Boom())
+    ep_id, ids = seed_shots(db)
+    for i, sid in enumerate(ids):
+        add_video(sv, sid, f"h{i}")
+    with pytest.raises(JobError):
+        run_export(FakeCtx(sv, job_id=8), {"episode_id": ep_id})
+    exports = sv.media.root / "demo" / "exports"
+    assert not exports.exists() or list(exports.iterdir()) == []

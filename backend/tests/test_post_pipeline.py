@@ -230,3 +230,24 @@ def test_translate_does_not_log_inside_its_write_transaction(tmp_path, db):
     ep_id, ids = seed(db)
     run_translate(DbLogCtx(sv), {"episode_id": ep_id})
     assert dialogue(db, ids[0])[0]["km"] == "ជាង!"
+
+
+def test_tts_cancel_during_trim_leaves_no_half_written_cache(tmp_path, db, monkeypatch):
+    """配音被取消在剪静音那一步：写了一半的 wav 不能留在缓存里（下次会被当成好的直接用），原始 mp3 也删掉。"""
+    from backend.pipeline.post import _tts
+    from backend.queue.errors import JobCanceled
+
+    monkeypatch.setattr("backend.pipeline.post.edge_tts_save",
+                        lambda text, voice, rate, out: Path(out).write_bytes(b"mp3"))
+
+    class CancelInTrim(FakeFFmpeg):
+        def trim_silence(self, src, dst):
+            Path(dst).write_bytes(b"half")
+            raise JobCanceled()
+
+    sv = make_services(tmp_path, db, ffmpeg=CancelInTrim())
+    cache = tmp_path / "cache"
+    cache.mkdir()
+    with pytest.raises(JobCanceled):
+        _tts(sv, cache, "សួស្តី", "km-KH-PisethNeural", 0)
+    assert list(cache.iterdir()) == []

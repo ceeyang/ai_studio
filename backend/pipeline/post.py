@@ -208,8 +208,14 @@ def _tts(sv, cache: Path, text: str, voice: str, rate: int) -> tuple[Path, float
             edge_tts_save(text, voice, rate, raw)
         except Exception as e:
             raise JobError(f"Edge TTS 失败（{voice}，{rate:+d}%）：{e}") from e
-        sv.ffmpeg.trim_silence(raw, wav)
-        raw.unlink(missing_ok=True)
+        try:
+            sv.ffmpeg.trim_silence(raw, wav)
+        except BaseException:
+            # 取消或失败时 wav 可能只写了一半；留着的话下次会被当成缓存直接用
+            wav.unlink(missing_ok=True)
+            raise
+        finally:
+            raw.unlink(missing_ok=True)
     return wav, sv.ffmpeg.duration(wav)
 
 

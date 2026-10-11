@@ -56,71 +56,77 @@ def run_export(ctx, payload: dict) -> dict:
     out = sv.media.export_path(
         cut.slug, f"ep{cut.number:02d}_{variant}{opts.tag()}_{datetime.now():%Y%m%d_%H%M%S}.mp4")
     work = sv.media.run_dir(cut.slug, ctx.job_id) / "work"
-    post = manifest is not None or not opts.bed or opts.subtitles != "none" or opts.end_card
-    trims = [{"code": c, "clip": round(s, 3), "used": round(lim, 3)}
-             for c, s, lim in zip(cut.codes, secs, limits) if lim]
-    if trims:
-        ctx.log("按分镜时长裁尾：" + "，".join(f"{t['code']} {t['clip']:.2f}→{t['used']:.2f}s"
-                                         for t in trims))
-    ctx.check_canceled()
-    ctx.log(f"合成 {len(cut.clips)} 个镜头 → {width}x{height}@{OUTPUT_FPS}")
-    asm = sv.ffmpeg.assemble(cut.clips, work / "base.mp4" if post else out, width=width,
-                             height=height, fps=OUTPUT_FPS, transitions=cut.transitions,
-                             work_dir=work, max_seconds=limits)
-    ctx.check_canceled()
-    cur = asm.path
-    over = 0
-    rows = manifest["lines"] if manifest is not None else []
-    if manifest is not None or not opts.bed:
-        over = sum(1 for r in rows if r.get("over"))
-        lines = [(sv.media.abs(r["file"]), asm.starts[r["shot"]] + r["offset"], r["seconds"])
-                 for r in rows]
-        bed_db = sv.cfg.dub.bed_db if opts.bed else None
-        ctx.log((f"叠高棉语配音 {len(lines)} 句，" if lines else "")
-                + (f"原音轨压到 {bed_db:g} dB" if opts.bed else "不要原声底：H3 原音轨整条静音"))
-        if manifest is not None and manifest.get("align") == "detected":
-            hit = sum(1 for r in rows if r.get("detected"))
-            ctx.log(f"配音对齐实际说话：{hit}/{len(rows)} 句对上了 H3 的说话段，其余用台词时间")
+    try:
+        post = manifest is not None or not opts.bed or opts.subtitles != "none" or opts.end_card
+        trims = [{"code": c, "clip": round(s, 3), "used": round(lim, 3)}
+                 for c, s, lim in zip(cut.codes, secs, limits) if lim]
+        if trims:
+            ctx.log("按分镜时长裁尾：" + "，".join(f"{t['code']} {t['clip']:.2f}→{t['used']:.2f}s"
+                                             for t in trims))
         ctx.check_canceled()
-        dubbed = work / "dub.mp4"
-        sv.ffmpeg.run(build_dub_mix_cmd(sv.ffmpeg.ffmpeg, cur, lines, dubbed,
-                                        bed_db=bed_db, duck_db=sv.cfg.dub.duck_db,
-                                        loudness=sv.cfg.dub.loudness if lines else None))
-        cur = dubbed
-    card_seconds = 0.0
-    if opts.subtitles != "none" or opts.end_card:
-        st = sv.cfg.subtitles
-        fonts = stage_fonts(st.fonts_dir, st.font_files, work)
-        subs_name = None
-        if opts.subtitles != "none":
-            # 有配音时字幕跟着配音实际播放的位置走，否则按台词时间
-            cues = (dub_cues(rows, asm.starts, cut.dialogue) if rows
-                    else timeline_cues(cut.dialogue, asm.starts, asm.durations))
-            (work / "subs.ass").write_text(
-                build_subtitles_ass(cues, width, height, mode=opts.subtitles, zh_font=st.zh_font,
-                                    km_font=st.km_font), encoding="utf-8")
-            subs_name = "subs.ass"
-            ctx.log(f"烧字幕（{opts.subtitles}）{len(cues)} 条"
-                    + ("，时间跟配音走" if rows else ""))
-        spec = None
-        if opts.end_card:
-            card_seconds = float(card.get("seconds") or 3.0)
-            (work / "card.ass").write_text(
-                build_endcard_ass(card["lines"], width, height, card_seconds,
-                                  default_font=st.latin_font), encoding="utf-8")
-            spec = CardSpec("card.ass", card_seconds, width, height, OUTPUT_FPS,
-                            color=card_color(card.get("background")))
-            ctx.log(f"接片尾卡 {card_seconds:g}s（{len(card['lines'])} 行）")
+        ctx.log(f"合成 {len(cut.clips)} 个镜头 → {width}x{height}@{OUTPUT_FPS}")
+        asm = sv.ffmpeg.assemble(cut.clips, work / "base.mp4" if post else out, width=width,
+                                 height=height, fps=OUTPUT_FPS, transitions=cut.transitions,
+                                 work_dir=work, max_seconds=limits)
         ctx.check_canceled()
-        sv.ffmpeg.run(build_finish_cmd(sv.ffmpeg.ffmpeg, cur, out, subs_ass=subs_name, card=spec,
-                                       has_audio=sv.ffmpeg.has_audio(cur), fonts_dir=fonts),
-                      cwd=work)
-    elif cur != out:
-        shutil.move(str(cur), out)
-    shutil.rmtree(work, ignore_errors=True)
-    if ctx.cancel_event.is_set():   # 最后一步刚跑完就被取消：不登记这次导出，删掉半成品
+        cur = asm.path
+        over = 0
+        rows = manifest["lines"] if manifest is not None else []
+        if manifest is not None or not opts.bed:
+            over = sum(1 for r in rows if r.get("over"))
+            lines = [(sv.media.abs(r["file"]), asm.starts[r["shot"]] + r["offset"], r["seconds"])
+                     for r in rows]
+            bed_db = sv.cfg.dub.bed_db if opts.bed else None
+            ctx.log((f"叠高棉语配音 {len(lines)} 句，" if lines else "")
+                    + (f"原音轨压到 {bed_db:g} dB" if opts.bed else "不要原声底：H3 原音轨整条静音"))
+            if manifest is not None and manifest.get("align") == "detected":
+                hit = sum(1 for r in rows if r.get("detected"))
+                ctx.log(f"配音对齐实际说话：{hit}/{len(rows)} 句对上了 H3 的说话段，其余用台词时间")
+            ctx.check_canceled()
+            dubbed = work / "dub.mp4"
+            sv.ffmpeg.run(build_dub_mix_cmd(sv.ffmpeg.ffmpeg, cur, lines, dubbed,
+                                            bed_db=bed_db, duck_db=sv.cfg.dub.duck_db,
+                                            loudness=sv.cfg.dub.loudness if lines else None))
+            cur = dubbed
+        card_seconds = 0.0
+        if opts.subtitles != "none" or opts.end_card:
+            st = sv.cfg.subtitles
+            fonts = stage_fonts(st.fonts_dir, st.font_files, work)
+            subs_name = None
+            if opts.subtitles != "none":
+                # 有配音时字幕跟着配音实际播放的位置走，否则按台词时间
+                cues = (dub_cues(rows, asm.starts, cut.dialogue) if rows
+                        else timeline_cues(cut.dialogue, asm.starts, asm.durations))
+                (work / "subs.ass").write_text(
+                    build_subtitles_ass(cues, width, height, mode=opts.subtitles, zh_font=st.zh_font,
+                                        km_font=st.km_font), encoding="utf-8")
+                subs_name = "subs.ass"
+                ctx.log(f"烧字幕（{opts.subtitles}）{len(cues)} 条"
+                        + ("，时间跟配音走" if rows else ""))
+            spec = None
+            if opts.end_card:
+                card_seconds = float(card.get("seconds") or 3.0)
+                (work / "card.ass").write_text(
+                    build_endcard_ass(card["lines"], width, height, card_seconds,
+                                      default_font=st.latin_font), encoding="utf-8")
+                spec = CardSpec("card.ass", card_seconds, width, height, OUTPUT_FPS,
+                                color=card_color(card.get("background")))
+                ctx.log(f"接片尾卡 {card_seconds:g}s（{len(card['lines'])} 行）")
+            ctx.check_canceled()
+            sv.ffmpeg.run(build_finish_cmd(sv.ffmpeg.ffmpeg, cur, out, subs_ass=subs_name, card=spec,
+                                           has_audio=sv.ffmpeg.has_audio(cur), fonts_dir=fonts),
+                          cwd=work)
+        elif cur != out:
+            shutil.move(str(cur), out)
+        shutil.rmtree(work, ignore_errors=True)
+        if ctx.cancel_event.is_set():   # 最后一步刚跑完就被取消：不登记这次导出，删掉半成品
+            out.unlink(missing_ok=True)
+            ctx.check_canceled()
+    except BaseException:
+        # 取消或失败：删掉中间文件和写了一半的成片，免得 exports/ 里留下一个名字像正式导出的坏 mp4
+        shutil.rmtree(work, ignore_errors=True)
         out.unlink(missing_ok=True)
-        ctx.check_canceled()
+        raise
     rel = sv.media.rel(out)
     settings = {"width": width, "height": height, "fps": OUTPUT_FPS, "clips": len(cut.clips),
                 "missing": cut.missing, **opts.model_dump(),
