@@ -2,9 +2,14 @@
 // 默认已登录、有输入框；afterSubmit([[秒, fn], ...]) 安排提交后第几秒发生什么；sleep() 推进假时钟。
 
 const PNG_HEAD = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+// mp4 文件头：偏移 4 是 ftyp
+const MP4_HEAD = btoa('\0\0\0\x18ftypisom\0\0\x02\0isomiso2');
 
 export class FakePage {
-  constructor(spec, { loggedIn = true, hasFileInput = true, promptBox = true, pasteWorks = false, fileInputWorks = true } = {}) {
+  constructor(spec, {
+    loggedIn = true, hasFileInput = true, promptBox = true, pasteWorks = false, fileInputWorks = true, videoIntro = false,
+    redirects = {},
+  } = {}) {
     this.spec = spec;
     this.t = 0;
     this.calls = [];
@@ -24,6 +29,14 @@ export class FakePage {
     this.script = [];
     this.submittedAt = null;
     this.urlNow = 'about:blank';
+    this.videos_ = [];
+    this.videoIntro = videoIntro; // 第一次选视频工具时弹介绍框
+    this.redirects = redirects; // goto 这些地址时实际跳到哪（模拟之前的对话打不开）
+    this.aspect = null;
+    // 做视频的按钮、画幅按钮和菜单项都在页面上（点最后一个做视频的按钮才进入视频模式）
+    for (const sel of spec.video_steps || []) this.shown.add(sel);
+    if (spec.video_aspect_button) this.shown.add(spec.video_aspect_button);
+    for (const sel of Object.values(spec.video_aspect_options || {})) this.shown.add(sel);
   }
 
   afterSubmit(steps) {
@@ -34,6 +47,10 @@ export class FakePage {
   hide(sel) { this.shown.delete(sel); }
   addResult(src, w = 1024, h = 1536, b64 = PNG_HEAD, alt = '') {
     this.results.push({ src, w, h, complete: true, alt });
+    this.blobs.set(src, b64);
+  }
+  addVideo(src, b64 = MP4_HEAD) {
+    this.videos_.push({ src, w: 0, h: 0, duration: 0, ready: false });
     this.blobs.set(src, b64);
   }
   finish(src, w = 1024, h = 1536) {
@@ -51,7 +68,7 @@ export class FakePage {
   clock = () => this.t;
 
   // ------------------------------------------------------------ driver
-  async goto(url) { this.calls.push(['goto', url]); this.urlNow = url; }
+  async goto(url) { this.calls.push(['goto', url]); this.urlNow = this.redirects[url] || url; }
   async url() { return this.urlNow; }
   async visible(sel) { return this.shown.has(sel); }
   async count(sel) {
@@ -68,6 +85,23 @@ export class FakePage {
     if (sel === this.spec.stop_button && this.shown.has(sel)) {
       this.hide(sel);
       return true;
+    }
+    const steps = this.spec.video_steps || [];
+    if (steps.length && sel === steps[steps.length - 1]) {
+      this.show(this.spec.video_active);
+      if (this.videoIntro) this.show(this.spec.video_dismiss);
+      return true;
+    }
+    if (sel === this.spec.video_dismiss && this.shown.has(sel)) {
+      this.hide(sel);
+      return true;
+    }
+    if (sel === this.spec.video_active && this.shown.has(sel)) {
+      this.hide(sel); // 取消选中视频工具
+      return true;
+    }
+    for (const [a, opt] of Object.entries(this.spec.video_aspect_options || {})) {
+      if (sel === opt) this.aspect = a;
     }
     return this.shown.has(sel);
   }
@@ -107,10 +141,15 @@ export class FakePage {
     if (sel === this.spec.user_images) return [...this.mine];
     return [];
   }
+  async videos(sel) {
+    if (sel === this.spec.result_videos) return [...this.videos_];
+    return [];
+  }
   async fetchImage(src) {
     this.calls.push(['fetch', src]);
     if (!this.blobs.has(src)) throw new Error('HTTP 403');
-    return { mime: 'image/png', b64: this.blobs.get(src), via: 'page' };
+    const b64 = this.blobs.get(src);
+    return { mime: b64 === MP4_HEAD ? 'video/mp4' : 'image/png', b64, via: 'page' };
   }
   async cookieNames() { return [...this.cookies]; }
   async sleep(s) {
@@ -120,3 +159,4 @@ export class FakePage {
 }
 
 export const PNG_B64 = PNG_HEAD;
+export const MP4_B64 = MP4_HEAD;

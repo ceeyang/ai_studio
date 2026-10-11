@@ -1,4 +1,5 @@
-"""执行网页出图的 EngineCall：每个网站一把锁、一个标签页，出完落盘、按要求的画幅居中裁切。
+"""执行网页出图 / 出视频的 EngineCall：每个网站一把锁、一个标签页，出完落盘（图按要求的画幅居中裁切，
+视频用 ffprobe 校验后原样存 mp4；网页出视频只走浏览器扩展）。
 
 任务跑在队列的「网页通道」线程里（不占 GPU worker，也不触发 ComfyUI 释放显存），每个网站一条
 串行通道；这里的锁再兜一层，防止 CLI 或别的入口同时操作同一个标签页。
@@ -12,6 +13,7 @@ from __future__ import annotations
 
 import io
 import json
+import subprocess
 import threading
 from collections.abc import Callable, Iterator
 from contextlib import AbstractContextManager, contextmanager
@@ -24,7 +26,7 @@ from backend.engines.browser import conversations as conv
 from backend.engines.browser import flow
 from backend.engines.browser.driver import PageDriver, PlaywrightDriver
 from backend.engines.browser.errors import EXT_DIR, BrowserError
-from backend.engines.browser.extension import (CONVERSATION_FEATURE, RPC_FEATURE, ExtensionHub,
+from backend.engines.browser.extension import (CONVERSATION_FEATURE, RPC_FEATURE, VIDEO_FEATURE, ExtensionHub,
                                                conversation_reload_text, decode)
 from backend.engines.browser.session import BrowserSession, cookie_names_for
 from backend.engines.browser.sites import SITES
@@ -34,6 +36,35 @@ from backend.queue.trace import annotate_last
 
 EXT = {"PNG": ".png", "JPEG": ".jpg", "WEBP": ".webp"}
 ASPECT_TOLERANCE = 0.015   # 宽高比差 1.5% 以内不裁
+VIDEO_CONTAINERS = ("mp4", "mov", "matroska", "webm")   # ffprobe format_name 里有这些才算视频文件
+
+
+def probe_video(ffprobe: str, path: Path) -> dict:
+    """读视频的宽高、时长、有没有音轨；读不出来（不是视频、文件坏了）抛 ValueError。"""
+    try:
+        p = subprocess.run([ffprobe, "-v", "error", "-show_entries",
+                            "stream=codec_type,width,height:format=format_name,duration", "-of", "json", str(path)],
+                           capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60,
+                           check=False)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        raise ValueError(f"ffprobe 跑不起来：{e}") from None
+    try:
+        info = json.loads(p.stdout or "{}")
+    except json.JSONDecodeError:
+        info = {}
+    streams = info.get("streams") or []
+    v = next((st for st in streams if st.get("codec_type") == "video"), None)
+    if p.returncode != 0 or v is None:
+        raise ValueError((p.stderr or "没有视频流").strip()[-300:])
+    fmt = str((info.get("format") or {}).get("format_name") or "")
+    if not any(x in fmt for x in VIDEO_CONTAINERS):   # 图片也会被 ffprobe 当成一帧的「视频流」
+        raise ValueError(f"容器格式是 {fmt or '未知'}，不是视频文件")
+    try:
+        dur = float((info.get("format") or {}).get("duration") or 0)
+    except (TypeError, ValueError):
+        dur = 0.0
+    return {"width": int(v.get("width") or 0), "height": int(v.get("height") or 0), "duration": dur,
+            "audio": any(st.get("codec_type") == "audio" for st in streams)}
 
 
 def parse_aspect(aspect: str) -> float:
@@ -60,8 +91,9 @@ def crop_to_aspect(im: Image.Image, aspect: str) -> Image.Image | None:
 class BrowserRunner:
     def __init__(self, session: BrowserSession, sites: dict[str, SiteSpec] | None = None, *,
                  page_factory: Callable[[SiteSpec], AbstractContextManager[PageDriver]] | None = None,
-                 poll: float = 1.0, hub: ExtensionHub | None = None):
+                 poll: float = 1.0, hub: ExtensionHub | None = None, ffprobe: str = "ffprobe"):
         self.session = session
+        self.ffprobe = ffprobe
         self.sites = dict(sites or SITES)
         self._locks = {k: threading.Lock() for k in self.sites}
         self._page_factory = page_factory or self._playwright_page
@@ -145,11 +177,15 @@ class BrowserRunner:
                          "logged_in": (bool(st[k].get("logged_in")) if k in st else None),
                          "cookie": st.get(k, {}).get("cookie"), "page": st.get(k, {}).get("page")}
                      for k, s in self.sites.items()}
-            # 连着的是 v0.1 的扩展（没有 rpc）：网页文本模型用不了，要在扩展管理页重新加载
-            needs_reload = bool(info["connected"]) and RPC_FEATURE not in (info.get("features") or [])
+            # 连着的是老扩展：v0.1 没有 rpc（网页文本模型用不了），v0.2 没有 video（不能网页出视频）。
+            # 要在扩展管理页重新加载（续接会话的能力另见 conversation）
+            feats = info.get("features") or []
+            missing = [x for x in (RPC_FEATURE, VIDEO_FEATURE) if x not in feats] if info["connected"] else []
+            needs_reload = bool(missing)
             return {"transport": "extension", "running": info["connected"], "connected": info["connected"],
                     "extension": info, "extension_dir": str(EXT_DIR), "sites": sites,
-                    "needs_reload": needs_reload, "conversation": self.conversation_support(),
+                    "needs_reload": needs_reload, "missing_features": missing,
+                    "conversation": self.conversation_support(),
                     "logged_in": {k: v["logged_in"] for k, v in sites.items()}}
         sess = self.session
         exe = sess.executable()
@@ -200,15 +236,20 @@ class BrowserRunner:
             log: Callable[[str], None] | None = None) -> list[Path]:
         log = log or (lambda m: None)
         req = call.workflow
+        video = call.output_kind == "video"
         spec = self.sites.get(req.get("site", ""))
-        if spec is None or not spec.result_images:
-            can = [k for k, s in self.sites.items() if s.result_images]
-            raise BrowserError("browser", f"网站 {req.get('site')!r} 不能出图，可选：{', '.join(can)}")
+        field = "result_videos" if video else "result_images"
+        if spec is None or not getattr(spec, field):
+            can = [k for k, s in self.sites.items() if getattr(s, field)]
+            raise BrowserError("browser", f"网站 {req.get('site')!r} 不能{'出视频' if video else '出图'}，"
+                                          f"可选：{', '.join(can)}")
+        if video and self.transport != "extension":
+            raise BrowserError("browser", "网页出视频只支持浏览器扩展（config.yaml 的 browser.transport 要是 extension）")
+        prefix = conv.CONTINUE_VIDEO_PREFIX if video else conv.CONTINUE_IMAGE_PREFIX
         plan = self._plan(spec, log)
         if plan is not None and plan.continuing:
-            # 在已有对话里接着发：提示词照样完整，开头说明这是一张新图，不是改上一张
-            req = {**req, "prompt": f"{conv.CONTINUE_IMAGE_PREFIX} {req['prompt']}",
-                   "conversation_url": plan.url}
+            # 在已有对话里接着发：提示词照样完整，开头说明这是一张新图 / 一段新视频，不是改上一个
+            req = {**req, "prompt": f"{prefix} {req['prompt']}", "conversation_url": plan.url}
         run_dir = Path(run_dir)
         run_dir.mkdir(parents=True, exist_ok=True)
         (run_dir / "workflow.api.json").write_text(
@@ -223,7 +264,12 @@ class BrowserRunner:
         timeout = float(req.get("timeout") or 300)
         page: dict = {}
         with self.site_lock(spec.key, spec.label, log, cancel):
-            if self.transport == "extension":
+            if video:
+                extra = {"conversation_url": req["conversation_url"]} if req.get("conversation_url") else {}
+                items = self.hub.generate(spec.key, spec.label, req["prompt"], refs, aspect=req.get("aspect"),
+                                          timeout=timeout, cancel=cancel, log=log, progress=on_progress,
+                                          info=page, kind="video", **extra)
+            elif self.transport == "extension":
                 got = self._via_extension(spec, req, refs, timeout, cancel, log, on_progress, page)
             else:
                 with self._page_factory(spec) as driver:
@@ -231,10 +277,34 @@ class BrowserRunner:
                                         log=log, progress=on_progress, poll=self.poll,
                                         conversation_url=req.get("conversation_url"), info=page)
         if plan is not None:
-            self._record(plan, spec, page, log)
+            self._record(plan, spec, page, log, prefix)
+        if video:
+            return self._save_video(items, run_dir, spec, log)
         return self._save(got, run_dir, spec, req.get("aspect"), bool(req.get("fit_aspect", True)), log)
 
-    def _record(self, plan: conv.Plan, spec: SiteSpec, page: dict, log: Callable[[str], None]) -> None:
+    def _save_video(self, items: list, run_dir: Path, spec: SiteSpec, log: Callable[[str], None]) -> list[Path]:
+        """扩展传回来的视频：ffprobe 读得出视频才算，原样存 mp4（画幅已经在页面上选了 / 写进提示词，不裁）。"""
+        paths: list[Path] = []
+        for i, item in enumerate(items):
+            out = run_dir / f"{spec.key}_{i:02d}.mp4"
+            out.write_bytes(item.data)
+            try:
+                info = probe_video(self.ffprobe, out)
+            except ValueError as e:
+                raise BrowserError("page", f"{spec.label} 浏览器扩展传回来的不是能读的视频（{item.mime or '未知类型'}，"
+                                           f"{len(item.data)} 字节）：{e}") from None
+            how = "在页面里带登录态" if item.via == "page" else "由扩展直接"
+            log(f"{spec.label}：视频 {info['width']}×{info['height']}，{info['duration']:.1f} 秒，"
+                f"{'有声' if info['audio'] else '无声'}（{how}取视频地址）")
+            paths.append(out)
+        if len(paths) > 1:
+            log(f"{spec.label} 一次出了 {len(paths)} 段视频，候选用第一段，其余留在任务目录 {run_dir}")
+        if not paths:
+            raise BrowserError("no_image", f"{spec.label} 没有出视频")
+        return paths
+
+    def _record(self, plan: conv.Plan, spec: SiteSpec, page: dict, log: Callable[[str], None],
+                prefix: str = conv.CONTINUE_IMAGE_PREFIX) -> None:
         if plan.scope is None:   # 旧扩展：没续接、读不到地址
             info = {"mode": "new", "url": None, "reason": plan.reason or None, "site": spec.key,
                     "scope": None, "turns": 1}
@@ -243,7 +313,7 @@ class BrowserRunner:
                                              note=page.get("note") or "")
             log(conv.describe(info, spec.label))
             if info.get("mode") == "continue":
-                info["prompt_prefix"] = conv.CONTINUE_IMAGE_PREFIX
+                info["prompt_prefix"] = prefix
         annotate_last("engine", {"conversation": info})
 
     def _via_extension(self, spec: SiteSpec, req: dict, refs: list[Path], timeout: float,

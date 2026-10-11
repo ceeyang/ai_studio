@@ -29,7 +29,7 @@ export function imageMessages(jobId, index, img, chunk = CHUNK_CHARS) {
   return out;
 }
 
-/** 按文件头判断 base64 里是不是图片，返回 mime 或 ''。 */
+/** 按文件头判断 base64 里是不是图片或 mp4 视频，返回 mime 或 ''。 */
 export function sniffMime(b64) {
   if (!b64 || typeof b64 !== 'string') return '';
   let head;
@@ -43,6 +43,7 @@ export function sniffMime(b64) {
   if (at(0) === 0xff && at(1) === 0xd8 && at(2) === 0xff) return 'image/jpeg';
   if (head.slice(0, 4) === 'RIFF' && head.slice(8, 12) === 'WEBP') return 'image/webp';
   if (head.slice(0, 4) === 'GIF8') return 'image/gif';
+  if (head.slice(4, 8) === 'ftyp') return 'video/mp4'; // ISO BMFF：mp4 / mov（偏移 4 是 ftyp）
   return '';
 }
 
@@ -98,8 +99,9 @@ export function loggedIn(cookie, page) {
  * rpc：studio 一步步驱动页面操作（开标签页、跳转、调 content/dom.js 的函数），文本流程在 studio 那边
  * （backend/engines/browser/chat.py），选择器也从 studio 发过来——改流程、改选择器不用重新加载扩展。
  * conversation（v0.3 起）：出图任务能续接之前的网页对话（job.conversation_url），结果里报回对话地址。
+ * video（v0.4 起）：job.kind = 'video' 网页出视频（Gemini / Muse）。
  */
-export const FEATURES = ['rpc', 'conversation'];
+export const FEATURES = ['rpc', 'conversation', 'video'];
 
 /** rpc 能调的 content/dom.js 函数（只读页面和往输入框里输入、点按钮、传图，别的不让调）。 */
 export const RPC_DOM_OPS = [

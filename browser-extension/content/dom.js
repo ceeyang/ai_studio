@@ -349,6 +349,23 @@
         .filter((e) => e.tagName === 'IMG')
         .map((e) => ({ alt: e.alt || '', src: e.currentSrc || e.src || '', w: e.naturalWidth || 0, h: e.naturalHeight || 0, complete: !!e.complete }));
     },
+    /** 生成的视频：<video> 的地址（没有就看里面的 <source>）、画面尺寸、时长。后台标签页里视频常常还没加载
+     *  （尺寸 0、时长 NaN），所以不按这些判断是不是结果，只当日志信息。 */
+    videos(sel) {
+      return queryAll(sel)
+        .filter((e) => e.tagName === 'VIDEO')
+        .map((e) => {
+          const source = e.querySelector('source[src]');
+          const d = Number(e.duration);
+          return {
+            src: e.currentSrc || e.src || (source && source.src) || '',
+            w: e.videoWidth || 0,
+            h: e.videoHeight || 0,
+            duration: Number.isFinite(d) ? d : 0,
+            ready: (e.readyState || 0) >= 1,
+          };
+        });
+    },
     /** 在页面里取图（同源请求自动带登录 cookie，blob: 也能取），返回 base64。 */
     async fetchB64(src) {
       try {

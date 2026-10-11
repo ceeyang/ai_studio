@@ -1,11 +1,13 @@
 /*
  * 通用网页出图流程：新对话（或续接之前的对话）→ 传参考图 → 输提示词 → 提交 → 等图出完 → 取原图。
+ * 出视频（v0.4 起，job.kind = 'video'，只有扩展这边有）：同样打开对话 → 选做视频的工具和画幅 → 传首帧 →
+ * 提交 → 等 <video> 出完 → 在页面里取原视频（mp4）。
  * 逐条照搬 backend/engines/browser/flow.py（同样的判断、同样的超时、同样的中文原因），只是页面操作换成
  * 扩展的 driver（background.js 里的 TabDriver，单测里是假的），所有方法都是 async。
  *
  * driver 接口：goto(url) url() visible(sel) count(sel) enabled(sel) click(sel) typeText(sel, text)
  *   press(sel, key) setFiles(sel, files) pasteFiles(sel, files) dropFiles(sel, files) text(sel)
- *   images(sel) fetchImage(src) → {mime, b64, via} cookieNames(url) → string[] sleep(seconds)
+ *   images(sel) videos(sel) fetchImage(src) → {mime, b64, via} cookieNames(url) → string[] sleep(seconds)
  * files 是 [{name, mime, b64}]（studio 发来的参考图）。
  *
  * 任何一步不对都抛 FlowError(kind, message)：kind 和后端 BrowserError 一样（not_logged_in / quota /
@@ -66,6 +68,8 @@ function match(patterns, text) {
   return !!text && patterns.some((p) => p.test(text));
 }
 
+const WHAT = { image: '图', video: '视频' };
+
 function siteFile(spec) {
   return `browser-extension/sites/${spec.key}.js（和 backend/engines/browser/sites/${spec.key}.py）`;
 }
@@ -82,7 +86,7 @@ class Flow {
     this.echo = new Set(); // 网站回显的参考图（提交后马上出现的图）
     this.nRefs = 0;
     this.continued = false; // 在之前的对话里接着发
-    this.before = new Set(); // 提交前页面上就有的图（之前几轮的结果、参考图）
+    this.before = new Set(); // 提交前页面上就有的图 / 视频（之前几轮的结果、参考图）
     this.beforeReply = ''; // 提交前最后一条回复的文字
   }
 
@@ -178,7 +182,8 @@ class Flow {
     let last = null;
     let srcs = [];
     for (;;) {
-      const all = [...(await this.d.images(s.result_images)), ...(await this.d.images(s.user_images))];
+      const all = [...(await this.d.images(s.result_images)), ...(await this.d.images(s.user_images)),
+        ...(s.result_videos ? await this.d.videos(s.result_videos) : [])];
       srcs = [...new Set(all.map((i) => i.src).filter(Boolean))].sort();
       const key = srcs.join('\n');
       if (!this.continued || key === last || this.clock() - start > SNAPSHOT_WAIT) break;
@@ -187,6 +192,58 @@ class Flow {
     }
     this.before = new Set(srcs);
     this.beforeReply = this.continued ? await this.d.text(s.assistant_turn, s.reply_exclude) : '';
+  }
+
+  /** 出视频：选中网站的做视频工具（已经选中就不点），第一次弹的介绍框点掉，再在画幅菜单里选画幅。 */
+  async selectVideoTool(aspect) {
+    const s = this.spec;
+    const steps = s.video_steps || [];
+    if (steps.length && !(s.video_active && (await this.d.visible(s.video_active)))) {
+      for (const sel of steps) {
+        await this.checkCancel();
+        if (!(await this.d.click(sel))) {
+          throw new FlowError(
+            'page',
+            `${s.label} 没找到做视频的按钮（${excerpt(sel, 60)}）。网站改版了，要更新 ${siteFile(s)} 里的 video_steps`,
+          );
+        }
+        await this.d.sleep(1);
+      }
+      for (let i = 0; i < 3 && s.video_dismiss && (await this.d.visible(s.video_dismiss)); i++) {
+        await this.d.click(s.video_dismiss); // 第一次用视频工具时的介绍框
+        await this.d.sleep(1);
+      }
+      if (s.video_active && !(await this.d.visible(s.video_active))) {
+        throw new FlowError(
+          'page',
+          `${s.label} 点了做视频的按钮但没进入视频模式（可能这个账号没有视频额度，或网站改版了——` +
+            `要更新 ${siteFile(s)} 里的 video_steps / video_active）`,
+        );
+      }
+      this.log(`${s.label}：已切到做视频`);
+    }
+    const opt = (s.video_aspect_options || {})[aspect];
+    if (s.video_aspect_button && opt) {
+      if (await this.d.click(s.video_aspect_button)) {
+        await this.d.sleep(0.8);
+        if (await this.d.click(opt)) {
+          this.log(`${s.label}：画幅选了 ${aspect}`);
+          await this.d.sleep(0.5);
+          return;
+        }
+      }
+      this.log(`${s.label}：没能在画幅菜单里选 ${aspect}，按网站当前的画幅出（提示词里也写了画幅）`);
+    }
+  }
+
+  /** 出图：标签页还停在做视频的模式（上一个任务留下的）就先退出来，不然会把出图请求做成视频。 */
+  async leaveVideoTool() {
+    const s = this.spec;
+    if (s.video_active && (await this.d.visible(s.video_active))) {
+      await this.d.click(s.video_active);
+      await this.d.sleep(0.5);
+      this.log(`${s.label}：退出了做视频的模式`);
+    }
   }
 
   /** 输入框里的参考图缩略图数：缩略图选择器和「输入框那一块里的图片数」取大的，网站改版也数得出来。 */
@@ -366,6 +423,91 @@ class Flow {
     }
   }
 
+  /** 新出的视频：不是提交前就有的、地址像生成结果，同一地址只留一个（尺寸、时长后台标签页里常读不到，不判断）。 */
+  async videoResults(why) {
+    const s = this.spec;
+    const out = new Map();
+    for (const v of await this.d.videos(s.result_videos)) {
+      if (!v.src) { if (why) why.push('无地址'); continue; }
+      if (this.before.has(v.src)) { if (why) why.push('是之前几轮的视频'); continue; }
+      if (out.has(v.src)) continue;
+      if (s.video_src_hint.length && !s.video_src_hint.some((h) => v.src.includes(h))) {
+        if (why) why.push(`地址不像生成结果 ${String(v.src).slice(0, 80)}`);
+        continue;
+      }
+      out.set(v.src, v);
+    }
+    return [...out.values()];
+  }
+
+  /** 等视频：判断和等图一样（限额、登录、拒绝、地址稳定 settle 秒），只是看 <video>；回复里说「正在生成，
+   *  要几分钟」（video_pending_patterns）时不算「回复了文字但没出视频」。 */
+  async waitVideos(timeout) {
+    const s = this.spec;
+    const start = this.clock();
+    let last = null;
+    let stableSince = 0;
+    let idleSince = 0;
+    let nextDiag = DIAG_EVERY;
+    for (;;) {
+      await this.checkCancel();
+      const now = this.clock();
+      const elapsed = now - start;
+      if (elapsed >= nextDiag) {
+        nextDiag += DIAG_EVERY;
+        const why = [];
+        const got = await this.videoResults(why);
+        const all = (await this.d.videos(s.result_videos)).length;
+        this.log([`等了 ${Math.round(elapsed)} 秒：停止按钮${(await this.isBusy()) ? '还在' : '已消失'}`,
+          `选择器命中 ${all} 个视频，可用 ${got.length} 个`, ...(why.length ? [`排除：${why.slice(0, 4).join('；')}`] : [])]
+          .join('，'));
+      }
+      if (elapsed > timeout) {
+        if (await this.d.visible(s.stop_button)) await this.d.click(s.stop_button);
+        throw new FlowError(
+          'timeout',
+          `${s.label} 超过 ${Math.round(timeout)} 秒还没出完视频，已放弃（浏览器里那条对话还在，视频可能稍后出来，可以去看看）`,
+        );
+      }
+      let reply = await this.d.text(s.assistant_turn, s.reply_exclude);
+      if (this.continued && reply === this.beforeReply) reply = ''; // 还是上一轮的回复，这次的还没出来
+      const alert = s.alert ? await this.d.text(s.alert) : '';
+      for (const t of [alert, reply]) {
+        if (match(s.quota_patterns, t)) {
+          throw new FlowError('quota', `${s.label} 出视频次数到上限或被限流：${excerpt(t)}。等一阵再重试，或换别的视频引擎`);
+        }
+      }
+      if (await this.d.visible(s.login_wall)) throw notLoggedIn(s);
+      const busy = await this.isBusy();
+      const vids = await this.videoResults();
+      const srcs = vids.map((v) => v.src).join('\n');
+      if (srcs && !busy) {
+        if (srcs !== last) {
+          last = srcs;
+          stableSince = now;
+        } else if (now - stableSince >= s.settle_seconds) {
+          return vids;
+        }
+      } else {
+        last = null;
+      }
+      const pending = match(s.video_pending_patterns, reply);
+      if (!busy && !srcs && reply.trim() && !pending) {
+        idleSince = idleSince || now;
+        if (now - idleSince >= s.no_image_grace) {
+          if (match(s.refusal_patterns, reply)) {
+            throw new FlowError('refused', `${s.label} 拒绝了这次出视频（内容审核）：${excerpt(reply)}。改一下提示词再试`);
+          }
+          throw new FlowError('no_image', `${s.label} 回复了文字但没有出视频：${excerpt(reply)}`);
+        }
+      } else {
+        idleSince = 0;
+      }
+      this.progress(Math.min(95, Math.floor((elapsed / Math.max(s.video_expected_seconds, 1)) * 95)), PROGRESS_MAX);
+      await this.d.sleep(this.poll);
+    }
+  }
+
   /** 还在出图：停止按钮看得见，或者网站标着这一轮没完成（busy_marker）。 */
   async isBusy() {
     const s = this.spec;
@@ -388,7 +530,7 @@ class Flow {
     this.log(parts.join('，'));
   }
 
-  async download(imgs) {
+  async download(imgs, kind = 'image') {
     const s = this.spec;
     const out = [];
     const errors = [];
@@ -403,8 +545,9 @@ class Flow {
           continue;
         }
         const mime = sniffMime(got && got.b64);
-        if (!mime) {
-          errors.push(`${excerpt(src, 60)}：取回来的不是图片（${(got && got.mime) || '未知类型'}）`);
+        if (!mime || !mime.startsWith(`${kind}/`)) {
+          const want = kind === 'video' ? '视频' : '图片';
+          errors.push(`${excerpt(src, 60)}：取回来的不是${want}（${mime || (got && got.mime) || '未知类型'}）`);
           continue;
         }
         out.push({ src, mime, b64: got.b64, via: got.via || 'page' });
@@ -412,14 +555,16 @@ class Flow {
       }
     }
     if (!out.length) {
-      throw new FlowError('page', `${s.label} 出了图但取原图失败：${errors.join('；').slice(0, 300)}`);
+      const what = kind === 'video' ? '视频但取原视频' : '图但取原图';
+      throw new FlowError('page', `${s.label} 出了${what}失败：${errors.join('；').slice(0, 300)}`);
     }
     return out;
   }
 }
 
 /**
- * 跑一次出图。job: {prompt, refs: [{name, mime, b64}], timeout, reuseConversation, fresh, conversationUrl}
+ * 跑一次出图 / 出视频。job: {kind: 'image'|'video', prompt, refs: [{name, mime, b64}], aspect, timeout,
+ *   reuseConversation, fresh, conversationUrl}（kind = video 时 refs 里是首帧）
  * conversationUrl（v0.3 起）：在这条之前的对话里接着出图，打不开就新开。
  * 返回 [{src, mime, b64, via}]；onConversation（可选）收到 {url, continued, note}：结束时标签页地址、
  * 是否真的续接上了、退回新对话的原因。
@@ -428,6 +573,10 @@ export async function generate(d, spec, job, { isCanceled, log, progress, clock,
   const lg = log || (() => {});
   const pg = progress || (() => {});
   const clk = clock || (() => Date.now() / 1000);
+  const kind = job.kind === 'video' ? 'video' : 'image';
+  if (kind === 'video' && !spec.result_videos) {
+    throw new FlowError('browser', `${spec.label} 不能出视频（扩展里没有它的视频选择器）`);
+  }
   const f = new Flow(d, spec, { isCanceled, log: lg, progress: pg, clock: clk, poll });
   pg(0, PROGRESS_MAX);
   let note = '';
@@ -444,16 +593,19 @@ export async function generate(d, spec, job, { isCanceled, log, progress, clock,
       fresh: !job.conversationUrl && !!job.fresh,
     });
   }
+  if (kind === 'video') await f.selectVideoTool(job.aspect);
+  else await f.leaveVideoTool();
   await f.snapshot();
   await f.upload(job.refs || []);
   await f.submit(job.prompt);
   const timeout = Number(job.timeout) || 300;
-  lg(`${spec.label}：已提交，等出图（最长 ${Math.round(timeout)} 秒）`);
+  lg(`${spec.label}：已提交，等出${WHAT[kind]}（最长 ${Math.round(timeout)} 秒）`);
   const t0 = clk();
-  const imgs = await f.waitImages(timeout);
-  lg(`${spec.label}：出了 ${imgs.length} 张图，用时 ${Math.round(clk() - t0)} 秒，取原图`);
+  const items = kind === 'video' ? await f.waitVideos(timeout) : await f.waitImages(timeout);
+  const unit = kind === 'video' ? '段视频' : '张图';
+  lg(`${spec.label}：出了 ${items.length} ${unit}，用时 ${Math.round(clk() - t0)} 秒，取原${WHAT[kind]}`);
   pg(PROGRESS_MAX, PROGRESS_MAX);
-  const out = await f.download(imgs);
+  const out = await f.download(items, kind);
   if (onConversation) onConversation({ url: String((await d.url()) || ''), continued: f.continued, note });
   return out;
 }

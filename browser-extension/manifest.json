@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "AI Studio 网页出图桥",
-  "version": "0.3.0",
-  "description": "让本机 AI Studio（127.0.0.1:8700）在你已登录的 ChatGPT / Gemini 标签页里出图，在 ChatGPT / Gemini / Claude 网页里写文本。不读取、不上传 cookie。",
+  "version": "0.4.0",
+  "description": "让本机 AI Studio（127.0.0.1:8700）在你已登录的 ChatGPT / Gemini / Muse 标签页里出图、出视频，在 ChatGPT / Gemini / Claude 网页里写文本。不读取、不上传 cookie。",
   "minimum_chrome_version": "116",
   "background": {
     "service_worker": "background.js",
@@ -15,6 +15,9 @@
     "https://*.oaiusercontent.com/*",
     "https://gemini.google.com/*",
     "https://*.googleusercontent.com/*",
+    "https://contribution.usercontent.google.com/*",
+    "https://muse.ai/*",
+    "https://*.muse.ai/*",
     "https://claude.ai/*"
   ],
   "action": {

@@ -2,7 +2,8 @@ import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { DoctorCheck, EngineRow } from '../../api/types';
-import { EngineTable, unavailableReason } from './EngineTable';
+import { EngineTable, durationText, unavailableReason } from './EngineTable';
+import { missingText } from './BrowserPanel';
 import { FoldPanel } from './FoldPanel';
 
 const img = (name: string, extra: Partial<EngineRow> = {}): EngineRow =>
@@ -83,5 +84,32 @@ describe('设置页折叠块', () => {
       </FoldPanel>,
     );
     expect(screen.getByText('内容').closest('.fold-body')?.hasAttribute('hidden')).toBe(false);
+  });
+
+  it('网页视频：同一网站出图、出视频合在一行的登录检查对两个引擎都算；时长按实测写明能不能指定', () => {
+    const doctor = [
+      { group: '浏览器', name: 'Gemini 登录（gemini_image、gemini_video）', status: 'fail', detail: '没登录' },
+    ] as DoctorCheck[];
+    const gv = vid('gemini_video', {
+      runtime: 'browser',
+      caps: { max_refs: 0, has_audio: true, fps: 24, sizes: { '9:16': [720, 1280], '16:9': [1280, 720] },
+        default_seconds: 10, max_seconds: 10, duration_control: 'fixed', allowed_seconds: [10] },
+    });
+    expect(unavailableReason(gv, doctor)).toContain('Gemini 登录');
+    expect(unavailableReason(img('gemini_image', { runtime: 'browser' }), doctor)).toContain('Gemini 登录');
+    expect(unavailableReason(img('gemini', { runtime: 'browser' }), doctor)).toBeNull();
+    render(<EngineTable image={[]} video={[gv]} doctor={[]} />);
+    const web = screen.getByTestId('engine-group-browser');
+    expect(web.textContent).toContain('首帧图生视频');
+    expect(web.textContent).toContain('时长不能指定，总是约 10 秒');
+    expect(durationText({ duration_control: 'prompt', allowed_seconds: [3, 5, 10], default_seconds: 10 })).toBe(
+      '时长写进提示词（只认 3 / 5 / 10 秒），不一定照做；不指定时约 10 秒');
+    expect(durationText({ allowed_seconds: [4, 6, 8] })).toBe('时长可选 4 / 6 / 8 秒');
+    expect(durationText({ default_seconds: 5, max_seconds: 10 })).toBe('默认 5 秒 / 最长 10 秒');
+  });
+
+  it('老扩展缺的能力写成中文', () => {
+    expect(missingText(['video'])).toBe('网页出视频（Gemini / Muse）');
+    expect(missingText(undefined)).toBe('网页文本模型（ChatGPT / Gemini / Claude 网页）');
   });
 });

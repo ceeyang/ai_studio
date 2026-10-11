@@ -10,20 +10,21 @@
  *    等待和轮询在这里做：后台标签页里的定时器会被浏览器节流，service worker 里的不会。
  * 3. 报状态：每个网站开着几个标签页、登录 cookie 在不在（chrome.cookies，只看名字不读值）、开着的标签页上
  *    有没有登录按钮。
- * 4. 续接会话（v0.3 起）：出图任务带 conversation_url 时在那条之前的对话里接着出图（打不开就新开），
+ * 4. 出视频（v0.4 起）：job.kind = 'video' 时在 Gemini / Muse 上用首帧出视频，原视频（mp4）同样分块传回。
+ *    续接会话（v0.3 起）：出图任务带 conversation_url 时在那条之前的对话里接着出图（打不开就新开），
  *    结果里报回对话地址，studio 按角色 / 镜头 / 场景 / 道具记下来，下次重新生成时续接。
  * 5. rpc（v0.2 起，网页文本模型）：studio 一步步驱动页面——开一个专门写文本的标签页（不用出图的那个）、
  *    跳转、调 content/dom.js 的函数（只许 lib/protocol.js 的 RPC_DOM_OPS 里那些）。流程和选择器都在 studio
  *    那边（backend/engines/browser/chat.py），改了不用重新加载扩展。
  *
- * 不读、不拷、不上传任何 cookie 的值；只在 ChatGPT / Gemini 的页面里操作。
+ * 不读、不拷、不上传任何 cookie 的值；只在 ChatGPT / Gemini / Muse / Claude 的页面里操作。
  */
 import { Canceled, FlowError, generate } from './lib/flow.js';
 import {
   DEFAULT_SERVER, FEATURES, PING_SECONDS, REPLACED_CODE, backoffMs, bufferToB64, imageMessages, loggedIn, onSite,
   rankTabs, rpcProblem,
 } from './lib/protocol.js';
-import { IMAGE_SITES, SITES } from './sites/index.js';
+import { IMAGE_SITES, SITES, VIDEO_SITES } from './sites/index.js';
 
 const VERSION = chrome.runtime.getManifest().version;
 const ALARM = 'ai-studio-keepalive';
@@ -282,6 +283,7 @@ class TabDriver {
   async dropFiles(sel, files) { return !!(await this.op('dropFiles', sel, files)); }
   async text(sel, exclude) { const t = await this.op('text', sel, exclude); return typeof t === 'string' ? t : ''; }
   async images(sel) { const r = await this.op('images', sel); return Array.isArray(r) ? r : []; }
+  async videos(sel) { const r = await this.op('videos', sel); return Array.isArray(r) ? r : []; }
   async cookieNames(url) {
     try {
       return (await chrome.cookies.getAll({ url })).map((c) => c.name);
@@ -431,10 +433,13 @@ async function handleRpc(msg) {
 // ---------------------------------------------------------------- 出图任务
 function runJob(msg) {
   const spec = SITES[msg.site];
-  if (!spec || !IMAGE_SITES.includes(spec.key)) {
+  const video = msg.kind === 'video';
+  const allowed = video ? VIDEO_SITES : IMAGE_SITES;
+  if (!spec || !allowed.includes(spec.key)) {
     send({
       type: 'error', job_id: msg.job_id, kind: 'browser',
-      message: `扩展不认识网站 ${msg.site}（支持 ${Object.keys(SITES).join('、')}）：扩展版本太旧，在扩展管理页重新加载一下`,
+      message: `扩展不能在网站 ${msg.site} 上${video ? '出视频' : '出图'}（支持 ${allowed.join('、')}）：` +
+        '扩展版本太旧的话，在扩展管理页重新加载一下',
     });
     return;
   }
@@ -461,6 +466,7 @@ async function doJob(msg, spec, job) {
     const images = await generate(
       new TabDriver(tabId), spec,
       {
+        kind: msg.kind === 'video' ? 'video' : 'image', aspect: msg.aspect,
         prompt: msg.prompt, refs: msg.refs || [], timeout: msg.timeout, reuseConversation: !!opts.reuse_conversation, fresh,
         conversationUrl: msg.conversation_url || '',
       },

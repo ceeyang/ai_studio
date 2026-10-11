@@ -63,7 +63,7 @@ def build_services(cfg: Config, db: Database, manager: Any) -> Services:
     ensure_api_providers(cfg.llm)
     # ChatGPT / Gemini / Claude 网页文本模型（走浏览器扩展）：config.yaml 没写也加上（扩展没连上时设置页里不可选）
     ensure_web_providers(cfg.llm)
-    browser = BrowserRunner(BrowserSession(cfg.browser))
+    browser = BrowserRunner(BrowserSession(cfg.browser), ffprobe=cfg.ffmpeg.ffprobe)
     # 重新生成时续接之前的网页会话（按角色 / 镜头 / 场景 / 道具 / 某集某一步），设置页可关
     from backend.engines.browser.conversations import ConversationBook
     browser.conversations = ConversationBook(db, store)

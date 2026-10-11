@@ -38,7 +38,15 @@ def test_engines_registered_with_caps(reg):
     assert (gpt.caps.max_refs, gem.caps.max_refs) == (4, 3)
     assert not gpt.caps.supports_negative and not gem.caps.supports_negative
     assert set(gpt.caps.sizes) == set(gem.caps.sizes) == {"9:16", "16:9", "1:1", "21:9"}
-    assert {gpt.family, gem.family} == set(BROWSER_FAMILIES)
+    muse = reg.image("muse_image")
+    assert runtime_of(muse) == "browser" and muse.family == "muse_web" and muse.caps.max_refs == 3
+    assert {gpt.family, gem.family, muse.family} == set(BROWSER_FAMILIES)
+    gv, mv = reg.video("gemini_video"), reg.video("muse_video")
+    assert runtime_of(gv) == runtime_of(mv) == "browser"
+    assert (gv.family, mv.family) == ("gemini_web", "muse_web")   # 和同网站的出图共用一条通道
+    assert (gv.caps.duration_control, gv.caps.allowed_seconds, gv.caps.default_seconds) == ("fixed", (10.0,), 10.0)
+    assert (mv.caps.duration_control, mv.caps.allowed_seconds) == ("prompt", (3.0, 5.0, 10.0))
+    assert gv.caps.has_audio and mv.caps.has_audio and gv.caps.max_refs == mv.caps.max_refs == 0
 
 
 def test_disabled_browser_engine_not_loaded():
@@ -165,7 +173,7 @@ def test_login_status_from_cookies(tmp_path, monkeypatch):
     monkeypatch.setattr(runner.session, "cookies", lambda: [
         {"name": "__Secure-1PSID", "domain": ".google.com"},
         {"name": "other", "domain": "chatgpt.com"}])
-    assert runner.login_status() == {"chatgpt": False, "gemini": True, "claude": False}
+    assert runner.login_status() == {"chatgpt": False, "gemini": True, "muse": False, "claude": False}
     assert cookie_names_for([{"name": "a", "domain": ".google.com"}], "gemini.google.com") == {"a"}
     assert cookie_names_for([{"name": "a", "domain": "evilgoogle.com"}], "google.com") == set()
 
@@ -308,7 +316,7 @@ def test_doctor_browser_logged_in_and_not(tmp_path, reg):
     c = checks(reg, FakeLoginRunner(FakeSession(tmp_path), {"chatgpt": True, "gemini": False}))
     assert c["程序"].status == "ok" and c["调试端口"].status == "ok" and "Chrome/140" in c["调试端口"].detail
     assert c["ChatGPT 登录（gpt_image）"].status == "ok"
-    g = c["Gemini 登录（gemini_image）"]
+    g = c["Gemini 登录（gemini_image、gemini_video）"]   # 同一网站的出图、出视频合成一行
     assert g.status == "warn" and "在设置页点“打开浏览器登录”" in g.detail
 
 
@@ -323,8 +331,8 @@ def test_doctor_browser_not_running_or_missing(tmp_path, reg):
 
 
 def test_doctor_skips_browser_when_engines_disabled(tmp_path):
-    r = EngineRegistry(Config(engines={"gpt_image": EngineCfg(enabled=False),
-                                       "gemini_image": EngineCfg(enabled=False)}))
+    r = EngineRegistry(Config(engines={n: EngineCfg(enabled=False) for n in
+                                       ("gpt_image", "gemini_image", "muse_image", "gemini_video", "muse_video")}))
     assert check_browser(r, FakeLoginRunner(FakeSession(tmp_path), {})) == []
 
 
@@ -339,10 +347,10 @@ def test_api_engines_and_browser_routes(api, monkeypatch):
     monkeypatch.setattr(runner.session, "open_login", lambda urls: opened.append(urls) or True)
     r = api.post("/api/browser/login")
     assert r.status_code == 200 and r.json()["launched"] is True
-    assert opened == [["https://chatgpt.com/", "https://gemini.google.com/app", "https://claude.ai/"]]
+    assert opened == [["https://chatgpt.com/", "https://gemini.google.com/app", "https://muse.ai/", "https://claude.ai/"]]
     monkeypatch.setattr(runner.session, "version", lambda: None)
     st = api.get("/api/browser/status").json()
-    assert st["running"] is False and st["logged_in"] == {"chatgpt": None, "gemini": None, "claude": None}
+    assert st["running"] is False and st["logged_in"] == {"chatgpt": None, "gemini": None, "muse": None, "claude": None}
 
 
 def test_api_portrait_draw_with_engine(api):

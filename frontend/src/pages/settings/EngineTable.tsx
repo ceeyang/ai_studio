@@ -35,10 +35,24 @@ export function unavailableReason(e: EngineRow, doctor: DoctorCheck[]): string |
   if (src === 'browser') {
     const ext = doctor.find((r) => r.group === '浏览器' && r.name === '扩展连接' && fail(r));
     if (ext) return `不能用：浏览器扩展没连上（${ext.detail}）`;
-    const login = doctor.find((r) => r.group === '浏览器' && fail(r) && new RegExp(`[(（]${e.name}[)）]`).test(r.name));
+    // 同一网站的出图、出视频合在一行：「Gemini 登录（gemini_image、gemini_video）」
+    const login = doctor.find((r) => r.group === '浏览器' && fail(r) && new RegExp(`[(（、]${e.name}[)）、]`).test(r.name));
     if (login) return `不能用：${login.name} ${login.detail}`;
   }
   return null;
+}
+
+/** 视频时长怎么控制（后端 VideoCaps.duration_control / allowed_seconds，网页引擎是实测的）。 */
+export function durationText(c: Record<string, unknown>): string {
+  const allowed = ((c.allowed_seconds as number[] | undefined) ?? []).join(' / ');
+  switch (c.duration_control) {
+    case 'fixed':
+      return `时长不能指定，总是约 ${c.default_seconds} 秒`;
+    case 'prompt':
+      return `时长写进提示词${allowed ? `（只认 ${allowed} 秒）` : ''}，不一定照做；不指定时约 ${c.default_seconds} 秒`;
+    default:
+      return allowed ? `时长可选 ${allowed} 秒` : `默认 ${c.default_seconds} 秒 / 最长 ${c.max_seconds} 秒`;
+  }
 }
 
 function capsText(kind: Kind, e: EngineRow): string {
@@ -46,7 +60,8 @@ function capsText(kind: Kind, e: EngineRow): string {
   const sizes = Object.keys((c.sizes as Record<string, unknown> | undefined) ?? {}).join(' / ');
   const api = e.runtime === 'api' ? `${e.model ? ` · 模型 ${e.model}` : ''} · 没有种子，每次结果不同 · 按次计费 · 不占显卡` : '';
   if (kind === 'video') {
-    const v = `${c.has_audio ? '有声' : '无声'} · ${c.fps} fps · 默认 ${c.default_seconds} 秒 / 最长 ${c.max_seconds} 秒 · 参考图上限 ${c.max_refs}`;
+    const v = `${c.has_audio ? '有声' : '无声'} · ${c.fps} fps · ${durationText(c)} · 参考图上限 ${c.max_refs}`;
+    if (e.runtime === 'browser') return `首帧图生视频 · ${v} · 画幅 ${sizes} · 没有种子，每次结果不同 · 不占显卡`;
     return e.runtime === 'api' ? `首帧图生视频 · ${v} · 画幅 ${sizes}${api}` : v;
   }
   const base = `参考图上限 ${c.max_refs} · ${c.supports_negative ? '支持' : '不支持'}负面提示词 · 画幅 ${sizes}`;

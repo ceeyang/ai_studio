@@ -80,6 +80,25 @@ export const GEMINI = {
   // 对话地址里的对话 id（第 1 组）：续接网页会话时认地址用，和 backend/engines/browser/sites/gemini.py 一致
   conversation_re: '/app/([0-9A-Za-z]{8,})',
   expected_seconds: 60,
+  // 出视频（Veo）：输入框左边「Upload & tools」→「Create video」，第一次弹介绍框点「Try it」；
+  // 画幅在输入框下面的「Aspect ratio」菜单里选（只有 16:9 / 9:16）；时长不能选，总是约 10 秒。
+  // 回复先说「I'm generating your video…」，几分钟后出 generated-video，地址在 usercontent.google.com。
+  result_videos: 'model-response generated-video video',
+  video_src_hint: ['usercontent.google.com', 'googleusercontent.com', 'blob:'],
+  video_steps: [
+    'button[aria-label="Upload & tools"], button[aria-label="上传和工具"], button[aria-label="上传文件和工具"]',
+    '.cdk-overlay-container button:has-text("Create video"), .cdk-overlay-container button:has-text("制作视频"), ' +
+      '.cdk-overlay-container button:has-text("创建视频"), .cdk-overlay-container button:has-text("生成视频")',
+  ],
+  video_active: 'button[aria-label="Deselect Videos"], button[aria-label*="取消选择视频"]',
+  video_dismiss: '.cdk-overlay-container button:has-text("Try it"), .cdk-overlay-container button:has-text("试试")',
+  video_aspect_button: 'button[aria-label^="Aspect ratio"], button[aria-label^="宽高比"]',
+  video_aspect_options: {
+    '9:16': '[role="menuitemradio"]:has-text("9:16")',
+    '16:9': '[role="menuitemradio"]:has-text("16:9")',
+  },
+  video_pending_patterns: [/generating your video/i, /could take a few minutes/i, /正在生成/i, /生成.{0,6}视频/i],
+  video_expected_seconds: 180,
   /** 取原图时依次试的地址：googleusercontent 的尺寸参数换成 =s0（原尺寸），再试页面里那张。 */
   fullSize: (src) => {
     const m = /^(https:\/\/[^/]*googleusercontent\.com\/[^=?#]+)=[A-Za-z0-9_-]+$/.exec(src);

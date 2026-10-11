@@ -38,6 +38,9 @@ TEXT_KINDS = ("episode",)
 # 续接时加在出图提示词前面：别让网站把这次当成「改上一张图」
 CONTINUE_IMAGE_PREFIX = ("Generate a NEW image for this request (do not edit or reuse the previous image "
                          "unless asked; this request is complete on its own).")
+# 续接时加在出视频提示词前面（网页出视频和这个镜头的首帧共用一条对话）
+CONTINUE_VIDEO_PREFIX = ("Generate a NEW video for this request from the image attached to THIS message "
+                         "(do not reuse a previous video; this request is complete on its own).")
 # 续接时加在文本提示词前面：这是一个新的、完整的请求
 CONTINUE_TEXT_PREFIX = ("【新的请求】下面是一个新的、完整的任务（不是对上一条回答的修改）："
                         "按这里的全部要求重新完整作答，不要只写改动的部分，也不要沿用上一次回答的格式以外的内容。")
@@ -49,6 +52,8 @@ IMAGE_JOB_SCOPES: dict[str, tuple[str, str]] = {
     "image.keyframe": ("shot", "shot_id"),
     "image.location": ("location", "location_id"),
     "image.prop": ("prop", "prop_id"),
+    # 网页出视频（gemini_video / muse_video）：和这个镜头的首帧在同一个网站上时共用同一条对话
+    "video.shot": ("shot", "shot_id"),
 }
 # 文本任务类型 → payload 里集 id 的键（作用域再按 LLM 调用的 key 细分到步骤 / 段落）
 TEXT_JOB_SCOPES: dict[str, str] = {
