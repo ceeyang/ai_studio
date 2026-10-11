@@ -13,13 +13,12 @@ def reg():
 
 def test_all_templates_load(reg):
     assert reg.names() == ["gemini_api_image", "gemini_image", "gemini_video", "gpt_image", "h3_image", "h3_video",
-                           "kling_video", "krea2", "muse_image", "muse_video", "openai_image", "seedance_video",
-                           "sora_video", "veo_video",
-                           "wan22_i2v", "zimage"]
+                           "jimeng_video", "kling_video", "kling_web_video", "krea2", "muse_image", "muse_video",
+                           "openai_image", "seedance_video", "sora_video", "veo_video", "wan22_i2v", "zimage"]
     assert reg.names("image") == ["gemini_api_image", "gemini_image", "gpt_image", "h3_image", "krea2",
                                   "muse_image", "openai_image", "zimage"]
-    assert reg.names("video") == ["gemini_video", "h3_video", "kling_video", "muse_video", "seedance_video", "sora_video",
-                                  "veo_video", "wan22_i2v"]
+    assert reg.names("video") == ["gemini_video", "h3_video", "jimeng_video", "kling_video", "kling_web_video",
+                                  "muse_video", "seedance_video", "sora_video", "veo_video", "wan22_i2v"]
     assert "MiniMaxH3ReferenceToVideo" in reg.get("h3_video").tpl.class_types()
 
 

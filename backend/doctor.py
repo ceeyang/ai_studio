@@ -13,7 +13,9 @@ import psutil
 
 from backend.config import Config
 from backend.engines.browser.errors import EXT_INSTALL_HINT, EXT_LOGIN_HINT, LOGIN_HINT
-from backend.engines.browser.extension import CONVERSATION_FEATURE, RPC_FEATURE, VIDEO_FEATURE, reload_text
+from backend.engines.browser.extension import (CONVERSATION_FEATURE, GENERATOR_FEATURE, GENERATOR_RELOAD_WHY,
+                                               RPC_FEATURE, VIDEO_FEATURE, reload_text)
+from backend.engines.browser.sites.generators import GENERATOR_SITES
 from backend.engines.comfyui.errors import ComfyError
 from backend.engines.registry import runtime_of
 
@@ -48,7 +50,9 @@ def check_browser(engines, browser) -> list[Check]:
     groups: dict[str, list[str]] = {}
     for name, e in sorted(engines.all().items()):
         if runtime_of(e) == "browser":
-            groups.setdefault(e.site, []).append(name)
+            # 即梦 / 可灵按设置页的区域取站点（jimeng_cn / jimeng_global …）
+            key = e.site_key() if hasattr(e, "site_key") else e.site
+            groups.setdefault(key, []).append(name)
     used = {k: _Names("、".join(v)) for k, v in groups.items()}
     if not used or browser is None:
         return []
@@ -80,6 +84,10 @@ def check_browser(engines, browser) -> list[Check]:
     else:
         err = "浏览器没在运行，查不了登录状态"
     for key, eng in sorted(used.items()):
+        if key in GENERATOR_SITES:
+            out.append(Check("浏览器", f"{GENERATOR_SITES[key].label}（{eng.name}）", "warn",
+                             "即梦 / 可灵网页出视频只支持浏览器扩展（config.yaml 的 browser.transport 要是 extension）"))
+            continue
         site = browser.sites.get(key)
         label = site.label if site else key
         name = f"{label} 登录（{eng.name}）"
@@ -118,12 +126,14 @@ def _check_extension(used: dict, browser) -> list[Check]:
         elif VIDEO_FEATURE not in feats or CONVERSATION_FEATURE not in feats:
             out.append(Check("浏览器", "扩展版本", "warn",
                              reload_text(info.get("version") or "?", "还不能网页出视频、也不会接着用之前的对话")))
+        elif GENERATOR_FEATURE not in feats and any(k in GENERATOR_SITES for k in used):
+            out.append(Check("浏览器", "扩展版本", "warn", reload_text(info.get("version") or "?", GENERATOR_RELOAD_WHY)))
     st = browser.hub.site_status()
     # Claude 网页只做文本（web_claude），没有出图引擎：单独报一行登录状态
     if "claude" in browser.sites and "claude" not in used:
         used = {**used, "claude": _Names("网页文本模型", text_only=True)}
     for key, eng in sorted(used.items()):
-        site = browser.sites.get(key)
+        site = browser.sites.get(key) or GENERATOR_SITES.get(key)
         label = site.label if site else key
         host = site.host if site else key
         name = f"{label} 登录（{eng.name}）"

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "AI Studio 网页出图桥",
-  "version": "0.4.1",
-  "description": "让本机 AI Studio（127.0.0.1:8700）在你已登录的 ChatGPT / Gemini / Muse 标签页里出图、出视频，在 ChatGPT / Gemini / Claude / Muse 网页里写文本。不读取、不上传 cookie。",
+  "version": "0.5.0",
+  "description": "让本机 AI Studio（127.0.0.1:8700）在你已登录的 ChatGPT / Gemini / Muse 标签页里出图、出视频，在即梦 / 可灵网页里出视频，在 ChatGPT / Gemini / Claude / Muse 网页里写文本。不读取、不上传 cookie。",
   "minimum_chrome_version": "116",
   "background": {
     "service_worker": "background.js",
@@ -18,7 +18,18 @@
     "https://contribution.usercontent.google.com/*",
     "https://muse.ai/*",
     "https://*.muse.ai/*",
-    "https://claude.ai/*"
+    "https://claude.ai/*",
+    "https://jimeng.jianying.com/*",
+    "https://*.jianying.com/*",
+    "https://dreamina.capcut.com/*",
+    "https://*.capcut.com/*",
+    "https://*.vlabvod.com/*",
+    "https://*.byteimg.com/*",
+    "https://klingai.com/*",
+    "https://*.klingai.com/*",
+    "https://kling.ai/*",
+    "https://*.kling.ai/*",
+    "https://*.kechuangai.com/*"
   ],
   "action": {
     "default_title": "AI Studio 网页出图桥",

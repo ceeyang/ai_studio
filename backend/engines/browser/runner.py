@@ -26,11 +26,12 @@ from backend.engines.browser import conversations as conv
 from backend.engines.browser import flow
 from backend.engines.browser.driver import PageDriver, PlaywrightDriver
 from backend.engines.browser.errors import EXT_DIR, BrowserError
-from backend.engines.browser.extension import (CONVERSATION_FEATURE, RPC_FEATURE, VIDEO_FEATURE, ExtensionHub,
-                                               conversation_reload_text, decode)
+from backend.engines.browser.extension import (CONVERSATION_FEATURE, GENERATOR_FEATURE, RPC_FEATURE, VIDEO_FEATURE,
+                                               ExtensionHub, conversation_reload_text, decode)
 from backend.engines.browser.session import BrowserSession, cookie_names_for
 from backend.engines.browser.sites import SITES
 from backend.engines.browser.sites.base import SiteSpec
+from backend.engines.browser.sites.generators import GENERATOR_SITES
 from backend.queue.errors import JobCanceled
 from backend.queue.trace import annotate_last
 
@@ -177,10 +178,11 @@ class BrowserRunner:
                          "logged_in": (bool(st[k].get("logged_in")) if k in st else None),
                          "cookie": st.get(k, {}).get("cookie"), "page": st.get(k, {}).get("page")}
                      for k, s in self.sites.items()}
-            # 连着的是老扩展：v0.1 没有 rpc（网页文本模型用不了），v0.2 没有 video（不能网页出视频）。
-            # 要在扩展管理页重新加载（续接会话的能力另见 conversation）
+            # 连着的是老扩展：v0.1 没有 rpc（网页文本模型用不了），v0.2 没有 video（不能网页出视频），
+            # v0.4 没有 generator（不能在即梦 / 可灵出视频）。要在扩展管理页重新加载（续接会话的能力另见 conversation）
             feats = info.get("features") or []
-            missing = [x for x in (RPC_FEATURE, VIDEO_FEATURE) if x not in feats] if info["connected"] else []
+            missing = ([x for x in (RPC_FEATURE, VIDEO_FEATURE, GENERATOR_FEATURE) if x not in feats]
+                       if info["connected"] else [])
             needs_reload = bool(missing)
             return {"transport": "extension", "running": info["connected"], "connected": info["connected"],
                     "extension": info, "extension_dir": str(EXT_DIR), "sites": sites,
@@ -236,6 +238,8 @@ class BrowserRunner:
             log: Callable[[str], None] | None = None) -> list[Path]:
         log = log or (lambda m: None)
         req = call.workflow
+        if req.get("generator"):
+            return self._run_generator(call, run_dir=run_dir, cancel=cancel, on_progress=on_progress, log=log)
         video = call.output_kind == "video"
         spec = self.sites.get(req.get("site", ""))
         field = "result_videos" if video else "result_images"
@@ -252,13 +256,7 @@ class BrowserRunner:
             req = {**req, "prompt": f"{prefix} {req['prompt']}", "conversation_url": plan.url}
         run_dir = Path(run_dir)
         run_dir.mkdir(parents=True, exist_ok=True)
-        (run_dir / "workflow.api.json").write_text(
-            json.dumps(req, ensure_ascii=False, indent=2), encoding="utf-8")
-        (run_dir / "call.json").write_text(json.dumps(
-            {"engine": call.engine, "runner": call.runner, "output_kind": call.output_kind,
-             "model_family": call.model_family, "meta": call.meta,
-             "dropped_refs": call.dropped_refs},
-            ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+        self._write_call(run_dir, req, call)
 
         refs = [Path(p) for p in req.get("refs") or []]
         timeout = float(req.get("timeout") or 300)
@@ -281,6 +279,38 @@ class BrowserRunner:
         if video:
             return self._save_video(items, run_dir, spec, log)
         return self._save(got, run_dir, spec, req.get("aspect"), bool(req.get("fit_aspect", True)), log)
+
+    def _run_generator(self, call: EngineCall, *, run_dir: Path, cancel: threading.Event,
+                       on_progress: Callable[[int, int], None] | None,
+                       log: Callable[[str], None]) -> list[Path]:
+        """即梦 / 可灵这类生成器页出视频（只走浏览器扩展，流程和选择器都在扩展的 runGenerator 里）：
+        请求里 choices 是要在页面上选的模型 / 参考方式 / 画幅 / 时长，refs 是首帧（和尾帧）。没有网页会话可续接。"""
+        req = call.workflow
+        site = GENERATOR_SITES.get(req.get("site", ""))
+        if site is None:
+            raise BrowserError("browser", f"网站 {req.get('site')!r} 不是生成器页网站，可选：{', '.join(GENERATOR_SITES)}")
+        if self.transport != "extension":
+            raise BrowserError("browser", "网页出视频只支持浏览器扩展（config.yaml 的 browser.transport 要是 extension）")
+        run_dir = Path(run_dir)
+        run_dir.mkdir(parents=True, exist_ok=True)
+        self._write_call(run_dir, req, call)
+        refs = [Path(p) for p in req.get("refs") or []]
+        timeout = float(req.get("timeout") or 900)
+        with self.site_lock(site.key, site.label, log, cancel):
+            items = self.hub.generate(site.key, site.label, req["prompt"], refs, aspect=req.get("aspect"),
+                                      timeout=timeout, cancel=cancel, log=log, progress=on_progress,
+                                      kind="video", generator=dict(req.get("choices") or {}))
+        return self._save_video(items, run_dir, site, log)
+
+    @staticmethod
+    def _write_call(run_dir: Path, req: dict, call: EngineCall) -> None:
+        (run_dir / "workflow.api.json").write_text(
+            json.dumps(req, ensure_ascii=False, indent=2), encoding="utf-8")
+        (run_dir / "call.json").write_text(json.dumps(
+            {"engine": call.engine, "runner": call.runner, "output_kind": call.output_kind,
+             "model_family": call.model_family, "meta": call.meta,
+             "dropped_refs": call.dropped_refs},
+            ensure_ascii=False, indent=2, default=str), encoding="utf-8")
 
     def _save_video(self, items: list, run_dir: Path, spec: SiteSpec, log: Callable[[str], None]) -> list[Path]:
         """扩展传回来的视频：ffprobe 读得出视频才算，原样存 mp4（画幅已经在页面上选了 / 写进提示词，不裁）。"""

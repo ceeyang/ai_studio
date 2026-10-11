@@ -13,7 +13,9 @@
  */
 (function (root) {
   'use strict';
-  const VERSION = 2; // 加了 replyText（网页文本模型）：版本变了，老版本注入过的页面会换成新的
+  // 2：加了 replyText（网页文本模型）；3：加了生成器页（即梦 / 可灵）用的 options / clickAt / fillInput /
+  // setFilesAt / cards。版本变了，老版本注入过的页面会换成新的
+  const VERSION = 3;
   if (root.__aiStudioDom && root.__aiStudioDom.VERSION === VERSION) return;
 
   // ---------------------------------------------------------------- 选择器
@@ -139,6 +141,28 @@
     return null;
   }
 
+  function visibleAll(sel) {
+    return queryAll(sel).filter(isVisible);
+  }
+
+  function clickEl(el) {
+    if (!el) return false;
+    try {
+      el.scrollIntoView({ block: 'center' });
+    } catch (_e) {
+      /* 有的元素不支持 */
+    }
+    // Radix 之类的下拉菜单在 pointerdown 时打开，普通按钮看 click：整套都发
+    const P = root.PointerEvent || root.MouseEvent;
+    const opts = { button: 0, buttons: 1, pointerType: 'mouse', isPrimary: true, view: root };
+    fire(el, 'pointerdown', P, opts);
+    fire(el, 'mousedown', root.MouseEvent, opts);
+    fire(el, 'pointerup', P, { ...opts, buttons: 0 });
+    fire(el, 'mouseup', root.MouseEvent, { ...opts, buttons: 0 });
+    el.click();
+    return true;
+  }
+
   // ---------------------------------------------------------------- 文件
   function toFiles(files) {
     return (files || []).map((f) => {
@@ -211,22 +235,76 @@
       return !!el && !el.disabled && el.getAttribute('aria-disabled') !== 'true';
     },
     click(sel) {
-      const el = firstVisible(sel);
+      return clickEl(firstVisible(sel));
+    },
+    /** 生成器页：看得见的命中元素（最多 200 个，按文档顺序）的文字、第一行、是不是灰的 / 已选中。
+     *  Arco 的下拉选项：灰的带 …-disabled、选中的带 …-selected（可能在选项自己或外面那层 wrapper 上）。 */
+    options(sel) {
+      return visibleAll(sel).slice(0, 200).map((el) => {
+        const raw = typeof el.innerText === 'string' && el.innerText.trim() ? el.innerText : el.textContent || '';
+        const head = String(raw).split('\n').map(norm).find(Boolean) || '';
+        const cls = `${el.getAttribute('class') || ''} ${(el.parentElement && el.parentElement.getAttribute('class')) || ''}`;
+        return {
+          text: norm(raw),
+          head,
+          disabled: !!el.disabled || el.getAttribute('aria-disabled') === 'true' || /(^|[-_\s])disabled\b/i.test(cls),
+          selected: el.getAttribute('aria-selected') === 'true' || el.getAttribute('aria-checked') === 'true' ||
+            /(^|[-_\s])(selected|checked)\b/i.test(cls),
+        };
+      });
+    },
+    /** 点第 index 个看得见的命中元素（和 options 的顺序一样）。 */
+    clickAt(sel, index) {
+      return clickEl(visibleAll(sel)[index || 0]);
+    },
+    /** 往数字输入框里填值（React / Arco 的受控输入框：用原生 setter 写，再发 input / change，回车、失焦提交）。
+     *  sel 命中的不是 input 时取它里面的第一个 input。 */
+    fillInput(sel, value) {
+      let el = firstVisible(sel);
+      if (el && el.tagName !== 'INPUT' && el.tagName !== 'TEXTAREA') el = el.querySelector('input, textarea');
       if (!el) return false;
-      try {
-        el.scrollIntoView({ block: 'center' });
-      } catch (_e) {
-        /* 有的元素不支持 */
-      }
-      // Radix 之类的下拉菜单在 pointerdown 时打开，普通按钮看 click：整套都发
-      const P = root.PointerEvent || root.MouseEvent;
-      const opts = { button: 0, buttons: 1, pointerType: 'mouse', isPrimary: true, view: root };
-      fire(el, 'pointerdown', P, opts);
-      fire(el, 'mousedown', root.MouseEvent, opts);
-      fire(el, 'pointerup', P, { ...opts, buttons: 0 });
-      fire(el, 'mouseup', root.MouseEvent, { ...opts, buttons: 0 });
-      el.click();
+      el.focus();
+      const proto = el.tagName === 'TEXTAREA' ? root.HTMLTextAreaElement : root.HTMLInputElement;
+      Object.getOwnPropertyDescriptor(proto.prototype, 'value').set.call(el, String(value));
+      fire(el, 'input', root.InputEvent || Event, { inputType: 'insertText', data: String(value) });
+      fire(el, 'change', Event, {});
+      const init = { key: 'Enter', code: 'Enter', keyCode: 13, which: 13 };
+      fire(el, 'keydown', root.KeyboardEvent, init);
+      fire(el, 'keyup', root.KeyboardEvent, init);
+      el.blur();
+      fire(el, 'blur', root.FocusEvent || Event, {});
       return true;
+    },
+    /** 把文件塞进第 index 个上传框（隐藏的也算：首帧、尾帧各一个上传框时按顺序取）。 */
+    setFilesAt(sel, index, files) {
+      const all = queryAll(sel).filter((e) => e.tagName === 'INPUT' && e.type === 'file');
+      const input = all[index || 0];
+      if (!input || !files || !files.length) return false;
+      input.files = transfer(input.multiple ? files : files.slice(0, 1)).files;
+      fire(input, 'input', Event, {});
+      fire(input, 'change', Event, {});
+      return true;
+    },
+    /** 生成器页结果区的任务卡片（按文档顺序，不按布局筛：后台标签页里懒渲染）：key 是卡片上的 id 类属性
+     *  （没有就 ''）、文字（截 300 字）、卡片里第一个视频的地址、有没有失败标志。videoSel / failedSel 是
+     *  卡片里面的普通 CSS 选择器。 */
+    cards(sel, videoSel, failedSel) {
+      const pick = (el, s) => {
+        if (!s) return null;
+        try {
+          return el.querySelector(s);
+        } catch (_e) {
+          return null;
+        }
+      };
+      return queryAll(sel).map((el) => {
+        const key = ['data-id', 'data-item-id', 'data-task-id', 'data-record-id', 'data-key', 'id']
+          .map((a) => el.getAttribute(a)).find(Boolean) || '';
+        const v = pick(el, videoSel || 'video');
+        const source = v && v.querySelector ? v.querySelector('source[src]') : null;
+        const video = v ? v.currentSrc || v.src || (source && source.src) || v.getAttribute('src') || '' : '';
+        return { key, text: textOf(el).slice(0, 300), video, failed: !!pick(el, failedSel) };
+      });
     },
     /** 输提示词：ProseMirror（ChatGPT）、Quill（Gemini）、普通 textarea 都走 execCommand('insertText')，
      *  它会触发网页自己的输入处理；不行再模拟粘贴纯文本，最后直接写内容 + input 事件。 */

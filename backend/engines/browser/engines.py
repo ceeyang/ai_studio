@@ -1,5 +1,6 @@
 """网页引擎：出图 gpt_image（chatgpt.com）、gemini_image（gemini.google.com）、muse_image（muse.ai）；
-出视频 gemini_video、muse_video（只走浏览器扩展）。
+出视频 gemini_video、muse_video（聊天页），jimeng_video（即梦 / Dreamina）、kling_web_video（可灵）
+（生成器页，见 _GeneratorVideoEngine），都只走浏览器扩展。
 
 build() 只把请求拼成「网页出图请求」（EngineCall.runner="browser"，workflow 里是网站、提示词、
 参考图、画幅），执行交给 BrowserRunner。网页没有尺寸、种子、负面提示词参数：画幅和尺寸写进提示词，
@@ -196,8 +197,118 @@ class MuseVideoEngine(_BrowserVideoEngine):
                      duration_control="prompt", allowed_seconds=(3.0, 5.0, 10.0))
 
 
+# ---------------------------------------------------------------- 生成器页出视频（即梦 / 可灵）
+def generator_prompt(prompt: str) -> str:
+    """生成器页的提示词：就是镜头描述，一行（画幅、时长在页面上选，不用写进提示词）。"""
+    return " ".join((prompt or "").split())
+
+
+class _GeneratorVideoEngine(_BrowserVideoEngine):
+    """即梦 / 可灵这类生成器页（不是聊天页）：模型、参考方式、画幅、时长都在页面上选，首帧（和尾帧）传进上传位。
+    流程和选择器在扩展里（browser-extension/lib/flow.js 的 runGenerator、sites/jimeng.js、kling.js），要扩展
+    报了 generator 能力（v0.5 起），老扩展在引擎下拉里提示「扩展需要重新加载」。
+
+    区域（国内 / 海外）：设置页「网页出图」里选，存 app_settings 的 web_region_<family>，默认国内；
+    params.region 能在 config.yaml 里写死。build() 按区域选站点（jimeng_cn / jimeng_global …）。
+
+    params（config.yaml engines.<name>.params）：
+      timeout: 等结果的最长秒数
+      model: 页面上模型下拉要选的（按名字开头匹配，如「Seedance 2.0」）；不写用 default_model，null 不动页面上的
+      mode: 参考方式 / 生成方式（即梦「首尾帧」、可灵「图生视频」）；不写用扩展里站点的默认
+      region: cn / global（写了就不看设置页）
+    """
+    site_family = ""
+    ext_feature = "generator"
+    default_model: str | None = None
+    default_timeout = 1200.0
+
+    def __init__(self, overrides: dict | None = None, region=None):
+        super().__init__(overrides)
+        # 现读区域设置的函数（build_services 里装上 SettingsStore.web_region）；没有就国内
+        self.region_source = region
+
+    def set_region_source(self, fn) -> None:
+        self.region_source = fn
+
+    def region(self) -> str:
+        from backend.engines.browser.sites.generators import REGIONS
+
+        r = self.overrides.get("region")
+        if not r and self.region_source is not None:
+            try:
+                r = self.region_source(self.site_family)
+            except Exception:
+                r = None
+        return r if r in REGIONS else "cn"
+
+    def site_key(self) -> str:
+        from backend.engines.browser.sites.generators import generator_site
+
+        return generator_site(self.site_family, self.region()).key
+
+    def build(self, req: VideoRequest) -> EngineCall:
+        from backend.engines.browser.sites.generators import GENERATOR_SITES
+
+        require_first_frame(req, self)   # 没有首帧（参考图直出）而引擎不支持 ref_mode 时报清楚
+        w, h = size_for(self.caps.sizes, req.aspect)
+        ask = self.ask_seconds(req)
+        seconds = float(ask or self.caps.default_seconds)
+        site = self.site_key()
+        text = generator_prompt(req.prompt)
+        timeout = float(self.overrides.get("timeout") or self.default_timeout)
+        end = req.end_frame if (req.end_frame and self.caps.supports_end_frame) else None
+        refs = [str(req.first_frame)] + ([str(end)] if end else [])
+        model = self.overrides.get("model", self.default_model)
+        choices = {"model": model or None, "mode": self.overrides.get("mode") or None, "ratio": req.aspect,
+                   "duration": int(round(seconds)), "end_frame": bool(end)}
+        request = {"runner": RUNTIME, "site": site, "kind": "video", "generator": True, "choices": choices,
+                   "prompt": text, "aspect": req.aspect, "refs": refs, "timeout": timeout, "fit_aspect": False}
+        meta = {"prompt": req.prompt, "web_prompt": text, "site": site, "region": GENERATOR_SITES[site].region,
+                "size": [w, h], "seed": None, "nondeterministic": True, "seconds": seconds,
+                "frames": self.frames_for(seconds), "fps": self.caps.fps, "first_frame": str(req.first_frame),
+                "end_frame": str(end) if end else None, "refs": [], "choices": choices,
+                "duration_control": self.caps.duration_control, "asked_seconds": ask, "shot_seconds": req.seconds}
+        if req.negative:
+            meta["negative_ignored"] = req.negative
+        dropped = [str(p) for p in req.refs]
+        if req.end_frame and not end:
+            dropped.append(str(req.end_frame))
+        return EngineCall(self.name, request, "video", self.family, meta=meta, dropped_refs=dropped, runner="browser")
+
+
+class JimengVideoEngine(_GeneratorVideoEngine):
+    """即梦（国内 jimeng.jianying.com）/ Dreamina（海外 dreamina.capcut.com）网页出视频，Seedance 模型。
+    「首尾帧」参考方式：首帧 + 可选尾帧。页面时长能填 4–15 秒的整数，这里按 5 / 10 / 15 三档取（不比镜头短）。
+    有声、24 fps、720P 尺寸是按 Seedance 2.0 的公开说明填的，待实跑确认（docs/notes/2026-10-12-jimeng-kling-web.md）。
+    默认模型 Seedance 2.0 mini（页面默认、最便宜：5 秒 720P 30 积分）；2.0 系列暂不支持真人人脸参考图。"""
+    name = "jimeng_video"
+    family = "jimeng_web"
+    site = "jimeng_cn"
+    site_family = "jimeng"
+    label = "即梦网页（Seedance）"
+    default_model = "Seedance 2.0 mini"
+    caps = VideoCaps(max_refs=0, supports_end_frame=True, has_audio=True, fps=24,
+                     sizes={"9:16": (720, 1280), "16:9": (1280, 720)}, default_seconds=5.0, max_seconds=15.0,
+                     duration_control="param", allowed_seconds=(5.0, 10.0, 15.0))
+
+
+class KlingWebVideoEngine(_GeneratorVideoEngine):
+    """可灵网页出视频（国内 klingai.com / 国际 kling.ai），图生视频：首帧，5 / 10 秒。
+    尾帧上传位还没实测到，先不支持；有声（可灵 3.0）和 1080p 尺寸待实跑确认。模型不写就用页面上现在选的。"""
+    name = "kling_web_video"
+    family = "kling_web"
+    site = "kling_cn"
+    site_family = "kling"
+    label = "可灵网页"
+    default_model = None
+    caps = VideoCaps(max_refs=0, supports_end_frame=False, has_audio=True, fps=24,
+                     sizes={"9:16": (1080, 1920), "16:9": (1920, 1080)}, default_seconds=5.0, max_seconds=10.0,
+                     duration_control="param", allowed_seconds=(5.0, 10.0))
+
+
 BROWSER_IMAGE_ENGINES = (GptImageEngine, GeminiImageEngine, MuseImageEngine)
-BROWSER_VIDEO_ENGINES = (GeminiVideoEngine, MuseVideoEngine)
+BROWSER_VIDEO_ENGINES = (GeminiVideoEngine, MuseVideoEngine, JimengVideoEngine, KlingWebVideoEngine)
+GENERATOR_ENGINES = (JimengVideoEngine, KlingWebVideoEngine)
 BROWSER_ENGINES = (*BROWSER_IMAGE_ENGINES, *BROWSER_VIDEO_ENGINES)
 # 队列给每个网页引擎族开一条串行通道（不走 GPU worker）
 BROWSER_FAMILIES: tuple[str, ...] = tuple(dict.fromkeys(e.family for e in BROWSER_ENGINES))

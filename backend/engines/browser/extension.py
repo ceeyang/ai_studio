@@ -24,6 +24,9 @@ browser-extension/ 是一个 MV3 扩展，装在用户日常用的 Chrome/Edge �
              kind（v0.3 起）：image（默认）/ video（Gemini、Muse 网页出视频，首帧在 refs 里；hello.features 里有 video 才发）
              conversation_url（v0.3 起）：在这条之前的对话里接着出图（打不开就新开）；result 里带回
              conversation {url, continued, note}：结束时标签页地址、是否真的续接上了、退回新对话的原因
+             generator（v0.5 起）：生成器页出视频（site 是 jimeng_cn / jimeng_global / kling_cn / kling_global，
+             kind = video）：{model, mode, ratio, duration, end_frame}，refs 是首帧（和尾帧）；
+             hello.features 里有 generator 才发
     cancel   {job_id}
     status_request {}
     open     {urls}                                           在用户浏览器里打开这些网址（登录用）
@@ -60,6 +63,8 @@ PROTOCOL = 1
 RPC_FEATURE = "rpc"          # 扩展 hello 里报的能力：有它才能用网页文本模型（v0.2 起）
 CONVERSATION_FEATURE = "conversation"   # 有它出图任务才能续接之前的网页会话、报回对话地址（v0.3 起）
 VIDEO_FEATURE = "video"      # 有它才能网页出视频（job.kind = video，v0.3 起）
+GENERATOR_FEATURE = "generator"   # 有它才能在即梦 / 可灵这类生成器页出视频（job.generator，v0.5 起）
+GENERATOR_RELOAD_WHY = "还不能在即梦 / 可灵网页出视频"
 RPC_TIMEOUT = 90.0
 KINDS = {"not_logged_in", "quota", "refused", "timeout", "no_image", "page", "browser"}
 # 扩展那边开标签页、等页面加载、传参考图都不算在 timeout（等出图）里，多给这么久再判超时
@@ -273,14 +278,18 @@ class ExtensionHub:
                  progress: Callable[[int, int], None] | None = None,
                  clock: Callable[[], float] = time.monotonic, poll: float = 0.5,
                  conversation_url: str | None = None, info: dict | None = None,
-                 kind: str = "image") -> list[ExtImage]:
+                 kind: str = "image", generator: dict | None = None) -> list[ExtImage]:
         """info（可选）：扩展在 result 里报的会话情况 {url, continued, note} 填进去（v0.3 起才有）。
-        kind：image（出图）/ video（出视频，扩展没有 video 能力时直接报要重新加载）。"""
+        kind：image（出图）/ video（出视频，扩展没有 video 能力时直接报要重新加载）。
+        generator（可选）：生成器页（即梦 / 可灵）要选的项，扩展没有 generator 能力时直接报要重新加载。"""
         conn = self._conn
         if conn is None:
             raise BrowserError("browser", not_connected_text())
-        if kind == "video" and VIDEO_FEATURE not in (conn.hello.get("features") or []):
+        feats = conn.hello.get("features") or []
+        if kind == "video" and VIDEO_FEATURE not in feats:
             raise BrowserError("browser", reload_text(str(conn.hello.get("version") or "?"), "这个版本还不能网页出视频"))
+        if generator is not None and GENERATOR_FEATURE not in feats:
+            raise BrowserError("browser", reload_text(str(conn.hello.get("version") or "?"), GENERATOR_RELOAD_WHY))
         what = "出视频" if kind == "video" else "出图"
         job_id = uuid.uuid4().hex
         q: queue.Queue = queue.Queue()
@@ -291,6 +300,8 @@ class ExtensionHub:
                    "options": self.options}
             if conversation_url:
                 msg["conversation_url"] = conversation_url
+            if generator is not None:
+                msg["generator"] = dict(generator)
             self.send(msg, conn)
             ver = conn.hello.get("version")
             log(f"{label}：任务已发给浏览器扩展{f'（v{ver}）' if ver else ''}，在你的浏览器里{what}")

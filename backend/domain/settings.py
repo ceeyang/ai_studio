@@ -45,6 +45,9 @@ STEP_KIND = {**{k: "llm" for k in LLM_STEPS}, **{k: "image" for k in IMAGE_STEPS
 STEP_LABEL = {**LLM_STEPS, **IMAGE_STEPS, **VIDEO_STEPS}
 GLOBAL_KEYS = {"text_model": "llm", "image_engine": "image", "video_engine": "video"}
 FLAG_KEYS = ("web_reuse_conversation",)   # 开关类的全局设置（存 true / false；没有这一行 = 默认）
+# 生成器页网站（即梦 / 可灵）用国内站还是海外站：存 "cn" / "global"，没有这一行 = 国内
+REGION_KEYS = {"web_region_jimeng": "jimeng", "web_region_kling": "kling"}
+REGIONS = ("cn", "global")
 FALLBACK_IMAGE = "zimage"
 FALLBACK_VIDEO = "h3_video"
 SHEET_ENGINE = "h3_image"          # 三视图没设置时优先用 H3（带定妆照锁脸）
@@ -58,6 +61,9 @@ class AppSettings:
     steps: dict[str, str] = field(default_factory=dict)    # 只放设置了的步骤
     # 网页出图 / 网页文本模型重新生成时续接之前的网页会话（backend/engines/browser/conversations.py），默认开
     web_reuse_conversation: bool = True
+    # 即梦 / 可灵网页出视频用哪个区域的站点（cn 国内 / global 海外），默认国内
+    web_region_jimeng: str = "cn"
+    web_region_kling: str = "cn"
 
     def step(self, key: str) -> str | None:
         return self.steps.get(key) or None
@@ -75,7 +81,15 @@ class SettingsStore:
                     if k.startswith("step:") and v and k[5:] in STEP_KIND}
         if isinstance(rows.get(FLAG_KEYS[0]), bool):
             st.web_reuse_conversation = rows[FLAG_KEYS[0]]
+        for key in REGION_KEYS:
+            if rows.get(key) in REGIONS:
+                setattr(st, key, rows[key])
         return st
+
+    def web_region(self, family: str) -> str:
+        """即梦 / 可灵（family = jimeng / kling）网页出视频用的区域：cn / global。给引擎 build() 现读。"""
+        key = f"web_region_{family}"
+        return getattr(self.load(), key, "cn") if key in REGION_KEYS else "cn"
 
     def save(self, values: dict[str, Any]) -> None:
         """values：text_model / image_engine / video_engine / step:<key> → 值（None = 跟随默认）。"""

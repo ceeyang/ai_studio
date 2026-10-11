@@ -100,9 +100,9 @@ def test_candidates_select_and_media(api):
 def test_system_endpoints(api):
     assert api.get("/api/health").json()["ok"] is True
     eng = api.get("/api/engines").json()
-    assert [e["name"] for e in eng["video"]] == ["gemini_video", "h3_video", "kling_video", "muse_video", "seedance_video",
-                                                 "sora_video", "veo_video",
-                                                 "wan22_i2v"]
+    assert [e["name"] for e in eng["video"]] == ["gemini_video", "h3_video", "jimeng_video", "kling_video",
+                                                 "kling_web_video", "muse_video", "seedance_video",
+                                                 "sora_video", "veo_video", "wan22_i2v"]
     assert eng["video"][0]["caps"]["has_audio"] is True
     assert eng["video"][0]["caps"]["duration_control"] == "fixed" and eng["video"][0]["runtime"] == "browser"
     api_rows = {e["name"]: e for e in eng["video"] + eng["image"] if e["runtime"] == "api"}

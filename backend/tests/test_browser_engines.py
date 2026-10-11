@@ -40,7 +40,8 @@ def test_engines_registered_with_caps(reg):
     assert set(gpt.caps.sizes) == set(gem.caps.sizes) == {"9:16", "16:9", "1:1", "21:9"}
     muse = reg.image("muse_image")
     assert runtime_of(muse) == "browser" and muse.family == "muse_web" and muse.caps.max_refs == 3
-    assert {gpt.family, gem.family, muse.family} == set(BROWSER_FAMILIES)
+    # 即梦 / 可灵网页出视频各自一条通道
+    assert {gpt.family, gem.family, muse.family, "jimeng_web", "kling_web"} == set(BROWSER_FAMILIES)
     gv, mv = reg.video("gemini_video"), reg.video("muse_video")
     assert runtime_of(gv) == runtime_of(mv) == "browser"
     assert (gv.family, mv.family) == ("gemini_web", "muse_web")   # 和同网站的出图共用一条通道
@@ -332,7 +333,8 @@ def test_doctor_browser_not_running_or_missing(tmp_path, reg):
 
 def test_doctor_skips_browser_when_engines_disabled(tmp_path):
     r = EngineRegistry(Config(engines={n: EngineCfg(enabled=False) for n in
-                                       ("gpt_image", "gemini_image", "muse_image", "gemini_video", "muse_video")}))
+                                       ("gpt_image", "gemini_image", "muse_image", "gemini_video", "muse_video",
+                                        "jimeng_video", "kling_web_video")}))
     assert check_browser(r, FakeLoginRunner(FakeSession(tmp_path), {})) == []
 
 

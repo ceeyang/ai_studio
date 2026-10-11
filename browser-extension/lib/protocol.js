@@ -104,8 +104,10 @@ export function loggedIn(cookie, page) {
  * （backend/engines/browser/chat.py），选择器也从 studio 发过来——改流程、改选择器不用重新加载扩展。
  * conversation（v0.3 起）：出图任务能续接之前的网页对话（job.conversation_url），结果里报回对话地址。
  * video（v0.4 起）：job.kind = 'video' 网页出视频（Gemini / Muse）。
+ * generator（v0.5 起）：即梦 / 可灵这类生成器页出视频（job.site 是 jimeng_cn / jimeng_global / kling_cn /
+ *   kling_global，job.generator 里是要选的模型、参考方式、画幅、时长，refs 是首帧和尾帧）。
  */
-export const FEATURES = ['rpc', 'conversation', 'video'];
+export const FEATURES = ['rpc', 'conversation', 'video', 'generator'];
 
 /** rpc 能调的 content/dom.js 函数（只读页面和往输入框里输入、点按钮、传图，别的不让调）。 */
 export const RPC_DOM_OPS = [

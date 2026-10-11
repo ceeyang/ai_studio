@@ -7,6 +7,10 @@
    8 秒后在助手消息里出一张 1024×1536 的图），并给 chatgpt.com 加一个假的登录 cookie；
 4. 后端用 gpt_image 出一张 9:16 的图（带一张参考图），检查：扩展连上、报了状态、参考图传进了
    file input、提示词输进了输入框、原图取回来并被居中裁成 864×1536。
+5. 生成器页（v0.5 起）：把 https://jimeng.jianying.com/ai-tool/generate 拦成一个假的即梦生成页（Arco 风格的
+   三个下拉、画幅 / 时长弹层、两个隐藏的上传框、tiptap 输入框、生成按钮、结果区 6 秒后出 <video>），后端用
+   jimeng_video 出一段（首帧 + 尾帧、8 秒 → 选 10 秒），检查选项都选对了、两帧传进了对应的上传框、mp4 取回来。
+   本机没有 ffmpeg 时跳过这一段（结果视频要 ffprobe 读得出来）。
 
 用法（仓库根目录）：uv run --no-sync python browser-extension/dev/smoke.py
 """
@@ -14,6 +18,7 @@ from __future__ import annotations
 
 import io
 import shutil
+import subprocess
 import sys
 import tempfile
 import threading
@@ -28,7 +33,7 @@ sys.path.insert(0, str(REPO))
 
 from backend.app.main import create_app
 from backend.config import ComfyCfg, Config, LLMCfg, ProviderCfg, ServerCfg
-from backend.engines.base import ImageRequest
+from backend.engines.base import ImageRequest, VideoRequest
 
 PORT = 18799
 EXT = REPO / "browser-extension"
@@ -68,6 +73,101 @@ FAKE_CHATGPT = """<!doctype html><html><head><meta charset="utf-8"><title>ChatGP
     }, 8000);
   });
 </script></body></html>"""
+
+
+# 假的即梦生成页：结构照 2026-10-12 实测的类名（lv-select / lv-select-option / lv-btn / lv-popover / ProseMirror /
+# credit-amount-text / actual-credits），没实测的部分（上传位、生成按钮、结果卡片）照 sites/jimeng.js 里猜的选择器
+FAKE_JIMENG = """<!doctype html><html><head><meta charset="utf-8"><title>即梦</title>
+<style>.lv-select,.lv-btn{display:inline-block;margin:4px;padding:4px;border:1px solid #ccc}</style></head>
+<body>
+  <span class="credit-amount-text">100</span>
+  <div id="bar">
+    <div role="combobox" class="lv-select">Agent 模式</div>
+    <div role="combobox" class="lv-select">Seedance 2.0 mini</div>
+    <div role="combobox" class="lv-select">全能参考</div>
+    <button class="lv-btn" id="ratio">16:9 720P 1</button>
+    <button class="lv-btn" id="dur">5s</button>
+  </div>
+  <div class="upload-slot" id="slots">
+    <input type="file" id="f0" style="display:none"><input type="file" id="f1" style="display:none">
+  </div>
+  <div role="textbox" class="ProseMirror" contenteditable="true" style="min-height:40px;border:1px solid #ccc"></div>
+  <span class="actual-credits">30</span>
+  <button class="submit-button" id="go">生成</button>
+  <div id="records"></div>
+<script>
+  window.__got = {picked: [], files: [], prompt: ''};
+  const MENUS = [
+    ['Agent 模式', '图片生成', '视频生成', '数字人'],
+    ['Seedance 2.0 mini', 'Seedance 2.0 Fast', 'Seedance 2.0'],
+    ['全能参考', '首尾帧', '智能多帧'],
+  ];
+  const close = () => document.querySelectorAll('.lv-select-popup, .lv-popover').forEach((e) => e.remove());
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+  document.querySelectorAll('[role=combobox]').forEach((box, i) => box.addEventListener('click', () => {
+    close();
+    const pop = document.createElement('div');
+    pop.className = 'lv-select-popup';
+    for (const t of MENUS[i]) {
+      const o = document.createElement('div');
+      o.className = 'lv-select-option';
+      o.textContent = t;
+      o.addEventListener('click', () => { box.textContent = t; window.__got.picked.push(t); close(); });
+      pop.appendChild(o);
+    }
+    document.body.appendChild(pop);
+  }));
+  document.getElementById('ratio').addEventListener('click', () => {
+    close();
+    const pop = document.createElement('div');
+    pop.className = 'lv-popover';
+    for (const t of ['16:9', '9:16', '1:1']) {
+      const b = document.createElement('button');
+      b.textContent = t;
+      b.addEventListener('click', () => {
+        document.getElementById('ratio').textContent = t + ' 720P 1'; window.__got.picked.push(t); close();
+      });
+      pop.appendChild(b);
+    }
+    document.body.appendChild(pop);
+  });
+  document.getElementById('dur').addEventListener('click', () => {
+    close();
+    const pop = document.createElement('div');
+    pop.className = 'lv-popover';
+    pop.innerHTML = '<div class="lv-input-number"><input value="5"></div>';
+    pop.querySelector('input').addEventListener('change', (e) => {
+      document.getElementById('dur').textContent = e.target.value + 's'; window.__got.picked.push(e.target.value + 's');
+    });
+    document.body.appendChild(pop);
+  });
+  for (const id of ['f0', 'f1']) document.getElementById(id).addEventListener('change', (e) => {
+    for (const f of e.target.files) {
+      window.__got.files.push(id + ':' + f.name);
+      const img = document.createElement('img');
+      img.src = URL.createObjectURL(f); img.width = 48; img.height = 48;
+      document.getElementById('slots').appendChild(img);
+    }
+  });
+  document.getElementById('go').addEventListener('click', () => {
+    window.__got.prompt = document.querySelector('.ProseMirror').innerText;
+    const card = document.createElement('div');
+    card.className = 'video-record';
+    card.textContent = '生成中';
+    document.getElementById('records').appendChild(card);
+    setTimeout(() => { card.innerHTML = '<p>已完成</p><video src="/fake/video.mp4"></video>'; }, 6000);
+  });
+</script></body></html>"""
+
+
+def mp4(path: Path) -> bytes | None:
+    ff = shutil.which("ffmpeg")
+    if ff is None:
+        return None
+    subprocess.run([ff, "-v", "error", "-y", "-f", "lavfi", "-i", "color=c=red:s=72x128:d=1:r=24",
+                    "-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono", "-shortest", "-c:v", "mpeg4",
+                    "-c:a", "aac", str(path)], check=True)
+    return path.read_bytes()
 
 
 def png(w, h, color=(30, 120, 200)) -> bytes:
@@ -155,6 +255,33 @@ def main() -> int:
             assert any("用上次出图的那个标签页" in m for m in logs), logs
             assert Image.open(files2[0]).size == (1024, 1024), Image.open(files2[0]).size
             print("第二张：", files2[0], Image.open(files2[0]).size)
+
+            # 生成器页：假的即梦，首帧 + 尾帧、8 秒（选 10 秒档）
+            video = mp4(tmp / "fake.mp4")
+            if video is None:
+                print("没有 ffmpeg，跳过生成器页（即梦）这一段")
+            else:
+                # 不碰真网站：即梦域名下别的请求（favicon 之类）一律拦掉（后注册的路由先匹配）
+                ctx.route("https://*.jianying.com/**", lambda r: r.abort())
+                ctx.route("https://jimeng.jianying.com/fake/video.mp4",
+                          lambda r: r.fulfill(status=200, content_type="video/mp4", body=video))
+                ctx.route("https://jimeng.jianying.com/ai-tool/generate*",
+                          lambda r: r.fulfill(status=200, content_type="text/html", body=FAKE_JIMENG))
+                ctx.add_cookies([{"name": "sessionid", "value": "fake", "domain": ".jianying.com", "path": "/",
+                                  "secure": True, "httpOnly": True}])
+                end = tmp / "end.png"
+                end.write_bytes(png(256, 256, (40, 200, 80)))
+                vcall = app.state.services.engines.video("jimeng_video").build(
+                    VideoRequest(prompt="灯笼 smoke test", first_frame=ref, end_frame=end, seconds=8.0))
+                vfiles = run_job(vcall, tmp / "run3")
+                print("即梦结果：", vfiles[0], vfiles[0].stat().st_size)
+                assert vfiles[0].name == "jimeng_cn_00.mp4" and vfiles[0].read_bytes() == video
+                jp = next(p for p in ctx.pages if "jimeng.jianying.com" in p.url)
+                got = jp.evaluate("window.__got")
+                print("假即梦页面收到：", got)
+                assert got["picked"] == ["视频生成", "首尾帧", "9:16", "10s"], got["picked"]
+                assert got["files"] == ["f0:chen.png", "f1:end.png"], got["files"]
+                assert "灯笼 smoke test" in got["prompt"]
             hub.request_status()
             pump.wait_for_timeout(2000)
             st = app.state.services.browser.status()

@@ -9,6 +9,7 @@
  *   press(sel, key) setFiles(sel, files) pasteFiles(sel, files) dropFiles(sel, files) text(sel)
  *   images(sel) videos(sel) fetchImage(src) → {mime, b64, via} cookieNames(url) → string[] sleep(seconds)
  * files 是 [{name, mime, b64}]（studio 发来的参考图）。
+ * 生成器页（即梦 / 可灵，v0.5 起）走文件末尾的 runGenerator，另外要 options clickAt fillInput setFilesAt cards。
  *
  * 任何一步不对都抛 FlowError(kind, message)：kind 和后端 BrowserError 一样（not_logged_in / quota /
  * refused / timeout / no_image / page / browser），message 原样显示在任务上，所以要说清楚怎么办。
@@ -620,4 +621,567 @@ export async function generate(d, spec, job, { isCanceled, log, progress, clock,
   const out = await f.download(items, kind);
   if (onConversation) onConversation({ url: String((await d.url()) || ''), continued: f.continued, note });
   return out;
+}
+
+// ================================================================ 生成器页（即梦 / 可灵，v0.5 起）
+/*
+ * 生成器页和聊天页流程不同：没有对话，页面上一个生成框（模式 / 模型 / 参考方式下拉、画幅和时长弹层、
+ * 首帧尾帧上传位、提示词、生成按钮），结果区里每次生成多一张任务卡片，卡片里出 <video>。
+ * spec.kind = 'generator' 的网站走这里（sites/jimeng.js、sites/kling.js），只在扩展里有，后端只发请求。
+ *
+ * job: {prompt, refs: [首帧, 尾帧?], aspect, timeout, generator: {model, mode, ratio, duration, end_frame}}
+ *   generator 里没给的项用 spec.defaults（tab / model / mode …），值是 null / '' 的项不动页面上现在的选择。
+ *
+ * 除了聊天流程那些 driver 方法，还要：options(sel) → [{text, head, disabled, selected}]（看得见的命中元素）、
+ *   clickAt(sel, i)、fillInput(sel, value)、setFilesAt(sel, i, files)、cards(cardSel, videoSel, failedSel)
+ *   → [{key, text, video, failed}]（结果区的任务卡片，按文档顺序）。
+ */
+
+/** 点了生成后最多等这么多秒看到结果区多出一张新卡片（或页面报错），看不到就当没提交上。 */
+export const CARD_APPEAR = 90;
+
+function normText(t) {
+  return String(t == null ? '' : t).replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+/**
+ * 在选项里挑要的那一项（纯函数），返回下标，找不到 -1。items: [{text, head}]（head 是第一行，没有就用 text）。
+ * want：字符串或数组（中英文界面的几种写法，任一）。mode：
+ * - exact：第一行或全文完全相同（不分大小写，空白合并）；
+ * - startsWith：先找完全相同的，再找「以 want 开头、后面紧跟的不是字母数字」的——选项文字常是名字 + 一行说明，
+ *   「Seedance 2.0」能匹配「Seedance 2.0 暂不支持真人人脸」，但不会选成「Seedance 2.0 mini」；
+ * - includes：全文包含。
+ */
+export function pickOption(items, want, mode = 'startsWith') {
+  const wants = (Array.isArray(want) ? want : [want]).map(normText).filter(Boolean);
+  const rows = (items || []).map((it, i) => ({ i, head: normText(it.head || it.text), text: normText(it.text) }));
+  for (const w of wants) {
+    const hit = rows.find((r) => r.head === w || r.text === w);
+    if (hit) return hit.i;
+  }
+  if (mode === 'exact') return -1;
+  for (const w of wants) {
+    for (const r of rows) {
+      if (mode === 'includes') {
+        if (r.text.includes(w)) return r.i;
+        continue;
+      }
+      for (const t of [r.head, r.text]) {
+        if (!t.startsWith(w)) continue;
+        const rest = t.slice(w.length).replace(/^\s+/, '');
+        if (!rest || !/^[a-z0-9]/.test(rest)) return r.i;
+      }
+    }
+  }
+  return -1;
+}
+
+/** 按钮上现在显示的值是不是 want（「16:9 720P 1」里有 16:9、「1080p · 5s」里有 5s）。 */
+export function showsValue(text, want) {
+  const tokens = String(text || '').split(/[\s·|,，/]+/).map(normText).filter(Boolean);
+  const wants = (Array.isArray(want) ? want : [want]).map(normText).filter(Boolean);
+  if (wants.some((w) => tokens.includes(w))) return true;
+  return pickOption([{ text }], want, 'startsWith') === 0;
+}
+
+function genSiteFile(spec) {
+  return `browser-extension/sites/${spec.family || spec.key}.js`;
+}
+
+function riskError(spec) {
+  return new FlowError(
+    'browser',
+    `${spec.label} 弹出了人机验证（滑块 / 频繁操作提示）：去那个标签页里手动完成验证，再重试这个任务`,
+  );
+}
+
+function num(text) {
+  const m = /(\d+(?:\.\d+)?)/.exec(String(text || '').replace(/,/g, ''));
+  return m ? Number(m[1]) : null;
+}
+
+const secondsTexts = (sec) => [`${sec}s`, `${sec}秒`, `${sec} 秒`];
+
+class Generator {
+  constructor(d, spec, job, { isCanceled, log, progress, clock, poll }) {
+    this.d = d;
+    this.spec = spec;
+    this.job = job;
+    this.isCanceled = isCanceled || (() => false);
+    this.log = log || (() => {});
+    this.progress = progress || (() => {});
+    this.clock = clock;
+    this.poll = poll;
+    this.beforeKeys = new Set();
+    this.beforeVideos = new Set();
+    this.beforeCount = 0;
+  }
+
+  async checkCancel() {
+    if (this.isCanceled()) throw new Canceled();
+  }
+
+  async sleep(s) {
+    await this.d.sleep(s);
+  }
+
+  /** 这一项要选的值：请求里给的 → 站点默认；null / '' = 不动页面上现在的选择。 */
+  want(param) {
+    const g = this.job.generator || {};
+    const v = g[param];
+    if (v != null && v !== '') return v;
+    if (param === 'ratio' && this.job.aspect) return this.job.aspect;
+    const dv = (this.spec.defaults || {})[param];
+    return dv == null || dv === '' ? null : dv;
+  }
+
+  async guard() {
+    const s = this.spec;
+    const at = String((await this.d.url()) || '');
+    if ((s.login_hosts || []).some((h) => at.includes(`://${h}/`))) throw notLoggedIn(s);
+    if (s.login_wall && (await this.d.visible(s.login_wall))) throw notLoggedIn(s);
+    if (s.captcha && (await this.d.visible(s.captcha))) throw riskError(s);
+  }
+
+  async dismiss() {
+    const s = this.spec;
+    for (let i = 0; i < 3 && s.dismiss_buttons && (await this.d.visible(s.dismiss_buttons)); i++) {
+      await this.d.click(s.dismiss_buttons);
+      await this.sleep(0.5);
+    }
+  }
+
+  // ------------------------------------------------------------ 1. 打开生成页、查登录
+  async open() {
+    const s = this.spec;
+    await this.d.goto(s.generate_url);
+    const start = this.clock();
+    for (;;) {
+      await this.checkCancel();
+      await this.guard();
+      if (await this.d.visible(s.prompt_box)) {
+        const names = new Set(await this.d.cookieNames(s.cookie_url));
+        const cookie = (s.session_cookies || []).some((c) => names.has(c));
+        if (cookie || this.clock() - start > 5) {
+          if (!cookie) this.log(`${s.label}：没读到登录 cookie，但页面上没有登录按钮，按已登录继续`);
+          await this.dismiss();
+          return;
+        }
+      }
+      if (this.clock() - start > s.ready_timeout) {
+        throw new FlowError(
+          'page',
+          `${s.label} 生成页 ${Math.round(s.ready_timeout)} 秒内没出现输入框（当前地址 ${await this.d.url()}）。` +
+            `网络不通，或网站改版了——要更新 ${genSiteFile(s)} 里的 prompt_box`,
+        );
+      }
+      await this.sleep(this.poll);
+    }
+  }
+
+  // ------------------------------------------------------------ 2–3. 选模式 / 模型 / 参考方式 / 画幅 / 时长
+  /** 找到这一项的触发按钮（同一种按钮有好几个时按 openMatch 认文字），返回 {idx, text}；没有 open（选项直接
+   *  摆在页面上，如可灵的技能条）返回 null。 */
+  async trigger(o) {
+    if (!o.open) return null;
+    const s = this.spec;
+    const list = await this.d.options(o.open);
+    let idx = o.openIndex || 0;
+    if (o.openMatch) {
+      const re = new RegExp(o.openMatch, 'i');
+      idx = list.findIndex((t) => re.test(t.text));
+    }
+    if (idx < 0 || idx >= list.length) {
+      const seen = list.map((t) => excerpt(t.text, 24)).join('、') || '一个都没有';
+      throw new FlowError(
+        'page',
+        `${s.label} 没找到「${o.name}」的按钮（${excerpt(o.open, 50)} 命中：${seen}）。` +
+          `网站改版了，要更新 ${genSiteFile(s)} 里「${o.name}」的选择器`,
+      );
+    }
+    return { idx, text: list[idx].text };
+  }
+
+  async openPanel(o, trig) {
+    if (!trig) return;
+    if (o.panel && (await this.d.visible(o.panel))) return; // 弹层已经开着（同一个弹层里选画幅、时长）
+    await this.d.clickAt(o.open, trig.idx);
+    await this.sleep(0.8);
+  }
+
+  async closePanel(o, trig) {
+    if (!o.panel || !(await this.d.visible(o.panel))) return;
+    await this.d.press(o.panel, 'Escape');
+    await this.sleep(0.4);
+    if (trig && (await this.d.visible(o.panel))) {
+      await this.d.clickAt(o.open, trig.idx);
+      await this.sleep(0.4);
+    }
+  }
+
+  /** 等选项出现（弹层有动画）：最多 5 秒。 */
+  async listOptions(sel) {
+    const start = this.clock();
+    for (;;) {
+      const items = await this.d.options(sel);
+      if (items.length || this.clock() - start > 5) return items;
+      await this.sleep(0.5);
+    }
+  }
+
+  async choose(o, want) {
+    const s = this.spec;
+    await this.checkCancel();
+    const trig = await this.trigger(o);
+    if (trig && showsValue(trig.text, want)) {
+      this.log(`${s.label}：${o.name}已经是 ${excerpt(trig.text, 30)}`);
+      return;
+    }
+    await this.openPanel(o, trig);
+    const items = await this.listOptions(o.option);
+    const i = pickOption(items, want, o.match || 'startsWith');
+    const wantText = Array.isArray(want) ? want.join(' / ') : want;
+    if (i < 0) {
+      await this.closePanel(o, trig);
+      const avail = items.map((t) => excerpt(t.head || t.text, 30)).filter(Boolean);
+      throw new FlowError(
+        'page',
+        `${s.label}「${o.name}」里没有「${wantText}」（页面上可选：${avail.join('、') || '一个都没读到'}）。` +
+          `可选项变了就在 config.yaml 的引擎 params 里换一个，或者网站改版了——要更新 ${genSiteFile(s)} 里的 options`,
+      );
+    }
+    const it = items[i];
+    if (it.disabled) {
+      await this.closePanel(o, trig);
+      throw new FlowError(
+        'page',
+        `${s.label}「${o.name}」的「${excerpt(it.head || it.text, 30)}」现在是灰的（可能要会员或这个模式不支持）：` +
+          '在 config.yaml 的引擎 params 里换一个再重试',
+      );
+    }
+    if (!it.selected) {
+      await this.d.clickAt(o.option, i);
+      await this.sleep(o.settle || 0.8);
+    }
+    await this.closePanel(o, trig);
+    this.log(`${s.label}：${o.name}选了 ${excerpt(it.head || it.text, 30)}`);
+  }
+
+  async selectOptions() {
+    for (const o of this.spec.options || []) {
+      const want = this.want(o.param);
+      if (want == null) continue;
+      await this.choose(o, want);
+    }
+  }
+
+  /** 时长：弹层里有数字输入框就直接填，没有就点刻度（「5s」「10s」）。 */
+  async setDuration() {
+    const s = this.spec;
+    const o = s.duration;
+    const sec = Math.round(Number(this.want('duration')) || 0);
+    if (!o || !sec) return;
+    await this.checkCancel();
+    const trig = await this.trigger(o);
+    if (trig && showsValue(trig.text, secondsTexts(sec))) {
+      this.log(`${s.label}：时长已经是 ${sec} 秒`);
+      return;
+    }
+    await this.openPanel(o, trig);
+    if (o.input && (await this.d.fillInput(o.input, String(sec)))) {
+      await this.sleep(0.5);
+      await this.closePanel(o, trig);
+      const after = trig ? await this.trigger(o) : null;
+      if (after && !showsValue(after.text, secondsTexts(sec))) {
+        this.log(`${s.label}：时长填了 ${sec} 秒，但按钮上显示的是 ${excerpt(after.text, 20)}（按页面上的出）`);
+      } else {
+        this.log(`${s.label}：时长 ${sec} 秒`);
+      }
+      return;
+    }
+    if (!o.option) {
+      await this.closePanel(o, trig);
+      throw new FlowError('page', `${s.label} 没找到时长输入框。网站改版了，要更新 ${genSiteFile(s)} 里的 duration`);
+    }
+    // 没有输入框：点刻度（弹层已经开着，choose 不会再点开）
+    await this.choose({ ...o, name: o.name || '时长', match: 'exact' }, [...secondsTexts(sec), String(sec)]);
+  }
+
+  // ------------------------------------------------------------ 4. 首帧 / 尾帧
+  async thumbs() {
+    const u = this.spec.upload || {};
+    return Math.max(u.thumb ? await this.d.count(u.thumb) : 0, await this.d.composerImages(this.spec.prompt_box));
+  }
+
+  /** 等上传位里出现缩略图：secs 秒内一点动静都没有就算这种方式没用；上传中（busy）一直等到 upload_timeout。 */
+  async uploaded(before, secs, what) {
+    const s = this.spec;
+    const u = s.upload || {};
+    const start = this.clock();
+    for (;;) {
+      await this.checkCancel();
+      const got = (await this.thumbs()) - before;
+      const busy = !!u.busy && (await this.d.visible(u.busy));
+      if (got >= 1 && !busy) return true;
+      const waited = this.clock() - start;
+      if (!busy && got <= 0 && waited > secs) return false;
+      if (waited > s.upload_timeout) {
+        if (got > 0) return true;
+        throw new FlowError('timeout', `${s.label} ${what} ${Math.round(s.upload_timeout)} 秒还没传完，已放弃`);
+      }
+      await this.sleep(this.poll);
+    }
+  }
+
+  async uploadFrame(slot, file, what) {
+    const s = this.spec;
+    if (!slot) {
+      throw new FlowError('page', `${s.label} 没配${what}的上传位（${genSiteFile(s)} 里的 upload）`);
+    }
+    const before = await this.thumbs();
+    const tried = [];
+    if (slot.click && (await this.d.click(slot.click))) await this.sleep(0.6);
+    if (await this.d.setFilesAt(slot.input, slot.index || 0, [file])) {
+      tried.push('上传框');
+      if (await this.uploaded(before, 15, what)) return this.log(`${s.label}：${what}已传上（上传框）`);
+    }
+    if (slot.paste && (await this.d.pasteFiles(s.prompt_box, [file]))) {
+      tried.push('粘贴');
+      if (await this.uploaded(before, 8, what)) return this.log(`${s.label}：${what}已传上（粘贴）`);
+    }
+    const target = slot.drop || (slot.paste ? s.prompt_box : '');
+    if (target && (await this.d.dropFiles(target, [file]))) {
+      tried.push('拖放');
+      if (await this.uploaded(before, 8, what)) return this.log(`${s.label}：${what}已传上（拖放）`);
+    }
+    const fi = await this.d.fileInputs(slot.input, s.prompt_box);
+    throw new FlowError(
+      'page',
+      `${s.label} ${what}没传上去（试过：${tried.join('、') || '没找到可用的方式'}；页面上有 ${fi.total} 个上传框），` +
+        `这次没有提交。网站可能改版了，要更新 ${genSiteFile(s)} 里的 upload`,
+    );
+  }
+
+  async upload() {
+    const s = this.spec;
+    const refs = this.job.refs || [];
+    if (!refs.length) throw new FlowError('browser', `${s.label}：请求里没有首帧图`);
+    const u = s.upload || {};
+    await this.uploadFrame(u.first, refs[0], '首帧');
+    const wantEnd = !!(this.job.generator || {}).end_frame;
+    if (wantEnd && refs[1]) {
+      if (!u.end) {
+        throw new FlowError(
+          'page',
+          `${s.label} 这个站点还不支持尾帧（${genSiteFile(s)} 里没有 upload.end）：换支持尾帧的引擎，或去掉尾帧`,
+        );
+      }
+      await this.uploadFrame(u.end, refs[1], '尾帧');
+    }
+  }
+
+  // ------------------------------------------------------------ 5–6. 输提示词、记下已有卡片、点生成
+  async cards() {
+    const s = this.spec;
+    const r = await this.d.cards(s.result_card, s.result_video, s.result_failed || '');
+    return Array.isArray(r) ? r : [];
+  }
+
+  /** 记下结果区已有的卡片；历史卡片是慢慢加载出来的，等数量稳定（最多 SNAPSHOT_WAIT 秒）。 */
+  async snapshot() {
+    const start = this.clock();
+    let last = -1;
+    let cards = [];
+    for (;;) {
+      cards = await this.cards();
+      if (cards.length === last || this.clock() - start > SNAPSHOT_WAIT) break;
+      last = cards.length;
+      await this.sleep(this.poll);
+    }
+    this.beforeCount = cards.length;
+    this.beforeKeys = new Set(cards.map((c) => c.key).filter(Boolean));
+    this.beforeVideos = new Set(cards.map((c) => c.video).filter(Boolean));
+  }
+
+  /** 积分：页面上读得到余额和这次要花的积分、余额不够时直接报 quota，不点生成。 */
+  async checkCredits() {
+    const s = this.spec;
+    if (!s.credits) return;
+    const have = num(await this.d.text(s.credits));
+    const cost = s.cost ? num(await this.d.text(s.cost)) : null;
+    if (have == null) return;
+    this.log(`${s.label}：积分余额 ${have}${cost != null ? `，这次要 ${cost}` : ''}`);
+    if (cost != null && have < cost) {
+      throw new FlowError(
+        'quota',
+        `${s.label} 积分不够：余额 ${have}，这次要 ${cost}。去网站上领 / 买积分，或换一个便宜点的模型、短一点的时长，再重试`,
+      );
+    }
+  }
+
+  async submit() {
+    const s = this.spec;
+    const text = String(this.job.prompt || '').split(/\s+/).filter(Boolean).join(' ');
+    if (!(await this.d.typeText(s.prompt_box, text))) {
+      throw new FlowError('page', `${s.label} 没能把提示词输进输入框。网站改版了，要更新 ${genSiteFile(s)} 里的 prompt_box`);
+    }
+    await this.sleep(0.5);
+    await this.checkCredits();
+    const start = this.clock();
+    while (!(await this.d.enabled(s.send_button))) {
+      // 首帧还在处理、提示词还没同步时生成按钮是灰的
+      await this.checkCancel();
+      await this.guard();
+      if (this.clock() - start > 30) {
+        throw new FlowError(
+          'page',
+          `${s.label} 生成按钮 30 秒都是灰的（可能首帧没传好、积分不够，或网站改版了——要更新 ${genSiteFile(s)} 里的 send_button）`,
+        );
+      }
+      await this.sleep(this.poll);
+    }
+    if (!(await this.d.click(s.send_button))) {
+      throw new FlowError('page', `${s.label} 没能点生成。网站改版了，要更新 ${genSiteFile(s)} 里的 send_button`);
+    }
+  }
+
+  // ------------------------------------------------------------ 7. 等新卡片出视频
+  /** 这次新出的卡片（最新的在前）：卡片都有 id 时按 id 比；没有就按数量（新卡片在 result_new_at 那一头）；
+   *  再不行，带着没见过的视频地址的卡片也算。 */
+  fresh(cards) {
+    const s = this.spec;
+    let out;
+    if (cards.length && cards.every((c) => c.key)) {
+      out = cards.filter((c) => !this.beforeKeys.has(c.key));
+      if (s.result_new_at === 'last') out.reverse();
+    } else {
+      const n = cards.length - this.beforeCount;
+      out = n <= 0 ? [] : s.result_new_at === 'last' ? cards.slice(-n).reverse() : cards.slice(0, n);
+    }
+    if (!out.length) out = cards.filter((c) => c.video && !this.beforeVideos.has(c.video));
+    return out;
+  }
+
+  videoOk(src) {
+    const hint = this.spec.video_src_hint || [];
+    return !!src && !this.beforeVideos.has(src) && (!hint.length || hint.some((h) => src.includes(h)));
+  }
+
+  /** 页面提示 / 卡片上的文字 → 对应的 FlowError；提示条上的文字不像出错时返回 null。 */
+  failure(text, where) {
+    const s = this.spec;
+    if (match(s.quota_patterns || [], text)) {
+      return new FlowError('quota', `${s.label} 积分 / 次数不够：${excerpt(text)}。去网站上看看额度，或换别的视频引擎，别马上重试`);
+    }
+    if (match(s.refusal_patterns || [], text)) {
+      return new FlowError('refused', `${s.label} 没通过内容审核：${excerpt(text)}。改一下提示词或首帧（真人脸可能不支持）再试`);
+    }
+    if (where === 'card') return new FlowError('no_image', `${s.label} 生成失败：${excerpt(text) || '卡片上标着失败，没写原因'}`);
+    return null;
+  }
+
+  async waitVideo(timeout) {
+    const s = this.spec;
+    const start = this.clock();
+    let last = null;
+    let stableSince = 0;
+    let seen = false;
+    let nextDiag = DIAG_EVERY;
+    for (;;) {
+      await this.checkCancel();
+      const now = this.clock();
+      const elapsed = now - start;
+      if (elapsed > timeout) {
+        throw new FlowError(
+          'timeout',
+          `${s.label} 超过 ${Math.round(timeout)} 秒还没出完视频，已放弃（任务还在网站上排队 / 生成，稍后可以去页面上看看）`,
+        );
+      }
+      const alert = s.alert ? await this.d.text(s.alert) : '';
+      const err = alert ? this.failure(alert, 'alert') : null;
+      if (err) throw err;
+      await this.guard();
+      const cards = await this.cards();
+      const fresh = this.fresh(cards);
+      const c = fresh[0];
+      if (c) {
+        seen = true;
+        if (this.videoOk(c.video)) {
+          if (c.video !== last) {
+            last = c.video;
+            stableSince = now;
+          } else if (now - stableSince >= s.settle_seconds) {
+            return c;
+          }
+        } else {
+          last = null;
+          if (c.failed || match(s.failed_patterns || [], c.text)) throw this.failure(c.text, 'card');
+        }
+      } else if (!seen && elapsed > CARD_APPEAR) {
+        throw new FlowError(
+          'page',
+          `${s.label} 点了生成 ${CARD_APPEAR} 秒，结果区没出现新任务（${cards.length} 张卡片，和提交前一样）。` +
+            `可能没提交上（去页面上看看有没有提示），或网站改版了——要更新 ${genSiteFile(s)} 里的 result_card`,
+        );
+      }
+      if (elapsed >= nextDiag) {
+        nextDiag += DIAG_EVERY;
+        this.log(`等了 ${Math.round(elapsed)} 秒：结果区 ${cards.length} 张卡片，新的 ${fresh.length} 张` +
+          (c ? `，最新一张${c.video ? '有视频' : '还没视频'}：${excerpt(c.text, 60) || '（没有文字）'}` : ''));
+      }
+      this.progress(Math.min(95, Math.floor((elapsed / Math.max(s.video_expected_seconds, 1)) * 95)), PROGRESS_MAX);
+      await this.sleep(this.poll);
+    }
+  }
+
+  // ------------------------------------------------------------ 8. 取原视频
+  async download(card) {
+    const s = this.spec;
+    const errors = [];
+    const srcs = s.fullSize ? s.fullSize(card.video) : [card.video];
+    for (const src of srcs) {
+      await this.checkCancel();
+      let got;
+      try {
+        got = await this.d.fetchImage(src);
+      } catch (e) {
+        errors.push(`${excerpt(src, 60)}：${(e && e.message) || e}`);
+        continue;
+      }
+      const mime = sniffMime(got && got.b64);
+      if (!mime || !mime.startsWith('video/')) {
+        errors.push(`${excerpt(src, 60)}：取回来的不是视频（${mime || (got && got.mime) || '未知类型'}）`);
+        continue;
+      }
+      return [{ src, mime, b64: got.b64, via: got.via || 'page' }];
+    }
+    throw new FlowError('page', `${s.label} 出了视频但取原视频失败：${errors.join('；').slice(0, 300)}`);
+  }
+}
+
+/**
+ * 生成器页出一段视频（即梦 / 可灵）。返回 [{src, mime, b64, via}]，失败抛 FlowError / Canceled。
+ * opts 同 generate：{isCanceled, log, progress, clock, poll}。
+ */
+export async function runGenerator(spec, job, d, { isCanceled, log, progress, clock, poll = 1 } = {}) {
+  if (spec.kind !== 'generator') throw new FlowError('browser', `${spec.label} 不是生成器页网站`);
+  const lg = log || (() => {});
+  const pg = progress || (() => {});
+  const clk = clock || (() => Date.now() / 1000);
+  const g = new Generator(d, spec, job, { isCanceled, log: lg, progress: pg, clock: clk, poll });
+  pg(0, PROGRESS_MAX);
+  lg(`${spec.label}：打开生成页 ${spec.generate_url}`);
+  await g.open();
+  await g.selectOptions();
+  await g.setDuration();
+  await g.upload();
+  await g.snapshot();
+  await g.submit();
+  const timeout = Number(job.timeout) || 900;
+  lg(`${spec.label}：已点生成，等出视频（最长 ${Math.round(timeout)} 秒）`);
+  const t0 = clk();
+  const card = await g.waitVideo(timeout);
+  lg(`${spec.label}：视频出来了，用时 ${Math.round(clk() - t0)} 秒，取原视频`);
+  pg(PROGRESS_MAX, PROGRESS_MAX);
+  return g.download(card);
 }

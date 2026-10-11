@@ -75,7 +75,10 @@ describe('extension protocol helpers', () => {
     ]);
     expect(GEMINI.fullSize('blob:https://gemini.google.com/1')).toEqual(['blob:https://gemini.google.com/1']);
     expect(CHATGPT.fullSize('x')).toEqual(['x']);
-    expect(Object.keys(SITES)).toEqual(['chatgpt', 'gemini', 'muse', 'claude']);
+    // 聊天页网站在前，生成器页网站（即梦 / 可灵，每个区域一个）在后
+    expect(Object.keys(SITES)).toEqual([
+      'chatgpt', 'gemini', 'muse', 'claude', 'jimeng_cn', 'jimeng_global', 'kling_cn', 'kling_global',
+    ]);
   });
 
   it('rpc（网页文本模型）：hello 报 rpc 能力；只许对交出去的标签页、白名单里的页面操作、支持的网站', () => {

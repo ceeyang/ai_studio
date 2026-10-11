@@ -1,5 +1,6 @@
 """browser-extension/sites/*.js 和 backend/engines/browser/sites/*.py 是同一份选择器和文案正则：
-网站改版时两边都要改，这里防止只改了一边。需要 node（前端本来就要），没有就跳过。"""
+网站改版时两边都要改，这里防止只改了一边。需要 node（前端本来就要），没有就跳过。
+生成器页网站（即梦 / 可灵）的选择器只在扩展里，只比对后端 sites/generators.py 记的名字、地址、登录 cookie。"""
 import json
 import shutil
 import subprocess
@@ -9,6 +10,7 @@ import pytest
 
 from backend.engines.browser.errors import EXT_DIR
 from backend.engines.browser.sites import SITES
+from backend.engines.browser.sites.generators import GENERATOR_SITES
 
 NODE = shutil.which("node")
 SCRIPT = """
@@ -50,11 +52,22 @@ def test_extension_site_matches_python(js_sites, key):
         assert js[f.name] == want, f"{key}.{f.name} 两边不一致：扩展 {js[f.name]!r}，后端 {want!r}"
 
 
+@pytest.mark.parametrize("key", sorted(GENERATOR_SITES))
+def test_extension_generator_site_matches_python(js_sites, key):
+    """生成器页网站（即梦 / 可灵）的选择器只在扩展里；后端只记名字、地址、登录 cookie，这几项两边要一致。"""
+    py, js = GENERATOR_SITES[key], js_sites[key]
+    assert js["kind"] == "generator"
+    for f in fields(py):
+        want = getattr(py, f.name)
+        assert js[f.name] == (list(want) if isinstance(want, tuple) else want), f"{key}.{f.name} 两边不一致"
+    assert js["generate_url"].startswith(f"https://{py.host}/")
+
+
 def test_manifest_permissions():
     m = json.loads((EXT_DIR / "manifest.json").read_text(encoding="utf-8"))
     assert m["manifest_version"] == 3 and m["background"]["type"] == "module"
     assert {"tabs", "scripting", "storage", "alarms", "cookies"} <= set(m["permissions"])
     hosts = set(m["host_permissions"])
-    for s in SITES.values():
+    for s in [*SITES.values(), *GENERATOR_SITES.values()]:
         assert f"https://{s.host}/*" in hosts
     assert "https://*.oaiusercontent.com/*" in hosts and "https://*.googleusercontent.com/*" in hosts
