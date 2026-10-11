@@ -857,8 +857,9 @@ def _refs_reason(old: list, new: list) -> str | None:
 
 
 def stale_reason(old, new: dict) -> str:
-    """选定候选过期的原因，按 参考图 → 提示词 → 引擎 → 画幅 → 时长 → 首帧 取第一条。
-    old：候选 params["inputs"]（老候选没有）；new：按镜头当前状态算的同结构摘要。
+    """选定候选过期的原因，按 参考图 → 提示词 → 画幅 → 时长 → 首帧 取第一条。
+    old：候选 params["inputs"]（老候选没有）；new：按镜头当前状态、用候选自己的引擎算的同结构摘要
+    （pipeline.freshness）。换引擎不是过期原因：多引擎协作，同一镜头的候选来自不同引擎是常态。
     接上一镜的首帧（pipeline/continuity.py）摘要里有 prev_video：按上一镜的视频比对。"""
     o = old if isinstance(old, dict) else {}
     if "prev_video" in new or "prev_video" in o:
@@ -878,8 +879,6 @@ def stale_reason(old, new: dict) -> str:
         return r
     if old.get("prompt") != new.get("prompt") or old.get("negative", "") != new.get("negative", ""):
         return "提示词改了"
-    if old.get("engine") != new.get("engine"):
-        return "引擎换了"
     if old.get("aspect") != new.get("aspect"):
         return "画幅改了"
     if "duration" in new and old.get("duration") != new["duration"]:
