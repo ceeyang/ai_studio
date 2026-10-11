@@ -11,6 +11,17 @@ const PAGE_TEXT: Record<string, string> = {
   unknown: '页面没认出来',
 };
 
+const FEATURE_TEXT: Record<string, string> = {
+  rpc: '网页文本模型（ChatGPT / Gemini / Claude 网页）',
+  video: '网页出视频（Gemini / Muse）',
+};
+
+/** 老扩展缺的能力 → 「网页出视频（Gemini / Muse）、同一集接着用之前的对话」；后端没给就按最老的说 */
+export function missingText(missing: string[] | undefined): string {
+  const list = (missing?.length ? missing : ['rpc']).map((f) => FEATURE_TEXT[f] ?? f);
+  return list.join('、');
+}
+
 function loginText(v: boolean | null | undefined): [string, 'ok' | 'warn' | 'fail'] {
   if (v === true) return ['已登录', 'ok'];
   if (v === false) return ['没登录', 'fail'];
@@ -39,7 +50,7 @@ function InstallSteps({ dir }: { dir: string }) {
         </button>
       </li>
       <li>
-        在这个浏览器里登录 ChatGPT（chatgpt.com）和 Gemini（gemini.google.com），只需一次；要用 Claude 网页写文本的再登录 Claude（claude.ai）。
+        在这个浏览器里登录要用的网站：ChatGPT（chatgpt.com）、Gemini（gemini.google.com）、Muse（muse.ai，Meta 账号），只需一次；要用 Claude 网页写文本的再登录 Claude（claude.ai）。
       </li>
       <li>保持浏览器开着。扩展会自动连上 studio（{window.location.host}），这里会显示「扩展已连上」。</li>
     </ol>
@@ -94,12 +105,12 @@ function ExtensionBody({ st }: { st: BrowserStatus }) {
           : `扩展没有连上：${engineLabel('gpt_image')} / ${engineLabel('gemini_image')}出图会失败`}
       </p>
       <p className="muted">
-        出图在你平时用的浏览器里进行：扩展在已登录的 ChatGPT / Gemini 标签页里开新对话、传参考图、输提示词，出完把原图传回来。studio
+        出图、出视频在你平时用的浏览器里进行：扩展在已登录的 ChatGPT / Gemini / Muse 标签页里打开对话（同一集的任务接着用同一个对话）、传参考图或首帧、输提示词，出完把原图 / 视频传回来。studio
         不启动浏览器，也不读取 cookie。
       </p>
       {connected && st.needs_reload && (
         <p className="error" role="alert" data-testid="extension-needs-reload">
-          扩展需要重新加载：现在连着的是 v{ext?.version ?? '?'}，还不支持网页文本模型（ChatGPT / Gemini / Claude 网页）。在{' '}
+          扩展需要重新加载：现在连着的是 v{ext?.version ?? '?'}，还不支持{missingText(st.missing_features)}。在{' '}
           <code>chrome://extensions</code>（Edge 是 <code>edge://extensions</code>）里找到「AI Studio 网页出图桥」点「重新加载」。出图不受影响。
         </p>
       )}
@@ -108,13 +119,13 @@ function ExtensionBody({ st }: { st: BrowserStatus }) {
       {connected && (
         <div className="row">
           <button type="button" disabled={login.isPending} onClick={() => login.mutate()}>
-            {login.isPending ? '正在打开…' : '在浏览器里打开 ChatGPT / Gemini / Claude'}
+            {login.isPending ? '正在打开…' : '在浏览器里打开 ChatGPT / Gemini / Muse / Claude'}
           </button>
         </div>
       )}
       {login.data && (
         <p className="notice" data-testid="browser-login-notice">
-          已在你的浏览器里打开 ChatGPT、Gemini 和 Claude：没登录的就在那里登录，登录后这里会自动刷新。
+          已在你的浏览器里打开 ChatGPT、Gemini、Muse 和 Claude：没登录的就在那里登录，登录后这里会自动刷新。
         </p>
       )}
       {login.error && <p className="error">打开失败：{errorText(login.error)}</p>}

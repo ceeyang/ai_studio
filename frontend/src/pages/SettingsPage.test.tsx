@@ -82,7 +82,7 @@ describe('SettingsPage', () => {
     expect(steps.textContent).toContain(`studio（${window.location.host}）`);
     // 引擎 id 不当主文案
     expect(screen.getByTestId('extension-status').textContent).toContain('ChatGPT 网页 / Gemini 网页出图会失败');
-    expect(screen.queryByRole('button', { name: '在浏览器里打开 ChatGPT / Gemini / Claude' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '在浏览器里打开 ChatGPT / Gemini / Muse / Claude' })).toBeNull();
     expect(screen.queryByRole('button', { name: '打开浏览器登录' })).toBeNull();
   });
 
@@ -111,7 +111,7 @@ describe('SettingsPage', () => {
     expect(screen.getByTestId('browser-site-gemini').textContent).toContain('没登录');
     // 老版本扩展（v0.1.0，没有 rpc）：提示重新加载，网页文本模型才能用
     expect(screen.queryByTestId('extension-needs-reload')).toBeNull();
-    await user.click(screen.getByRole('button', { name: '在浏览器里打开 ChatGPT / Gemini / Claude' }));
+    await user.click(screen.getByRole('button', { name: '在浏览器里打开 ChatGPT / Gemini / Muse / Claude' }));
     expect((await screen.findByTestId('browser-login-notice')).textContent).toContain('已在你的浏览器里打开');
     expect(calls.some((c) => c.method === 'POST' && c.url === '/api/browser/login')).toBe(true);
   });

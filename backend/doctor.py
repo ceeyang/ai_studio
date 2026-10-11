@@ -13,7 +13,7 @@ import psutil
 
 from backend.config import Config
 from backend.engines.browser.errors import EXT_INSTALL_HINT, EXT_LOGIN_HINT, LOGIN_HINT
-from backend.engines.browser.extension import RPC_FEATURE, reload_text
+from backend.engines.browser.extension import CONVERSATION_FEATURE, RPC_FEATURE, VIDEO_FEATURE, reload_text
 from backend.engines.comfyui.errors import ComfyError
 from backend.engines.registry import runtime_of
 
@@ -43,8 +43,13 @@ def _basename(f: str) -> str:
 
 
 def check_browser(engines, browser) -> list[Check]:
-    """网页图像引擎：浏览器程序、调试端口、各网站是否登录（按 cookie，不开页面、不出图）。"""
-    used = {e.site: e for e in engines.all().values() if runtime_of(e) == "browser"}
+    """网页引擎：浏览器程序、调试端口、各网站是否登录（按 cookie，不开页面、不出图）。
+    同一个网站的出图、出视频引擎合成一行（行名里列出引擎名，用「、」隔开）。"""
+    groups: dict[str, list[str]] = {}
+    for name, e in sorted(engines.all().items()):
+        if runtime_of(e) == "browser":
+            groups.setdefault(e.site, []).append(name)
+    used = {k: _Names("、".join(v)) for k, v in groups.items()}
     if not used or browser is None:
         return []
     if getattr(browser, "transport", "cdp") == "extension":
@@ -89,8 +94,9 @@ def check_browser(engines, browser) -> list[Check]:
 
 
 @dataclass
-class _TextOnly:
-    name: str
+class _Names:
+    name: str               # 这个网站上的引擎名（多个用「、」隔开）
+    text_only: bool = False  # 只有网页文本模型（Claude）
 
 
 def _check_extension(used: dict, browser) -> list[Check]:
@@ -99,18 +105,23 @@ def _check_extension(used: dict, browser) -> list[Check]:
     out: list[Check] = []
     if not info.get("connected"):
         out.append(Check("浏览器", "扩展连接", "warn",
-                         f"浏览器扩展没有连上，gpt_image / gemini_image 出图会失败。{EXT_INSTALL_HINT}"))
+                         f"浏览器扩展没有连上，网页出图、出视频（{'、'.join(e.name for e in used.values())}）会失败。"
+                         f"{EXT_INSTALL_HINT}"))
     else:
         out.append(Check("浏览器", "扩展连接", "ok",
                          f"已连上 · 扩展 v{info.get('version') or '?'} · {info.get('browser') or '浏览器'}"
                          f" · id {info.get('ext_id') or '?'}"))
-        if RPC_FEATURE not in (info.get("features") or []):
+        feats = info.get("features") or []
+        if RPC_FEATURE not in feats:
             out.append(Check("浏览器", "扩展版本", "warn",
                              reload_text(info.get("version") or "?", "还不支持网页文本模型（ChatGPT / Gemini / Claude 网页）")))
+        elif VIDEO_FEATURE not in feats or CONVERSATION_FEATURE not in feats:
+            out.append(Check("浏览器", "扩展版本", "warn",
+                             reload_text(info.get("version") or "?", "还不能网页出视频、也不会接着用之前的对话")))
     st = browser.hub.site_status()
     # Claude 网页只做文本（web_claude），没有出图引擎：单独报一行登录状态
     if "claude" in browser.sites and "claude" not in used:
-        used = {**used, "claude": _TextOnly("网页文本模型")}
+        used = {**used, "claude": _Names("网页文本模型", text_only=True)}
     for key, eng in sorted(used.items()):
         site = browser.sites.get(key)
         label = site.label if site else key
@@ -130,7 +141,7 @@ def _check_extension(used: dict, browser) -> list[Check]:
             if s.get("logged_in"):
                 out.append(Check("浏览器", name, "ok", f"已登录 {host} · {tab_text}"))
             else:
-                what = "用不了" if isinstance(eng, _TextOnly) else "出图会失败"
+                what = "用不了" if eng.text_only else "出图 / 出视频会失败"
                 out.append(Check("浏览器", name, "warn",
                                  f"没登录 {host}，{eng.name}{what}。在装了扩展的浏览器里登录 {host} · {tab_text}"))
     return out

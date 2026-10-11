@@ -468,7 +468,9 @@ def test_rpc_roundtrip_over_websocket(api):
         assert out["ok"] == {"text": "hi", "count": 1}
         assert out["err"].kind == "page" and "不允许" in str(out["err"])
         st = api.get("/api/browser/status").json()
-        assert st["needs_reload"] is False and "claude" in st["sites"]
+        # 只有 rpc 的老扩展：网页文本模型能用，但不能网页出视频，提示重新加载
+        assert st["needs_reload"] is True and st["missing_features"] == ["video"]
+        assert "claude" in st["sites"]
 
 
 def test_settings_lists_web_models_disabled_until_extension(api):

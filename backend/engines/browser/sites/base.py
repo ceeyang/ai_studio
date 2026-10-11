@@ -58,4 +58,16 @@ class SiteSpec:
     expected_seconds: float = 90.0           # 进度条按这个时长估
     # 对话地址里的对话 id（正则，第 1 组是 id）：续接网页会话时认地址用（chatgpt.com/c/<id> …）
     conversation_re: str = ""
+    # ---- 出视频（只走浏览器扩展：browser-extension/lib/flow.js 的 generateVideo；空 result_videos = 不能出视频）
+    result_videos: str = ""                  # 回复里生成的视频（<video>）
+    video_src_hint: tuple[str, ...] = ()     # 视频地址里该有的片段（任一），用来排除页面上别的动画
+    # 选中「做视频」工具要依次点的按钮（Gemini：Upload & tools → Create video）；空 = 不用选，提示词说明就行
+    video_steps: tuple[str, ...] = ()
+    video_active: str = ""                   # 视频工具已经选中的标志（复用对话时先看它，选中了就不再点）
+    video_dismiss: str = ""                  # 第一次用视频工具时的介绍框按钮（Gemini「Try it」）
+    video_aspect_button: str = ""            # 画幅按钮（点开是菜单）；空 = 画幅写进提示词
+    video_aspect_options: dict = field(default_factory=dict)   # {"9:16": 菜单项选择器, "16:9": …}
+    # 回复里说「正在生成视频，要几分钟」：有这句话不算「回复了文字但没出视频」
+    video_pending_patterns: tuple[re.Pattern[str], ...] = ()
+    video_expected_seconds: float = 180.0    # 出视频的进度条按这个时长估
     extra: dict = field(default_factory=dict)

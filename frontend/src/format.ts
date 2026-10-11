@@ -46,6 +46,9 @@ export const ENGINE_LABEL: Record<string, string> = {
   krea2: 'Krea2 人像',
   gpt_image: 'ChatGPT 网页',
   gemini_image: 'Gemini 网页',
+  muse_image: 'Muse 网页',
+  gemini_video: 'Gemini 网页（Veo · 有声）',
+  muse_video: 'Muse 网页（有声）',
   h3_video: 'H3 视频（有声）',
   wan22_i2v: 'Wan2.2 图生视频（无声）',
   // 官方 API（Key 在设置页「API 服务」里填）
@@ -70,8 +73,17 @@ export const ENGINE_LABEL: Record<string, string> = {
 
 /** 下拉框里引擎的写法：API 引擎没配 Key 时后面写明（同时 disabled），别的不可用写「现在不可用」 */
 export function engineOptionText(e: { name: string; runtime?: string; label?: string; ready?: boolean }): string {
-  if (e.ready !== false) return engineLabel(e);
-  return `${engineLabel(e)}${e.runtime === 'api' ? '（先在 API 服务里填 Key）' : '（现在不可用）'}`;
+  const hint = engineUnreadyHint(e);
+  return hint ? `${engineLabel(e)}（${hint}）` : engineLabel(e);
+}
+
+/** 引擎现在用不了时的短说明（下拉框括号里、表单下面的提示用）；能用时返回 null */
+export function engineUnreadyHint(e: { runtime?: string; ready?: boolean }): string | null {
+  if (e.ready !== false) return null;
+  if (e.runtime === 'api') return '先在 API 服务里填 Key';
+  if (e.runtime === 'comfyui') return '未配置：ComfyUI 没连上';
+  if (e.runtime === 'browser') return '未配置：浏览器扩展没连上';
+  return '现在不可用';
 }
 
 /** 没配 Key 的 API 引擎在下拉框里禁用（别的不可用引擎照旧能选，提交时再报原因） */

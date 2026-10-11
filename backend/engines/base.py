@@ -29,6 +29,10 @@ class VideoCaps:
     sizes: dict[str, tuple[int, int]]
     default_seconds: float
     max_seconds: float
+    # 时长怎么控制：param = 引擎参数精确控制；prompt = 只能写进提示词，模型不一定照做；fixed = 不能指定，
+    # 总是 default_seconds。allowed_seconds：只认这几档（空 = 连续可调，到 max_seconds 为止）
+    duration_control: Literal["param", "prompt", "fixed"] = "param"
+    allowed_seconds: tuple[float, ...] = ()
 
 
 def dedupe_negative(text: str) -> str:

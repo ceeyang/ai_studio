@@ -69,7 +69,7 @@ export interface EngineRow {
   /** 后端给的中文名（format.ts 的 ENGINE_LABEL 没有时用，比如 RunningHub 云端引擎） */
   label?: string;
   family: string;
-  /** comfyui：本机显卡；browser：驱动已登录的 ChatGPT / Gemini 网页出图（不占显卡、没有种子）；
+  /** comfyui：本机显卡；browser：驱动已登录的 ChatGPT / Gemini / Muse 网页出图、出视频（不占显卡、没有种子）；
    *  runninghub：RunningHub 云端；api：OpenAI / Gemini 官方 API（Key 在设置页「API 服务」里填） */
   runtime?: 'comfyui' | 'browser' | 'runninghub' | 'api';
   caps: Record<string, unknown>;
@@ -246,6 +246,8 @@ export interface BrowserStatus {
   needs_reload?: boolean;
   /** 扩展支不支持续接网页会话；不支持时 hint 说怎么办（如「重新加载扩展可复用会话」） */
   conversation?: { supported: boolean; hint: string | null };
+  /** 连着的扩展缺的能力（rpc / video），needs_reload 时用来说明缺什么 */
+  missing_features?: string[];
   // cdp
   executable?: string | null;
   endpoint?: string;

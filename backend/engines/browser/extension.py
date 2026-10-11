@@ -12,14 +12,16 @@ browser-extension/ 是一个 MV3 扩展，装在用户日常用的 Chrome/Edge �
     status   {sites: {key: {tabs, logged_in, cookie, page}}}  各网站开着几个标签页、像不像已登录
     progress {job_id, value, max}
     log      {job_id, message}
-    image    {job_id, index, seq, total, mime, src, via, data}   结果图 base64 分块（单帧别超过 uvicorn 的 16MB）
+    image    {job_id, index, seq, total, mime, src, via, data}   结果图 / 视频 base64 分块（单帧别超过 uvicorn 的 16MB；
+                                                              视频的 mime 是 video/mp4）
     result   {job_id, count}                                  全部分块发完
     error    {job_id, kind, message}                          中文原因，kind 同 BrowserError
     opened   {urls}                                           open 的回执
     rpc_result {id, ok, result | kind+error}                  rpc 的回执
   studio → 扩展
     welcome  {server_version, options}
-    job      {job_id, site, prompt, refs: [{name, mime, b64}], aspect, timeout, options, conversation_url}
+    job      {job_id, site, kind, prompt, refs: [{name, mime, b64}], aspect, timeout, options, conversation_url}
+             kind（v0.3 起）：image（默认）/ video（Gemini、Muse 网页出视频，首帧在 refs 里；hello.features 里有 video 才发）
              conversation_url（v0.3 起）：在这条之前的对话里接着出图（打不开就新开）；result 里带回
              conversation {url, continued, note}：结束时标签页地址、是否真的续接上了、退回新对话的原因
     cancel   {job_id}
@@ -57,6 +59,7 @@ from backend.queue.errors import JobCanceled
 PROTOCOL = 1
 RPC_FEATURE = "rpc"          # 扩展 hello 里报的能力：有它才能用网页文本模型（v0.2 起）
 CONVERSATION_FEATURE = "conversation"   # 有它出图任务才能续接之前的网页会话、报回对话地址（v0.3 起）
+VIDEO_FEATURE = "video"      # 有它才能网页出视频（job.kind = video，v0.3 起）
 RPC_TIMEOUT = 90.0
 KINDS = {"not_logged_in", "quota", "refused", "timeout", "no_image", "page", "browser"}
 # 扩展那边开标签页、等页面加载、传参考图都不算在 timeout（等出图）里，多给这么久再判超时
@@ -269,29 +272,34 @@ class ExtensionHub:
                  timeout: float, cancel: threading.Event, log: Callable[[str], None],
                  progress: Callable[[int, int], None] | None = None,
                  clock: Callable[[], float] = time.monotonic, poll: float = 0.5,
-                 conversation_url: str | None = None, info: dict | None = None) -> list[ExtImage]:
-        """info（可选）：扩展在 result 里报的会话情况 {url, continued, note} 填进去（v0.3 起才有）。"""
+                 conversation_url: str | None = None, info: dict | None = None,
+                 kind: str = "image") -> list[ExtImage]:
+        """info（可选）：扩展在 result 里报的会话情况 {url, continued, note} 填进去（v0.3 起才有）。
+        kind：image（出图）/ video（出视频，扩展没有 video 能力时直接报要重新加载）。"""
         conn = self._conn
         if conn is None:
             raise BrowserError("browser", not_connected_text())
+        if kind == "video" and VIDEO_FEATURE not in (conn.hello.get("features") or []):
+            raise BrowserError("browser", reload_text(str(conn.hello.get("version") or "?"), "这个版本还不能网页出视频"))
+        what = "出视频" if kind == "video" else "出图"
         job_id = uuid.uuid4().hex
         q: queue.Queue = queue.Queue()
         self._jobs[job_id] = q
         try:
-            msg = {"type": "job", "job_id": job_id, "site": site, "prompt": prompt,
+            msg = {"type": "job", "job_id": job_id, "site": site, "kind": kind, "prompt": prompt,
                    "refs": [ref_payload(p) for p in refs], "aspect": aspect, "timeout": timeout,
                    "options": self.options}
             if conversation_url:
                 msg["conversation_url"] = conversation_url
             self.send(msg, conn)
             ver = conn.hello.get("version")
-            log(f"{label}：任务已发给浏览器扩展{f'（v{ver}）' if ver else ''}，在你的浏览器里出图")
-            return self._wait(job_id, q, label, timeout, cancel, log, progress, clock, poll, info)
+            log(f"{label}：任务已发给浏览器扩展{f'（v{ver}）' if ver else ''}，在你的浏览器里{what}")
+            return self._wait(job_id, q, label, timeout, cancel, log, progress, clock, poll, info, what=what)
         finally:
             self._jobs.pop(job_id, None)
 
     def _wait(self, job_id, q, label, timeout, cancel, log, progress, clock, poll,
-              info: dict | None = None) -> list[ExtImage]:
+              info: dict | None = None, *, what: str = "出图") -> list[ExtImage]:
         deadline = clock() + timeout + JOB_GRACE_SECONDS
         chunks: dict[int, dict] = {}
         while True:
@@ -308,7 +316,7 @@ class ExtensionHub:
                 continue
             t = msg.get("type")
             if t == "_disconnected":
-                raise BrowserError("browser", f"{label} 出图中途{msg.get('why', '扩展连接断开了')}，重试这个任务")
+                raise BrowserError("browser", f"{label} {what}中途{msg.get('why', '扩展连接断开了')}，重试这个任务")
             if t == "progress":
                 if progress is not None:
                     try:
@@ -321,7 +329,7 @@ class ExtensionHub:
                 self._add_chunk(chunks, msg)
             elif t == "error":
                 kind = msg.get("kind") if msg.get("kind") in KINDS else "browser"
-                raise BrowserError(kind, str(msg.get("message") or f"{label} 出图失败（扩展没说原因）"))
+                raise BrowserError(kind, str(msg.get("message") or f"{label} {what}失败（扩展没说原因）"))
             elif t == "result":
                 if info is not None and isinstance(msg.get("conversation"), dict):
                     info.update(msg["conversation"])

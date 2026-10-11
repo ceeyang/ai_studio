@@ -185,7 +185,7 @@ class VeoEngine(_ApiVideoEngine):
     label = "Google Veo（API）"
     service = "gemini"
     caps = VideoCaps(max_refs=0, supports_end_frame=False, has_audio=True, fps=24, sizes=VIDEO_SIZES,
-                     default_seconds=8.0, max_seconds=8.0)
+                     default_seconds=8.0, max_seconds=8.0, allowed_seconds=VEO31_SECONDS)
 
     def _seconds(self, req, model) -> int | None:
         if "3.1" not in model:
@@ -204,7 +204,7 @@ class SoraEngine(_ApiVideoEngine):
     label = "OpenAI Sora（API）"
     service = "openai"
     caps = VideoCaps(max_refs=0, supports_end_frame=False, has_audio=True, fps=30, sizes=VIDEO_SIZES,
-                     default_seconds=4.0, max_seconds=12.0)
+                     default_seconds=4.0, max_seconds=12.0, allowed_seconds=SORA_SECONDS)
 
     def _seconds(self, req, model) -> int:
         want = max(req.seconds, req.min_seconds)

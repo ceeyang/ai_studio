@@ -20,6 +20,7 @@ from backend.domain.settings import (GLOBAL_KEYS, STEP_KIND, STEP_LABEL, AppSett
                                      prop_engine,
                                      portrait_engine,
                                      sheet_engine)
+from backend.app.routes.system import engine_note_fn
 from backend.engines.registry import runtime_of
 from backend.queue.errors import JobError
 
@@ -43,10 +44,10 @@ class SettingsIn(BaseModel):
 
 def _engine_rows(sv, kind: str) -> list[dict]:
     rows = []
+    engine_note = engine_note_fn(sv)
     for name in sv.engines.names(kind):
         e = sv.engines.get(name)
-        pre = getattr(e, "preflight", None)
-        note = pre() if callable(pre) else None
+        note = engine_note(e)
         rows.append({"name": name, "label": getattr(e, "label", None) or name,
                      "runtime": runtime_of(e), "family": e.family, "enabled": True,
                      "ready": note is None, "note": note})

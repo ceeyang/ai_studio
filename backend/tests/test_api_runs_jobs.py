@@ -100,8 +100,10 @@ def test_candidates_select_and_media(api):
 def test_system_endpoints(api):
     assert api.get("/api/health").json()["ok"] is True
     eng = api.get("/api/engines").json()
-    assert [e["name"] for e in eng["video"]] == ["h3_video", "sora_video", "veo_video", "wan22_i2v"]
+    assert [e["name"] for e in eng["video"]] == ["gemini_video", "h3_video", "muse_video", "sora_video", "veo_video",
+                                                 "wan22_i2v"]
     assert eng["video"][0]["caps"]["has_audio"] is True
+    assert eng["video"][0]["caps"]["duration_control"] == "fixed" and eng["video"][0]["runtime"] == "browser"
     api_rows = {e["name"]: e for e in eng["video"] + eng["image"] if e["runtime"] == "api"}
     assert set(api_rows) == {"sora_video", "veo_video", "openai_image", "gemini_api_image"}
     cfg = api.get("/api/config").json()
@@ -396,3 +398,20 @@ def test_unforced_all_run_counts_script_rerun_losses(api):
     r = api.post(url, json={"stage": "all"})
     assert r.status_code == 400 and "S01" in r.json()["detail"]
     assert api.post(url, json={"stage": "all", "confirm": True}).status_code == 200
+
+
+def test_engines_mark_comfy_engines_unready_when_comfy_down(api, monkeypatch):
+    from backend.engines.comfyui import health
+
+    rows = {e["name"]: e for e in api.get("/api/engines").json()["video"]}
+    assert rows["h3_video"]["ready"] is True and rows["h3_video"]["note"] is None
+    monkeypatch.setattr(health, "check_comfy",
+                        lambda client: health.ComfyHealth(False, "连不上 127.0.0.1:9（拒绝连接）"))
+    eng = api.get("/api/engines").json()
+    rows = {e["name"]: e for e in eng["video"] + eng["image"]}
+    assert rows["h3_video"]["ready"] is False
+    assert rows["h3_video"]["note"] == "ComfyUI 连不上 127.0.0.1:9（拒绝连接）"
+    assert rows["zimage"]["ready"] is False
+    # 设置页的可选项也一样
+    choices = api.get("/api/settings").json()["choices"]["video"]
+    assert {c["name"]: c for c in choices}["h3_video"]["ready"] is False

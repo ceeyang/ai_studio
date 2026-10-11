@@ -1,8 +1,8 @@
 // 扩展的出图流程（browser-extension/lib/flow.js）：和 backend/tests/test_browser_flow.py 同样的场景。
 import { describe, expect, it } from 'vitest';
 import { Canceled, FlowError, generate } from '../../../browser-extension/lib/flow.js';
-import { CHATGPT, GEMINI } from '../../../browser-extension/sites/index.js';
-import { FakePage, PNG_B64 } from './fakePage.js';
+import { CHATGPT, GEMINI, MUSE, SITES } from '../../../browser-extension/sites/index.js';
+import { FakePage, MP4_B64, PNG_B64 } from './fakePage.js';
 
 const GPT_PARTIAL = 'https://chatgpt.com/backend-api/estuary/content?id=file_partial';
 const GPT_FINAL = 'https://chatgpt.com/backend-api/estuary/content?id=file_final';
@@ -221,4 +221,69 @@ describe('extension flow', () => {
     expect(e.kind).toBe('page');
     expect(e.message).toContain('不是图片');
   });
+
+  it('Gemini 出视频：选做视频工具、点掉介绍框、选画幅、粘贴首帧；「正在生成」的回复不算没出视频；取回 mp4', async () => {
+    const G = SITES.gemini;
+    const VID = 'https://contribution.usercontent.google.com/download?c=abc&filename=video.mp4';
+    const page = new FakePage(G, { hasFileInput: false, pasteWorks: true, videoIntro: true }).afterSubmit([
+      [1, (p) => p.show(G.stop_button)],
+      [20, (p) => { p.hide(G.stop_button); p.reply = "I'm generating your video. This could take a few minutes"; }],
+      [150, (p) => { p.reply = 'Your video is ready!'; p.addVideo(VID); }],
+    ]);
+    const { out, logs } = await run(page, { spec: G, kind: 'video', aspect: '9:16', refs: [REF], timeout: 600 });
+    expect(out).toEqual([{ src: VID, mime: 'video/mp4', b64: MP4_B64, via: 'page' }]);
+    for (const sel of G.video_steps) expect(page.calls).toContainEqual(['click', sel]);
+    expect(page.calls).toContainEqual(['click', G.video_dismiss]);
+    expect(page.aspect).toBe('9:16');
+    expect(page.calls).toContainEqual(['pasteFiles', ['chen.png']]);
+    expect(logs.some((m) => m.includes('已切到做视频'))).toBe(true);
+    expect(page.t).toBeGreaterThanOrEqual(150 + G.settle_seconds);
+  });
+
+  it('Gemini 出视频：点了按钮却没进入视频模式（没有视频额度等）就报错、不提交', async () => {
+    const G = SITES.gemini;
+    const page = new FakePage(G);
+    page.click = async (sel) => { page.calls.push(['click', sel]); return page.shown.has(sel) && sel !== G.video_active; };
+    const e = await fails(run(page, { spec: G, kind: 'video', aspect: '9:16' }));
+    expect(e.kind).toBe('page');
+    expect(e.message).toContain('视频模式');
+    expect(page.calls).not.toContainEqual(['type', 'PROMPT']);
+  });
+
+  it('Muse 出视频：没有工具按钮，传首帧、等 blob 视频出来；页面上的头像动画不在选择器里，不算', async () => {
+    const VID = 'blob:https://muse.ai/v1';
+    const page = new FakePage(MUSE).afterSubmit([
+      [1, (p) => p.show(MUSE.stop_button)],
+      [60, (p) => { p.hide(MUSE.stop_button); p.reply = "Here's your video."; p.addVideo(VID); }],
+    ]);
+    const { out } = await run(page, { spec: SITES.muse, kind: 'video', aspect: '9:16', refs: [REF] });
+    expect(out.map((o) => [o.src, o.mime])).toEqual([[VID, 'video/mp4']]);
+    expect(page.calls).toContainEqual(['setFiles', ['chen.png']]);
+    expect(page.calls).toContainEqual(['goto', MUSE.new_chat_url]);
+  });
+
+  it('出视频但取回来的是图片：报错', async () => {
+    const VID = 'blob:https://muse.ai/v2';
+    const page = new FakePage(MUSE).afterSubmit([
+      [30, (p) => { p.addVideo(VID, PNG_B64); }],
+    ]);
+    const e = await fails(run(page, { spec: SITES.muse, kind: 'video', aspect: '9:16' }));
+    expect(e.kind).toBe('page');
+    expect(e.message).toContain('不是视频');
+  });
+
+  it('不能出视频的网站接到视频任务：直接报错', async () => {
+    const e = await fails(run(new FakePage(CHATGPT), { spec: SITES.chatgpt, kind: 'video' }));
+    expect(e.kind).toBe('browser');
+  });
+
+  it('出图时标签页还停在做视频的模式：先退出来', async () => {
+    const G = SITES.gemini;
+    const FINAL = 'https://lh3.googleusercontent.com/gg/x=s1024';
+    const page = new FakePage(G).afterSubmit([[1, (p) => p.show(G.stop_button)], [30, (p) => p.finish(FINAL)]]);
+    page.show(G.video_active);
+    await run(page, { spec: G });
+    expect(page.calls).toContainEqual(['click', G.video_active]);
+  });
+
 });

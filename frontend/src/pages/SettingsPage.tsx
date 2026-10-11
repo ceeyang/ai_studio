@@ -21,7 +21,7 @@ export function SettingsPage() {
   const engines = useEngines();
   const config = useConfig();
   const rows = doctor.data ?? [];
-  const hasBrowserEngine = (engines.data?.image ?? []).some((e) => e.runtime === 'browser');
+  const hasBrowserEngine = [...(engines.data?.image ?? []), ...(engines.data?.video ?? [])].some((e) => e.runtime === 'browser');
 
   return (
     <div className="page">

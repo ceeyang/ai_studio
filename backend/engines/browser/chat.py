@@ -22,7 +22,7 @@ from backend.engines.browser.sites.base import SiteSpec
 Log = Callable[[str], None]
 
 # 标签页被跳到这些地址上 = 没登录
-LOGIN_URL_HINTS = ("auth.openai.com", "auth0.openai.com", "accounts.google.com", "claude.ai/login")
+LOGIN_URL_HINTS = ("auth.openai.com", "auth0.openai.com", "accounts.google.com", "claude.ai/login", "auth.muse.ai")
 START_TIMEOUT = 90.0       # 发出去这么久还没开始回复（没在生成、也没有回复文字）就判失败
 SETTLE_SECONDS = 3.0       # 不在生成、回复文字连续这么久不变才算写完
 REPORT_EVERY = 20.0        # 等回复时每隔多久在任务日志里写一次进度

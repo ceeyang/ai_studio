@@ -44,14 +44,49 @@ def system_health(request: Request):
     return {"comfyui": comfy, "browser_ext": _browser_ext(sv.browser)}
 
 
+def engine_note_fn(sv):
+    """引擎下拉框用：返回 note(engine) → 现在用不了的原因（None = 能用）。
+    API / RunningHub 看自己的 preflight（没配 Key）；本机 ComfyUI 引擎看 ComfyUI 连没连上；
+    网页出图引擎看浏览器扩展连没连上。ComfyUI 和扩展的状态一次请求只查一次。"""
+    cache: dict[str, str | None] = {}
+
+    def comfy() -> str | None:
+        if "comfy" not in cache:
+            h = comfy_health.check_comfy(sv.comfy_client)
+            cache["comfy"] = None if h.ok else (h.message if h.message.startswith("ComfyUI")
+                                                else f"ComfyUI {h.message}")
+        return cache["comfy"]
+
+    def browser() -> str | None:
+        if "browser" not in cache:
+            b = _browser_ext(sv.browser)
+            cache["browser"] = None if b["ok"] else b["message"]
+        return cache["browser"]
+
+    def note(e) -> str | None:
+        pre = getattr(e, "preflight", None)
+        msg = pre() if callable(pre) else None
+        if msg:
+            return msg
+        rt = runtime_of(e)
+        if rt == "comfyui":
+            return comfy()
+        if rt == "browser":
+            return browser()
+        return None
+
+    return note
+
+
 @router.get("/engines")
 def engines(request: Request):
-    reg = services(request).engines
+    sv = services(request)
+    reg = sv.engines
+    engine_note = engine_note_fn(sv)
 
     def row(name):
         e = reg.get(name)
-        pre = getattr(e, "preflight", None)
-        note = pre() if callable(pre) else None
+        note = engine_note(e)
         out = {"name": name, "label": getattr(e, "label", None) or name, "family": e.family,
                "runtime": runtime_of(e), "caps": asdict(e.caps), "ready": note is None, "note": note}
         if runtime_of(e) == "api":

@@ -1,10 +1,11 @@
 // 扩展的纯函数：重连退避、分块、图片类型、选标签页、登录判断、Gemini 原尺寸地址。
 import { describe, expect, it } from 'vitest';
 import {
-  FEATURES, RPC_DOM_OPS, backoffMs, imageMessages, loggedIn, onSite, rankTabs, rpcProblem, siteOfUrl, sniffMime,
+  FEATURES, RPC_DOM_OPS, backoffMs, imageMessages, loggedIn, onSite, rankTabs, rpcProblem, siteOfUrl,
+  sniffMime,
 } from '../../../browser-extension/lib/protocol.js';
-import { CHATGPT, CLAUDE, GEMINI, IMAGE_SITES, SITES } from '../../../browser-extension/sites/index.js';
-import { PNG_B64 } from './fakePage.js';
+import { CHATGPT, CLAUDE, GEMINI, IMAGE_SITES, MUSE, SITES, VIDEO_SITES } from '../../../browser-extension/sites/index.js';
+import { MP4_B64, PNG_B64 } from './fakePage.js';
 
 describe('extension protocol helpers', () => {
   it('重连退避：1s 起翻倍，封顶 30s，抖动不超过 20%', () => {
@@ -70,13 +71,13 @@ describe('extension protocol helpers', () => {
     ]);
     expect(GEMINI.fullSize('blob:https://gemini.google.com/1')).toEqual(['blob:https://gemini.google.com/1']);
     expect(CHATGPT.fullSize('x')).toEqual(['x']);
-    expect(Object.keys(SITES)).toEqual(['chatgpt', 'gemini', 'claude']);
+    expect(Object.keys(SITES)).toEqual(['chatgpt', 'gemini', 'muse', 'claude']);
   });
 
   it('rpc（网页文本模型）：hello 报 rpc 能力；只许对交出去的标签页、白名单里的页面操作、支持的网站', () => {
     expect(FEATURES).toContain('rpc');
     expect(RPC_DOM_OPS).toContain('replyText');
-    expect(IMAGE_SITES).toEqual(['chatgpt', 'gemini']);
+    expect(IMAGE_SITES).toEqual(['chatgpt', 'gemini', 'muse']);
     expect(siteOfUrl('https://claude.ai/new', SITES)).toBe('claude');
     expect(siteOfUrl('https://evil.example/', SITES)).toBe('');
     const ctx = { tabs: new Set([5]), sites: SITES };
@@ -90,5 +91,13 @@ describe('extension protocol helpers', () => {
     expect(rpcProblem('cookie_names', { url: 'https://evil.example/' }, ctx)).toMatch('只能查');
     expect(rpcProblem('eval', {}, ctx)).toMatch('不认识 rpc 方法');
     expect(CLAUDE.new_chat_url).toBe('https://claude.ai/new');
+  });
+
+  it('认 mp4；视频网站和能力', () => {
+    expect(sniffMime(MP4_B64)).toBe('video/mp4');
+    expect(VIDEO_SITES).toEqual(['gemini', 'muse']);
+    expect(FEATURES).toEqual(expect.arrayContaining(['rpc', 'conversation', 'video']));
+    expect(SITES.chatgpt.result_videos).toBe(''); // 不出视频的网站有默认值
+    expect(SITES.muse.video_steps).toEqual([]);
   });
 });
