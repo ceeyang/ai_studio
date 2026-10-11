@@ -6,8 +6,10 @@ server:
 
 comfyui:
   url: http://127.0.0.1:8188
-  # 只给 doctor 检查模型文件是否存在
-  models_dir: C:\Users\cee\AppData\Local\Comfy-Desktop\ComfyUI-Shared\models
+  # 只给 doctor 检查模型文件是否存在；不写就跳过这项检查。填你本机 ComfyUI 的 models 目录（绝对路径），例如
+  #   Windows（ComfyUI Desktop）：C:\Users\<你的用户名>\AppData\Local\Comfy-Desktop\ComfyUI-Shared\models
+  #   macOS / Linux：/home/<你的用户名>/ComfyUI/models
+  models_dir: null
   timeout: 30
   max_retries: 6
   # 队列空闲超过这么多秒（自上一个 GPU 任务结束算起）就自动调一次 ComfyUI 的 /free，
@@ -31,6 +33,14 @@ llm:
     # OpenAI / Anthropic / Google Gemini 的官方 API（openai_api / anthropic_api / gemini_api）不用写在这里：
     # 会自动加上，Key、Base URL、模型名在设置页「API 服务」里填（或用环境变量 OPENAI_API_KEY /
     # ANTHROPIC_API_KEY / GEMINI_API_KEY），没配 Key 时下拉里不可选
+    #
+    # 所有 API 服务的 Key 都不写在本文件里：设置页「API 服务」填的优先，没填再读环境变量（也可以写进仓库根目录的
+    # .env，.env 已在 .gitignore 里）。括号里是可选的 Base URL 环境变量：
+    #   OpenAI（GPT / gpt-image / Sora）：OPENAI_API_KEY（OPENAI_BASE_URL）
+    #   Anthropic（Claude）：ANTHROPIC_API_KEY（ANTHROPIC_BASE_URL）
+    #   Google（Gemini / Veo）：GEMINI_API_KEY 或 GOOGLE_API_KEY
+    #   火山方舟（Seedance 视频）：ARK_API_KEY（ARK_BASE_URL）；国内 / 海外区域在设置页选
+    #   可灵（Kling 视频）：KLING_API_KEY，或 KLING_ACCESS_KEY + KLING_SECRET_KEY（KLING_BASE_URL）；区域在设置页选
   routes:
     script: claude
     storyboard: claude

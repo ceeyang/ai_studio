@@ -1,0 +1,58 @@
+name: 问题反馈（Bug）
+description: 功能出错、报错、结果不对
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈！请不要贴 API Key、cookie、账号信息；截图请遮掉个人信息。
+        如果是某个网站（ChatGPT / Gemini / 即梦 / 可灵……）的页面变了导致网页出图失败，请改用「网站改版 / 选择器失效」模板。
+  - type: textarea
+    id: what
+    attributes:
+      label: 发生了什么
+      description: 你做了什么、期望看到什么、实际看到什么。
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      placeholder: |
+        1. 打开某个项目的剧集工作台
+        2. 点「首帧」……
+        3. 任务失败，提示……
+    validations:
+      required: true
+  - type: input
+    id: engine
+    attributes:
+      label: 涉及的引擎 / 文本模型
+      placeholder: 例如 zimage、gemini_video、seedance_video、web_chatgpt、claude
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志
+      description: 任务面板里失败任务的日志和「调用明细」，或后端终端的报错。
+      render: text
+  - type: textarea
+    id: doctor
+    attributes:
+      label: 环境检查结果
+      description: 设置页「环境检查」或 `uv run studio doctor` 的输出（注意遮掉本机路径里的用户名）。
+      render: text
+  - type: input
+    id: version
+    attributes:
+      label: 版本
+      description: 提交号（`git rev-parse --short HEAD`），用到浏览器扩展时再写扩展版本（chrome://extensions 里能看到）。
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: 操作系统
+      options: [Windows, macOS, Linux, 其他]
+    validations:
+      required: true

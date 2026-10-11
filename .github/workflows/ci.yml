@@ -1,0 +1,74 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: 后端测试（pytest）
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      # Ubuntu 的 ffmpeg 编译时带 libass：烧字幕、AI 标识角标的导出测试能跑。
+      # 本机 ffmpeg 不带 libass（如 macOS Homebrew 的 ffmpeg 8）时，test_post_ffmpeg / test_fit_pipeline 里
+      # 两个烧字幕的导出测试会失败，属于环境问题；没有 ffmpeg 时相关测试自动跳过。
+      - name: 安装 ffmpeg
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg
+          ffmpeg -hide_banner -filters | grep -E '^ ... ass ' || echo "警告：ffmpeg 没有 ass 滤镜（libass）"
+
+      # test_browser_extension_js 用 node 读扩展里的网站配置
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: 安装依赖
+        run: uv sync --locked
+
+      - name: pytest
+        run: uv run pytest backend/tests -q
+
+  frontend:
+    name: 前端（类型检查 + Vitest + 构建）
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 类型检查
+        run: npm run typecheck
+
+      - name: Vitest
+        run: npx vitest run
+
+      - name: 构建
+        run: npm run build

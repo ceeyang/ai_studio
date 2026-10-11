@@ -1,0 +1,29 @@
+name: 功能建议
+description: 想要的新功能、新引擎、流程改进
+title: "[建议] "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: 遇到了什么问题
+      description: 做短剧的哪一步不方便？现在是怎么绕过去的？
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 希望怎么做
+      description: 你设想的做法；如果是新引擎，写上网站或 API 文档链接、需要的账号 / Key、费用。
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 其他方案
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: 参与
+      options:
+        - label: 我愿意自己提 PR（实现前可以先在这里讨论方案）

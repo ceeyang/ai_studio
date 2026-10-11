@@ -1,0 +1,68 @@
+name: 网站改版 / 选择器失效
+description: 网页版出图、出视频、写文本突然不行了（网站改了页面）
+title: "[网站改版] "
+labels: ["site-breakage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        网页版引擎靠页面上的按钮、输入框定位，网站改版后可能失效。提之前请先：
+        1. 在设置页「环境检查」确认扩展连着、网站已登录；
+        2. 在 `chrome://extensions` 里把扩展「重新加载」一次，再试一遍。
+
+        **截图请遮掉头像、账号名、邮箱、积分余额、订单信息。不要贴 cookie。**
+  - type: dropdown
+    id: site
+    attributes:
+      label: 网站
+      options:
+        - ChatGPT（chatgpt.com）
+        - Gemini（gemini.google.com）
+        - Claude（claude.ai）
+        - Muse（muse.ai）
+        - 即梦（jimeng.jianying.com）
+        - Dreamina（dreamina.capcut.com）
+        - 可灵国内站
+        - 可灵国际站
+        - 其他
+    validations:
+      required: true
+  - type: dropdown
+    id: usage
+    attributes:
+      label: 用途
+      options: [出图, 出视频, 写文本（网页文本模型）]
+    validations:
+      required: true
+  - type: input
+    id: ui_lang
+    attributes:
+      label: 网站界面语言
+      placeholder: 例如 简体中文 / English
+  - type: textarea
+    id: step
+    attributes:
+      label: 哪一步失败
+      description: 例如 找不到输入框、参考图没传上去、点了生成没反应、结果出来了但没取回、一直等到超时。
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: 任务日志
+      description: 任务面板里失败任务的日志（含「调用明细」）。
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: page
+    attributes:
+      label: 页面信息（可选，能帮很大忙）
+      description: 出问题那个元素的截图，或在开发者工具里右键「复制 outerHTML」贴一小段。
+  - type: input
+    id: version
+    attributes:
+      label: 版本
+      description: 提交号（`git rev-parse --short HEAD`）和扩展版本（chrome://extensions 里能看到）。
+    validations:
+      required: true
