@@ -106,6 +106,13 @@ def extension_id_of(origin: str) -> str:
     return origin.split("://", 1)[1].strip("/") if "://" in origin else ""
 
 
+# 扩展刚断开（被重新加载、Service Worker 重启）多半一两秒就重连上：断开不到 RECENT_DISCONNECT 秒、或刚连上还没
+# 报 hello 时，发任务前最多等 RECONNECT_GRACE 秒，等它回来再发，免得正好撞上重连的任务直接失败（2026-10-12 实跑：
+# 两个视频任务挨着排，第二个在扩展重连的那一瞬间开始，报「没有连上」）。从没连上过 / 断了很久的照旧马上报错。
+RECONNECT_GRACE = 10.0
+RECENT_DISCONNECT = 30.0
+
+
 class ExtensionHub:
     """持有当前扩展连接；网页通道线程通过 generate() 发任务、等结果。"""
 
@@ -197,6 +204,22 @@ class ExtensionHub:
             q.put({**_DISCONNECTED, "why": why})
 
     # ------------------------------------------------------------ 线程这边
+    def ready_conn(self, cancel: threading.Event | None = None, *, grace: float = RECONNECT_GRACE,
+                   poll: float = 0.25) -> "_Conn | None":
+        """当前连接（已经报过 hello 的）；扩展刚断开或刚连上还没报 hello 时最多等 grace 秒。等不到返回现在的连接（可能是 None）。"""
+        c = self._conn
+        if c is not None and c.hello:
+            return c
+        recent = c is not None or (self.last_disconnect is not None
+                                   and time.time() - self.last_disconnect < RECENT_DISCONNECT)
+        deadline = time.monotonic() + grace
+        while recent and time.monotonic() < deadline and not (cancel is not None and cancel.is_set()):
+            time.sleep(poll)
+            c = self._conn
+            if c is not None and c.hello:
+                return c
+        return self._conn
+
     def send(self, msg: dict, conn: _Conn | None = None) -> None:
         conn = conn or self._conn
         if conn is None:
@@ -240,7 +263,7 @@ class ExtensionHub:
 
     def rpc(self, method: str, params: dict | None = None, *, timeout: float = RPC_TIMEOUT) -> Any:
         """让扩展做一步页面操作，等它回执（同步，在调用线程里等）。失败抛 BrowserError（中文原因）。"""
-        conn = self._conn
+        conn = self.ready_conn()
         if conn is None:
             raise BrowserError("browser", not_connected_text())
         if RPC_FEATURE not in (conn.hello.get("features") or []):
@@ -282,7 +305,7 @@ class ExtensionHub:
         """info（可选）：扩展在 result 里报的会话情况 {url, continued, note} 填进去（v0.3 起才有）。
         kind：image（出图）/ video（出视频，扩展没有 video 能力时直接报要重新加载）。
         generator（可选）：生成器页（即梦 / 可灵）要选的项，扩展没有 generator 能力时直接报要重新加载。"""
-        conn = self._conn
+        conn = self.ready_conn(cancel)
         if conn is None:
             raise BrowserError("browser", not_connected_text())
         feats = conn.hello.get("features") or []

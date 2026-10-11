@@ -313,3 +313,30 @@ def test_hub_timeout_without_answer(monkeypatch):
 
 def test_decode_reports_size_and_format():
     assert decode(ExtImage(png(30, 20), "image/png", "s", "page"), "X") == (30, 20, "PNG")
+
+
+def test_ready_conn_waits_for_a_quick_reconnect():
+    """扩展刚断开（重新加载）时等它重连上、报完 hello 再发；从没连上过的马上返回 None。"""
+    import threading
+    import time
+
+    from backend.engines.browser.extension import ExtensionHub
+
+    hub = ExtensionHub()
+    assert hub.ready_conn(grace=5) is None            # 从没连上过：不等
+
+    class C:
+        hello = {"version": "0.5.0", "features": []}
+
+    hub.last_disconnect = time.time()                  # 刚断开
+    conn = C()
+    threading.Timer(0.3, lambda: setattr(hub, "_conn", conn)).start()
+    t0 = time.monotonic()
+    assert hub.ready_conn(grace=5, poll=0.05) is conn
+    assert time.monotonic() - t0 < 3
+
+    hub2 = ExtensionHub()
+    hub2.last_disconnect = time.time() - 120           # 断了很久：不等
+    t0 = time.monotonic()
+    assert hub2.ready_conn(grace=5) is None
+    assert time.monotonic() - t0 < 1
