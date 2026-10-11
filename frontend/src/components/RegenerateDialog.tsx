@@ -14,6 +14,9 @@ export function impactLosesWork(im: RerunImpact): boolean {
   return im.selected_videos > 0 || im.selected_first_frames > 0 || (im.edited_shots ?? 0) > 0;
 }
 
+/** 会删镜头时的一句保底说明：删掉的候选不会丢、数据库删之前有备份 */
+export const ARCHIVE_NOTE = '删掉的镜头的首帧和视频会放进「历史候选」（镜头详情里可以恢复），删之前会自动备份数据库。';
+
 export const RULES_OUTDATED_NOTE = '分镜规则已更新，现有镜头是按旧规则出的；这次重新生成会按新规则出';
 export const SCRIPT_RULES_OUTDATED_NOTE = '剧本规则已更新，现有剧本是按旧规则出的；这次重新生成会按新规则出';
 
@@ -136,6 +139,7 @@ function RegenerateDialogBody({
           />
         </label>
         {impactView}
+        {im && im.shots_deleted > 0 && <p className="muted small">{ARCHIVE_NOTE}</p>}
         {im?.rules_outdated && (
           <p className="muted">{stage === 'script' ? SCRIPT_RULES_OUTDATED_NOTE : RULES_OUTDATED_NOTE}</p>
         )}

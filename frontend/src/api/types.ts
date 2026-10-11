@@ -245,6 +245,27 @@ export interface Candidate {
   created_at: string;
 }
 
+/** 历史候选：重跑分镜（或删镜头）删掉的镜头留下的首帧 / 视频候选，可以恢复到同一集的镜头上 */
+export interface ArchivedCandidate {
+  id: number;
+  episode_id: number;
+  /** 原来那个镜头的编号 */
+  shot_code: string;
+  kind: string;
+  file_path: string;
+  url: string;
+  engine: string;
+  params: Record<string, unknown>;
+  note: string;
+  /** 删之前是不是那个镜头的选定 */
+  was_selected: boolean;
+  /** 删之前镜头的内容（动作、提示词、对白……） */
+  shot_snapshot: Record<string, unknown>;
+  reason: string;
+  created_at: string;
+  archived_at: string;
+}
+
 export interface Slot {
   id: number;
   kind: string;
