@@ -166,12 +166,49 @@ def test_chain_videos_wait_for_prev_video(tmp_path, db, manager):
 
 
 def test_chain_keyframes_only_submits_continue_job(tmp_path, db, manager):
+    """只跑首帧：上一镜已有选定视频的接上一镜镜头照常截尾帧。"""
     ctx, _, _, ep_id, ids = setup(tmp_path, db)
+    give_video(ctx.services, ids[0], "A")
     submit_chain(manager, db, ctx.services.engines, ep_id, ["keyframes"], RunOptions(candidates=2))
     rows = jobs(db)
     assert [(r[1], r[2]) for r in rows] == [("image.keyframe", ids[0]), ("image.keyframe", ids[0]),
                                             ("image.continue_frame", ids[1]),
                                             ("image.keyframe", ids[2]), ("image.keyframe", ids[2])]
+
+
+def test_chain_keyframes_only_skips_continue_shot_waiting_for_prev_video(tmp_path, db, manager):
+    """第三次样片 job 217：只跑首帧时，上一镜还没有视频（也没在出）的接上一镜镜头不提交注定失败的任务，
+    跳过并给一句「等上一镜视频」。"""
+    from backend.pipeline.runs import continue_wait_notes
+
+    ctx, _, _, ep_id, ids = setup(tmp_path, db)
+    sv = ctx.services
+    out = submit_chain(manager, db, sv.engines, ep_id, ["keyframes"], RunOptions(), precheck=Precheck())
+    rows = jobs(db)
+    assert [(r[1], r[2]) for r in rows] == [("image.keyframe", ids[0]), ("image.keyframe", ids[2])]
+    assert out == [r[0] for r in rows]
+    notes = continue_wait_notes(db, ep_id, ["keyframes"])
+    assert len(notes) == 1 and "S02" in notes[0] and "等上一镜视频" in notes[0] and "S01" in notes[0]
+    # 只点这一镜：也不提交，不报错
+    assert submit_chain(manager, db, sv.engines, ep_id, ["keyframes"], RunOptions(shots=["S02"]),
+                        precheck=Precheck()) == []
+    assert continue_wait_notes(db, ep_id, ["keyframes"], ["S03"]) == []
+    # 同时出视频：照常串起来，不算等待
+    assert continue_wait_notes(db, ep_id, ["keyframes", "videos"]) == []
+    # 上一镜有视频了：不再跳过
+    give_video(sv, ids[0], "A")
+    assert continue_wait_notes(db, ep_id, ["keyframes"]) == []
+
+
+def test_run_all_chains_continue_shot_after_storyboard(tmp_path, db, manager):
+    """整集 all：分镜之后接着提交 keyframes + videos + export，接上一镜的镜头排在上一镜视频之后。"""
+    ctx, _, _, ep_id, ids = setup(tmp_path, db)
+    submit_chain(manager, db, ctx.services.engines, ep_id, ["keyframes", "videos", "export"],
+                 RunOptions())
+    by = {(r[1], r[2]): r for r in jobs(db)}
+    assert ("image.continue_frame", ids[1]) in by
+    assert by[("image.continue_frame", ids[1])][3] == [by[("video.shot", ids[0])][0]]
+    assert by[("video.shot", ids[1])][3] == [by[("image.continue_frame", ids[1])][0]]
 
 
 def test_chain_videos_precheck(tmp_path, db, manager):
@@ -224,3 +261,116 @@ def test_continue_waits_for_prev_video_job_already_queued(tmp_path, db, manager)
                         ("video.shot", ids[1], [jobs(db)[1][0]])]
     submit_chain(manager, db, sv.engines, ep_id, ["keyframes"], RunOptions(shots=["S02"]))
     assert jobs(db)[-1][1:4] == ("image.continue_frame", ids[1], first)
+
+
+# ------------------------------------------------------------ 接上一镜的视频：锁脸状态沿用上一镜，新入画的角色带定妆照
+def _cast_with_portraits(db, ids):
+    """S01 只有阿杰；S02（接上一镜）阿杰 + 苏晴（从画外进来）。两人都有定妆照。"""
+    from backend.domain.characters import add_portrait
+    from backend.domain.models import Character
+
+    with db.session() as s:
+        proj = s.scalar(select(Project))
+        out = {}
+        for name, vp in (("阿杰", "a young delivery man in his twenties with a rain-soaked yellow jacket"),
+                         ("苏晴", "a Chinese woman in her late twenties with shoulder-length layered hair, "
+                                  "wearing an oatmeal cardigan over a white tee")):
+            ch = Character(project_id=proj.id, name=name, visual_prompt=vp)
+            s.add(ch)
+            s.flush()
+            add_portrait(s, ch.id, file_path=f"demo/media/portrait/{ch.id}.png", engine="krea2",
+                         params={}, input_hash=f"p{ch.id}", job_id=None)
+            out[name] = ch.id
+        s.get(Shot, ids[0]).cast = [{"character_id": out["阿杰"], "variation_id": None}]
+        s.get(Shot, ids[1]).cast = [{"character_id": out["阿杰"], "variation_id": None},
+                                    {"character_id": out["苏晴"], "variation_id": None}]
+        s.get(Shot, ids[1]).motion_prompt = "the woman leans in from frame right and whispers"
+    return out
+
+
+def _prev_video(sv, shot_id, identity):
+    dst = sv.media.new_media_path("demo", "video", ".mp4")
+    dst.write_bytes(b"prev")
+    with sv.db.session() as s:
+        c = add_candidate(s, get_or_create_slot(s, "shot", shot_id, "video"),
+                          file_path=sv.media.rel(dst), engine="h3_video",
+                          params={"identity": identity}, input_hash="v-prev", job_id=None,
+                          force_select=True)
+        return c.id
+
+
+def _labels(call):
+    return [r for r in call.meta.get("refs") or []]
+
+
+def test_continue_video_brings_portrait_of_character_entering_frame(tmp_path, db):
+    """第三次样片 S06：上一镜没锁脸（文生图），尾帧里没有苏晴；她从画外进来，视频要带她的定妆照锁脸，
+    阿杰的脸以尾帧为准（不带他的定妆照，免得两张脸打架）。提示词里给新入画的人一句简短外貌。"""
+    from backend.pipeline.videos import run_video
+
+    ctx, runner, _, _, ids = setup(tmp_path, db)
+    sv = ctx.services
+    chars = _cast_with_portraits(db, ids)
+    _prev_video(sv, ids[0], "first_frame")
+    run_continue_frame(ctx, {"shot_id": ids[1]})
+    run_video(ctx, {"shot_id": ids[1]})
+    call = runner.calls[-1]
+    assert len(call.meta["refs"]) == 1
+    prompt = call.workflow["6"]["inputs"]["prompt"] if "6" in call.workflow else str(call.workflow)
+    assert "Entering the frame" in prompt and "shoulder-length layered hair" in prompt
+    assert not any("文生图" in m for m in ctx.logs)
+    with db.session() as s:
+        v = selected_candidate(s, "shot", ids[1], "video")
+        assert v.params["identity"] == "entering"
+        assert [r["label"] for r in v.params["inputs"]["refs"]] == ["苏晴 定妆照"]
+    d = detail(sv, ids[1])
+    assert not next(x for x in d.slots if x.kind == "video").stale
+    assert chars
+
+
+def test_continue_video_inherits_locked_face_from_prev_shot(tmp_path, db):
+    """上一镜的视频是带定妆照锁过脸的：尾帧里的脸就是定妆照的脸，这一镜照常带全部出场角色的定妆照。"""
+    from backend.pipeline.videos import run_video
+
+    ctx, runner, _, _, ids = setup(tmp_path, db)
+    sv = ctx.services
+    _cast_with_portraits(db, ids)
+    _prev_video(sv, ids[0], "refs")
+    run_continue_frame(ctx, {"shot_id": ids[1]})
+    run_video(ctx, {"shot_id": ids[1]})
+    with db.session() as s:
+        v = selected_candidate(s, "shot", ids[1], "video")
+        assert v.params["identity"] == "refs"
+        assert [r["label"] for r in v.params["inputs"]["refs"]] == ["阿杰 定妆照", "苏晴 定妆照"]
+    assert not next(x for x in detail(sv, ids[1]).slots if x.kind == "video").stale
+
+
+def test_old_continue_video_without_refs_is_not_stale(tmp_path, db):
+    """以前接上一镜的视频一律不带参考图：新规则下不判过期、不自动重出。"""
+    from backend.pipeline.prompting import video_input_hash
+    from backend.pipeline.keyframes import load_shot
+    from backend.pipeline.videos import run_video
+
+    ctx, runner, _, _, ids = setup(tmp_path, db)
+    sv = ctx.services
+    _cast_with_portraits(db, ids)
+    _prev_video(sv, ids[0], "first_frame")
+    run_continue_frame(ctx, {"shot_id": ids[1]})
+    with db.session() as s:
+        shot, _, proj, style = load_shot(s, ids[1])
+        ff = selected_candidate(s, "shot", ids[1], "first_frame")
+        h_old = video_input_hash(shot, proj, style, ff.id, "h3_video", True, [])
+        add_candidate(s, get_or_create_slot(s, "shot", ids[1], "video"), file_path="x.mp4",
+                      engine="h3_video", params={}, input_hash=h_old, job_id=None)
+    assert not next(x for x in detail(sv, ids[1]).slots if x.kind == "video").stale
+    n = len(runner.calls)
+    assert run_video(ctx, {"shot_id": ids[1]})["skipped"] is True and len(runner.calls) == n
+
+
+def test_forced_continue_reuses_same_tail_frame(tmp_path, db):
+    """第三次样片 job 225：force 重出接上一镜的视频时又截了一张一模一样的尾帧。上一镜视频没换就复用。"""
+    ctx, _, ff, _, ids = setup(tmp_path, db)
+    give_video(ctx.services, ids[0], "A")
+    run_continue_frame(ctx, {"shot_id": ids[1]})
+    assert run_continue_frame(ctx, {"shot_id": ids[1], "force": True})["skipped"] is True
+    assert len(ff.calls) == 1

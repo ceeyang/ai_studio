@@ -93,6 +93,19 @@ CUT_EDGE = 0.15      # 开头/结尾这么近的突变不算（编码首帧、�
 _SHOWINFO_PTS = re.compile(r"Parsed_showinfo.*?\bpts_time:\s*(-?[\d.]+)")
 
 
+SSIM_SIZE = (32, 32)
+_SSIM_ALL = re.compile(r"SSIM\b.*?All:\s*([0-9.]+)")
+
+
+def parse_ssim(log: str) -> float | None:
+    """ffmpeg ssim 滤镜的汇总行「SSIM Y:… All:0.91 (…)」里的 All 值。"""
+    m = _SSIM_ALL.findall(log or "")
+    try:
+        return float(m[-1]) if m else None
+    except ValueError:
+        return None
+
+
 def parse_scene_cuts(showinfo_log: str) -> list[float]:
     """select='gt(scene,X)',showinfo 的 stderr → 画面突变的时间点（秒）。"""
     return [float(x) for x in _SHOWINFO_PTS.findall(showinfo_log or "")]
@@ -261,6 +274,22 @@ class FFmpeg:
         except FFmpegError:
             dur = None
         return hard_cuts(parse_scene_cuts(p.stderr), dur)
+
+    def first_frame_ssim(self, video: Path, image: Path) -> float:
+        """视频第 0 帧和给的首帧图有多像（SSIM，0–1）。两张都缩到 SSIM_SIZE、转灰度再比，
+        分辨率、画幅不同也能比。缩得很小是故意的：只看构图，轻微推拉、平移和编码噪声不算。
+        第三次样片实测（32×32）：正常 0.94–0.96，开头轻微放大平移 0.70，H3 没从首帧开始（重新构图）0.11–0.18。"""
+        w, h = SSIM_SIZE
+        graph = (f"[0:v]trim=end_frame=1,setpts=PTS-STARTPTS,scale={w}:{h},format=gray[a];"
+                 f"[1:v]setpts=PTS-STARTPTS,scale={w}:{h},format=gray[b];[a][b]ssim")
+        p = self._exec([self.ffmpeg, "-hide_banner", "-nostats", "-i", str(video), "-i", str(image),
+                        "-an", "-filter_complex", graph, "-frames:v", "1", "-f", "null", "-"])
+        if p.returncode != 0:
+            raise FFmpegError(f"首帧相似度检测失败：\n{(p.stderr or '')[-1500:]}")
+        v = parse_ssim(p.stderr)
+        if v is None:
+            raise FFmpegError("首帧相似度检测没有结果")
+        return v
 
     def trim_silence(self, src: Path, dst: Path) -> Path:
         """剪掉音频首尾静音（配音用）。"""

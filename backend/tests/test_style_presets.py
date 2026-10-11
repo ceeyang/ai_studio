@@ -173,3 +173,30 @@ def test_storyboard_run_uses_project_preset(tmp_path, db):
                                               plan.shot_seconds, plan.max_seconds, "")
     assert plan.preset == "commercial" and "product hero shot" in system
     assert fp == fp_plain
+
+
+def test_live_action_recommends_reference_capable_keyframe_engine():
+    """第三次样片：真人写实推荐 krea2 出首帧，但 krea2 吃不了参考图，首帧既不锁脸也用不上场景图。
+    首帧推荐 h3_image 排第一；krea2 留给定妆照这一步（portrait_engines）。"""
+    live = PRESETS["live_action"]
+    assert live.image_engines[0] == "h3_image"
+    assert live.portrait_engines[0] == "krea2"
+    assert live.public()["portrait_engines"] == ["krea2"]
+
+
+def test_live_action_negative_and_anchor_keep_lips_natural():
+    """第三次样片 S05/S06：嘴唇又亮又粉像涂了唇彩。负面词里有 glossy lips，风格锚指引写自然唇色；
+    负面词不写 text（爆款道具常要画字），改成 logo, captions。"""
+    live = PRESETS["live_action"]
+    neg = [x.strip() for x in live.negative.split(",")]
+    assert "glossy lips" in neg and "lipstick" in neg and "text" not in neg
+    assert "logo" in neg and "captions" in neg and "watermark" in neg
+    assert "natural lip color" in live.anchor_guidance
+
+
+def test_api_lists_portrait_engine_recommendation(api):
+    live = api.get("/api/style-presets").json()[0]
+    names = api.app.state.services.engines.names("image")
+    assert live["portrait_engine"] == ("krea2" if "krea2" in names else None)
+    if "h3_image" in names:
+        assert live["image_engine"] == "h3_image"

@@ -4,7 +4,8 @@
 - script_visual 写风格锚（style.anchor_text）的画风方向。锚仍然只写成像风格（画风、镜头与质感、
   调色、光线软硬、材质真实感），不写场景、天气、光源、道具——校验见 pipeline/script.anchor_problems；
 - 项目的负面提示词默认值（只有支持负面提示词的引擎会用）；
-- 推荐的图片 / 视频引擎（只是建议：新建项目对话框里预选，用户可以改）；
+- 推荐的图片 / 视频引擎（只是建议：新建项目对话框里预选，用户可以改）；首帧引擎要能吃参考图才能
+  锁脸、用场景图，所以写实类首帧优先 h3_image；krea2 只推荐给定妆照这一步（portrait_engines）；
 - 剧本结构 / 分镜的额外写法指引（目前只有商业广告：产品特写插入镜头、结尾行动号召镜头，配合片尾卡）。
 
 改预设不会自动改已有的视觉设定：风格锚、角色和场景外观要重新生成剧本的视觉设定才会按新预设写。
@@ -25,8 +26,11 @@ class StylePreset:
     style_label: str           # 写进剧本 / 分镜提示词里的风格说法（如「仿真人风格」）
     anchor_guidance: str       # script_visual：风格锚的画风方向（只写成像风格）
     negative: str              # 项目负面提示词默认值（英文）
-    image_engines: tuple[str, ...]   # 推荐的图片引擎（按优先级，取第一个可用的）
+    image_engines: tuple[str, ...]   # 推荐的图片引擎（首帧用，按优先级，取第一个可用的）
     video_engines: tuple[str, ...]   # 推荐的视频引擎
+    # 推荐的定妆照引擎（设置页「角色定妆照」这一步）。首帧引擎要能吃参考图才能锁脸、用场景图，
+    # krea2 吃不了参考图，但出定妆照（中性影棚半身照）质感好，所以只推荐给定妆照这一步
+    portrait_engines: tuple[str, ...] = ()
     script_guidance: str = ""        # script_structure 的额外要求
     storyboard_guidance: str = ""    # storyboard 的额外要求
 
@@ -34,6 +38,7 @@ class StylePreset:
         return {"key": self.key, "label": self.label, "description": self.description,
                 "negative": self.negative, "image_engines": list(self.image_engines),
                 "video_engines": list(self.video_engines),
+                "portrait_engines": list(self.portrait_engines),
                 "has_storyboard_guidance": bool(self.storyboard_guidance)}
 
 
@@ -44,10 +49,12 @@ _PRESETS = (
         style_label="仿真人风格",
         anchor_guidance=("photorealistic live-action，真人实拍质感：写镜头与焦段（如 35mm / 50mm prime "
                          "lens）、胶片或数字质感（fine film grain）、整体调色和对比、光线软硬、"
-                         "natural skin texture 和布料材质的真实感"),
+                         "natural skin texture 和布料材质的真实感；写 natural lip color（自然唇色，"
+                         "不涂唇彩、不反光）"),
         negative=("cartoon, anime, illustration, 3d render, cgi, plastic skin, doll face, "
-                  "deformed hands, extra fingers, text, watermark"),
-        image_engines=("krea2", "zimage"), video_engines=("h3_video", "wan22_i2v")),
+                  "glossy lips, lipstick, deformed hands, extra fingers, watermark, logo, captions"),
+        image_engines=("h3_image", "krea2", "zimage"), video_engines=("h3_video", "wan22_i2v"),
+        portrait_engines=("krea2",)),
     StylePreset(
         key="cg_realistic", label="3D 写实",
         description="高精度 3D 渲染的写实角色，像游戏过场动画或 CG 短片。",
@@ -102,7 +109,8 @@ _PRESETS = (
                          "通透的调色和适中对比、柔和均匀的光线质感、产品材质的光泽和真实感"),
         negative=("cartoon, anime, illustration, low quality, dull colors, cluttered, "
                   "deformed hands, extra fingers, misspelled text, watermark"),
-        image_engines=("krea2", "zimage"), video_engines=("h3_video", "wan22_i2v"),
+        image_engines=("h3_image", "krea2", "zimage"), video_engines=("h3_video", "wan22_i2v"),
+        portrait_engines=("krea2",),
         script_guidance=("这是一条商业广告：前 3 秒直接亮出痛点或产品；中间至少一段让产品被人使用、"
                          "效果看得见；最后一段落到行动号召（如到店、扫码、下单），台词里说出来。"),
         storyboard_guidance=("这是商业广告的分镜：产品出现的段落里给产品单独一个大特写或特写的插入镜头"

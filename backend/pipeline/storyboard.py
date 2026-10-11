@@ -392,7 +392,9 @@ def previous_shot_lines(db, block_id: int) -> list[str]:
 #   v3：image_prompt 里用外貌占位符 {{char:<id>}}（出图时按景别填当前外貌）、不写拼音名、
 #       说话人和语速校验、规则 6 不再和风格锚重叠、低风险的镜头运动词表
 #   v4：风格预设（分镜里的风格说法；商业广告要产品特写插入镜头和结尾行动号召镜头）
-STORYBOARD_RULES_VERSION = 4
+#   v5：audio_prompt 只写画面里的声音、不写音乐，以 No background music. 结尾（音乐交给成片配乐）；
+#       结尾要人物留在画面里的镜头不写成长静止镜头
+STORYBOARD_RULES_VERSION = 5
 RULES_OUTDATED_HINT = "分镜规则已更新，要按新规则重出请强制重跑"
 
 # 镜头上会被用户改动的字段：生成时记下每镜的哈希，之后对不上就是改过（含拆分出来的新镜头）

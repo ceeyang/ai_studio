@@ -299,7 +299,11 @@ def compose_video_prompt(motion_prompt: str, image_prompt: str, audio_prompt: st
     anyone = any(sp.on_screen for sp in (speakers or {}).values())
     lines = [_dialogue_line(d, speakers, anyone)
              for d in dialogue or [] if d.get("zh") and d["zh"] not in audio]
+    if speakers is not None:   # 发给引擎：只要画面里的声音，音乐交给成片配乐（不进输入哈希）
+        audio = diegetic_audio(audio)
     parts = [p for p in (audio, " ".join(lines)) if p]
+    if speakers is not None:
+        parts.append(NO_MUSIC)
     return text + ("\nAudio: " + " ".join(parts) if parts else "")
 
 
@@ -363,11 +367,52 @@ def continuity_clause(location: str = "") -> str:
             "for the whole clip, as a single uninterrupted shot.")
 
 
-def with_continuity(video_prompt: str, location: str = "") -> str:
-    """把连续性要求接在画面描述后面、Audio 段前面。location 是 location_summary 的结果。"""
+def with_continuity(video_prompt: str, location: str = "", extra: list[str] | tuple = ()) -> str:
+    """把连续性要求接在画面描述后面、Audio 段前面。location 是 location_summary 的结果；
+    extra 是另外要接在画面描述后面的句子（新入画角色的外貌、结尾留在画面里）。"""
     body, sep, audio = (video_prompt or "").partition("\nAudio:")
-    body = body.rstrip()
-    return f"{body} {continuity_clause(location)}".strip() + (sep + audio if sep else "")
+    body = " ".join([body.rstrip(), *[x for x in extra if x], continuity_clause(location)])
+    return body.strip() + (sep + audio if sep else "")
+
+
+ENTERING_WORDS = 40
+
+
+def entering_clause(visual_prompts: list[str]) -> str:
+    """接上一镜：首帧（上一镜的尾帧）里还没有、这一镜才从画外进来的角色，写一句简短外貌（上半身），
+    和一起带上的定妆照对上——第三次样片 S06 的苏晴没有这句，H3 给她换了白衬衫、长直发。"""
+    looks = []
+    for vp in visual_prompts:
+        words = upper_body_look(vp or "").split()
+        if words and not _CJK_ANY.search(vp or ""):
+            looks.append(" ".join(words[:ENTERING_WORDS]).rstrip(".,;"))
+    return ("Entering the frame: " + "; ".join(looks) + ".") if looks else ""
+
+
+# 第三次样片 S06：结尾镜头里的人最后走出了画面，「爸在屋里」的压迫感没了
+STAY_IN_FRAME = ("Everyone on screen stays inside the frame until the very last moment of the shot; "
+                 "nobody walks out of frame.")
+
+# 第三次样片：分镜 audio_prompt 写了钢琴、弦乐，H3 自己配了一层音乐，和成片配乐叠在一起，持续音高还让
+# 浊音检测把整条判成「在说话」。发给引擎时只留画面里真实存在的声音，结尾写明不要配乐。
+_MUSIC = re.compile(r"\b(?:music\w*|musical|piano|strings?|violins?|cellos?|orchestra\w*|score|"
+                    r"soundtrack|melod\w*|chords?|synth\w*|choir|guitar|bgm)\b", re.I)
+NO_MUSIC = "No background music."
+
+
+def diegetic_audio(audio: str) -> str:
+    """去掉写音乐的分句（按句子、逗号切；「no music」这类也去掉，compose_video_prompt 最后统一接 NO_MUSIC）。"""
+    kept: list[str] = []
+    for sentence in re.split(r"(?<=[.;!?])\s+", (audio or "").strip()):
+        sentence = sentence.strip()
+        if not sentence:
+            continue
+        end = sentence[-1] if sentence[-1] in ".!?" else "."
+        parts = [p.strip() for p in sentence.rstrip(".;!? ").split(",") if p.strip()]
+        parts = [p for p in parts if not _MUSIC.search(p)]
+        if parts:
+            kept.append(", ".join(parts) + end)
+    return " ".join(kept)
 
 
 def join_negative(*parts: str | None) -> str:

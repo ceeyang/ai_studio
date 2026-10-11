@@ -223,3 +223,36 @@ def test_scene_cuts_bad_file_raises(tmp_path):
     bad.write_bytes(b"x")
     with pytest.raises(FFmpegError):
         FFmpeg().scene_cuts(bad)
+
+
+# ---------------------------------------------------------------- 第三次样片：视频开头没接上首帧
+def test_parse_ssim():
+    from backend.engines.ffmpeg import parse_ssim
+
+    log = ("[Parsed_ssim_4 @ 000001] SSIM Y:0.912345 (10.586) All:0.912345 (10.586)\n"
+           "[out#0/null @ 0001] video:1KiB")
+    assert parse_ssim(log) == pytest.approx(0.912345)
+    assert parse_ssim("nothing") is None
+
+
+@needs_ffmpeg
+def test_first_frame_ssim_matches_and_mismatches(tmp_path):
+    """视频开头就是首帧（testsrc 第 0 帧，尺寸不同也能比）→ 高；首帧是彩条（H3 重新构图）→ 低。"""
+    clip = make_clip(tmp_path / "c.mp4", 1.0, False)
+    same = tmp_path / "same.png"
+    subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "testsrc=size=640x480:rate=24:duration=1",
+                    "-frames:v", "1", str(same)], check=True, capture_output=True)
+    other = tmp_path / "other.png"
+    subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "smptebars=size=640x480:rate=24:duration=1",
+                    "-frames:v", "1", str(other)], check=True, capture_output=True)
+    ff = FFmpeg()
+    hi = ff.first_frame_ssim(clip, same)
+    lo = ff.first_frame_ssim(clip, other)
+    assert hi > 0.8 and lo < 0.6, (hi, lo)
+
+
+def test_first_frame_ssim_bad_file_raises(tmp_path):
+    bad = tmp_path / "bad.mp4"
+    bad.write_bytes(b"x")
+    with pytest.raises(FFmpegError):
+        FFmpeg().first_frame_ssim(bad, bad)

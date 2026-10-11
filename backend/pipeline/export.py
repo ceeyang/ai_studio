@@ -59,7 +59,8 @@ def run_export(ctx, payload: dict) -> dict:
         if not music_src.is_file():
             raise JobError(f"配乐文件不见了：{music_src.name}，重新上传一次")
     if cut.flagged:
-        ctx.log(f"注意：这些选定的视频出片自检疑似跳切，成片里会有画面突变：{'；'.join(cut.flagged)}"
+        ctx.log(f"注意：这些选定的视频出片自检有问题（疑似跳切 / 开头没接上首帧），成片里会有画面突变："
+                f"{'；'.join(cut.flagged)}"
                 "（不对就到视频阶段重拍或换一条再导出）")
     width, height = OUTPUT_SIZES[cut.aspect]
     variant = cut.aspect.replace(":", "x")

@@ -55,7 +55,8 @@ def list_style_presets(request: Request):
     sv = services(request)
     images, videos = sv.engines.names("image"), sv.engines.names("video")
     return [StylePresetOut(**p.public(), image_engine=recommended(images, p.image_engines),
-                           video_engine=recommended(videos, p.video_engines))
+                           video_engine=recommended(videos, p.video_engines),
+                           portrait_engine=recommended(images, p.portrait_engines))
             for p in PRESETS.values()]
 
 

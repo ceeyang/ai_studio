@@ -51,6 +51,63 @@ class Precheck:
     comfy: Callable[[], tuple[bool, str]] | None = None
 
 
+def _prev_has_video(s, chain: "Chain") -> set[int]:
+    """接上一镜的镜头里，上一镜已有选定视频的（只跑首帧时能直接截尾帧）。"""
+    prevs = {chain.prev[sid] for sid in chain.cont if sid in chain.prev}
+    if not prevs:
+        return set()
+    with_video = set(s.scalars(select(Slot.owner_id).where(
+        Slot.owner_type == "shot", Slot.kind == "video", Slot.owner_id.in_(list(prevs)),
+        Slot.selected_candidate_id.is_not(None))))
+    return {sid for sid in chain.cont if chain.prev.get(sid) in with_video}
+
+
+def _waits_prev_video(sid: int, chain: "Chain", stages: list[str], ready: set[int]) -> bool:
+    """只跑首帧（不连视频）时，接上一镜而上一镜既没有选定视频、也没有视频任务在排队的镜头：
+    截尾帧注定失败（第三次样片 job 217），提交时跳过，等上一镜出了视频再说。"""
+    return ("keyframes" in stages and "videos" not in stages and sid in chain.cont
+            and sid not in ready and chain.prev.get(sid) not in chain.pending_video)
+
+
+def _chain_of(s, ep) -> "Chain":
+    order = [sh.id for sh in ep.shots]
+    chain = Chain(cont={sh.id for sh in ep.shots if sh.continue_from_prev},
+                  prev={b: a for a, b in zip(order, order[1:])}, order=order)
+    if chain.cont:
+        from backend.domain.models import Job
+        from backend.queue.manager import ACTIVE
+        for oid, jid in s.execute(select(Job.owner_id, Job.id).where(
+                Job.type == "video.shot", Job.owner_type == "shot",
+                Job.owner_id.in_(order), Job.status.in_(ACTIVE)).order_by(Job.id)):
+            chain.pending_video[oid] = jid
+    return chain
+
+
+def continue_wait_notes(db: Database, episode_id: int, stages: list[str],
+                        shots: list[str] | None = None) -> list[str]:
+    """只跑首帧时被跳过的接上一镜镜头（见 _waits_prev_video），给提交结果里的一句说明。"""
+    if "keyframes" not in stages or "videos" in stages:
+        return []
+    with db.session() as s:
+        ep = s.get(Episode, episode_id)
+        if ep is None or not ep.shots:
+            return []
+        try:
+            picked = _pick_shots(ep.shots, shots)
+        except JobError:
+            return []
+        chain = _chain_of(s, ep)
+        ready = _prev_has_video(s, chain)
+        codes = {sh.id: sh.code for sh in ep.shots}
+        waiting = [(sh.code, codes.get(chain.prev.get(sh.id), ""))
+                   for sh in picked if _waits_prev_video(sh.id, chain, stages, ready)]
+    if not waiting:
+        return []
+    what = "、".join(f"{c}（接 {p}）" if p else c for c, p in waiting)
+    return [f"{what} 等上一镜视频：首帧要取上一镜视频的最后一帧，这次先跳过；"
+            "出完上一镜的视频后再出，或者直接连视频一起生成（会自动按顺序串起来）"]
+
+
 def _pick_shots(shots, wanted: list[str] | None):
     if not wanted:
         return list(shots)
@@ -207,16 +264,11 @@ def submit_chain(manager, db: Database, engines, episode_id: int, stages: list[s
             from backend.domain.music import bgm_of
             if bgm_of(s, episode_id) is None:   # 在提交任何任务之前就拦下，免得前面的任务成了孤儿
                 raise JobError("这一集还没有上传配乐，先在成片阶段上传背景音乐，或取消勾选「配乐」")
-        order = [sh.id for sh in ep.shots]
-        chain = Chain(cont={sh.id for sh in ep.shots if sh.continue_from_prev},
-                      prev={b: a for a, b in zip(order, order[1:])}, order=order)
-        if chain.cont:
-            from backend.domain.models import Job
-            from backend.queue.manager import ACTIVE
-            for oid, jid in s.execute(select(Job.owner_id, Job.id).where(
-                    Job.type == "video.shot", Job.owner_type == "shot",
-                    Job.owner_id.in_(order), Job.status.in_(ACTIVE)).order_by(Job.id)):
-                chain.pending_video[oid] = jid
+        chain = _chain_of(s, ep)
+        ready = _prev_has_video(s, chain)
+        if stages[0] not in LLM_STAGES and stages[0] != FIT_STAGE:
+            # 只跑首帧时，等上一镜视频的接上一镜镜头不提交（不出一条注定失败的任务）
+            picked = [p for p in picked if not _waits_prev_video(p[0], chain, stages, ready)]
         selected: set[tuple[int, str]] = set()
         if precheck is not None and stages[0] not in LLM_STAGES and shot_codes:
             selected = {(oid, kind) for oid, kind in s.execute(
@@ -251,6 +303,8 @@ def submit_chain(manager, db: Database, engines, episode_id: int, stages: list[s
                                depends_on=deps, **common)]
 
     if ("keyframes" in stages or "videos" in stages) and not picked:
+        if shot_codes and "videos" not in stages:
+            return []   # 选中的都是等上一镜视频的接上一镜镜头：跳过，说明见 continue_wait_notes
         raise JobError("这一集还没有分镜，先跑 storyboard")
     # 先把本次会用到的引擎 family 全部解析出来，任何一个镜头的引擎不存在都在提交任何任务之前报错，
     # 避免前面镜头的任务已经提交、后面镜头才校验失败导致的孤儿任务。

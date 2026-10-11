@@ -7,10 +7,11 @@ from backend.domain.refs import shot_refs
 from backend.domain.slots import add_candidate, get_or_create_slot, selected_candidate
 from backend.engines.base import VideoRequest
 from backend.pipeline.common import job_services
+from backend.pipeline.continuity import video_ref_plan
 from backend.pipeline.keyframes import load_shot, ref_labels, run_comfy
 from backend.domain.models import Location, SceneBlock
-from backend.pipeline.prompting import (Speaker, compose_video_prompt, first_frame_locked_face,
-                                        join_negative, location_summary, short_ref,
+from backend.pipeline.prompting import (STAY_IN_FRAME, Speaker, compose_video_prompt,
+                                        entering_clause, join_negative, location_summary, short_ref,
                                         shot_image_prompt, shot_seed, video_input_hash,
                                         video_inputs, with_continuity)
 from backend.queue.errors import JobCanceled, JobError
@@ -24,30 +25,73 @@ def cut_note(cuts: list[float]) -> str:
     return f"疑似跳切：{where} 处画面突变（可能剪进了参考图或换了场景），建议看一下，不对就重拍"
 
 
-def scene_qc(ctx, sv, path, code: str) -> dict | None:
-    """出片自检：找片段内部的硬切。检测本身失败只记日志，不影响出片。"""
+# 视频第 0 帧和选定首帧的相似度（ffmpeg ssim，见 FFmpeg.first_frame_ssim）低于这个值：H3 没从首帧开始
+START_SSIM_MIN = 0.6
+
+
+def start_note(ssim: float) -> str:
+    return (f"开头没接上首帧：视频第一帧和选定的首帧不像（相似度 {ssim:.2f}），H3 可能重新构图了，"
+            "接上一镜、场景和人物位置都对不上，建议看一下，不对就重拍")
+
+
+def qc_bad(qc: dict | None) -> bool:
+    """出片自检有没有发现问题：疑似跳切，或开头没接上首帧。"""
+    return bool(qc and (qc.get("hard_cuts") or qc.get("start_mismatch")))
+
+
+def qc_note(qc: dict | None) -> str:
+    if not qc:
+        return ""
+    parts = []
+    if qc.get("start_mismatch"):
+        parts.append(start_note(float(qc.get("first_frame_ssim") or 0)))
+    if qc.get("hard_cuts"):
+        parts.append(cut_note(qc["hard_cuts"]))
+    return "；".join(parts)
+
+
+def _why(e: Exception) -> str:
+    return (str(e).strip().splitlines() or [type(e).__name__])[0][:200]
+
+
+def scene_qc(ctx, sv, path, code: str, first=None) -> dict | None:
+    """出片自检：找片段内部的硬切；给了首帧图时再看视频开头是不是从首帧开始。
+    检测本身失败只记日志，不影响出片。"""
+    qc: dict = {}
     detect = getattr(sv.ffmpeg, "scene_cuts", None)
-    if detect is None:
-        return None
-    try:
-        cuts = detect(path)
-    except JobCanceled:
-        raise
-    except Exception as e:
-        why = (str(e).strip().splitlines() or [type(e).__name__])[0][:200]
-        ctx.log(f"视频 {code}：跳切检测没跑成，跳过（{why}）")
-        return None
-    if cuts:
-        ctx.log(f"视频 {code}：{cut_note(cuts)}")
-    return {"hard_cuts": cuts}
+    if detect is not None:
+        try:
+            cuts = detect(path)
+        except JobCanceled:
+            raise
+        except Exception as e:
+            ctx.log(f"视频 {code}：跳切检测没跑成，跳过（{_why(e)}）")
+        else:
+            if cuts:
+                ctx.log(f"视频 {code}：{cut_note(cuts)}")
+            qc["hard_cuts"] = cuts
+    similar = getattr(sv.ffmpeg, "first_frame_ssim", None)
+    if similar is not None and first is not None:
+        try:
+            v = float(similar(path, first))
+        except JobCanceled:
+            raise
+        except Exception as e:
+            ctx.log(f"视频 {code}：首帧相似度检测没跑成，跳过（{_why(e)}）")
+        else:
+            qc["first_frame_ssim"] = round(v, 3)
+            qc["start_mismatch"] = v < START_SSIM_MIN
+            if qc["start_mismatch"]:
+                ctx.log(f"视频 {code}：{start_note(v)}")
+    return qc or None
 
 
 def clean_selection(s, shot_id: int, fresh_hashes) -> bool:
-    """当前选定的视频是不是「干净的」：没被出片自检标成疑似跳切，而且输入没过期。"""
+    """当前选定的视频是不是「干净的」：出片自检没发现问题（疑似跳切、开头没接上首帧），而且输入没过期。"""
     cur = selected_candidate(s, "shot", shot_id, "video")
     if cur is None or cur.input_hash not in fresh_hashes:
         return False
-    return not (((cur.params or {}).get("qc") or {}).get("hard_cuts"))
+    return not qc_bad((cur.params or {}).get("qc"))
 
 
 def _speakers(proj, shot) -> dict[str, Speaker]:
@@ -92,24 +136,32 @@ def run_video(ctx, payload: dict) -> dict:
         negative = join_negative(proj.negative, style.negative if style else "")
         packed = shot_refs(s, shot, video=True)
         legacy = packed[:engine.caps.max_refs]   # 以前的规则：不管首帧，一律带定妆照 / 三视图
-        locked = first_frame_locked_face(ff.params, image_max_refs(sv.engines, ff.engine))
-        if not locked:
-            if packed:
-                ctx.log(f"视频 {shot.code}：首帧是 {ff.engine} 文生图，没用定妆照锁脸，身份以首帧为准，"
-                        f"不带{'、'.join(r.label for r in packed)}（免得首帧和参考图两张脸打架）")
-            packed = []
+        plan = video_ref_plan(s, shot, ff, lambda n: image_max_refs(sv.engines, n))
+        if plan.dropped:
+            src = ("首帧是上一镜视频的尾帧，上一镜没用定妆照锁脸" if plan.continued
+                   else f"首帧是 {ff.engine} 出的图，没用定妆照锁脸")
+            ctx.log(f"视频 {shot.code}：{src}，身份以首帧为准，"
+                    f"不带{'、'.join(r.label for r in plan.dropped)}（免得首帧和参考图两张脸打架）")
+        if plan.continued and plan.entering and plan.identity == "entering":
+            ctx.log(f"视频 {shot.code}：接上一镜，{'、'.join(r.label for r in plan.refs)} 是新入画的角色，"
+                    "带上定妆照锁脸")
+        packed = plan.refs
         refs = [sv.media.abs(r.file_path) for r in packed]
         labels = ref_labels(packed, refs)
         used = packed[:engine.caps.max_refs]
         h = video_input_hash(shot, proj, style, ff.id, engine_name, has_audio,
                              [r.candidate_id for r in used])
-        # 按以前规则出的视频（输入哈希按当时带的参考图算）不算过期，不白跑 GPU
+        # 按以前规则出的视频（输入哈希按当时带的参考图算）不算过期，不白跑 GPU：
+        # 一律带参考图的老规则；接上一镜以前一律不带参考图
         h_legacy = video_input_hash(shot, proj, style, ff.id, engine_name, has_audio,
                                     [r.candidate_id for r in legacy])
+        ok_hashes = {h, h_legacy}
+        if plan.continued:
+            ok_hashes.add(video_input_hash(shot, proj, style, ff.id, engine_name, has_audio, []))
         inputs = video_inputs(shot, proj, style, ff.id, engine_name, has_audio, used)
         if not payload.get("force"):
             cur = selected_candidate(s, "shot", shot.id, "video")
-            if cur is not None and cur.input_hash in (h, h_legacy):  # hash 里含首帧候选 id
+            if cur is not None and cur.input_hash in ok_hashes:  # hash 里含首帧候选 id
                 ctx.log(f"视频 {shot.code}：输入没变，跳过（要重出用 --force）")
                 return {"skipped": True, "candidate_ids": []}
         slot = get_or_create_slot(s, "shot", shot.id, "video")
@@ -121,8 +173,16 @@ def run_video(ctx, payload: dict) -> dict:
         first = sv.media.abs(ff.file_path)
         slug, code, aspect = proj.slug, shot.code, proj.aspect
         place = _shot_location(s, shot)
+        extra = []
+        if plan.continued and plan.entering:
+            looks = {c.id: c.visual_prompt for c in proj.characters}
+            extra.append(entering_clause([looks.get(cid) or "" for cid in plan.entering]))
+        on_screen = any(isinstance(c, dict) and c.get("character_id") is not None
+                        for c in shot.cast or [])
+        if on_screen and ep.shots and ep.shots[-1].id == shot.id:
+            extra.append(STAY_IN_FRAME)   # 全集最后一镜：人留在画面里，结尾的压迫感不散
     # 连续性要求只加在发给引擎的提示词里，不进输入哈希
-    call = engine.build(VideoRequest(prompt=with_continuity(prompt, place), first_frame=first,
+    call = engine.build(VideoRequest(prompt=with_continuity(prompt, place, extra), first_frame=first,
                                      aspect=aspect, seed=seed,
                                      seconds=seconds, min_seconds=min_seconds,
                                      negative=negative, refs=refs,
@@ -138,7 +198,7 @@ def run_video(ctx, payload: dict) -> dict:
     shutil.copyfile(video, dst)
     canceled: JobCanceled | None = None
     try:
-        qc = scene_qc(ctx, sv, dst, code)
+        qc = scene_qc(ctx, sv, dst, code, first)
     except JobCanceled as e:
         # 视频已经出好了：先登记成候选（没做自检），再把取消报上去，GPU 的活不白干
         qc, canceled = None, e
@@ -146,20 +206,21 @@ def run_video(ctx, payload: dict) -> dict:
     with sv.db.session() as s:
         slot = get_or_create_slot(s, "shot", shot_id, "video")
         params = {**call.meta, "first_frame_candidate_id": ff.id,
-                  "identity": "refs" if locked else "first_frame",
+                  "identity": plan.identity,
                   "workflow": sv.media.rel(run_dir / "workflow.api.json"), "inputs": inputs}
         if qc is not None:
             params["qc"] = qc
-        # 新的一条疑似跳切、而当前选定的是干净且没过期的：不抢选定（无人值守时坏片不进成片），重拍也一样
-        keep = bool(qc and qc["hard_cuts"]) and clean_selection(s, shot_id, (h, h_legacy))
+        # 新的一条自检有问题（疑似跳切 / 开头没接上首帧）、而当前选定的是干净且没过期的：不抢选定
+        # （无人值守时坏片不进成片），重拍也一样
+        keep = qc_bad(qc) and clean_selection(s, shot_id, ok_hashes)
         c = add_candidate(s, slot, file_path=sv.media.rel(dst), engine=engine_name,
                           params=params,
                           input_hash=h, job_id=ctx.job_id, auto_select=not keep,
                           force_select=bool(payload.get("force")) and not keep)  # 重拍：新的一条直接选中
         if keep:
-            ctx.log(f"视频 {code}：新的一条疑似跳切，没有替换当前选定的视频；要用它请手动选")
-        if qc and qc["hard_cuts"]:
-            c.note = cut_note(qc["hard_cuts"])
+            ctx.log(f"视频 {code}：新的一条自检有问题，没有替换当前选定的视频；要用它请手动选")
+        if qc_bad(qc):
+            c.note = qc_note(qc)
         cid = c.id
     if canceled is not None:
         raise canceled

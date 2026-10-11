@@ -635,6 +635,24 @@ def test_run_warns_about_missing_portraits_but_submits(api):
     assert api.post(f"/api/episodes/{ep_id}/run", json={"stage": "keyframes"}).json()["warnings"] == []
 
 
+def test_run_keyframes_skips_continue_shot_with_note(api):
+    """只跑首帧：接上一镜、上一镜还没有视频的镜头跳过，返回一句「等上一镜视频」，不出失败任务。"""
+    from backend.domain.models import Job
+
+    sv = api.app.state.services
+    api.post("/api/projects", json={"title": "demo"})
+    ep_id = api.post("/api/projects/demo/episodes", json={"source_text": "x"}).json()["id"]
+    with sv.db.session() as s:
+        s.add(Shot(episode_id=ep_id, order=0, code="S01", image_prompt=IMG))
+        s.add(Shot(episode_id=ep_id, order=1, code="S02", image_prompt=IMG, continue_from_prev=True))
+    r = api.post(f"/api/episodes/{ep_id}/run", json={"stage": "keyframes"})
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert len(body["job_ids"]) == 1 and "S02" in body["notes"][0] and "等上一镜视频" in body["notes"][0]
+    with sv.db.session() as s:
+        assert [j.type for j in s.query(Job).all()] == ["image.keyframe"]
+
+
 # ---------------------------------------------------------------- 复审：画风、场景摘要、多人外貌
 @pytest.mark.parametrize("anchor,medium", [
     ("Anime cel shading, bold outlines, soft pastel palette.", "anime cel shading"),
@@ -704,3 +722,119 @@ def test_scene_terms_are_whole_words():
         assert not _SCENE_TERMS.search(ok), ok
     for bad in ("rainy night", "faint atmospheric haze", "neon signs"):
         assert _SCENE_TERMS.search(bad), bad
+
+
+# ---------------------------------------------------------------- 第三次样片：音频不要音乐、最后一镜留在画面里
+def test_diegetic_audio_drops_music_clauses():
+    from backend.pipeline.prompting import diegetic_audio
+
+    assert diegetic_audio("Muffled rain outside, the soft dry rustle of old photo paper turning, "
+                          "a single low sustained piano note rising quietly underneath.") == \
+        "Muffled rain outside, the soft dry rustle of old photo paper turning."
+    assert diegetic_audio("The young woman whispers, low and tense. Heavy rain outside, "
+                          "a low sustained string tone rising.") == \
+        "The young woman whispers, low and tense. Heavy rain outside."
+    assert diegetic_audio("Rain on the window, no music.") == "Rain on the window."
+    assert diegetic_audio("Soft piano music.") == ""
+
+
+def test_video_audio_sent_without_music_but_hash_unchanged(tmp_path, db):
+    from backend.pipeline.prompting import NO_MUSIC, video_input_hash
+
+    ctx, runner, shot_id = setup(tmp_path, db)
+    with db.session() as s:
+        s.get(Shot, shot_id).audio_prompt = "Rain hissing outside, the soft piano note continuing low."
+    run_keyframe(ctx, {"shot_id": shot_id})
+    run_video(ctx, {"shot_id": shot_id})
+    prompt = runner.calls[-1].workflow["6"]["inputs"]["prompt"]
+    audio = prompt.split("\nAudio:", 1)[1]
+    assert "piano" not in audio and "Rain hissing outside." in audio and audio.endswith(NO_MUSIC)
+    with db.session() as s:
+        v = selected_candidate(s, "shot", shot_id, "video")
+        shot, _, proj, style = load_shot(s, shot_id)
+        assert "piano" in v.params["inputs"]["prompt"]   # 摘要和哈希按老写法，已有视频不过期
+        assert v.input_hash == video_input_hash(shot, proj, style,
+                                                v.params["first_frame_candidate_id"], "h3_video", True)
+
+
+def test_last_shot_with_cast_asks_to_stay_in_frame(tmp_path, db):
+    from backend.pipeline.prompting import STAY_IN_FRAME
+
+    ctx, runner, shot_id = setup(tmp_path, db)
+    run_keyframe(ctx, {"shot_id": shot_id})
+    run_video(ctx, {"shot_id": shot_id})
+    assert STAY_IN_FRAME not in runner.calls[-1].workflow["6"]["inputs"]["prompt"]   # 没有人出镜
+    _with_portrait(db, shot_id, "zimage")
+    run_video(ctx, {"shot_id": shot_id, "force": True})
+    body = runner.calls[-1].workflow["6"]["inputs"]["prompt"].split("\nAudio:", 1)[0]
+    assert STAY_IN_FRAME in body
+    with db.session() as s:
+        shot, ep, _, _ = load_shot(s, shot_id)
+        s.add(Shot(episode_id=ep.id, order=5, code="S02", image_prompt=IMG))
+    run_video(ctx, {"shot_id": shot_id, "force": True})
+    assert STAY_IN_FRAME not in runner.calls[-1].workflow["6"]["inputs"]["prompt"]   # 不是最后一镜
+
+
+# ---------------------------------------------------------------- 出片自检：开头没接上首帧
+class SsimFFmpeg(CutFFmpeg):
+    """假 ffmpeg：跳切检测 + 首帧相似度（返回预设值，记下比的是哪两张）。"""
+
+    def __init__(self, ssim=0.9, cuts=None, fail=None):
+        super().__init__(cuts=cuts)
+        self.ssim, self.ssim_fail, self.compared = ssim, fail, []
+
+    def first_frame_ssim(self, video, image):
+        self.compared.append((video, image))
+        if self.ssim_fail:
+            raise self.ssim_fail
+        return self.ssim
+
+
+def test_video_qc_flags_start_not_matching_first_frame(tmp_path, db):
+    ff = SsimFFmpeg(ssim=0.29)
+    ctx, shot_id, res = video_with_ffmpeg(tmp_path, db, ff)
+    assert res["qc"] == {"hard_cuts": [], "first_frame_ssim": 0.29, "start_mismatch": True}
+    with db.session() as s:
+        v = selected_candidate(s, "shot", shot_id, "video")
+        first = selected_candidate(s, "shot", shot_id, "first_frame")
+        assert "开头没接上首帧" in v.note and "0.29" in v.note
+        assert ff.compared == [(ctx.services.media.abs(v.file_path),
+                                ctx.services.media.abs(first.file_path))]
+    assert any("开头没接上首帧" in m for m in ctx.logs)
+
+
+def test_video_qc_start_matches_has_no_note(tmp_path, db):
+    ctx, shot_id, res = video_with_ffmpeg(tmp_path, db, SsimFFmpeg(ssim=0.91))
+    assert res["qc"]["start_mismatch"] is False and res["qc"]["first_frame_ssim"] == 0.91
+    with db.session() as s:
+        assert selected_candidate(s, "shot", shot_id, "video").note == ""
+
+
+def test_video_qc_ssim_failure_does_not_fail_job(tmp_path, db):
+    from backend.engines.ffmpeg import FFmpegError
+
+    ctx, shot_id, res = video_with_ffmpeg(tmp_path, db, SsimFFmpeg(fail=FFmpegError("坏图")))
+    assert res["candidate_ids"] and res["qc"] == {"hard_cuts": []}
+    assert any("首帧相似度检测没跑成" in m for m in ctx.logs)
+
+
+def test_start_mismatch_video_does_not_replace_clean_selection(tmp_path, db):
+    ctx, runner, shot_id = setup(tmp_path, db)
+    ctx.services.ffmpeg = SsimFFmpeg(ssim=0.9)
+    run_keyframe(ctx, {"shot_id": shot_id})
+    clean = run_video(ctx, {"shot_id": shot_id})["candidate_ids"][0]
+    ctx.services.ffmpeg = SsimFFmpeg(ssim=0.3)
+    run_video(ctx, {"shot_id": shot_id, "force": True})
+    with db.session() as s:
+        assert selected_candidate(s, "shot", shot_id, "video").id == clean
+
+
+def test_export_cut_flags_start_mismatch(tmp_path, db):
+    from backend.pipeline.post import load_cut
+
+    ctx, shot_id, _ = video_with_ffmpeg(tmp_path, db, SsimFFmpeg(ssim=0.3))
+    with db.session() as s:
+        shot, ep, _, _ = load_shot(s, shot_id)
+        ep_id = ep.id
+    cut = load_cut(ctx.services, ep_id)
+    assert cut.flagged == ["S01 开头没接上首帧"]

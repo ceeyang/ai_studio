@@ -183,6 +183,8 @@ def run(stage: str = typer.Argument(..., help="script / storyboard / keyframes /
         typer.echo(f"已提交 {len(r['job_ids'])} 个任务：{', '.join(map(str, r['job_ids']))}")
         for w in r.get("warnings") or []:
             typer.echo(f"提醒：{w}", err=True)
+        for n in r.get("notes") or []:
+            typer.echo(f"说明：{n}", err=True)
         if stage == "all":
             typer.echo(ALL_GUIDE, err=True)
 

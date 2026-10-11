@@ -66,9 +66,11 @@ class StylePresetOut(BaseModel):
     negative: str
     image_engines: list[str]
     video_engines: list[str]
+    portrait_engines: list[str] = []
     has_storyboard_guidance: bool = False
     image_engine: str | None = None     # 推荐引擎里第一个可用的（只是建议，新建项目时预选）
     video_engine: str | None = None
+    portrait_engine: str | None = None  # 定妆照推荐引擎里第一个可用的（设置页「角色定妆照」这一步）
 
 
 class StyleIO(ORM):
@@ -508,6 +510,7 @@ class EndCardIO(BaseModel):
 class RunOut(BaseModel):
     job_ids: list[int]
     warnings: list[str] = Field(default_factory=list)   # 不拦提交的提醒（如出场角色还没有定妆照）
+    notes: list[str] = Field(default_factory=list)      # 说明（如接上一镜的镜头等上一镜视频，这次跳过）
 
 
 class RerunImpact(BaseModel):

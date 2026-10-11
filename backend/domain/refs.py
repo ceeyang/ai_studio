@@ -41,6 +41,7 @@ class Ref:
     file_path: str
     label: str
     kind: str = ""     # location / shot_ref / portrait / turnaround（截断优先级和「锁脸」判断用）
+    character_id: int | None = None   # 定妆照 / 三视图格是谁的（接上一镜时挑新入画的角色用）
 
 
 # 带脸的参考图：首帧带了其中一张才算按定妆照锁过脸
@@ -69,11 +70,12 @@ def _cast_refs(s: Session, shot) -> list[Ref]:
         p = portrait_of(s, ch.id)
         if p is None:
             continue  # 没有定妆照就不带三视图（三视图是按定妆照锁的脸）
-        portraits.append(Ref(p.id, p.file_path, f"{ch.name} 定妆照", "portrait"))
+        portraits.append(Ref(p.id, p.file_path, f"{ch.name} 定妆照", "portrait", ch.id))
         picked = pick_cell(s, ch, view)
         if picked is not None:
             v, c = picked
-            cells.append(Ref(c.id, c.file_path, f"{ch.name} 三视图·{VIEW_LABELS[v]}", "turnaround"))
+            cells.append(Ref(c.id, c.file_path, f"{ch.name} 三视图·{VIEW_LABELS[v]}", "turnaround",
+                             ch.id))
     return portraits + cells
 
 

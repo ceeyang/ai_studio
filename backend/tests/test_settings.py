@@ -270,3 +270,18 @@ def test_api_marks_invalid_settings(api):
     assert steps["portrait"]["invalid"] is True and steps["portrait"]["effective"] == "zimage"
     assert steps["script"]["invalid"] is True and steps["script"]["effective"] == "manual"
     assert steps["storyboard"]["invalid"] is False
+
+
+def test_api_global_settings_mark_steps_that_follow_project_engine(api):
+    """第三次样片：全局设置页上场景图显示 zimage，实际出图用的是项目的 h3_image。不带项目时，
+    没单独设置、会跟项目图片引擎走的步骤标 follows_project，页面写「跟随项目图片引擎」。"""
+    steps = {x["key"]: x for x in api.get("/api/settings").json()["steps"]}
+    assert steps["location"]["follows_project"] is True and steps["portrait"]["follows_project"] is True
+    assert steps["turnaround"]["follows_project"] is False        # 没设置时先用 H3
+    assert steps["script"].get("follows_project") in (None, False)
+    api.put("/api/settings", json={"steps": {"location": "krea2"}})
+    steps = {x["key"]: x for x in api.get("/api/settings").json()["steps"]}
+    assert steps["location"]["follows_project"] is False
+    api.post("/api/projects", json={"title": "片", "slug": "pp", "image_engine": "gpt_image"})
+    steps = {x["key"]: x for x in api.get("/api/settings", params={"project": "pp"}).json()["steps"]}
+    assert steps["portrait"]["follows_project"] is False          # 带了项目：生效值就是项目的引擎

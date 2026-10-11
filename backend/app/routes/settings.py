@@ -57,6 +57,9 @@ def _config_provider(cfg, task: str) -> str | None:
         return None
 
 
+_PROJECT = "<project>"   # 占位：看某一步的生效值是不是直接取项目的图片引擎
+
+
 def build_settings_out(sv, st: AppSettings, project=None) -> dict[str, Any]:
     """每一项给 value（设置值）、effective（现在生效的）、fallback（改回「跟随默认」后会用的）、
     invalid（设置值已经不在可选项里）。"""
@@ -89,6 +92,13 @@ def build_settings_out(sv, st: AppSettings, project=None) -> dict[str, Any]:
             return location_engine(sv, proj_image, st=x)
         return sheet_engine(sv, proj_image, st=x)
 
+    def image_eff_for(key, x):
+        if key == "portrait":
+            return portrait_engine(sv, _PROJECT, st=x)
+        if key == "location":
+            return location_engine(sv, _PROJECT, st=x)
+        return sheet_engine(sv, _PROJECT, st=x)
+
     steps = []
     for key, label in STEP_LABEL.items():
         kind = STEP_KIND[key]
@@ -102,7 +112,9 @@ def build_settings_out(sv, st: AppSettings, project=None) -> dict[str, Any]:
             eff, fb = image_eff(key, st), image_eff(key, without(key))
             row = {"value": value, "effective": eff, "fallback": fb,
                    "invalid": bool(value) and value not in image_names,
-                   "source": "step" if value and value == eff else "default"}
+                   "source": "step" if value and value == eff else "default",
+                   # 不带项目时：这一步实际跟各项目的图片引擎走（effective 只是新项目默认引擎的估计）
+                   "follows_project": project is None and image_eff_for(key, st) == _PROJECT}
         steps.append({"key": key, "label": label, "kind": kind, **row})
 
     def engine_row(value, names, effective, fallback):

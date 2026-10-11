@@ -15,8 +15,8 @@ from backend.domain.models import Character, Episode, Job, Project, Shot
 from backend.domain.refs import SHOT_REF_SLOT, shot_ref_images, shot_refs, split_refs
 from backend.domain.shots import prev_shot
 from backend.domain.slots import selected_candidate, slots_for
-from backend.pipeline.continuity import continue_hash, continue_inputs
-from backend.pipeline.prompting import (first_frame_locked_face, keyframe_input_hash,
+from backend.pipeline.continuity import continue_hash, continue_inputs, video_ref_plan
+from backend.pipeline.prompting import (keyframe_input_hash,
                                         keyframe_inputs, shot_image_prompt, stale_reason,
                                         video_input_hash,
                                         video_inputs)
@@ -143,7 +143,7 @@ def shot_detail(s: Session, sv, shot, proj, style, *, jobs: OwnerJobs | None = N
         inputs["first_frame"] = continue_inputs(prev.code if prev else "", pv.id if pv else 0)
         unused = []
         lost = []
-    legacy_ok: dict[str, str] = {}
+    legacy_ok: dict[str, set[str]] = {}
     ff = next((x for x in slots if x.kind == "first_frame"), None)
     if ff is not None and ff.selected_candidate_id:
         ve = shot.video_engine or proj.video_engine
@@ -154,15 +154,18 @@ def shot_detail(s: Session, sv, shot, proj, style, *, jobs: OwnerJobs | None = N
         if has_audio is not None:
             v_cap = _max_refs(sv, "video", ve)
             ff_sel = next((c for c in ff.candidates if c.id == ff.selected_candidate_id), None)
-            # 和 videos.run_video 同一个规则：首帧没锁脸时视频不带参考图，身份以首帧为准
-            locked = ff_sel is not None and first_frame_locked_face(
-                ff_sel.params, _max_refs(sv, "image", ff_sel.engine))
-            v_refs = v_pack[:v_cap] if locked else []
+            # 和 videos.run_video 同一个规则：首帧没锁脸时视频不带参考图，身份以首帧为准；
+            # 接上一镜沿用上一镜的锁脸状态，新入画的角色带定妆照
+            plan = video_ref_plan(s, shot, ff_sel, lambda n: _max_refs(sv, "image", n))
+            v_refs = plan.refs[:v_cap]
             current["video"] = video_input_hash(shot, proj, style, ff.selected_candidate_id, ve,
                                                 has_audio, [r.candidate_id for r in v_refs])
-            # 按以前规则（一律带参考图）出的视频不算过期
-            legacy_ok["video"] = video_input_hash(shot, proj, style, ff.selected_candidate_id, ve,
-                                                  has_audio, [r.candidate_id for r in v_pack[:v_cap]])
+            # 按以前规则出的视频不算过期：一律带参考图；接上一镜一律不带
+            legacy_ok["video"] = {video_input_hash(shot, proj, style, ff.selected_candidate_id, ve,
+                                                   has_audio, [r.candidate_id for r in v_pack[:v_cap]])}
+            if plan.continued:
+                legacy_ok["video"].add(video_input_hash(shot, proj, style, ff.selected_candidate_id,
+                                                        ve, has_audio, []))
             inputs["video"] = video_inputs(shot, proj, style, ff.selected_candidate_id, ve,
                                            has_audio, v_refs)
     outs = []
@@ -170,7 +173,8 @@ def shot_detail(s: Session, sv, shot, proj, style, *, jobs: OwnerJobs | None = N
     for sl in slots:
         sel = next((c for c in sl.candidates if c.id == sl.selected_candidate_id), None)
         stale = bool(sel is not None and sl.kind in current
-                     and sel.input_hash not in (current[sl.kind], legacy_ok.get(sl.kind)))
+                     and sel.input_hash != current[sl.kind]
+                     and sel.input_hash not in legacy_ok.get(sl.kind, set()))
         reason = stale_reason((sel.params or {}).get("inputs"), inputs[sl.kind]) if stale else None
         newer = sum(1 for c in sl.candidates if c.id > sel.id) if sel is not None else 0
         selected_job[sl.kind] = sel.job_id if sel is not None else None

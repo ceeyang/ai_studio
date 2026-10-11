@@ -19,7 +19,8 @@
   6. 本镜特有的色彩重点和焦点：哪个物件是点睛的颜色、焦点落在哪里。不要写胶片型号、颗粒、photorealistic、cinematic 这类全片通用的词——它们在风格锚里
   每个镜头都独立写全，禁止写 "same as before" 或 "same as previous shot"。不要堆 beautiful、amazing、cinematic 这类空词，只写画面里看得见的东西。
 - motion_prompt：30–60 个英文单词。第一次提到主体时用 image_prompt 里那个简短指代（如 the stocky man），不要只写 he / she（两人同框时分不清是谁）；人物的视线写明方向和对象（如 glancing up toward the old man at frame left），人物不看镜头，除非剧本写了看镜头；写主体在这几秒里的微动作、镜头运动和结束时的状态。镜头运动只用一种，从这些里选：static / slow push in / slow pull back / slow pan left / slow pan right / slow tilt up / slow tilt down / subtle handheld；人脸近景不用快速运动。motion_prompt 里不写外貌占位符。
-- audio_prompt：20–40 个英文单词，写环境声、动作音效、有无音乐；有台词时写明谁在说（用英文外貌简称）、什么语气。
+- audio_prompt：20–40 个英文单词，只写画面里真实存在的声音（环境声、动作音效、人声）；不写音乐——钢琴、弦乐、低音铺底这类一律不写，配乐由成片统一加，视频里自带音乐会和配乐叠在一起；最后以 No background music. 结尾。有台词时写明谁在说（用英文外貌简称）、什么语气。
+- 结尾要人物留在画面里的镜头（如最后一镜人站在门口、看着门里）：不要写成 5 秒以上的长静止镜头，控制在 4 秒左右或改成反应特写；motion_prompt 写明人物留在画面里（stays in frame），不要写走开、转身离开。
 - dialogue：只在有人说话时写。speaker 只能是角色表里的名字。zh 是中文台词，每句不超过 16 个字，语速每秒不超过 5 个字（如 10 个字至少给 2 秒）；start / end 是相对本镜开头的秒数，第一句不早于 0.4 秒，最后一句结束后留 0.4 秒。
 - cast：出场角色名（画面里看得见的人），只能从角色表里选；没有人出场就写空数组。
 - transition_out 只能是：hard_cut、dissolve_0.5、white_flash_0.2、black_dip_0.3、fade_out_1.0。
