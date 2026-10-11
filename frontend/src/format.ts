@@ -12,6 +12,7 @@ export const JOB_TYPE_LABEL: Record<string, string> = {
   'character.suggest': '推荐造型',
   'character.recommend': '推荐角色',
   'character.turnaround_look': '三视图描述',
+  'character.from_photo': '参考图写外观',
   'post.dub': '配音',
   'subtitles.translate': '字幕翻译',
   'dialogue.fit_khmer': '高棉语台词适配',

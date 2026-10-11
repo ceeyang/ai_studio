@@ -13,6 +13,7 @@ const BACKEND_JOB_TYPES = [
   'character.suggest',
   'character.recommend',
   'character.turnaround_look',
+  'character.from_photo',
   'post.dub',
   'subtitles.translate',
   'dialogue.fit_khmer',

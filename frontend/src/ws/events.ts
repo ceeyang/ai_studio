@@ -61,7 +61,13 @@ export function eventsReducer(state: EventsState, action: EventsAction): EventsS
 /** 任务停下来（完成、失败、取消、等人工输入）时，它可能改了剧集、镜头、候选、成片。 */
 const SETTLED: JobStatus[] = ['done', 'failed', 'canceled', 'waiting_input'];
 const LLM_TYPES = ['script', 'storyboard'];
-const CHARACTER_TYPES = ['image.portrait', 'character.suggest', 'image.turnaround', 'character.turnaround_look'];
+const CHARACTER_TYPES = [
+  'image.portrait',
+  'character.suggest',
+  'image.turnaround',
+  'character.turnaround_look',
+  'character.from_photo',
+];
 // 这些任务结束后会改一集的状态（分镜数、exported 等），项目页的剧集列表要跟着刷新
 const EPISODES_TYPES = [...LLM_TYPES, 'export.episode'];
 

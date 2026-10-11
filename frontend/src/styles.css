@@ -1539,6 +1539,8 @@ img.rail-avatar { border: 0; }
 /* 角色资料：从参考图写外观 */
 .photo-look { display: flex; flex-direction: column; gap: var(--s-2); padding: var(--s-3); border: 1px dashed var(--border-strong); border-radius: var(--r-md); }
 .photo-look-row { display: flex; gap: var(--s-3); align-items: flex-start; flex-wrap: wrap; }
+.photo-look-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: var(--s-2); }
+.photo-look-body > p { margin: 0; font-size: 12.5px; line-height: 1.55; }
 .photo-look-thumb { width: 72px; height: 96px; object-fit: cover; border-radius: var(--r-sm); border: 1px solid var(--border); flex: none; }
 .photo-look-actions { display: flex; gap: var(--s-2); flex-wrap: wrap; align-items: center; }
 .photo-look-diff { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--s-2); }

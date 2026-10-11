@@ -454,6 +454,16 @@ export interface Character {
   turnaround?: Turnaround | null;
   /** 最近一次失败的抽卡（之后没有成功的抽卡才有） */
   last_failure?: JobBrief | null;
+  /** 「从参考图写外观」上传的参考照片（只给 LLM 看，不当出图参考图）和 LLM 写好、等确认的外观 */
+  appearance_ref?: AppearanceRef | null;
+}
+
+export interface AppearanceRef {
+  candidate_id: number;
+  url: string;
+  /** LLM 按照片写的英文外观；还没写 / 放弃了是 null */
+  visual_prompt: string | null;
+  core_features: string | null;
 }
 
 export type TurnaroundSheetKey = 'body' | 'face';
@@ -579,6 +589,9 @@ export interface InputRequest {
   user: string;
   schema?: unknown;
   error?: string;
+  /** 这一步要模型看图（如「从参考图写外观」）：图片的本机路径，和页面上能打开的地址 */
+  images?: string[];
+  image_urls?: string[];
 }
 
 export interface JobResult {

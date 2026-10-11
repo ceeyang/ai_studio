@@ -359,6 +359,37 @@ export function useUploadPortrait(slug: string) {
   });
 }
 
+/** 上传「从参考图写外观」的参考照片（不是定妆照，不当出图参考图） */
+export function useUploadAppearanceRef(slug: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, file }: { id: number; file: File }) => {
+      const form = new FormData();
+      form.append('file', file);
+      return api.post<Character>(`/api/characters/${id}/appearance-ref`, form);
+    },
+    onSuccess: () => invalidate(qc, keys.characters(slug)),
+  });
+}
+
+/** 让 LLM 看参考照片写外观（结果记在参考照片上，等用户确认） */
+export function useAppearanceFromPhoto(slug: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => api.post<RunOut>(`/api/characters/${id}/appearance-from-photo`, {}),
+    onSuccess: () => invalidate(qc, keys.characters(slug), ['jobs'], keys.queue),
+  });
+}
+
+/** 不用 LLM 按参考照片写的外观了（照片留着） */
+export function useDiscardPhotoLook(slug: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => api.del(`/api/characters/${id}/appearance-from-photo`),
+    onSuccess: () => invalidate(qc, keys.characters(slug)),
+  });
+}
+
 export function useCreateCharacter(slug: string) {
   const qc = useQueryClient();
   return useMutation({
