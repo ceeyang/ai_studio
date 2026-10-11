@@ -2,7 +2,7 @@ const TRACE_HEAD = 'Traceback (most recent call last)';
 
 /**
  * 把日志里 Python 的调用栈收起来：「Traceback …」那一行和下面缩进的几行换成一句提示，异常那一行（不缩进的）留着。
- * 完整日志另外放在折叠里。
+ * 日志页签里勾选「显示调用栈」看完整日志。
  */
 export function splitTraceback(log: string): { brief: string; hasTrace: boolean } {
   if (!log.includes(TRACE_HEAD)) return { brief: log, hasTrace: false };
@@ -13,7 +13,7 @@ export function splitTraceback(log: string): { brief: string; hasTrace: boolean 
       out.push(lines[i]);
       continue;
     }
-    out.push('（调用栈已收进「完整日志」）');
+    out.push('（调用栈已收起，勾选「显示调用栈」查看）');
     while (i + 1 < lines.length && /^\s+\S/.test(lines[i + 1])) i += 1;
   }
   return { brief: out.join('\n'), hasTrace: true };

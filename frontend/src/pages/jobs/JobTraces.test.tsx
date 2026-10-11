@@ -132,18 +132,17 @@ describe('JobTraces', () => {
     expect((await screen.findByTestId('trace-empty')).textContent).toBe('这个任务是旧版本跑的，没有调用明细。');
   });
 
-  it('任务详情在日志下面显示调用明细，调试信息还在', async () => {
+  it('任务详情的「调用明细」页签复用调用明细列表；调试信息另有页签', async () => {
     const job = makeJob({ id: 7, type: 'storyboard', status: 'done', log: '[10:00:00] 开始\n' });
     installFetch({
       'GET /api/jobs': [job],
       'GET /api/jobs/7': job,
       'GET /api/jobs/7/traces': { job_id: 7, traces: [LLM] },
     });
-    renderAt(<JobsPage />, { route: '/jobs?job=7', path: '/jobs' });
+    renderAt(<JobsPage />, { route: '/jobs?job=7&tab=traces', path: '/jobs' });
     await screen.findByRole('list', { name: '调用明细' });
-    const headings = screen.getAllByRole('heading', { level: 4 }).map((h) => h.textContent);
-    expect(headings.indexOf('调用明细')).toBeGreaterThan(headings.indexOf('日志'));
-    expect(screen.getByText('调试信息')).toBeTruthy();
+    expect(screen.getByRole('tab', { name: '调用明细' }).getAttribute('aria-selected')).toBe('true');
+    expect(screen.getByRole('tab', { name: '调试信息' })).toBeTruthy();
     await waitFor(() => expect(screen.getByText('LLM · storyboard · claude · 第 1 次 · 18.6s')).toBeTruthy());
   });
 });

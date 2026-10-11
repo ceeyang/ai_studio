@@ -103,7 +103,8 @@ export const keys = {
   // 挂在 ['episode', id] 下：体检任务结束、分镜改了都跟着刷新
   scriptReview: (episodeId: number) => ['episode', episodeId, 'script-review'] as const,
   rerunImpact: (episodeId: number, stage: string, blockIds: number[] | null) => ['rerunImpact', episodeId, stage, blockIds] as const,
-  jobs: (status: string, limit: number) => ['jobs', status, limit] as const,
+  jobs: (status: string, limit: number, project = '') =>
+    (project ? (['jobs', status, limit, project] as const) : (['jobs', status, limit] as const)),
   job: (id: number) => ['job', id] as const,
   queue: ['queue'] as const,
   doctor: ['doctor'] as const,
@@ -229,15 +230,19 @@ export function useExports(episodeId: number) {
  * status 为 '' 表示全部；WebSocket 断开时靠 5 秒轮询兜底。
  * keepPrevious：换条数（加载更多）时先留着上一批，别让列表闪空。
  */
-export function useJobs(status: string, limit = 100, keepPrevious = false) {
+export function useJobs(status: string, limit = 100, keepPrevious = false, project = '') {
   const qs = new URLSearchParams();
   if (status) qs.set('status', status);
+  if (project) qs.set('project', project);
   qs.set('limit', String(limit));
   return useQuery({
-    queryKey: keys.jobs(status, limit),
+    queryKey: keys.jobs(status, limit, project),
     queryFn: () => api.get<Job[]>(`/api/jobs?${qs.toString()}`),
     refetchInterval: 5000,
-    placeholderData: keepPrevious ? (prev, prevQuery) => (prevQuery?.queryKey[1] === status ? prev : undefined) : undefined,
+    placeholderData: keepPrevious
+      ? (prev, prevQuery) =>
+          prevQuery?.queryKey[1] === status && (prevQuery?.queryKey[3] ?? '') === project ? prev : undefined
+      : undefined,
   });
 }
 

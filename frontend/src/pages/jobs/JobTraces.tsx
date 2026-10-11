@@ -356,7 +356,7 @@ function TraceRow({ jobId, t }: { jobId: number; t: JobTrace }) {
   );
 }
 
-export function JobTraces({ jobId, active }: { jobId: number; active: boolean }) {
+export function JobTraces({ jobId, active, heading = true }: { jobId: number; active: boolean; heading?: boolean }) {
   const q = useJobTraces(jobId);
   let body;
   if (q.isLoading) body = <p className="muted">加载中…</p>;
@@ -381,7 +381,7 @@ export function JobTraces({ jobId, active }: { jobId: number; active: boolean })
   }
   return (
     <section className="job-traces">
-      <h4>调用明细</h4>
+      {heading && <h4>调用明细</h4>}
       {body}
     </section>
   );

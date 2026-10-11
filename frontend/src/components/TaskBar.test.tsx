@@ -26,9 +26,56 @@ describe('TaskBar', () => {
     expect(current.textContent).toContain('#7');
     expect(current.textContent).toContain('视频');
     expect(current.textContent).toContain('12/30');
-    expect(await screen.findByText('排队 3')).toBeTruthy();
+    const queued = await screen.findByRole('link', { name: '另有 3 个排队' });
+    expect(queued.getAttribute('href')).toBe('/jobs?status=queued');
     expect(screen.getByRole('link', { name: '等待输入 1' }).getAttribute('href')).toBe('/jobs?status=waiting_input');
     expect(screen.queryByText(/实时连接已断开/)).toBeNull();
+  });
+
+  it('点运行中那一块跳到这个任务的详情（/jobs?job=ID）', async () => {
+    installFetch({
+      'GET /api/queue': QUEUE,
+      'GET /api/jobs': [makeJob({ id: 293, type: 'video.shot', status: 'running', context: { label: '第 1 集 S01', url: null, project_slug: 'demo', episode_id: 1, shot_id: 1, character_id: null } })],
+    });
+    renderBar({ connected: true, everConnected: true, progress: {} });
+    const user = userEvent.setup();
+    const link = await screen.findByTestId('taskbar-current-link');
+    expect(link.getAttribute('href')).toBe('/jobs?job=293');
+    expect(link.textContent).toContain('运行中 #293 视频');
+    expect(link.textContent).toContain('第 1 集 S01');
+    await user.click(link);
+    await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/jobs?job=293'));
+  });
+
+  it('「取消」按钮单独可点，不触发跳转', async () => {
+    installFetch({ 'GET /api/queue': QUEUE, 'GET /api/jobs': [makeJob({ id: 7, status: 'running' })] });
+    renderBar({ connected: true, everConnected: true, progress: {} });
+    const user = userEvent.setup();
+    const current = await screen.findByTestId('taskbar-current');
+    const before = screen.getByTestId('location').textContent;
+    const cancelBtn = within(current).getByRole('button', { name: '取消' });
+    expect(cancelBtn.closest('a')).toBeNull();
+    await user.click(cancelBtn);
+    expect(await screen.findByRole('dialog')).toBeTruthy();
+    expect(screen.getByTestId('location').textContent).toBe(before);
+  });
+
+  it('多个运行中：写「另有 N 个运行中」，点了跳到筛选为运行中的列表', async () => {
+    installFetch({
+      'GET /api/queue': { ...QUEUE, counts: { queued: 0, running: 2, waiting_input: 0 } },
+      'GET /api/jobs': [makeJob({ id: 7, status: 'running' }), makeJob({ id: 8, status: 'running' })],
+    });
+    renderBar({ connected: true, everConnected: true, progress: {} });
+    const user = userEvent.setup();
+    const more = await screen.findByRole('link', { name: '另有 1 个运行中' });
+    await user.click(more);
+    await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/jobs?status=running'));
+  });
+
+  it('没有运行中、只有排队：写「排队 N」', async () => {
+    installFetch({ 'GET /api/queue': { ...QUEUE, counts: { queued: 2, running: 0, waiting_input: 0 } }, 'GET /api/jobs': [] });
+    renderBar({ connected: true, everConnected: true, progress: {} });
+    expect((await screen.findByRole('link', { name: '排队 2' })).getAttribute('href')).toBe('/jobs?status=queued');
   });
 
   it('采样进度到头（value>=max）但任务还在跑：显示"解码保存中"而不是卡在 20/20', async () => {
