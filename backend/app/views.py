@@ -107,7 +107,10 @@ def shot_detail(s: Session, sv, shot, proj, style, *, jobs: OwnerJobs | None = N
     slots = slots_for(s, "shot", shot.id)
     refs = shot_refs(s, shot)
     ie = shot.image_engine or proj.image_engine
-    ff_refs = refs[:_max_refs(sv, "image", ie)]
+    ff_cap = _max_refs(sv, "image", ie)
+    ff_refs = refs[:ff_cap]
+    # 首帧引擎完全不吃参考图：定妆照对首帧没有作用，界面要提示（引擎不存在不算，那是另一种错）
+    unused = [r.label for r in refs] if ff_cap == 0 and ie in sv.engines.names("image") else []
     current: dict[str, str] = {
         "first_frame": keyframe_input_hash(shot, proj, style, ie,
                                            [r.candidate_id for r in ff_refs])}
@@ -143,7 +146,8 @@ def shot_detail(s: Session, sv, shot, proj, style, *, jobs: OwnerJobs | None = N
     return ShotDetail.model_validate(shot).model_copy(update={
         "slots": outs,
         "active_jobs": [job_brief(j, progress) for j in jobs.active],
-        "failures": [job_brief(f, failed=True) for f in sorted(failures, key=lambda x: x.id)]})
+        "failures": [job_brief(f, failed=True) for f in sorted(failures, key=lambda x: x.id)],
+        "first_frame_refs_unused": unused})
 
 
 def episode_detail(s: Session, sv, ep, *, progress: Mapping[int, float] | None = None) -> EpisodeDetail:

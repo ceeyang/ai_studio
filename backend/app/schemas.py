@@ -373,6 +373,8 @@ class ShotDetail(ShotOut):
     slots: list[SlotOut] = Field(default_factory=list)
     active_jobs: list[JobBrief] = Field(default_factory=list)   # 排队 / 运行 / 等输入的首帧、视频任务
     failures: list[JobBrief] = Field(default_factory=list)      # 首帧、视频各自最近一次失败（之后没出过新的才给）
+    # 首帧引擎完全不吃参考图（max_refs=0）时，这个镜头本该带上却用不上的参考图（如「老周 定妆照」）
+    first_frame_refs_unused: list[str] = Field(default_factory=list)
 
 
 class EpisodeDetail(EpisodeOut):

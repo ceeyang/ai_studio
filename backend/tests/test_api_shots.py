@@ -191,3 +191,24 @@ def test_shot_out_includes_origin(api):
     assert manual["origin"] == "manual"
     shots = api.get(f"/api/episodes/{ep_id}").json()["shots"]
     assert [x["origin"] for x in shots] == ["llm", "manual"]
+
+
+def test_first_frame_refs_unused_when_engine_takes_no_refs(api):
+    """zimage（max_refs=0）：出场角色有定妆照也用不上，镜头详情列出来给界面提示；换 H3 图像就没有。"""
+    from backend.domain.characters import add_portrait
+    from backend.domain.models import Character
+
+    ep_id, ids = seed(api, n=1)
+    db = api.app.state.services.db
+    with db.session() as s:
+        proj = s.query(Project).one()
+        ch = Character(project_id=proj.id, name="老周", visual_prompt="a man")
+        s.add(ch)
+        s.flush()
+        add_portrait(s, ch.id, file_path="demo/media/portrait/a.png", engine="zimage", params={},
+                     input_hash="p", job_id=None)
+        s.get(Shot, ids[0]).cast = [{"character_id": ch.id, "variation_id": None}]
+    shot = api.get(f"/api/episodes/{ep_id}").json()["shots"][0]
+    assert shot["first_frame_refs_unused"] == ["老周 定妆照"]
+    api.patch(f"/api/shots/{ids[0]}", json={"image_engine": "h3_image"})
+    assert api.get(f"/api/shots/{ids[0]}").json()["first_frame_refs_unused"] == []

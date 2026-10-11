@@ -294,6 +294,8 @@ export interface ShotDetail extends Shot {
   active_jobs?: JobBrief[];
   /** 首帧、视频各自最近一次失败（之后没出过新的才给），每种最多一条 */
   failures?: JobBrief[];
+  /** 首帧引擎完全不吃参考图时，这个镜头用不上的参考图（如「老周 定妆照」）；吃参考图时为空 */
+  first_frame_refs_unused?: string[];
 }
 
 export interface EpisodeDetail extends Episode {

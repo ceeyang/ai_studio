@@ -205,6 +205,31 @@ def test_video_force_retake_selects_new_candidate_even_with_same_input(tmp_path,
         assert len({c.input_hash for c in video_slot.candidates}) == 1   # 确实是同一输入
 
 
+def test_keyframe_logs_when_engine_ignores_portraits(tmp_path, db):
+    """zimage 不吃参考图：任务日志写明定妆照用不上、人物一致只靠文字，提示可换 H3 图像。"""
+    from backend.domain.characters import add_portrait
+    from backend.domain.models import Character
+
+    ctx, runner, shot_id = setup(tmp_path, db)
+    with db.session() as s:
+        shot, _, proj, _ = load_shot(s, shot_id)
+        ch = Character(project_id=proj.id, name="老周", visual_prompt="a man")
+        s.add(ch)
+        s.flush()
+        add_portrait(s, ch.id, file_path="demo/media/portrait/a.png", engine="zimage", params={},
+                     input_hash="p", job_id=None)
+        shot.cast = [{"character_id": ch.id, "variation_id": None}]
+    run_keyframe(ctx, {"shot_id": shot_id})
+    hint = [m for m in ctx.logs if "不吃参考图" in m]
+    assert hint and "老周 定妆照" in hint[0] and "H3 图像" in hint[0]
+
+
+def test_keyframe_no_ref_hint_without_portraits(tmp_path, db):
+    ctx, runner, shot_id = setup(tmp_path, db)
+    run_keyframe(ctx, {"shot_id": shot_id})
+    assert not any("不吃参考图" in m for m in ctx.logs)
+
+
 # ---------------------------------------------------------------- 视频连续性：提示词 + 出片自检
 def test_video_prompt_has_continuity_clause_without_changing_hash(tmp_path, db):
     """H3 曾在镜头中途切到定妆照：提示词里写明单个连续镜头、和首帧同一地点、不切镜、不要影棚背景。

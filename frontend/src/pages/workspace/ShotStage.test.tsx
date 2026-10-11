@@ -56,6 +56,25 @@ describe('ShotStage', () => {
     expect(posts(calls)[1].body).toEqual({ stage: 'keyframes', candidates: 1, force: false, shots: ['12'] });
   });
 
+  it('首帧引擎不吃参考图、角色又有定妆照：首帧阶段一行提示；视频阶段不提示', async () => {
+    const HINT = '当前首帧引擎不吃参考图，人物一致只靠文字；要锁脸可换 H3 图像';
+    const shots = [makeShot({ id: 11, code: 'S01', first_frame_refs_unused: ['老周 定妆照'] }), makeShot({ id: 12, code: 'S02', order: 1 })];
+    installFetch(routes({ 'GET /api/episodes/4': makeEpisode({ id: 4, shots }) }));
+    const first = renderAt(<Harness />, AT);
+    expect((await screen.findByRole('note')).textContent).toBe(HINT);
+    first.unmount();
+    renderAt(<Harness stage="videos" />, AT);
+    await screen.findByText('2 个镜头，共 10.0 秒');
+    expect(screen.queryByText(HINT)).toBeNull();
+  });
+
+  it('首帧引擎吃参考图（没有用不上的）时不提示', async () => {
+    installFetch(routes());
+    renderAt(<Harness />, AT);
+    await screen.findByText('2 个镜头，共 11.0 秒');
+    expect(screen.queryByText(/不吃参考图/)).toBeNull();
+  });
+
   it('单镜候选数 4（超过 3 个任务）先确认耗时，取消就不提交', async () => {
     const calls = installFetch(routes());
     renderAt(<Harness />, AT);

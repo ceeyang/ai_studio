@@ -96,6 +96,9 @@ def run_keyframe(ctx, payload: dict) -> dict:
     seed_text = "无种子（网页出图每次不同）" if call.runner == "browser" else f"seed {seed}"
     ctx.log(f"首帧 {code} · {engine_name} · {seed_text} · 参考图 {len(refs)} 张"
             f"{'：' + '、'.join(labels.values()) if labels else ''}")
+    if refs and engine.caps.max_refs == 0:
+        ctx.log(f"首帧 {code}：{engine_name} 不吃参考图，{'、'.join(labels.values())}用不上，"
+                f"人物一致只靠提示词里的外貌文字；要锁脸可换 H3 图像")
     files, run_dir = run_comfy(ctx, call, slug, labels)
     dst = sv.media.new_media_path(slug, "first_frame", files[0].suffix)
     shutil.copyfile(files[0], dst)

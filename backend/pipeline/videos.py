@@ -75,7 +75,9 @@ def run_video(ctx, payload: dict) -> dict:
         seconds = max(1.0, min(float(shot.duration), engine.caps.max_seconds))
         first = sv.media.abs(ff.file_path)
         slug, code, aspect = proj.slug, shot.code, proj.aspect
-    call = engine.build(VideoRequest(prompt=with_continuity(prompt), first_frame=first, aspect=aspect, seed=seed,
+    # 连续性要求只加在发给引擎的提示词里，不进输入哈希
+    call = engine.build(VideoRequest(prompt=with_continuity(prompt), first_frame=first,
+                                     aspect=aspect, seed=seed,
                                      seconds=seconds, negative=negative, refs=refs,
                                      prefix=f"studio/{slug}/clip_{code}"))
     ctx.log(f"视频 {code} · {engine_name} · {seconds:.1f}s · seed {seed} · 参考图 {len(refs)} 张"

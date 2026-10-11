@@ -281,6 +281,11 @@ export function ShotStage({
           新增镜头
         </button>
       </div>
+      {stage === 'keyframes' && shots.some((s) => (s.first_frame_refs_unused?.length ?? 0) > 0) && (
+        <p className="muted small" role="note">
+          当前首帧引擎不吃参考图，人物一致只靠文字；要锁脸可换 H3 图像
+        </p>
+      )}
       {!(openShot && active) && notice.view}
 
       {shots.length === 0 ? (
