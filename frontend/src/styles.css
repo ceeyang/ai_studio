@@ -1816,3 +1816,6 @@ img.rail-avatar { border: 0; }
 .bible-actions { display: flex; justify-content: flex-end; }
 .new-project-import > summary { cursor: pointer; color: var(--muted); }
 .new-project-import .fields { margin-top: var(--s-2); }
+
+/* 工作台页头「一键出完剩下的」 */
+.finish-all { display: inline-flex; align-items: center; gap: var(--s-2); flex-wrap: wrap; min-width: 0; }

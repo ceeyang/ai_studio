@@ -6,7 +6,7 @@ import { Navigate, type RouteObject, useLocation, useParams, useSearchParams } f
 import { useCharacters, useEpisode, useExports, useRecentDoneJobs } from '../api/queries';
 import type { LeaveCheck } from '../components/confirmDiscard';
 import { EpisodeHeader, EpisodeLoadError, useSceneInfo } from '../components/EpisodeHeader';
-import { AutopilotBar } from './workspace/AutopilotBar';
+import { AutopilotBar, FinishAllButton } from './workspace/AutopilotBar';
 import { setSceneSkipped } from './workspace/sceneSkip';
 import { type NextStep, type StageKey, episodeStages, exportStep, isStageKey } from './stages';
 import { CastStage } from './workspace/CastStage';
@@ -174,7 +174,9 @@ function Workspace({ slug, id }: { slug: string; id: number }) {
 
   return (
     <div className="page workspace">
-      <EpisodeHeader slug={slug} ep={ep.data} stage={stage} />
+      <EpisodeHeader slug={slug} ep={ep.data} stage={stage}>
+        <FinishAllButton episodeId={id} hasShots={ep.data.shots.length > 0} />
+      </EpisodeHeader>
       {params.get('autopilot') === '1' && (
         <AutopilotBar
           episodeId={id}
