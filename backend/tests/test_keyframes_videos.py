@@ -398,9 +398,9 @@ def test_video_dialogue_lines_use_english_refs_and_off_screen_voice():
     v = compose_video_prompt("she looks up", "img", "quiet hum", dlg, anchor="", has_audio=True,
                              speakers=speakers)
     audio = v.split("\nAudio: ", 1)[1]
-    assert 'the woman in her late twenties says in Mandarin Chinese: "词被改了"' in audio
-    assert ('an off-screen voice says in Mandarin Chinese: "我早就知道", '
-            "the on-screen character's lips stay closed") in audio
+    assert 'The woman in her late twenties says in Mandarin Chinese: "词被改了"' in audio
+    assert ('Then an off-screen voice (the stocky man) says in Mandarin Chinese: "我早就知道", '
+            "the on-screen character's lips stay closed.") in audio
     assert "林夏" not in v and "老周" not in v
     # 不给 speakers（算输入哈希用）：和以前一字不差，已有视频不会因此过期
     old = compose_video_prompt("she looks up", "img", "quiet hum", dlg[:1], anchor="A",
@@ -427,7 +427,7 @@ def test_video_job_sends_speaker_refs_but_hash_unchanged(tmp_path, db):
     run_keyframe(ctx, {"shot_id": shot_id})
     run_video(ctx, {"shot_id": shot_id})
     prompt = runner.calls[-1].workflow["6"]["inputs"]["prompt"]
-    assert 'an off-screen voice says in Mandarin Chinese: "我早就知道"' in prompt
+    assert 'off-screen male voice (the stocky man in his fifties) says in Mandarin Chinese: "我早就知道"' in prompt
     assert "老周" not in prompt
     with db.session() as s:
         v = selected_candidate(s, "shot", shot_id, "video")

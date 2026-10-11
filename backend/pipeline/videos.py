@@ -11,7 +11,7 @@ from backend.pipeline.continuity import video_ref_plan
 from backend.pipeline.keyframes import load_shot, ref_labels, run_comfy
 from backend.domain.models import Location, SceneBlock
 from backend.pipeline.prompting import (STAY_IN_FRAME, Speaker, compose_video_prompt,
-                                        entering_clause, join_negative, location_summary, short_ref,
+                                        entering_clause, gender_of, insert_kind, token_refs, join_negative, location_summary, short_ref,
                                         shot_image_prompt, shot_seed, video_input_hash,
                                         video_inputs, with_continuity)
 from backend.queue.errors import JobCanceled, JobError
@@ -95,8 +95,16 @@ def clean_selection(s, shot_id: int, fresh_hashes) -> bool:
 
 
 def _speakers(proj, shot) -> dict[str, Speaker]:
+    """说话人叫法：画面里的人用分镜在 image_prompt 里给他的简短指代（和 motion 里的叫法一致），
+    没有时用外貌简称；性别从外貌第一句看（画外音要说清男声女声）。只露手 / 腰的插入镜头里没人露脸，
+    都按不在画面里算（不加视线句，说话就是画外音）。"""
     on = {c.get("character_id") for c in shot.cast or [] if isinstance(c, dict)}
-    return {c.name: Speaker(short_ref(c.visual_prompt), c.id in on) for c in proj.characters}
+    if insert_kind(shot.image_prompt or "", getattr(shot, "shot_size", "") or "") in ("hands", "body"):
+        on = set()
+    refs = token_refs(shot.image_prompt)
+    return {c.name: Speaker(refs.get(c.id) or short_ref(c.visual_prompt), c.id in on,
+                            gender_of(c.visual_prompt))
+            for c in proj.characters}
 
 
 def _shot_location(s, shot) -> str:

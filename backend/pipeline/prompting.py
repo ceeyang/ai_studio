@@ -122,9 +122,12 @@ def portrait_look(visual_prompt: str) -> str:
 # 分镜里 image_prompt 用 {{char:<角色 id>}} 占位，出图时按角色当前的外貌提示词、按景别取舍后填进去：
 # 外貌只有一个来源，角色换造型后镜头自动跟上（首帧输入哈希按填好的文字算，换造型就过期）。
 CHAR_TOKEN = re.compile(r"\{\{\s*char\s*:\s*(\d+)\s*\}\}")
-_FACE = re.compile(r"face|hair|eyes?\b|eyebrows?|brows?\b|nose|lips?\b|mouth|jaw|cheek|chin|skin"
-                   r"|complexion|beard|stubble|mustache|moustache|glasses|spectacles|earrings?"
-                   r"|freckles?|mole|scar|wrinkle|forehead|bangs|ponytail|bun\b|braid", re.I)
+# 加词边界：open-face（头盔）、surface、interface 不算写脸
+_FACE = re.compile(r"(?<![\w-])faces?\b|\bhair\w*|\beyes?\b|\beyebrows?\b|\bbrows?\b|\bnose\b|\blips?\b"
+                   r"|\bmouth\b|\bjaw\w*|\bcheek\w*|\bchin\b|\bskin\b|\bcomplexion\b|\bbeard\b|\bstubble\b"
+                   r"|\bmustache\b|\bmoustache\b|\bglasses\b|\bspectacles\b|\bearrings?\b|\bfreckles?\b"
+                   r"|\bmoles?\b|\bscars?\b|\bwrinkle\w*|\bforehead\b|\bbangs\b|\bponytail\b|\bbun\b"
+                   r"|\bbraids?\b", re.I)
 _TOKEN_WITH_TAIL = re.compile(CHAR_TOKEN.pattern + r"(\s*[.,;:!?])?")
 FACE_SIZES = ("大特写", "特写")
 UPPER_SIZES = ("近景",)
@@ -160,26 +163,117 @@ def look_for_size(visual_prompt: str, shot_size: str = "") -> str:
     return (visual_prompt or "").strip()
 
 
-# 填好外貌后整段提示词的上限（词）：Z-Image / umt5 这类编码器 512 token 左右，前面还要拼风格锚
-MAX_RESOLVED_WORDS = 200
+# 填好外貌后整段提示词的上限（词）：Z-Image（Qwen3-4B）/ krea2（T5）编码器约 512 token；
+# 260 词 + 风格锚约 70 词 ≈ 430 token，放得下。以前是 200：两人同框的中景必超，退成只写脸、服装全丢
+MAX_RESOLVED_WORDS = 260
+
+_SENTENCES = re.compile(r"(?<=[.!?])\s+")
+_WEARS = re.compile(r"^\s*(?:wears|wearing|dressed|clad|in an?\b)", re.I)
+_CLOTHES = re.compile(r"jacket|shirt|t-shirt|coat|sweater|hoodie|blouse|vest|cardigan|uniform|dress\b"
+                      r"|apron|suit\b|robe|gown|overalls|pinafore|windbreaker|polo|tee\b|top\b", re.I)
+
+
+def _sentences(text: str) -> list[str]:
+    return [x for x in _SENTENCES.split((text or "").strip()) if x]
+
+
+def costume_sentence(visual_prompt: str, upper: bool = True) -> str:
+    """外貌里写服装的那一句（「Wears …」优先，没有就第一句写了衣服的），upper=True 时去掉下半身。"""
+    rest = _sentences(visual_prompt)[1:]
+    pick = next((x for x in rest if _WEARS.search(x)), None) or next(
+        (x for x in rest if _CLOTHES.search(x) and not x.lower().startswith("signature")), "")
+    if not pick:
+        return ""
+    return (upper_body_look(pick) if upper else pick).strip()
+
+
+def signature_sentence(visual_prompt: str) -> str:
+    """「Signature detail: …」（角色的标志性细节，core feature）：去掉下半身后主语还在才用。"""
+    sig = next((x for x in _sentences(visual_prompt) if x.lower().startswith("signature")), "")
+    if not sig:
+        return ""
+    cut = upper_body_look(sig).strip()
+    return cut if cut.lower().startswith("signature") else ""
+
+
+def compact_look(visual_prompt: str, with_signature: bool = True) -> str:
+    """压缩版外貌：身份句（性别年龄、脸、发型、体型）+ 标志性细节（core feature）+ 服装句（上半身）。
+    每个同框的人都留服装，首帧只靠文字的引擎（zimage / krea2）才不会换装。"""
+    sents = _sentences(visual_prompt)
+    if not sents:
+        return ""
+    parts = [sents[0]]
+    sig = signature_sentence(visual_prompt) if with_signature else ""
+    wear = costume_sentence(visual_prompt)
+    parts += [x for x in (sig, wear) if x]
+    return " ".join(parts)
+
+
+# ------------------------------------------------------------ 插入镜头：只露手 / 身体局部 / 物件
+_HANDS_SUBJ = re.compile(r"\b(?:fingers?|fingertips?|hands?|palms?|knuckles?|wrists?|thumbs?)\b", re.I)
+_BODY_SUBJ = re.compile(r"\b(?:hips?|waist|pocket|belt|torso|back of|lap|knees?|feet|foot|shoes?)\b", re.I)
+_FACE_SUBJ = re.compile(r"(?<![\w-])faces?\b|\beyes?\b|\blips?\b|\bmouth\b|\btears?\b|\bgaze\b"
+                        r"|\bcheeks?\b|\bbrows?\b|\bexpression\b|\bsmil\w*|\bhead\b|\bhair\b", re.I)
+
+
+def insert_kind(image_prompt: str, shot_size: str = "") -> str:
+    """特写 / 大特写里画的是不是「插入镜头」：hands = 只露手，body = 只露腰、口袋这类身体局部，
+    object = 没有占位符（调用方只在 cast 为空时把它当物件镜头；老镜头没写占位符也会得到 object）；
+    拍到脸的特写返回空串。看每个外貌占位符后面那一句（写这个人的句子）。"""
+    if shot_size not in FACE_SIZES:
+        return ""
+    text = image_prompt or ""
+    ends = [m.end() for m in CHAR_TOKEN.finditer(text)]
+    if not ends:
+        return "object"
+    kinds = set()
+    for end in ends:
+        rest = CHAR_TOKEN.sub("", text[end:]).lstrip(" .,;")
+        sentence = (_sentences(rest) or [""])[0]
+        if _FACE_SUBJ.search(sentence):
+            return ""
+        if _HANDS_SUBJ.search(sentence):
+            kinds.add("hands")
+        elif _BODY_SUBJ.search(sentence):
+            kinds.add("body")
+        else:
+            return ""
+    return "hands" if kinds == {"hands"} else "body"
+
+
+def insert_look(visual_prompt: str, kind: str) -> str:
+    """插入镜头里这个人的外貌：只写看得见的服装（手 → 上衣、袖子；身体局部 → 整句服装），不写脸和头发。"""
+    return costume_sentence(visual_prompt, upper=(kind == "hands"))
 
 
 def resolve_char_tokens(text: str, looks: dict[int, str], shot_size: str = "",
                         notes: list | None = None) -> str:
     """把 {{char:<id>}} 换成该角色按景别取舍后的外貌（句末补句号）；没有占位符时原样返回。
     找不到的角色（删了）或外貌是空的、或是中文的，占位符直接去掉（中文进英文提示词会被画成字）。
-    同框两人及以上时每人只用上半身外貌；填完超过 MAX_RESOLVED_WORDS 个词时都退成只写脸，
-    notes 里记一句（任务日志用）。"""
+    - 只露手 / 身体局部的插入镜头（insert_kind）：只填看得见的服装，不填脸和头发；
+    - 同框两人及以上时每人只用上半身外貌；
+    - 填完超过 MAX_RESOLVED_WORDS 个词：每人退到「身份句 + 标志性细节 + 服装句」，还超就去掉标志性细节，
+      再超才只写脸；notes 里记一句（任务日志用）。"""
     if not text or "{{" not in text:
         return text or ""
+    kind = insert_kind(text, shot_size)
+    if kind in ("hands", "body"):
+        return _resolve(text, looks, lambda look: insert_look(look, kind))
     people = {int(x) for x in CHAR_TOKEN.findall(text)}
     multi = len(people) >= 2 and shot_size not in FACE_SIZES
     out = _resolve(text, looks, lambda look: upper_body_look(look) if multi
                    else look_for_size(look, shot_size))
-    if len(out.split()) > MAX_RESOLVED_WORDS and shot_size not in FACE_SIZES:
-        out = _resolve(text, looks, face_look)
-        if notes is not None:
-            notes.append(f"填好外貌后超过 {MAX_RESOLVED_WORDS} 个词，外貌改成只写脸")
+    if len(out.split()) <= MAX_RESOLVED_WORDS or shot_size in FACE_SIZES:
+        return out
+    steps = ((compact_look, "每人只留身份、标志性细节和服装"),
+             (lambda look: compact_look(look, with_signature=False), "每人只留身份和服装"),
+             (face_look, "外貌改成只写脸"))
+    for pick, note in steps:
+        out = _resolve(text, looks, pick)
+        if len(out.split()) <= MAX_RESOLVED_WORDS or pick is face_look:
+            if notes is not None:
+                notes.append(f"填好外貌后超过 {MAX_RESOLVED_WORDS} 个词，{note}")
+            break
     return out
 
 
@@ -240,9 +334,43 @@ def compose_image_prompt(image_prompt: str, anchor: str) -> str:
 
 
 class Speaker(NamedTuple):
-    """视频提示词里怎么称呼说话人：英文简称（不写中文名），以及他在不在画面里（在这一镜的 cast 里）。"""
+    """视频提示词里怎么称呼说话人：英文简称（不写中文名；画面里的人用分镜里写的同一个简称），
+    他在不在画面里（在这一镜的 cast 里），以及性别（male / female / 空），画外音要说清是男声还是女声。"""
     ref: str
     on_screen: bool
+    gender: str = ""
+
+
+_FEMALE = re.compile(r"\b(?:woman|women|girl|lady|female|mother|grandmother|wife|sister|daughter|aunt"
+                     r"|actress)\b", re.I)
+_MALE = re.compile(r"\b(?:man|men|boy|gentleman|male|father|grandfather|husband|brother|son|uncle)\b",
+                   re.I)
+
+
+def gender_of(visual_prompt: str | None) -> str:
+    """从外貌的第一句看性别：female / male；看不出来返回空串。"""
+    head = (_sentences(visual_prompt or "") or [""])[0]
+    f, m = _FEMALE.search(head), _MALE.search(head)
+    if f and (not m or f.start() <= m.start()):
+        return "female"
+    if m:
+        return "male"
+    return ""
+
+
+_PERSON_NOUN = (r"(?:woman|man|girl|boy|lady|gentleman|teenager|teen|child|kid|guy|mother|father"
+                r"|grandmother|grandfather|grandma|grandpa|worker|courier|driver|stranger)")
+_TOKEN_REF = re.compile(CHAR_TOKEN.pattern + r"\s*[.,;:]?\s*(?:The|the)\s+((?:[\w-]+\s+){0,3}?"
+                        + _PERSON_NOUN + r")\b")
+
+
+def token_refs(image_prompt: str | None) -> dict[int, str]:
+    """分镜给每个人的简短指代：image_prompt 里占位符后面紧跟的「The young woman …」。
+    视频对白里说话人用同一个叫法，H3 才知道动作和台词说的是同一个人（双人镜头谁张嘴）。"""
+    out: dict[int, str] = {}
+    for m in _TOKEN_REF.finditer(image_prompt or ""):
+        out.setdefault(int(m.group(1)), "the " + " ".join(m.group(2).split()).lower())
+    return out
 
 
 _REF_CUT = re.compile(r",|;|\.|\bwith\b|\bwearing\b|\bwho\b|\band\b", re.I)
@@ -267,9 +395,18 @@ def _dialogue_line(d: dict, speakers: dict[str, Speaker] | None, anyone_on_scree
         return f'{d.get("speaker", "")} {said}'
     sp = speakers.get(d.get("speaker", ""))
     if sp is not None and sp.on_screen:
-        return f"{sp.ref} {said}"
-    lips = ", the on-screen character's lips stay closed" if anyone_on_screen else ""
-    return f"an off-screen voice {said}{lips}"
+        return f"{sp.ref[:1].upper()}{sp.ref[1:]} {said}"
+    voice = f"An off-screen {sp.gender} voice" if sp is not None and sp.gender else "An off-screen voice"
+    if sp is not None and sp.ref and sp.ref != "the speaker":
+        voice += f" ({sp.ref})"
+    lips = ", the on-screen character's lips stay closed." if anyone_on_screen else ""
+    return f"{voice} {said}{lips}"
+
+
+def _join_lines(lines: list[str]) -> str:
+    """多句台词按先后写成独立的句子：第二句起加 Then，句子之间不会粘在一起。"""
+    return " ".join(line if i == 0 else "Then " + line[:1].lower() + line[1:]
+                    for i, line in enumerate(lines))
 
 
 GAZE_LINE = ("The people on screen keep their eyes on each other and on what they are doing, "
@@ -301,7 +438,8 @@ def compose_video_prompt(motion_prompt: str, image_prompt: str, audio_prompt: st
              for d in dialogue or [] if d.get("zh") and d["zh"] not in audio]
     if speakers is not None:   # 发给引擎：只要画面里的声音，音乐交给成片配乐（不进输入哈希）
         audio = diegetic_audio(audio)
-    parts = [p for p in (audio, " ".join(lines)) if p]
+    joined = " ".join(lines) if speakers is None else _join_lines(lines)
+    parts = [p for p in (audio, joined) if p]
     if speakers is not None:
         parts.append(NO_MUSIC)
     return text + ("\nAudio: " + " ".join(parts) if parts else "")
@@ -375,7 +513,7 @@ def with_continuity(video_prompt: str, location: str = "", extra: list[str] | tu
     return body.strip() + (sep + audio if sep else "")
 
 
-ENTERING_WORDS = 40
+ENTERING_WORDS = 60   # 身份句 + 服装句，按句累加
 
 
 def entering_clause(visual_prompts: list[str]) -> str:
@@ -383,9 +521,17 @@ def entering_clause(visual_prompts: list[str]) -> str:
     和一起带上的定妆照对上——第三次样片 S06 的苏晴没有这句，H3 给她换了白衬衫、长直发。"""
     looks = []
     for vp in visual_prompts:
-        words = upper_body_look(vp or "").split()
-        if words and not _CJK_ANY.search(vp or ""):
-            looks.append(" ".join(words[:ENTERING_WORDS]).rstrip(".,;"))
+        if not vp or _CJK_ANY.search(vp):
+            continue
+        # 按句累加到 ENTERING_WORDS 个词为止，不在词中间截断（以前截出「over a plain.」）；
+        # 一句都放不下时退到第一句
+        kept: list[str] = []
+        for x in _sentences(compact_look(vp, with_signature=False)):
+            if kept and len(" ".join(kept + [x]).split()) > ENTERING_WORDS:
+                break
+            kept.append(x)
+        if kept:
+            looks.append(" ".join(kept).rstrip(".,; "))
     return ("Entering the frame: " + "; ".join(looks) + ".") if looks else ""
 
 

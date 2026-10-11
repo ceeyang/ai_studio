@@ -394,7 +394,9 @@ def previous_shot_lines(db, block_id: int) -> list[str]:
 #   v4：风格预设（分镜里的风格说法；商业广告要产品特写插入镜头和结尾行动号召镜头）
 #   v5：audio_prompt 只写画面里的声音、不写音乐，以 No background music. 结尾（音乐交给成片配乐）；
 #       结尾要人物留在画面里的镜头不写成长静止镜头
-STORYBOARD_RULES_VERSION = 5
+#   v6：AI 短剧（不再叫漫剧）；两人同框时正文 60–90 词；占位符后一句用「The + 简短指代」开头、
+#       全镜逐字一致（视频对白按它认说话人）；只露手 / 腰的插入镜头只写部位、系统只填服装
+STORYBOARD_RULES_VERSION = 6
 RULES_OUTDATED_HINT = "分镜规则已更新，要按新规则重出请强制重跑"
 
 # 镜头上会被用户改动的字段：生成时记下每镜的哈希，之后对不上就是改过（含拆分出来的新镜头）

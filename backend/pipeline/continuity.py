@@ -16,7 +16,7 @@ from backend.domain.refs import Ref, shot_refs
 from backend.domain.shots import prev_shot
 from backend.domain.slots import add_candidate, get_or_create_slot, selected_candidate
 from backend.pipeline.common import job_services, load_episode
-from backend.pipeline.prompting import first_frame_locked_face
+from backend.pipeline.prompting import first_frame_locked_face, insert_kind
 from backend.queue.errors import JobError
 from backend.queue.handlers import HANDLERS
 
@@ -90,6 +90,10 @@ def video_ref_plan(s, shot, ff, image_max_refs: Callable[[str], int]) -> VideoRe
     - 接上一镜的首帧：尾帧里锁过脸的角色接着带（沿用上一镜）；这一镜 cast 里有、上一镜 cast 里没有的角色
       （从画外进来，尾帧里还没有这个人）总要带上定妆照——不然 H3 会自己编一张脸（第三次样片 S06）。"""
     packed = shot_refs(s, shot, video=True)
+    if insert_kind(shot.image_prompt or "", shot.shot_size or "") in ("hands", "body"):
+        # 只露手 / 腰 / 物件的插入镜头：画面里没有脸，带定妆照只会让 H3 中途剪进一张脸（第一次样片那类）
+        return VideoRefPlan([], False, "first_frame", continued=ff is not None
+                            and ff.engine == CONTINUE_ENGINE, dropped=packed)
     if ff is None or ff.engine != CONTINUE_ENGINE:
         locked = ff is not None and first_frame_locked_face(ff.params,
                                                             image_max_refs(ff.engine))

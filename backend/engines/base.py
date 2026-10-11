@@ -31,6 +31,19 @@ class VideoCaps:
     max_seconds: float
 
 
+def dedupe_negative(text: str) -> str:
+    """负面词按逗号分项去重（不分大小写，保留第一次出现的写法和顺序）。项目负面词和风格负面词常常一样，
+    拼起来会写两遍。只在发给引擎的请求里去重，输入哈希仍按原来的拼法算，已有结果不会过期。"""
+    seen: set[str] = set()
+    out: list[str] = []
+    for item in (text or "").split(","):
+        x = item.strip()
+        if x and x.lower() not in seen:
+            seen.add(x.lower())
+            out.append(x)
+    return ", ".join(out)
+
+
 def size_for(sizes: dict[str, tuple[int, int]], aspect: str) -> tuple[int, int]:
     if aspect not in sizes:
         raise ValueError(f"不支持画幅 {aspect}，可选：{', '.join(sizes)}")
@@ -46,6 +59,9 @@ class ImageRequest:
     refs: list[Path] = field(default_factory=list)
     prefix: str = "studio/img"
 
+    def __post_init__(self):
+        self.negative = dedupe_negative(self.negative)
+
 
 @dataclass
 class VideoRequest:
@@ -60,6 +76,9 @@ class VideoRequest:
     min_seconds: float = 0.0
     refs: list[Path] = field(default_factory=list)
     prefix: str = "studio/vid"
+
+    def __post_init__(self):
+        self.negative = dedupe_negative(self.negative)
 
 
 @dataclass
