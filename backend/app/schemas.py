@@ -652,3 +652,63 @@ TurnaroundSheetOut.model_rebuild()
 TurnaroundOut.model_rebuild()
 CharacterOut.model_rebuild()  # portraits / turnaround 引用了后面定义的 CandidateOut
 LocationOut.model_rebuild()  # images 引用了后面定义的 CandidateOut
+
+
+# ---------------------------------------------------------------- 从一个点子出片（首页向导）
+class IdeaOptionIO(BaseModel):
+    title: str = Field(max_length=60)
+    logline: str = Field(max_length=400)
+    hook: str = Field("", max_length=300)
+    twist: str = Field("", max_length=300)
+    ending: str = Field("", max_length=300)
+    genre: str = Field("", max_length=30)
+
+
+class IdeaOptionsIn(BaseModel):
+    idea: str = Field(min_length=1, max_length=2000)
+    target_seconds: float = Field(30.0, gt=0, le=600)
+    style_preset: StylePresetKey = "live_action"
+    feedback: str = Field("", max_length=500)          # 「要更搞笑 / 要反转」之类，重出时用
+    exclude: list[str] = Field(default_factory=list)   # 「再来几个」：看过的方向标题
+    count: int = Field(4, ge=2, le=6)
+
+
+class IdeaOptionsOut(BaseModel):
+    options: list[IdeaOptionIO]
+
+
+class IdeaExpandIn(BaseModel):
+    idea: str = Field("", max_length=2000)
+    options: list[IdeaOptionIO] = Field(min_length=1, max_length=2)   # 一个，或两个合并
+    target_seconds: float = Field(30.0, gt=0, le=600)
+    style_preset: StylePresetKey = "live_action"
+    current: str = Field("", max_length=20000)          # 现在的梗概（按修改要求改写时带上）
+    instruction: str = Field("", max_length=500)        # 修改要求
+
+
+class IdeaExpandOut(BaseModel):
+    title: str
+    synopsis: str
+
+
+class IdeaStartIn(BaseModel):
+    title: str = Field(min_length=1, max_length=200)
+    synopsis: str = Field(min_length=1, max_length=20000)
+    target_seconds: float = Field(30.0, gt=0, le=600)
+    aspect: Aspect = "9:16"
+    style_preset: StylePresetKey = "live_action"
+    image_engine: str | None = None     # 不给就按风格预设推荐（和新建项目一样）
+    video_engine: str | None = None
+
+
+class IdeaStartOut(BaseModel):
+    slug: str
+    episode_id: int
+    episode_number: int
+    job_ids: list[int]
+
+
+class AutopilotOut(BaseModel):
+    job_ids: list[int]
+    skipped: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)

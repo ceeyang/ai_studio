@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import type { Character, ExportRow, Slot } from '../api/types';
 import { ConfirmProvider } from '../components/ConfirmDialog';
 import { LeaveGuard } from '../components/EditableFields';
-import { installFetch } from '../test/fetch';
+import { installFetch, json } from '../test/fetch';
 import { makeCandidate, makeEpisode, makeProject, makeShot, makeSlot } from '../test/factories';
 import { newQueryClient } from '../test/render';
 import { episodeRoutes } from './EpisodeWorkspace';
@@ -572,3 +572,70 @@ describe('EpisodeWorkspace', () => {
     });
   });
 });
+
+describe('工作台的「点子出片」条（?autopilot=1）', () => {
+  it('没带 ?autopilot=1 时不显示', async () => {
+    installFetch(routes());
+    renderRoute('/projects/demo/episodes/4?stage=cast');
+    await screen.findByRole('list', { name: '制作阶段' });
+    expect(screen.queryByRole('region', { name: '点子出片' })).toBeNull();
+  });
+
+  it('还没有镜头：说正在写剧本和分镜，没有「继续出片」', async () => {
+    installFetch(routes({ 'GET /api/episodes/4': { ...EP, shots: [] } }));
+    renderRoute('/projects/demo/episodes/4?stage=script&autopilot=1');
+    const bar = await screen.findByRole('region', { name: '点子出片' });
+    expect(within(bar).getByText('正在写剧本和分镜…')).toBeTruthy();
+    expect(within(bar).queryByRole('button', { name: '继续出片' })).toBeNull();
+  });
+
+  it('剧本没写成：说出失败原因，不再一直说「正在写」', async () => {
+    const failed = { id: 70, type: 'script', status: 'failed', project_id: 1, owner_type: 'episode', owner_id: 4, payload: {},
+      gpu: false, model_family: null, priority: 0, depends_on: [], log: '', error: 'Gemini 网页用不了：浏览器扩展没有连上',
+      result: null, created_at: '2026-10-08T10:00:00Z', started_at: null, finished_at: null };
+    installFetch(routes({ 'GET /api/episodes/4': { ...EP, shots: [] }, 'GET /api/jobs': [failed] }));
+    renderRoute('/projects/demo/episodes/4?stage=script&autopilot=1');
+    const bar = await screen.findByRole('region', { name: '点子出片' });
+    expect(await within(bar).findByText(/剧本没写成：Gemini 网页用不了：浏览器扩展没有连上/)).toBeTruthy();
+    expect(within(bar).queryByText('正在写剧本和分镜…')).toBeNull();
+  });
+
+  it('分镜做好了：点「继续出片」排任务，显示跳过的角色；刷新后不再给按钮；× 关掉', async () => {
+    const calls = installFetch(routes({
+      'POST /api/episodes/4/autopilot': {
+        job_ids: [31, 32], skipped: ['老周 还没有外貌提示词，没出定妆照（首帧只能按文字出脸）'], warnings: ['首帧会按文字出老周的脸'],
+      },
+    }));
+    const first = renderRoute('/projects/demo/episodes/4?stage=cast&autopilot=1');
+    const user = userEvent.setup();
+    const bar = await screen.findByRole('region', { name: '点子出片' });
+    expect(within(bar).getByText(/分镜做好了/)).toBeTruthy();
+    await user.click(within(bar).getByRole('button', { name: '继续出片' }));
+    expect(await within(bar).findByText(/老周 还没有外貌提示词/)).toBeTruthy();
+    expect(within(bar).getByText('首帧会按文字出老周的脸')).toBeTruthy();
+    expect(within(bar).getByText(/已排好：定妆照 → 首帧 → 视频 → 导出/)).toBeTruthy();
+    expect(within(bar).queryByRole('button', { name: '继续出片' })).toBeNull();
+    expect(calls.filter((c) => c.method === 'POST' && c.url.endsWith('/api/episodes/4/autopilot'))).toHaveLength(1);
+    first.unmount();
+
+    // 刷新：按集记住点过了
+    renderRoute('/projects/demo/episodes/4?stage=cast&autopilot=1');
+    const again = await screen.findByRole('region', { name: '点子出片' });
+    expect(within(again).getByText(/已排好/)).toBeTruthy();
+    expect(within(again).queryByRole('button', { name: '继续出片' })).toBeNull();
+    await user.click(within(again).getByRole('button', { name: '关掉「点子出片」' }));
+    expect(screen.queryByRole('region', { name: '点子出片' })).toBeNull();
+    expect(where()).toBe('/projects/demo/episodes/4?stage=cast');
+  });
+
+  it('继续出片失败（还没有分镜）：显示后端的说明，按钮还在', async () => {
+    installFetch(routes({ 'POST /api/episodes/4/autopilot': json({ detail: '这一集还没有分镜，先生成分镜' }, 400) }));
+    renderRoute('/projects/demo/episodes/4?stage=cast&autopilot=1');
+    const user = userEvent.setup();
+    const bar = await screen.findByRole('region', { name: '点子出片' });
+    await user.click(within(bar).getByRole('button', { name: '继续出片' }));
+    expect(await within(bar).findByText(/这一集还没有分镜/)).toBeTruthy();
+    expect(within(bar).getByRole('button', { name: '继续出片' })).toBeTruthy();
+  });
+});
+

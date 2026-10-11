@@ -22,6 +22,18 @@ function where(): string {
 }
 
 describe('ProjectsPage', () => {
+  it('首页有「从一个点子开始」，去 /start；空状态里也有', async () => {
+    installFetch({ 'GET /api/projects': [], 'GET /api/engines': ENGINES });
+    renderAt(<ProjectsPage />, { route: '/', path: '/' });
+    const empty = (await screen.findByText(/还没有项目/)).closest('section')!;
+    const links = screen.getAllByRole('link', { name: '从一个点子开始' });
+    expect(links).toHaveLength(2);
+    expect(links.every((a) => a.getAttribute('href') === '/start')).toBe(true);
+    expect(within(empty).getByRole('link', { name: '从一个点子开始' })).toBeTruthy();
+    await userEvent.setup().click(links[0]);
+    await waitFor(() => expect(where()).toBe('/start'));
+  });
+
   it('新建项目：默认选 zimage / h3_video，提交后跳到项目页', async () => {
     const calls = installFetch({
       'GET /api/projects': [],

@@ -10,6 +10,9 @@ export const STYLE_PRESETS: { key: StylePresetKey; label: string; description: s
   { key: 'commercial', label: '商业广告', description: '产品特写，结尾落到行动号召（配片尾卡）。' },
 ];
 
+/** 新建项目、点子向导默认选的预设 */
+export const DEFAULT_STYLE_PRESET: StylePresetKey = 'live_action';
+
 export function stylePresetLabel(key: string | null | undefined): string {
   return STYLE_PRESETS.find((p) => p.key === key)?.label ?? '真人写实';
 }

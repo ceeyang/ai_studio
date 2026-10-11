@@ -7,6 +7,7 @@ import type {
   ApiTestOut,
   AppSettings,
   AppSettingsIn,
+  AutopilotOut,
   ArchivedCandidate,
   Bgm,
   BrowserConversations,
@@ -26,6 +27,12 @@ import type {
   EpisodePatch,
   ExportRow,
   FreeGpuResult,
+  IdeaExpandIn,
+  IdeaExpandOut,
+  IdeaOptionsIn,
+  IdeaOptionsOut,
+  IdeaStartIn,
+  IdeaStartOut,
   Job,
   JobTraces,
   Location,
@@ -940,6 +947,38 @@ export function useRunStage(episodeId: number) {
   return useMutation({
     mutationFn: (body: RunIn) => api.post<RunOut>(`/api/episodes/${episodeId}/run`, body),
     onSuccess: () => invalidate(qc, ['jobs'], keys.queue),
+  });
+}
+
+/** 「继续出片」：出镜角色缺的定妆照 → 首帧 → 视频 → 导出，一次排好 */
+export function useAutopilot(episodeId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.post<AutopilotOut>(`/api/episodes/${episodeId}/autopilot`),
+    onSuccess: () => invalidate(qc, ['jobs'], keys.queue, keys.episode(episodeId)),
+  });
+}
+
+// ---- 从一个点子出片（首页向导）：方向、梗概只在页面里，不写库；文本模型一次要十几秒到一分钟
+
+export function useIdeaOptions() {
+  return useMutation({
+    mutationFn: (body: IdeaOptionsIn) => api.post<IdeaOptionsOut>('/api/ideas/options', body),
+  });
+}
+
+export function useIdeaExpand() {
+  return useMutation({
+    mutationFn: (body: IdeaExpandIn) => api.post<IdeaExpandOut>('/api/ideas/expand', body),
+  });
+}
+
+/** 开始制作：建项目 + 第 1 集，排剧本 → 分镜 */
+export function useIdeaStart() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: IdeaStartIn) => api.post<IdeaStartOut>('/api/ideas/start', body),
+    onSuccess: () => invalidate(qc, keys.projects, ['jobs'], keys.queue),
   });
 }
 

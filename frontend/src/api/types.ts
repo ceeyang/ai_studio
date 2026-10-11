@@ -976,3 +976,79 @@ export interface SystemHealth {
   comfyui: HealthItem;
   browser_ext: HealthItem;
 }
+
+// ---------------------------------------------------------------- 从一个点子出片（首页向导，/start）
+
+/** 一张方向卡片：AI 出的一个故事方向 */
+export interface IdeaOption {
+  title: string;
+  /** 一句话卖点 */
+  logline: string;
+  /** 开头钩子 */
+  hook: string;
+  /** 反转 */
+  twist: string;
+  /** 结尾卡点 */
+  ending: string;
+  /** 类型，如「悬疑」「喜剧」 */
+  genre: string;
+}
+
+/** POST /api/ideas/options */
+export interface IdeaOptionsIn {
+  idea: string;
+  target_seconds: number;
+  style_preset: StylePresetKey;
+  /** 补一句要求重出（「要更搞笑」） */
+  feedback?: string;
+  /** 「再来几个」：看过的方向标题，让模型避开 */
+  exclude?: string[];
+  /** 2–6，默认 4 */
+  count?: number;
+}
+
+export interface IdeaOptionsOut {
+  options: IdeaOption[];
+}
+
+/** POST /api/ideas/expand：一个方向扩写，两个合并；带 current + instruction 时按修改要求改写 */
+export interface IdeaExpandIn {
+  idea: string;
+  options: IdeaOption[];
+  target_seconds: number;
+  style_preset: StylePresetKey;
+  current?: string;
+  instruction?: string;
+}
+
+export interface IdeaExpandOut {
+  title: string;
+  synopsis: string;
+}
+
+/** POST /api/ideas/start：建项目 + 第 1 集，排剧本 → 分镜 */
+export interface IdeaStartIn {
+  title: string;
+  synopsis: string;
+  target_seconds: number;
+  aspect: Aspect;
+  style_preset: StylePresetKey;
+  image_engine?: string | null;
+  video_engine?: string | null;
+}
+
+export interface IdeaStartOut {
+  slug: string;
+  episode_id: number;
+  episode_number: number;
+  job_ids: number[];
+}
+
+/** POST /api/episodes/{id}/autopilot：「继续出片」排好定妆照 → 首帧 → 视频 → 导出 */
+export interface AutopilotOut {
+  job_ids: number[];
+  /** 没能出定妆照的角色说明 */
+  skipped: string[];
+  /** 不拦提交的提醒（如首帧只能按文字出脸） */
+  warnings: string[];
+}

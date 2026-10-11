@@ -11,6 +11,7 @@ import { SettingsPage } from './pages/SettingsPage';
 import { JobsPage } from './pages/JobsPage';
 import { episodeRoutes } from './pages/EpisodeWorkspace';
 import { ProjectsPage } from './pages/ProjectsPage';
+import { StartPage } from './pages/StartPage';
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 2000, retry: 1, refetchOnWindowFocus: false } },
@@ -39,6 +40,8 @@ const router = createBrowserRouter([
       { path: '/jobs', element: <JobsPage /> },
       // 单集工作台；旧的 /script /cast /director /export 重定向过去（后端任务的 context.url 还是旧形式）
       ...episodeRoutes,
+      // 从一个点子开始：四步向导，建好项目跳到工作台（?autopilot=1）
+      { path: '/start', element: <StartPage /> },
       { path: '/', element: <ProjectsPage /> },
       { path: '/projects/:slug', element: <ProjectsPage /> },
       { path: '*', element: <NotFound /> },

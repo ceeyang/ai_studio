@@ -7,7 +7,6 @@ import {
   useCharacters,
   useCreateProject,
   useDeleteEpisode,
-  useEngines,
   useLocations,
   usePatchProject,
   useStyle,
@@ -16,31 +15,17 @@ import {
   useProjectOverview,
   useProjects,
   keys,
-  useAppSettings,
-  useStylePresets,
 } from '../api/queries';
-import type { Aspect, EngineRow, Episode, EpisodeIdeaIn, EpisodeIdeaOut, EpisodeStats, Project, ProjectOverview, SettingValue, StylePresetKey } from '../api/types';
+import type { Aspect, Episode, EpisodeIdeaIn, EpisodeIdeaOut, EpisodeStats, Project, ProjectOverview, StylePresetKey } from '../api/types';
 import { useConfirm } from '../components/ConfirmDialog';
 import { Dialog } from '../components/Dialog';
 import { ProjectSettingsDialog } from '../components/ProjectSettingsDialog';
 import { Menu, type MenuItem } from '../components/Menu';
-import { StylePresetPicker, stylePresetLabel } from '../components/StylePresetPicker';
-import { EPISODE_STATUS_LABEL, engineLabel, engineOptionDisabled, engineOptionText, engineUnreadyHint } from '../format';
+import { EngineNotes, EngineSelects, useEngineChoice } from '../components/EngineChoice';
+import { DEFAULT_STYLE_PRESET, StylePresetPicker, stylePresetLabel } from '../components/StylePresetPicker';
+import { EPISODE_STATUS_LABEL, engineLabel } from '../format';
 import { forgetEpisode, readLastEpisode } from '../lastEpisode';
 import { workspacePath } from './workspace/urls';
-
-function pickDefault(rows: EngineRow[] | undefined, preferred: string): string {
-  if (!rows || rows.length === 0) return '';
-  return rows.some((r) => r.name === preferred) ? preferred : rows[0].name;
-}
-
-/** 视频引擎的名字：中文名里没写有声 / 无声时补上 */
-function videoEngineText(r: EngineRow): string {
-  const label = engineLabel(r);
-  const text = label.includes('声') ? label : `${label}${r.caps.has_audio ? '（有声）' : '（无声）'}`;
-  const hint = engineUnreadyHint(r);
-  return hint ? `${text}（${hint}）` : text;
-}
 
 function statusLabel(s: string): string {
   return EPISODE_STATUS_LABEL[s] ?? s;
@@ -76,61 +61,14 @@ function StatusPill({ status }: { status: string }) {
 // ------------------------------------------------------------ 新建项目
 
 function NewProjectDialog({ onClose }: { onClose: () => void }) {
-  const engines = useEngines();
-  // 设置页「新项目的图片/视频来源」；拿不到设置就用 zimage / h3_video。设置还在加载时不让提交，
-  // 免得用户手快、按内置默认建了项目
-  const settings = useAppSettings();
-  const settingsLoading = settings.isPending;
   const create = useCreateProject();
   const navigate = useNavigate();
   const [title, setTitle] = useState('');
   const [aspect, setAspect] = useState<Aspect>('9:16');
-  const [preset, setPreset] = useState<StylePresetKey>('live_action');
-  const presets = useStylePresets();
-  // 用户在下拉框里手动选的引擎（空 = 没动过）：换预设时不覆盖
-  const [imageEngine, setImageEngine] = useState('');
-  const [videoEngine, setVideoEngine] = useState('');
-  const rec = presets.data?.find((p) => p.key === preset);
-  const has = (rows: EngineRow[] | undefined, name: string | null | undefined): name is string =>
-    !!name && (rows ?? []).some((r) => r.name === name);
-  // 设置页明确设了（source=settings）、而且和预设合得来（在预设推荐的引擎里；预设没列就都算合得来）才用设置的
-  const fromSettings = (rows: EngineRow[] | undefined, v: SettingValue | undefined, allowed: string[] | undefined) =>
-    v && v.source === 'settings' && has(rows, v.effective) && (!allowed?.length || allowed.includes(v.effective!))
-      ? v.effective!
-      : '';
-  // 默认值：手动选的 → 设置页明确设的（和预设合得来）→ 当前预设推荐的（包括一打开就是的默认预设）→ 设置页 / 内置默认
-  const defaultEngine = (
-    rows: EngineRow[] | undefined,
-    v: SettingValue | undefined,
-    allowed: string[] | undefined,
-    recommended: string | null | undefined,
-    builtin: string,
-  ) => fromSettings(rows, v, allowed) || (has(rows, recommended) ? recommended : '') || pickDefault(rows, v?.effective ?? builtin);
-  const image =
-    imageEngine || defaultEngine(engines.data?.image, settings.data?.image_engine, rec?.image_engines, rec?.image_engine, 'zimage');
-  const video =
-    videoEngine || defaultEngine(engines.data?.video, settings.data?.video_engine, rec?.video_engines, rec?.video_engine, 'h3_video');
-
-  // 首帧引擎吃不吃参考图（caps.max_refs）：不吃的话首帧没法用定妆照锁脸、也用不上场景图
-  const imageRow = (engines.data?.image ?? []).find((r) => r.name === image);
-  const noRefs = imageRow?.caps?.max_refs === 0;
-  const videoRow = (engines.data?.video ?? []).find((r) => r.name === video);
-  // 选中的引擎还没配置好（ComfyUI 没连上、扩展没连上、没填 Key…）：表单下面提示一句，仍然能建项目
-  const unready = (kind: string, rows: EngineRow[] | undefined, row: EngineRow | undefined) => {
-    if (!engines.data) return null;
-    if (!rows?.length) return `没有可用的${kind}，先在 config.yaml 或设置页「API 服务」里配置。`;
-    if (!row || row.ready !== false) return null;
-    return `${kind}「${engineLabel(row)}」未配置好：${row.note ?? engineUnreadyHint(row)}。`;
-  };
-  const engineWarnings = [unready('图像引擎', engines.data?.image, imageRow), unready('视频引擎', engines.data?.video, videoRow)].filter(
-    (w): w is string => !!w,
-  );
-  // 预设推荐的定妆照引擎（如真人写实的 krea2）：和首帧引擎不同时提一句
-  const portraitRec = rec?.portrait_engine ?? null;
-  const portraitHint = portraitRec && portraitRec !== image ? portraitRec : null;
-
-  // 换预设：没手动选过的引擎跟着预设推荐的走（见上面的 image / video；推荐的不可用就不动）
-  const choosePreset = (key: StylePresetKey) => setPreset(key);
+  const [preset, setPreset] = useState<StylePresetKey>(DEFAULT_STYLE_PRESET);
+  // 引擎默认值跟着预设推荐的走（手动选过的不动），见 EngineChoice
+  const engine = useEngineChoice(preset);
+  const { image, video, settingsLoading } = engine;
 
   const submit = (e: FormEvent) => {
     e.preventDefault();
@@ -147,7 +85,7 @@ function NewProjectDialog({ onClose }: { onClose: () => void }) {
           <span>项目标题</span>
           <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="如：提词员" />
         </label>
-        <StylePresetPicker value={preset} onChange={choosePreset} />
+        <StylePresetPicker value={preset} onChange={setPreset} />
         <div className="field-grid">
           <label className="field">
             <span>画幅</span>
@@ -156,38 +94,9 @@ function NewProjectDialog({ onClose }: { onClose: () => void }) {
               <option value="16:9">16:9 横屏</option>
             </select>
           </label>
-          <label className="field">
-            <span>图像引擎</span>
-            <select value={image} onChange={(e) => setImageEngine(e.target.value)} title="选了风格预设会预选推荐的引擎，可以改">
-              {(engines.data?.image ?? []).map((r) => (
-                <option key={r.name} value={r.name} disabled={engineOptionDisabled(r)} title={r.note ?? undefined}>
-                  {engineOptionText(r)}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="field">
-            <span>视频引擎</span>
-            <select value={video} onChange={(e) => setVideoEngine(e.target.value)}>
-              {(engines.data?.video ?? []).map((r) => (
-                <option key={r.name} value={r.name} disabled={engineOptionDisabled(r)} title={r.note ?? undefined}>
-                  {videoEngineText(r)}
-                </option>
-              ))}
-            </select>
-          </label>
+          <EngineSelects choice={engine} />
         </div>
-        <p className="muted small" data-testid="engine-hint">
-          首帧引擎要能吃参考图才能锁脸、用场景图（如 H3 图像）。
-          {noRefs && `${engineLabel(image)} 不吃参考图，首帧只能按文字出脸、场景图也用不上。`}
-          {portraitHint && `定妆照默认用 ${engineLabel(portraitHint)}（这个风格预设推荐的；设置页「角色定妆照」设了别的、且和预设合得来时用设置的）。`}
-        </p>
-        {engineWarnings.length > 0 && (
-          <p className="warn small" data-testid="engine-unready">
-            {engineWarnings.join(' ')}
-          </p>
-        )}
-        {engines.error && <p className="error">读取引擎列表失败：{errorText(engines.error)}</p>}
+        <EngineNotes choice={engine} />
         {create.error && <p className="error">{errorText(create.error)}</p>}
         <div className="modal-foot">
           <button type="button" className="ghost" onClick={onClose}>
@@ -420,21 +329,32 @@ function ProjectsOverview() {
         <span className="eyebrow">01 · 项目中心</span>
         <h2>项目中心</h2>
         {projects.data && <span className="chip">{rows.length} 个项目</span>}
-        <button type="button" className="primary lg head-action" onClick={() => setCreating(true)}>
-          <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
-            <path d="M7 2v10M2 7h10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-          </svg>
-          新建项目
-        </button>
+        <span className="head-action head-actions">
+          {/* 只有一句话的点子：AI 出方向、写梗概，确认后自动建项目 */}
+          <Link className="btn primary lg" to="/start">
+            从一个点子开始
+          </Link>
+          <button type="button" className="lg" onClick={() => setCreating(true)}>
+            <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
+              <path d="M7 2v10M2 7h10" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+            </svg>
+            新建项目
+          </button>
+        </span>
       </header>
       {projects.isLoading && <p className="loading">加载中…</p>}
       {projects.error && <p className="error">{errorText(projects.error)}</p>}
       {projects.data && rows.length === 0 && (
         <section className="panel empty">
-          <p>{archived.length > 0 ? '没有进行中的项目。' : '还没有项目。'}新建一个，把第一集的梗概贴进去就能开工。</p>
-          <button type="button" className="primary" onClick={() => setCreating(true)}>
-            新建项目
-          </button>
+          <p>{archived.length > 0 ? '没有进行中的项目。' : '还没有项目。'}新建一个，把第一集的梗概贴进去就能开工；只有一句话的点子，也可以让 AI 先帮你想方向、写梗概。</p>
+          <p>
+            <Link className="btn primary" to="/start">
+              从一个点子开始
+            </Link>{' '}
+            <button type="button" onClick={() => setCreating(true)}>
+              新建项目
+            </button>
+          </p>
         </section>
       )}
       {rows.length > 0 && (
