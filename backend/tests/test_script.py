@@ -331,7 +331,8 @@ SCRIPT_TEMPLATE_HASHES = {("script_structure", 2): "0f71c3456df6b738",
                           ("script_visual", 3): "aa9130be0add3439",
                           ("script_structure", 4): "c7695bf3c309b984",
                           ("script_visual", 4): "81810d6712f799a6",
-                          ("script_visual", 5): "bc57f650d77b38b9"}
+                          ("script_visual", 5): "bc57f650d77b38b9",
+                          ("script_structure", 5): "c42eb0c982215277"}
 
 
 @pytest.mark.parametrize("name,attr", [("script_structure", "STRUCTURE_RULES_VERSION"),

@@ -196,6 +196,58 @@ def test_recommend_template_excludes_voice_only():
     assert "只出声" in text
 
 
+# ---------------------------------------------------------------- P1-12 剧本重写时认人
+def test_structure_prompt_lists_existing_characters_but_fingerprint_ignores_them(tmp_path, db):
+    from sqlalchemy import select
+
+    from backend.domain.models import Character
+    from backend.pipeline.script import run_script, structure_inputs
+    from backend.tests.test_script import STRUCTURE, VISUAL, setup as script_setup
+
+    from backend.domain.models import Episode
+
+    ctx, ep_id, prov = script_setup(tmp_path, db, [STRUCTURE, VISUAL])
+    run_script(ctx, {"episode_id": ep_id})
+    first_user = prov.calls[0]["messages"][-1]["content"]
+    assert "项目里已有的角色" not in first_user          # 第一次还没有角色
+    with db.session() as s:
+        ep = s.get(Episode, ep_id)
+        _, user, fp = structure_inputs(ctx.services, ep, ep.project)
+        assert "项目里已有的角色" in user and "- 林夏：新闻主播" in user
+        assert fp == ep.stage_hashes["structure"]["inputs"]   # 已有角色表不进指纹
+        assert len(s.scalars(select(Character)).all()) == 2
+
+
+def test_renamed_character_is_hinted_in_log(tmp_path, db):
+    from backend.pipeline.script import run_script
+    from backend.tests.test_script import STRUCTURE, VISUAL, setup as script_setup
+
+    renamed = {**STRUCTURE, "characters": [
+        {"name": "林主播", "description": "新闻主播"},
+        {"name": "老周", "description": "导播"}]}
+    vis = {**VISUAL, "characters": [*VISUAL["characters"],
+                                    {**VISUAL["characters"][0], "name": "林主播"}]}
+    ctx, ep_id, prov = script_setup(tmp_path, db, [STRUCTURE, VISUAL, renamed, vis])
+    run_script(ctx, {"episode_id": ep_id})
+    run_script(ctx, {"episode_id": ep_id, "force": True})
+    assert any("林主播" in m and "林夏" in m and "换了叫法" in m for m in ctx.logs)
+    assert not any("老周" in m and "换了叫法" in m for m in ctx.logs)
+
+
+def test_renamed_hints_needs_similar_description():
+    from backend.pipeline.script import renamed_hints
+
+    class C:
+        def __init__(self, name, description):
+            self.name, self.description = name, description
+
+    old = [C("苏晴", "28 岁，点外卖的女人，等了阿杰很多年"), C("阿杰", "外卖骑手")]
+    assert renamed_hints(old, [C("苏小姐", "28 岁，点外卖的女人，等了阿杰很多年"),
+                               C("阿杰", "外卖骑手")])
+    assert renamed_hints(old, [C("站长", "外卖站站长，只出声"), C("苏晴", "x"),
+                               C("阿杰", "y")]) == []
+
+
 # ---------------------------------------------------------------- P2-7 建议接上一镜、P2-9 第一镜和镜头节奏
 def test_storyboard_stores_continue_suggestion_but_never_on_block_first_shot(tmp_path, db):
     from backend.domain.models import Episode

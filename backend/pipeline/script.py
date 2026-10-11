@@ -30,7 +30,8 @@ from backend.queue.handlers import HANDLERS
 #   v3（视觉）：风格锚按项目的风格预设定画风方向，负面词参考预设
 #   v4（结构、视觉）：开头的称呼「AI 漫剧」改成「AI 短剧」（真人写实预设不是漫画）
 #   v5（视觉）：只出声、不出镜的角色 visual_prompt 只写性别年龄族裔加 voice only（约 10 词）
-STRUCTURE_RULES_VERSION = 4
+#   v5（结构）：给模型项目里已有的角色表，已有的人沿用原名、不换叫法（换了叫法会新建角色，定妆照接不上）
+STRUCTURE_RULES_VERSION = 5
 VISUAL_RULES_VERSION = 5
 SCRIPT_RULES_OUTDATED_HINT = "剧本规则已更新，要按新规则重出请强制重跑（会重写段落、牵连镜头）"
 DEFAULT_SHOT_SECONDS = 5.0
@@ -74,16 +75,20 @@ def visual_inputs_fp(project_title: str, characters: list[dict], locations: list
 def structure_prompt_fp(prompts, project_title: str, target_seconds: float,
                         source_text: str, note: str | None = None, *, shot_count: int = 0,
                         shot_seconds: float = DEFAULT_SHOT_SECONDS,
-                        aspect: str = "9:16", preset: str | None = None) -> tuple[str, str, str]:
+                        aspect: str = "9:16", preset: str | None = None,
+                        existing_characters: list[dict] | None = None) -> tuple[str, str, str]:
     """剧本结构这次要用的提示词及其输入指纹（不调用 LLM）。script 阶段和重跑影响预估共用。
-    指纹见 structure_inputs_fp（不含修改意见、不含模板文字）。"""
+    指纹见 structure_inputs_fp（不含修改意见、不含模板文字、不含已有角色表——角色表是剧本结构自己写的，
+    放进指纹会让每次跑完都判「变了」）。"""
     if not shot_count:
         shot_count = shot_budget(target_seconds, shot_seconds)
     system, user, _, _ = render_with_note(prompts, "script_structure", note,
                                           project_title=project_title,
                                           target_seconds=target_seconds, source_text=source_text,
                                           shot_count=shot_count, shot_seconds=shot_seconds,
-                                          aspect=aspect or "9:16", **prompt_vars(preset))
+                                          aspect=aspect or "9:16",
+                                          existing_characters=list(existing_characters or []),
+                                          **prompt_vars(preset))
     return system, user, structure_inputs_fp(project_title, target_seconds, source_text)
 
 
@@ -105,7 +110,9 @@ def structure_inputs(sv, ep, proj, note: str | None = None) -> tuple[str, str, s
                                getattr(proj, "shot_seconds", None))
     return structure_prompt_fp(sv.prompts(proj.slug), proj.title, ep.target_seconds,
                                ep.source_text, note, shot_count=count, shot_seconds=seconds,
-                               aspect=proj.aspect or "9:16", preset=proj.style_preset)
+                               aspect=proj.aspect or "9:16", preset=proj.style_preset,
+                               existing_characters=[{"name": c.name, "description": c.description}
+                                                    for c in proj.characters])
 
 
 def judge_script(record, fp: str, rules: str, has_output: bool):
@@ -180,6 +187,8 @@ def _structure(ctx, episode_id: int, force: bool, manual: dict, note: str | None
                           manual=manual, key="script_structure")
     with sv.db.session() as s:
         ep, proj = load_episode(s, episode_id)
+        for hint in renamed_hints(proj.characters, out.characters):
+            ctx.log(f"剧本结构：{hint}")
         for c in out.characters:
             ch = s.scalar(select(Character).where(Character.project_id == proj.id,
                                                   Character.name == c.name))
@@ -213,6 +222,36 @@ def _structure(ctx, episode_id: int, force: bool, manual: dict, note: str | None
     ctx.log(f"剧本结构：{len(out.scenes)} 段，角色 {len(out.characters)} 个，"
             f"场景 {len(out.locations)} 个")
     return "done"
+
+
+RENAME_SIMILARITY = 0.6
+
+
+def _similar(a: str, b: str) -> float:
+    from difflib import SequenceMatcher
+
+    a, b = (a or "").strip(), (b or "").strip()
+    if not a or not b:
+        return 0.0
+    return SequenceMatcher(None, a, b).ratio()
+
+
+def renamed_hints(existing, new_chars) -> list[str]:
+    """重写剧本结构时，模型给的新名字在项目里找不到、而某个这次没出现的老角色描述和它很像（审查 P1-12）：
+    多半是同一个人换了叫法。只提示，不自动合并（合错了会把两个人的造型混在一起）。"""
+    new_names = {c.name for c in new_chars}
+    old = [c for c in existing if c.name not in new_names]
+    have = {c.name for c in existing}
+    out = []
+    for c in new_chars:
+        if c.name in have:
+            continue
+        best = max(old, key=lambda o: _similar(o.description, c.description), default=None)
+        if best is not None and _similar(best.description, c.description) >= RENAME_SIMILARITY:
+            out.append(f"新角色「{c.name}」和已有的「{best.name}」描述很像，可能是同一个人换了叫法："
+                       f"「{c.name}」会新建一个角色，没有「{best.name}」的造型和定妆照；是同一个人的话，"
+                       f"把「{c.name}」删掉、在原文里沿用「{best.name}」这个叫法后重新生成剧本")
+    return out
 
 
 # 爆款剧本规范的对白校验。段落里的对白按「角色名：「台词」」写（模板要求），能认出来才校验：
