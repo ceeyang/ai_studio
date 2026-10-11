@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { errorText } from '../../api/client';
 import { useProvideInput } from '../../api/queries';
 import type { Job } from '../../api/types';
+import { type MediaItem, useMediaGroup } from '../../components/MediaViewer';
 
 function PromptBlock({ label, text }: { label: string; text: string }) {
   const [copied, setCopied] = useState(false);
@@ -38,6 +39,11 @@ export function ManualInputForm({ job, onSubmitted }: ManualInputFormProps) {
   const input = useProvideInput();
   const [text, setText] = useState('');
   const req = job.result?.input_request;
+  const pics = (req?.images ?? [])
+    .map((path, i) => ({ path, i, url: req?.image_urls?.[i] }))
+    .filter((x): x is { path: string; i: number; url: string } => !!x.url);
+  const items: MediaItem[] = pics.map((x) => ({ url: x.url, alt: `要发给模型的图片 ${x.i + 1}`, title: `图片 ${x.i + 1} · ${x.path}` }));
+  const view = useMediaGroup(items, { title: '要发给模型的图片' });
   if (!req) return null;
 
   const submit = () =>
@@ -70,9 +76,14 @@ export function ManualInputForm({ job, onSubmitted }: ManualInputFormProps) {
             return (
               <div key={path} className="photo-look-row">
                 {url && (
-                  <a href={url} target="_blank" rel="noreferrer">
+                  <button
+                    type="button"
+                    className="media-thumb"
+                    aria-label={`看大图：要发给模型的图片 ${i + 1}`}
+                    onClick={() => view(pics.findIndex((x) => x.i === i))}
+                  >
                     <img className="photo-look-thumb" src={url} alt={`要发给模型的图片 ${i + 1}`} />
-                  </a>
+                  </button>
                 )}
                 <code>{path}</code>
               </div>

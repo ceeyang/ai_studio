@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { errorText } from '../../api/client';
 import { useArchivedCandidates, useRestoreArchived } from '../../api/queries';
 import type { ArchivedCandidate } from '../../api/types';
+import { type MediaItem, useMediaGroup } from '../../components/MediaViewer';
 import { engineLabel, fmtTime } from '../../format';
 import { SLOT_LABEL } from './slots';
 
@@ -29,6 +30,27 @@ export function ArchivedCandidates({ episodeId, shotId }: ArchivedCandidatesProp
   const q = useArchivedCandidates(episodeId, open);
   const restore = useRestoreArchived(episodeId);
   const rows = (q.data ?? []).filter((a) => KINDS.includes(a.kind));
+  const items: MediaItem[] = rows.map((a) => ({
+    url: a.url,
+    kind: a.kind === 'video' ? 'video' : 'image',
+    alt: `历史候选 #${a.id}`,
+    title: `${KIND_LABEL[a.kind] ?? a.kind} · 原 ${a.shot_code || '?'} · ${engineLabel(a.engine)} · ${fmtTime(a.archived_at)} 移入`,
+    current: a.was_selected,
+    currentLabel: '当时选定',
+    caption: snapshotText(a) || undefined,
+  }));
+  const view = useMediaGroup(items, {
+    title: '历史候选',
+    actions: (_item, i) => {
+      const a = rows[i];
+      if (!a) return null;
+      return (
+        <button type="button" className="sm" disabled={restore.isPending} onClick={() => restore.mutate({ id: a.id, shotId })}>
+          恢复到这个镜头
+        </button>
+      );
+    },
+  });
 
   return (
     <section className="archived-cands" aria-label="历史候选区">
@@ -45,14 +67,16 @@ export function ArchivedCandidates({ episodeId, shotId }: ArchivedCandidatesProp
           {q.data && rows.length === 0 && <p className="muted small">这一集没有历史候选。</p>}
           {rows.length > 0 && (
             <div className="cands" role="list" aria-label="历史候选">
-              {rows.map((a) => (
+              {rows.map((a, i) => (
                 <figure key={a.id} role="listitem" className="cand">
                   {a.kind === 'video' ? (
-                    <video src={a.url} controls preload="metadata" />
+                    <button type="button" className="media-thumb is-video" aria-label={`播放历史候选 #${a.id}`} onClick={() => view(i)}>
+                      <video src={a.url} preload="metadata" muted aria-hidden="true" />
+                    </button>
                   ) : (
-                    <a href={a.url} target="_blank" rel="noreferrer">
+                    <button type="button" className="media-thumb" aria-label={`看大图：历史候选 #${a.id}`} onClick={() => view(i)}>
                       <img src={a.url} alt={`历史候选 #${a.id}`} loading="lazy" />
-                    </a>
+                    </button>
                   )}
                   <figcaption>
                     <span>

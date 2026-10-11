@@ -4,7 +4,9 @@ import { type ReactNode, useMemo, useState } from 'react';
 import { errorText } from '../api/client';
 import { useEpisodeAssets } from '../api/queries';
 import type { Asset, AssetKind, AssetPick } from '../api/types';
+import { engineLabel, fmtTime } from '../format';
 import { Dialog } from './Dialog';
+import { useMediaGroup } from './MediaViewer';
 
 export const ASSET_TABS: { kind: AssetKind; label: string; empty: string }[] = [
   { kind: 'character', label: '角色', empty: '还没有角色图：先在角色阶段抽定妆照或出三视图。' },
@@ -79,6 +81,33 @@ export function AssetPicker({
     });
   };
 
+  // 缩略图点了是选中；右上角的放大镜在当前页看大图 / 播视频，弹窗里也能选
+  const view = useMediaGroup(
+    shown.map((a) => ({
+      url: a.url || a.thumb_url,
+      kind: a.media,
+      alt: a.label,
+      title: [a.label, a.engine ? engineLabel(a.engine) : '', a.created_at ? fmtTime(a.created_at) : ''].filter(Boolean).join(' · '),
+      current: !!a.selected,
+      currentLabel: '已选',
+      width: a.width,
+      height: a.height,
+    })),
+    {
+      title: `${tabInfo?.label ?? ''}资产`,
+      actions: (_item, i) => {
+        const a = shown[i];
+        if (!a) return null;
+        const on = picked.includes(a.id);
+        return (
+          <button type="button" className="sm" aria-pressed={on} disabled={!on && full} onClick={() => toggle(a)}>
+            {on ? '取消选择' : '选择'}
+          </button>
+        );
+      },
+    },
+  );
+
   const confirm = () => {
     if (chosen.length === 0) return;
     onConfirm(
@@ -115,7 +144,7 @@ export function AssetPicker({
         )}
         {shown.length > 0 && (
           <div className="asset-grid" role="list" aria-label={`${tabInfo?.label ?? ''}资产`}>
-            {shown.map((a) => {
+            {shown.map((a, i) => {
               const on = picked.includes(a.id);
               const size = sizeText(a);
               return (
@@ -136,6 +165,18 @@ export function AssetPicker({
                     )}
                     {a.selected && <span className="pcard-tag">已选</span>}
                     {a.media === 'video' && <span className="pcard-current">视频</span>}
+                  </button>
+                  <button
+                    type="button"
+                    className="ghost asset-zoom"
+                    aria-label={`看大图：${a.label}`}
+                    title={a.media === 'video' ? '放大播放' : '看大图'}
+                    onClick={() => view(i)}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
+                      <circle cx="7" cy="7" r="4.5" fill="none" stroke="currentColor" strokeWidth="1.6" />
+                      <path d="M10.4 10.4L14 14" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                    </svg>
                   </button>
                   <span className="asset-label" title={a.label}>
                     {a.label}

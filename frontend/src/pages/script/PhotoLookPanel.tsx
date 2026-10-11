@@ -16,6 +16,7 @@ import {
 import type { Character } from '../../api/types';
 import { useConfirm } from '../../components/ConfirmDialog';
 import { useJobNotice } from '../../components/JobNotice';
+import { useMediaGroup } from '../../components/MediaViewer';
 import { refreshText } from './CharacterLooks';
 
 const DIRTY_HINT = '资料里有没保存的修改：先保存或撤销，再填入参考图写的外观';
@@ -65,6 +66,9 @@ export function PhotoLookPanel({ c, slug, profileDirty }: { c: Character; slug: 
   const job = useJob(jobId);
   const noVision = job.data?.status === 'failed' && NO_VISION.test(job.data.error ?? '');
   const ref = c.appearance_ref ?? null;
+  const viewRef = useMediaGroup(ref ? [{ url: ref.url, alt: `${c.name} 的外观参考照片`, title: `${c.name} 的外观参考照片` }] : [], {
+    title: `${c.name} 的外观参考照片`,
+  });
   const writing = (c.active_jobs ?? []).some((j) => j.type === 'character.from_photo');
   const look = ref?.visual_prompt?.trim() ?? '';
   const pending = look !== '' && look !== c.visual_prompt.trim();
@@ -108,7 +112,11 @@ export function PhotoLookPanel({ c, slug, profileDirty }: { c: Character; slug: 
   return (
     <section className="photo-look" aria-label="从参考图写外观">
       <div className="photo-look-row">
-        {ref && <img className="photo-look-thumb" src={ref.url} alt={`${c.name} 的外观参考照片`} />}
+        {ref && (
+          <button type="button" className="media-thumb" aria-label={`看大图：${c.name} 的外观参考照片`} onClick={() => viewRef(0)}>
+            <img className="photo-look-thumb" src={ref.url} alt={`${c.name} 的外观参考照片`} />
+          </button>
+        )}
         <div className="photo-look-body">
           <p className="muted">
             有真人参考照片时：上传后让 AI 看图写英文外观提示词（只写脸、发型、体型、服装，不认人）。照片只用来写外观，不当出图参考图。

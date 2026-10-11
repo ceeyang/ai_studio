@@ -265,7 +265,7 @@ describe('ExportStage', () => {
     const user = userEvent.setup();
     const player = (await screen.findByTestId('export-player')) as HTMLVideoElement;
     expect(player.getAttribute('src')).toBe('/media/a.mp4');
-    await user.click(screen.getByRole('button', { name: /第二版/ }));
+    await user.click(screen.getByRole('button', { name: /^第二版/ }));
     expect(screen.getByTestId('export-player').getAttribute('src')).toBe('/media/b.mp4');
     await user.click(screen.getAllByRole('button', { name: '设为定稿' })[1]);
     await waitFor(() => expect(calls.some((c) => c.method === 'PATCH')).toBe(true));

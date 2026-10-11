@@ -16,6 +16,7 @@ import {
 import type { Bgm, ExportOptions, ExportRow, ShotDetail } from '../../api/types';
 import { EpisodeLoadError, nextActionProps } from '../../components/EpisodeHeader';
 import { useJobNotice } from '../../components/JobNotice';
+import { useMediaGroup } from '../../components/MediaViewer';
 import { fmtTime } from '../../format';
 import { EndCardPanel } from '../director/EndCardPanel';
 import { qcIssues } from '../director/shotStatus';
@@ -263,6 +264,19 @@ export function readiness(shots: ShotDetail[]) {
 function ExportsList({ rows, episodeId }: { rows: ExportRow[]; episodeId: number }) {
   const patch = usePatchExport(episodeId);
   const [playing, setPlaying] = useState<number | null>(null);
+  // 「放大播放」：所有成片一组，在当前页的弹窗里左右切换着看
+  const view = useMediaGroup(
+    rows.map((x) => ({
+      url: x.url,
+      kind: 'video' as const,
+      alt: exportLabel(x),
+      title: `${exportLabel(x)} · ${fmtTime(x.created_at)}`,
+      current: x.is_final,
+      currentLabel: '定稿',
+      caption: x.file_path,
+    })),
+    { title: '成片' },
+  );
   if (rows.length === 0) {
     return <p className="muted">还没有导出。所有镜头都有选定视频后点「合成导出」。</p>;
   }
@@ -313,6 +327,14 @@ function ExportsList({ rows, episodeId }: { rows: ExportRow[]; episodeId: number
                     设为定稿
                   </button>
                 )}
+                <button
+                  type="button"
+                  className="sm ghost export-zoom"
+                  aria-label={`放大播放 ${exportLabel(x)}`}
+                  onClick={() => view(rows.indexOf(x))}
+                >
+                  放大播放
+                </button>
                 <a data-testid="export-link" className="export-file" href={x.url} download>
                   {x.file_path.split('/').pop()}
                 </a>
