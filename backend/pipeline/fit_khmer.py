@@ -14,7 +14,8 @@ import re
 from backend.domain.models import Location, SceneBlock, Shot
 from backend.llm.schemas import FitOut
 from backend.pipeline.common import continue_chain, load_episode
-from backend.pipeline.post import KHMER, _tts, speakers_without_voice, translate_lines
+from backend.pipeline.post import (KHMER, _tts, speaker_profiles, speakers_without_voice,
+                                   translate_lines)
 from backend.post.fit import FitLine, fit_lines, retime_shot, update_audio_prompt, within
 from backend.queue.errors import JobError
 from backend.queue.handlers import HANDLERS
@@ -70,10 +71,13 @@ def _translate_missing(ctx, slug, title, shots, payload, episode_id) -> None:
     if not todo:
         return
     ctx.log(f"先翻译 {len(todo)} 句缺高棉语的台词")
+    with ctx.services.db.session() as s:
+        _, proj = load_episode(s, episode_id)
+        speakers = speaker_profiles(proj, [t["speaker"] for t in todo])
     km = translate_lines(ctx, slug=slug, title=title,
                          todo=[{k: v for k, v in t.items() if k != "ref"} for t in todo],
                          glossary=payload.get("glossary") or {}, manual=payload.get("manual") or {},
-                         key=f"{FIT_TASK}:{episode_id}:translate")
+                         key=f"{FIT_TASK}:{episode_id}:translate", speakers=speakers)
     for t in todo:
         sh, j = t["ref"]
         sh["dialogue"][j].update(km=km[t["id"]], km_review="ai_draft")

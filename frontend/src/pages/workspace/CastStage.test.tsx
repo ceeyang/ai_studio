@@ -273,4 +273,39 @@ describe('CastStage', () => {
     renderAt(<CastStage />, { ...AT, route: '/projects/demo/episodes/4?stage=cast&recommend=90' });
     expect(await screen.findByTestId('recommend-前台小李')).toBeTruthy();
   });
+
+  it('定妆照齐了、本集场景缺场景图：「生成场景图（N 个）」是下一步要触发的那个，点了给每个缺的场景出一张', async () => {
+    const ep = makeEpisode({
+      id: 4,
+      scene_blocks: [{ id: 1, order: 0, location_id: 3, text: 'a' }],
+      shots: [makeShot({ id: 1, scene_block_id: 1, image_max_refs: 9, cast: [{ character_id: 8, variation_id: null }] })],
+    });
+    const calls = installFetch({
+      ...ROUTES,
+      'GET /api/episodes/4': ep,
+      'GET /api/projects/demo/characters': [LIN],
+      'POST /api/locations/3/images/draw': { job_ids: [91] },
+    });
+    renderAt(<CastStage />, { ...AT, route: '/projects/demo/episodes/4?stage=cast' });
+    const user = userEvent.setup();
+    const btn = await screen.findByRole('button', { name: '生成场景图（1 个）' });
+    await waitFor(() => expect(btn.hasAttribute('data-next-action')).toBe(true));
+    await user.click(btn);
+    await waitFor(() => expect(writes(calls)).toHaveLength(1));
+    expect(writes(calls)[0]).toMatchObject({ method: 'POST', url: '/api/locations/3/images/draw', body: { count: 1 } });
+    // 设定展开，看得到生成进度
+    expect(screen.getByRole('button', { name: /设定/ }).getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('首帧引擎不吃参考图（image_max_refs 0）：不给生成场景图按钮', async () => {
+    const ep = makeEpisode({
+      id: 4,
+      scene_blocks: [{ id: 1, order: 0, location_id: 3, text: 'a' }],
+      shots: [makeShot({ id: 1, scene_block_id: 1, image_max_refs: 0, cast: [{ character_id: 8, variation_id: null }] })],
+    });
+    installFetch({ ...ROUTES, 'GET /api/episodes/4': ep, 'GET /api/projects/demo/characters': [LIN] });
+    renderAt(<CastStage />, AT);
+    await screen.findByTestId('character-8');
+    expect(screen.queryByRole('button', { name: /生成场景图/ })).toBeNull();
+  });
 });

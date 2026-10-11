@@ -79,6 +79,8 @@ def test_fit_khmer_translates_measures_rewrites_and_retimes(tmp_path, db, monkey
     res = run_fit_khmer(ctx, {"episode_id": ep_id})
 
     assert "S02.1｜陈师傅｜" in prov.calls[0]["messages"][0]["content"]   # 先翻缺的那句
+    assert "说话人（名字｜性别年龄｜人物描述" in prov.calls[0]["messages"][0]["content"]
+    assert "- 陈师傅｜" in prov.calls[0]["messages"][0]["content"]       # 称谓要看说话人身份
     r1 = prov.calls[1]["messages"][0]["content"]
     assert "id=S01.1" in r1 and "id=S02.1" in r1 and "id=S02.2" not in r1   # S02.2 原句已合格
     assert ("師傅" not in r1) and "目标字数≈" in r1

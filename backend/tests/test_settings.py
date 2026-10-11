@@ -93,6 +93,62 @@ def test_portrait_and_sheet_resolution(tmp_path, db):
     assert sheet_engine(sv, "zimage", explicit="zimage") == "zimage"
 
 
+def test_portrait_engine_follows_project_style_preset(tmp_path, db):
+    """定妆照引擎按项目的风格预设走：全局设成 krea2 的写实项目照用 krea2，动漫项目不能也变成写实照片。"""
+    sv = make_services(tmp_path, db)
+    names = sv.engines.names("image")
+    assert {"krea2", "zimage", "h3_image", "gpt_image"} <= set(names)
+    # 没有全局设置：写实 / 广告预设推荐 krea2；其他预设没推荐，跟项目图片引擎
+    assert portrait_engine(sv, "h3_image", preset="live_action") == "krea2"
+    assert portrait_engine(sv, "h3_image", preset="commercial") == "krea2"
+    assert portrait_engine(sv, "gpt_image", preset="anime") == "gpt_image"
+    sv.settings.save({"step:portrait": "krea2"})
+    assert portrait_engine(sv, "h3_image", preset="live_action") == "krea2"
+    # krea2 不在动漫预设的推荐里：不用全局设置，跟项目图片引擎
+    assert portrait_engine(sv, "gpt_image", preset="anime") == "gpt_image"
+    # 全局设置在这个预设的推荐图片引擎里：照用
+    sv.settings.save({"step:portrait": "zimage"})
+    assert portrait_engine(sv, "gpt_image", preset="anime") == "zimage"
+    assert portrait_engine(sv, "h3_image", preset="live_action") == "zimage"
+    # 手选最优先
+    assert portrait_engine(sv, "gpt_image", explicit="krea2", preset="anime") == "krea2"
+
+
+def test_portrait_job_skips_incompatible_global_engine_for_anime(tmp_path, db):
+    from backend.domain.models import Project
+    from backend.pipeline.characters import run_portrait
+
+    runner = FakeRunner()
+    sv = make_services(tmp_path, db, comfy=runner)
+    pid, _ = seed_episode(db, image_engine="zimage")
+    with db.session() as s:
+        s.get(Project, pid).style_preset = "anime"
+        c = Character(project_id=pid, name="陈", visual_prompt="short hair")
+        s.add(c)
+        s.flush()
+        cid = c.id
+    sv.settings.save({"step:portrait": "krea2"})
+    run_portrait(FakeCtx(sv), {"character_id": cid})
+    assert runner.calls[-1].engine == "zimage"
+
+
+def test_settings_route_portrait_default_for_project_follows_preset(api):
+    r = api.post("/api/projects", json={"title": "动漫", "slug": "an", "style_preset": "anime",
+                                        "image_engine": "zimage"})
+    assert r.status_code == 201, r.text
+    api.put("/api/settings", json={"steps": {"portrait": "krea2"}})
+    rows = {r["key"]: r for r in api.get("/api/settings", params={"project": "an"}).json()["steps"]}
+    assert rows["portrait"]["effective"] == "zimage"
+    api.post("/api/projects", json={"title": "写实", "slug": "live", "style_preset": "live_action",
+                                    "image_engine": "h3_image"})
+    rows = {r["key"]: r for r in api.get("/api/settings", params={"project": "live"}).json()["steps"]}
+    assert rows["portrait"]["effective"] == "krea2"
+    # 不带项目的全局页：定妆照没单独设置时仍标「跟随项目」（按项目的风格预设 / 图片引擎）
+    api.put("/api/settings", json={"steps": {"portrait": None}})
+    rows = {r["key"]: r for r in api.get("/api/settings").json()["steps"]}
+    assert rows["portrait"]["follows_project"] is True
+
+
 def test_portrait_job_uses_step_setting(tmp_path, db):
     from backend.pipeline.characters import run_portrait
 
@@ -203,8 +259,9 @@ def test_new_project_defaults_from_settings(api):
 
 
 def test_api_settings_for_project(api):
+    # 动漫预设没有推荐的定妆照引擎：定妆照没单独设置时跟项目的图片引擎
     api.post("/api/projects", json={"title": "片", "slug": "pp", "image_engine": "gpt_image",
-                                    "video_engine": "wan22_i2v"})
+                                    "video_engine": "wan22_i2v", "style_preset": "anime"})
     api.put("/api/settings", json={"image_engine": "krea2", "steps": {"turnaround": "zimage"}})
     d = api.get("/api/settings", params={"project": "pp"}).json()
     steps = {x["key"]: x for x in d["steps"]}
@@ -240,7 +297,8 @@ def test_migration_creates_app_settings(tmp_path):
 
 def test_api_portrait_draw_resolves_engine_once_in_route(api):
     """定妆照这一步设成网页引擎：路由就按它算队列（不占 GPU worker），payload 写死 engine，任务不再重新选。"""
-    api.post("/api/projects", json={"title": "demo", "image_engine": "zimage"})
+    # 动漫预设：gpt_image 在推荐的图片引擎里（和预设合得来才用全局设置），没有推荐的定妆照引擎
+    api.post("/api/projects", json={"title": "demo", "image_engine": "zimage", "style_preset": "anime"})
     ch = api.post("/api/projects/demo/characters", json={"name": "陈", "visual_prompt": "LOOK"}).json()
     api.put("/api/settings", json={"steps": {"portrait": "gpt_image"}})
     [jid] = api.post(f"/api/characters/{ch['id']}/portraits/draw", json={"count": 1}).json()["job_ids"]

@@ -1,5 +1,5 @@
 // 一集的五段制作进度（剧本 → 角色 → 首帧 → 视频 → 成片）和「下一步」。纯函数，单集工作台的阶段条和测试共用。
-import type { Character, EpisodeDetail, ExportRow, ShotDetail } from '../api/types';
+import type { Character, EpisodeDetail, ExportRow, Location, ShotDetail } from '../api/types';
 import { slotMark, slotOf } from './director/slots';
 
 export type StageKey = 'script' | 'cast' | 'keyframes' | 'videos' | 'export';
@@ -32,6 +32,53 @@ export interface NextStep {
   stale: boolean;
   /** 这一步正在进行（如缺定妆照的角色都在抽卡）：阶段条的按钮禁用，字照样显示 */
   busy?: boolean;
+  /** 可以跳过的建议步骤（场景图）：阶段条在主按钮旁给「跳过」 */
+  skippable?: boolean;
+  /** 角色阶段里具体是哪一步：scenes = 生成场景图（角色阶段的场景图按钮打 data-next-action） */
+  kind?: 'scenes';
+}
+
+/** 场景图这一步要用的：项目的场景（带选定的场景图和进行中的任务）；skipped = 用户在阶段条点过「跳过」 */
+export interface SceneInfo {
+  locations: Location[];
+  skipped?: boolean;
+}
+
+/** 场景有没有能用来出场景图的英文画面提示词（后端没有时直接拒绝） */
+export function hasEnglishPrompt(loc: Location): boolean {
+  const vp = loc.visual_prompt.trim();
+  return vp !== '' && !/[⺀-鿿]/.test(vp);
+}
+
+const hasLocationImage = (l: Location) => !!(l.image_candidate_id || l.image_url) && !l.image_stale;
+const isDrawingLocation = (l: Location) => (l.active_jobs ?? []).some((j) => j.type === 'image.location');
+
+/** 本集段落用到的场景 */
+export function episodeLocations(ep: EpisodeDetail, locations: Location[]): Location[] {
+  const ids = new Set(ep.scene_blocks.map((b) => b.location_id).filter((x): x is number => x != null));
+  return locations.filter((l) => ids.has(l.id));
+}
+
+/** 角色阶段「生成场景图」要出的：本集用到、缺场景图（或已过期）、有英文画面提示词、没在生成的场景 */
+export function scenesToDraw(ep: EpisodeDetail, locations: Location[]): Location[] {
+  return episodeLocations(ep, locations).filter((l) => !hasLocationImage(l) && !isDrawingLocation(l) && hasEnglishPrompt(l));
+}
+
+/**
+ * 场景图进度：首帧引擎吃参考图（镜头的 image_max_refs > 0）时才有意义——场景图排在首帧参考图第一张，
+ * 引擎不吃参考图就用不上。没有可统计的（不吃参考图、本集没用到场景）返回 null。
+ */
+function sceneProgress(ep: EpisodeDetail, scenes: SceneInfo | undefined) {
+  if (!scenes || !ep.shots.some((s) => (s.image_max_refs ?? 0) > 0)) return null;
+  const used = episodeLocations(ep, scenes.locations);
+  if (used.length === 0) return null;
+  const missing = used.filter((l) => !hasLocationImage(l));
+  return {
+    total: used.length,
+    ok: used.length - missing.length,
+    drawing: missing.filter(isDrawingLocation).length,
+    toDraw: scenesToDraw(ep, scenes.locations).length,
+  };
 }
 
 export const STAGE_STATE_TEXT: Record<Stage['state'], string> = {
@@ -105,7 +152,14 @@ function slotStats(shots: ShotDetail[], kind: string) {
   return { total: shots.length, selected: shots.length - missing, missing, stale };
 }
 
-type Draft = Omit<Stage, 'state'> & { state: 'done' | 'todo' | 'stale'; next: string; count: number; busy?: boolean };
+type Draft = Omit<Stage, 'state'> & {
+  state: 'done' | 'todo' | 'stale';
+  next: string;
+  count: number;
+  busy?: boolean;
+  skippable?: boolean;
+  kind?: 'scenes';
+};
 
 function slotStage(key: 'keyframes' | 'videos', label: string, shots: ShotDetail[]): Draft {
   const st = slotStats(shots, key === 'keyframes' ? 'first_frame' : 'video');
@@ -117,18 +171,30 @@ function slotStage(key: 'keyframes' | 'videos', label: string, shots: ShotDetail
   return { key, label, detail, state: done ? 'done' : 'todo', next: `生成${label}（${st.missing} 镜缺${label}）`, count: st.missing };
 }
 
-/** 算一集的五段进度。next 取第一段没完成的（过期也算没完成）；全部完成时为 null。 */
-export function episodeStages(
-  ep: EpisodeDetail,
-  chars: Character[],
-  exports: ExportRow[],
-): { stages: Stage[]; next: NextStep | null } {
+/**
+ * 角色阶段这一格。定妆照齐了以后，本集用到的场景还缺场景图（首帧引擎吃参考图时）：下一步建议「生成场景图」——
+ * 场景图排在首帧参考图第一张，同一场景各镜的布景才一致。它可以跳过（scenes.skipped），首帧已经开始做了也不再提，
+ * 不拦着去首帧阶段；detail 里一直显示「场景图 x/y」。
+ */
+function castStage(ep: EpisodeDetail, chars: Character[], scenes: SceneInfo | undefined): Draft {
   const shots = ep.shots;
   const cast = castOf(shots, chars);
   const withPortrait = cast.filter(hasPortrait).length;
-  const finalCut = exports.some((x) => x.is_final);
   const target = castTarget(shots, chars);
-  const castNext =
+  const sp = sceneProgress(ep, scenes);
+  const portraitsDone = cast.length > 0 && withPortrait === cast.length;
+  const base = cast.length === 0 ? '还没有角色' : `${withPortrait}/${cast.length}`;
+  const detail = sp ? `${base} · 场景图 ${sp.ok}/${sp.total}` : base;
+  const keyframesStarted = shots.some((s) => slotMark(slotOf(s, 'first_frame')) !== 'none');
+  if (portraitsDone && sp && sp.ok < sp.total && !scenes?.skipped && !keyframesStarted && (sp.toDraw > 0 || sp.drawing > 0)) {
+    const busy = sp.toDraw === 0;
+    return {
+      key: 'cast', label: '角色', state: 'todo', detail,
+      next: busy ? `生成场景图中（${sp.drawing} 个）` : `生成场景图（${sp.toDraw} 个）`,
+      count: sp.toDraw, skippable: true, kind: 'scenes', ...(busy ? { busy: true } : {}),
+    };
+  }
+  const next =
     cast.length === 0
       ? '按剧本推荐角色'
       : target?.kind === 'prompt'
@@ -136,19 +202,26 @@ export function episodeStages(
         : target?.kind === 'busy'
           ? `抽定妆照中（${target.missing} 个）`
           : `抽定妆照（${cast.length - withPortrait} 个角色缺）`;
+  return {
+    key: 'cast', label: '角色', state: portraitsDone ? 'done' : 'todo', detail, next,
+    count: cast.length - withPortrait, busy: target?.kind === 'busy',
+  };
+}
+
+/** 算一集的五段进度。next 取第一段没完成的（过期也算没完成）；全部完成时为 null。scenes 给了才看场景图。 */
+export function episodeStages(
+  ep: EpisodeDetail,
+  chars: Character[],
+  exports: ExportRow[],
+  scenes?: SceneInfo,
+): { stages: Stage[]; next: NextStep | null } {
+  const shots = ep.shots;
+  const finalCut = exports.some((x) => x.is_final);
 
   const drafts: Draft[] = [
     // 剧本 = 有段落、每段都有镜头、没有上一版剧本留下的镜头（分镜也在剧本阶段做）
     scriptStage(ep),
-    {
-      key: 'cast',
-      label: '角色',
-      state: cast.length > 0 && withPortrait === cast.length ? 'done' : 'todo',
-      detail: cast.length === 0 ? '还没有角色' : `${withPortrait}/${cast.length}`,
-      next: castNext,
-      count: cast.length - withPortrait,
-      busy: target?.kind === 'busy',
-    },
+    castStage(ep, chars, scenes),
     slotStage('keyframes', '首帧', shots),
     slotStage('videos', '视频', shots),
     {
@@ -162,13 +235,22 @@ export function episodeStages(
   ];
 
   const first = drafts.findIndex((d) => d.state !== 'done');
-  const stages: Stage[] = drafts.map(({ next: _next, count: _count, busy: _busy, ...d }, i) => ({
+  const stages: Stage[] = drafts.map(({ next: _next, count: _count, busy: _busy, skippable: _skip, kind: _kind, ...d }, i) => ({
     ...d,
     state: i === first && d.state === 'todo' ? 'active' : d.state,
   }));
   const d = first >= 0 ? drafts[first] : null;
   const next: NextStep | null = d
-    ? { label: d.next, stage: d.key, action: 'run', count: d.count, stale: d.state === 'stale', ...(d.busy ? { busy: true } : {}) }
+    ? {
+        label: d.next,
+        stage: d.key,
+        action: 'run',
+        count: d.count,
+        stale: d.state === 'stale',
+        ...(d.busy ? { busy: true } : {}),
+        ...(d.skippable ? { skippable: true } : {}),
+        ...(d.kind ? { kind: d.kind } : {}),
+      }
     : null;
   return { stages, next };
 }

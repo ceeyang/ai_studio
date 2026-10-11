@@ -20,7 +20,8 @@ def words(n: int, w: str = "detail") -> str:
     return " ".join([w] * n)
 
 
-def setup(tmp_path, db, *, image_engine="h3_image", llm=None, look=LOOK):
+def setup(tmp_path, db, *, image_engine="h3_image", llm=None, look=LOOK, preset="cg_realistic"):
+    """preset 默认 3D 写实：它没有推荐的定妆照引擎，定妆照跟项目的图像引擎（真人写实会推荐 krea2）。"""
     runner = FakeRunner()
     sv = make_services(tmp_path, db, comfy=runner, llm=llm)
     proj_id, ep_id = seed_episode(db, image_engine=image_engine,
@@ -30,6 +31,7 @@ def setup(tmp_path, db, *, image_engine="h3_image", llm=None, look=LOOK):
         s.add(sb)
         s.flush()
         s.get(Episode, ep_id).project.style_bible_id = sb.id
+        s.get(Episode, ep_id).project.style_preset = preset
         s.add(SceneBlock(episode_id=ep_id, order=0, text="修车厂里，陈师傅擦着扳手。"))
         ch = Character(project_id=proj_id, name="陈师傅", description="45 岁中国汽修师傅",
                        visual_prompt=look)
@@ -134,7 +136,57 @@ def test_portrait_prompt_without_anchor():
     from backend.pipeline.characters import portrait_prompt
 
     p = portrait_prompt(LOOK, "")
-    assert LOOK in p and "Photographic style" not in p
+    assert LOOK in p and "Photographic style" not in p and "Style:" not in p
+
+
+# ep 8（yuye-waimai-3）的苏晴：标志性细节那句的主语分句写了 hips，去掉下半身后只剩半句
+SUQING_LOOK = (
+    "Chinese woman in her late twenties, oval face with a defined jawline and straight dark eyebrows, "
+    "shoulder-length straight black hair tucked behind her ears, slender build of average height. "
+    "Wears a long oversized oatmeal-colored chunky knit cardigan over a plain white cotton T-shirt, "
+    "charcoal straight-leg trousers and simple gray felt indoor slippers. Signature detail: the long "
+    "oatmeal knit cardigan hanging below her hips, a soft warm block of color against cool "
+    "surroundings.")
+EP8_ANCHOR = (
+    "Photorealistic live-action cinematic still, shot on 35mm and 50mm prime lenses with shallow "
+    "depth of field, subtle fine film grain and gentle halation on highlights, muted desaturated "
+    "color grade with cool shadows and restrained warm accents, moderate contrast with deep but "
+    "detailed blacks, soft directional light with natural falloff, natural skin texture, realistic "
+    "fabric weave and material detail, grounded documentary realism.")
+
+
+def test_portrait_prompt_drops_sentence_whose_subject_clause_was_removed():
+    """「Signature detail: … hanging below her hips, a soft warm block of color against cool
+    surroundings.」去掉含 hips 的第一个分句后只剩「A soft warm block of color against cool
+    surroundings.」：主语没了，还和灰背景矛盾——整句不要。其余上半身外貌照留。"""
+    from backend.pipeline.characters import portrait_prompt
+
+    p = portrait_prompt(SUQING_LOOK, EP8_ANCHOR)
+    assert "soft warm block" not in p and "cool surroundings" not in p
+    assert "hips" not in p and "trousers" not in p and "slippers" not in p
+    assert "Chinese woman in her late twenties, oval face" in p
+    assert "Wears a long oversized oatmeal-colored chunky knit cardigan over a plain white cotton T-shirt." in p
+
+
+def test_portrait_prompt_keeps_orphan_clause_that_names_upper_body_clothing():
+    """第一个分句去掉了、但剩下的分句自己写了上衣 / 配饰：保留（只丢没主语的空话）。"""
+    from backend.pipeline.characters import portrait_prompt
+
+    p = portrait_prompt("A tall man. Black trousers, a red wool scarf around his neck.", "")
+    assert "A red wool scarf around his neck." in p and "trousers" not in p
+
+
+def test_portrait_prompt_style_line_follows_art_style():
+    """定妆照风格句写「Style:」（和场景图一致）：动漫、国风预设不能被说成照片。"""
+    from backend.pipeline.characters import portrait_prompt
+
+    p = portrait_prompt(SUQING_LOOK, EP8_ANCHOR)
+    assert "Photographic style" not in p
+    assert "Style: Photorealistic live-action cinematic still" in p
+    anime = ("2D cel-shaded anime, clean line art, flat colors with soft gradient shading, vivid "
+             "saturated palette, crisp soft-edged shadows.")
+    p = portrait_prompt(SUQING_LOOK, anime)
+    assert "Photographic" not in p and "Style: 2D cel-shaded anime" in p
 
 
 def test_portrait_draw_needs_prompt_and_character(tmp_path, db):
@@ -263,11 +315,12 @@ def test_api_draw_submits_portrait_jobs(api):
     assert r.status_code == 200, r.text
     assert len(r.json()["job_ids"]) == 2
     js = jobs(api, "image.portrait")
+    # 项目默认真人写实：没单独设置定妆照引擎时用预设推荐的 krea2
     assert js[0] == ("image.portrait", "character", ch["id"],
-                     {"character_id": ch["id"], "engine": "h3_image"}, True)
+                     {"character_id": ch["id"], "engine": "krea2"}, True)
     r = api.post(f"/api/characters/{ch['id']}/portraits/draw",
                  json={"count": 1, "visual_prompt": "  custom look  "})
-    assert jobs(api, "image.portrait")[-1][3] == {"character_id": ch["id"], "engine": "h3_image",
+    assert jobs(api, "image.portrait")[-1][3] == {"character_id": ch["id"], "engine": "krea2",
                                                   "visual_prompt": "custom look"}
     assert api.post(f"/api/characters/{ch['id']}/portraits/draw", json={"count": 5}).status_code == 422
     assert api.post("/api/characters/999/portraits/draw", json={"count": 1}).status_code == 404

@@ -11,6 +11,8 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from backend.app.schemas import RerunImpact
+from backend.domain.characters import portrait_of
+from backend.domain.locations import location_image_of
 from backend.domain.models import Shot, Slot
 from backend.pipeline.common import check_scene_blocks, clean_note, load_episode
 from backend.pipeline.script import (judge_script, structure_inputs, structure_rules,
@@ -151,7 +153,25 @@ def _script_judge(s: Session, sv, episode_id: int, force: bool) -> tuple[bool, b
     return structure_will_run, visual_will_run, sj.rules_outdated or vj.rules_outdated
 
 
-def _script_impact(s: Session, sv, episode_id: int, force: bool) -> RerunImpact:
+def visual_overwrites(s: Session, episode_id: int, has_note: bool) -> list[str]:
+    """视觉设定重跑真正会覆盖的（和 pipeline.script._visual 的保护一致）：选了定妆照的角色外貌、
+    选了场景图的场景外观不覆盖；已经有风格锚时，没带修改意见就不覆盖风格。"""
+    _, proj = load_episode(s, episode_id)
+    out = []
+    if any(not ((c.visual_prompt or "").strip() and portrait_of(s, c.id) is not None)
+           for c in proj.characters):
+        out.append("角色外观")
+    if any(not ((l.visual_prompt or "").strip() and location_image_of(s, l.id) is not None)
+           for l in proj.locations):
+        out.append("场景外观")
+    sb = proj.style_bible
+    if sb is None or not (sb.anchor_text or "").strip() or has_note:
+        out.append("风格设定")
+    return out
+
+
+def _script_impact(s: Session, sv, episode_id: int, force: bool,
+                   has_note: bool = False) -> RerunImpact:
     ep, _ = load_episode(s, episode_id)
     structure_will_run, visual_will_run, outdated = _script_judge(s, sv, episode_id, force)
 
@@ -168,7 +188,7 @@ def _script_impact(s: Session, sv, episode_id: int, force: bool) -> RerunImpact:
     if structure_will_run:
         overwrites += ["角色描述", "场景氛围"]
     if visual_will_run:
-        overwrites += ["角色外观", "场景外观", "风格设定"]
+        overwrites += visual_overwrites(s, episode_id, has_note)
 
     return RerunImpact(stage="script", will_run=structure_will_run or visual_will_run, blocks=[],
                        shots_deleted=len(shot_ids), selected_first_frames=first_sel,
@@ -180,16 +200,17 @@ def rerun_impact(s: Session, sv, episode_id: int, stage: str, force: bool, *,
                  scene_block_ids: list[int] | None = None,
                  note: str | None = None) -> RerunImpact:
     """scene_block_ids：只重写这些段落的分镜（只对 storyboard 有效）；note 有内容时按 force 算。"""
-    if clean_note(note):
+    has_note = bool(clean_note(note))
+    if has_note:
         force = True
     if scene_block_ids:
         check_scene_blocks(s, episode_id, stage, scene_block_ids)
     if stage == "storyboard":
         return _storyboard_impact(s, sv, episode_id, force, scene_block_ids)
     if stage == "script":
-        return _script_impact(s, sv, episode_id, force)
+        return _script_impact(s, sv, episode_id, force, has_note)
     if stage == "all":
-        return _all_impact(s, sv, episode_id, force)
+        return _all_impact(s, sv, episode_id, force, has_note)
     raise JobError(f"未知阶段：{stage}，可选：script、storyboard、all")
 
 
@@ -205,13 +226,13 @@ class ChainTargets:
 
 
 def chain_targets(s: Session, sv, episode_id: int, stages: list[str], force: bool,
-                  scene_block_ids: list[int] | None = None) -> ChainTargets:
+                  scene_block_ids: list[int] | None = None, has_note: bool = False) -> ChainTargets:
     """/run 的兜底、命令行的影响打印、stage=all 的影响预估共用：一串阶段会动哪些镜头。"""
     ep, _ = load_episode(s, episode_id)
     if stages[0] == "script":
         structure, visual = _script_will_run(s, sv, episode_id, force)
         overwrites = (["角色描述", "场景氛围"] if structure else []) + \
-            (["角色外观", "场景外观", "风格设定"] if visual else [])
+            (visual_overwrites(s, episode_id, has_note) if visual else [])
         scan = _try_scan(s, sv, episode_id, force, None) if "storyboard" in stages else None
         outdated = bool(scan and scan.rules_outdated)
         # 结构重跑：段落清空，llm 镜头全成孤儿；视觉重跑又接着跑分镜：角色外观变了，每段都会重出
@@ -235,9 +256,10 @@ def _try_scan(s, sv, episode_id, force, only):
         return None   # 还没有段落：剧本跑完才有
 
 
-def _all_impact(s: Session, sv, episode_id: int, force: bool) -> RerunImpact:
+def _all_impact(s: Session, sv, episode_id: int, force: bool,
+                has_note: bool = False) -> RerunImpact:
     """整集 all（剧本 → 分镜 → …）不强制时会删什么：和 /run 的兜底用同一套判断。"""
-    t = chain_targets(s, sv, episode_id, ["script", "storyboard"], force)
+    t = chain_targets(s, sv, episode_id, ["script", "storyboard"], force, has_note=has_note)
     first_sel, video_sel = _selected_counts(s, t.shot_ids)
     return RerunImpact(stage="all", will_run=t.will_run, blocks=t.blocks,
                        shots_deleted=len(t.shot_ids), selected_first_frames=first_sel,

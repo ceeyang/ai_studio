@@ -234,11 +234,103 @@ def test_rerun_visual_keeps_chosen_look(tmp_path, db):
     assert any("林夏 已经选定了定妆照造型" in m for m in ctx.logs)
 
 
+ANCHOR_NEW = ANCHOR_OK.replace("ARRI Alexa", "Sony Venice").replace("teal", "green")
+VISUAL_NEW = {
+    "style": {"anchor_text": ANCHOR_NEW, "palette": "冷绿", "mood_keywords": ["cold"],
+              "negative": "anime"},
+    "characters": [{"name": "林夏", "visual_prompt": LOOK_LIN + ", red scarf", "core_features": "红围巾"},
+                   {"name": "老周", "visual_prompt": LOOK_ZHOU + ", glasses", "core_features": "眼镜"}],
+    "locations": [{"name": "直播间", "visual_prompt": "a huge bright television studio"},
+                  {"name": "走廊", "visual_prompt": "a wide marble corridor"}],
+}
+
+
+def _add_location_image(s, name):
+    from backend.domain.locations import add_location_image, location_spec
+
+    loc = s.scalar(select(Location).where(Location.name == name))
+    add_location_image(s, loc.id, file_path="demo/loc.png", engine="zimage",
+                       params={"spec": location_spec(loc)}, input_hash="h", job_id=None)
+    return loc.id
+
+
+def test_rerun_visual_without_note_keeps_existing_style_anchor(tmp_path, db):
+    """重跑视觉设定（没带修改意见）：已有的风格锚不覆盖——锚在所有首帧、三视图的哈希里，
+    LLM 每次写的锚都不一样，一覆盖全片过期。日志说清楚要换风格得带修改意见。"""
+    ctx, ep_id, prov = setup(tmp_path, db, [STRUCTURE, VISUAL, STRUCTURE, VISUAL_NEW])
+    run_script(ctx, {"episode_id": ep_id})
+    assert run_script(ctx, {"episode_id": ep_id, "force": True})["visual"] == "done"
+    with db.session() as s:
+        sb = s.get(Episode, ep_id).project.style_bible
+        assert sb.anchor_text == ANCHOR_OK and sb.negative == "cartoon" and sb.palette == "青橙"
+        # 角色没选定妆照：外貌照常按新结果写
+        assert s.scalar(select(Character).where(Character.name == "林夏")).visual_prompt \
+            == LOOK_LIN + ", red scarf"
+    assert any("已有风格锚，没覆盖；要换风格请带修改意见重新生成" in m for m in ctx.logs)
+
+
+def test_rerun_visual_with_note_replaces_style_anchor(tmp_path, db):
+    ctx, ep_id, prov = setup(tmp_path, db, [STRUCTURE, VISUAL, STRUCTURE, VISUAL_NEW])
+    run_script(ctx, {"episode_id": ep_id})
+    run_script(ctx, {"episode_id": ep_id, "note": "换成冷色调"})
+    with db.session() as s:
+        sb = s.get(Episode, ep_id).project.style_bible
+        assert sb.anchor_text == ANCHOR_NEW and sb.negative == "anime"
+    assert not any("已有风格锚" in m for m in ctx.logs)
+
+
+def test_rerun_visual_keeps_location_prompt_with_selected_location_image(tmp_path, db):
+    """场景已经选定了场景图：外观提示词不覆盖（和已选定妆照的角色对称），场景图不过期；没场景图的照常写。
+    带修改意见也一样（要换场景外观到「设定」里改，再重出场景图）。"""
+    from backend.domain.locations import location_image_of, location_image_stale
+
+    ctx, ep_id, prov = setup(tmp_path, db, [STRUCTURE, VISUAL, STRUCTURE, VISUAL_NEW])
+    run_script(ctx, {"episode_id": ep_id})
+    with db.session() as s:
+        studio = _add_location_image(s, "直播间")
+    run_script(ctx, {"episode_id": ep_id, "note": "更紧凑"})
+    with db.session() as s:
+        loc = s.get(Location, studio)
+        assert loc.visual_prompt == VISUAL["locations"][0]["visual_prompt"]
+        assert not location_image_stale(loc, location_image_of(s, studio))
+        hall = s.scalar(select(Location).where(Location.name == "走廊"))
+        assert hall.visual_prompt == "a wide marble corridor"
+    assert any("直播间 已经选定了场景图" in m for m in ctx.logs)
+
+
+def test_changing_one_character_description_does_not_restyle_everything(tmp_path, db):
+    """改一个角色的描述 → 下一次整集运行重跑视觉设定：锚不变（首帧、三视图哈希里的锚不变）、
+    已选场景图的场景外观不变（场景图不过期）、已选定妆照的角色外貌不变。"""
+    from backend.domain.characters import add_portrait
+    from backend.domain.locations import location_image_of, location_image_stale
+
+    ctx, ep_id, prov = setup(tmp_path, db, [STRUCTURE, VISUAL, VISUAL_NEW])
+    run_script(ctx, {"episode_id": ep_id})
+    with db.session() as s:
+        studio = _add_location_image(s, "直播间")
+        hall = _add_location_image(s, "走廊")
+        lin = s.scalar(select(Character).where(Character.name == "林夏"))
+        add_portrait(s, lin.id, file_path="demo/p.png", engine="zimage", params={},
+                     input_hash="h", job_id=None)
+        s.scalar(select(Character).where(Character.name == "老周")).description = "导播，戴眼镜"
+    assert run_script(ctx, {"episode_id": ep_id}) == {"structure": "skipped", "visual": "done"}
+    with db.session() as s:
+        assert s.get(Episode, ep_id).project.style_bible.anchor_text == ANCHOR_OK
+        for lid in (studio, hall):
+            assert not location_image_stale(s.get(Location, lid), location_image_of(s, lid))
+        assert s.scalar(select(Character).where(Character.name == "林夏")).visual_prompt == LOOK_LIN
+        # 改了描述的老周照常按新结果写
+        assert s.scalar(select(Character).where(Character.name == "老周")).visual_prompt \
+            == LOOK_ZHOU + ", glasses"
+
+
 # 内置剧本模板的内容哈希（统一成 LF 后 sha256 前 16 位）和规则版本绑在一起
 SCRIPT_TEMPLATE_HASHES = {("script_structure", 2): "0f71c3456df6b738",
                           ("script_visual", 2): "d4a150a183a70949",
                           ("script_structure", 3): "a6e4688397666507",
-                          ("script_visual", 3): "aa9130be0add3439"}
+                          ("script_visual", 3): "aa9130be0add3439",
+                          ("script_structure", 4): "c7695bf3c309b984",
+                          ("script_visual", 4): "81810d6712f799a6"}
 
 
 @pytest.mark.parametrize("name,attr", [("script_structure", "STRUCTURE_RULES_VERSION"),

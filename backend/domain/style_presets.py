@@ -64,8 +64,8 @@ _PRESETS = (
                          "scattering on skin）、虚拟镜头焦段与景深、整体调色和对比、光线软硬、"
                          "材质的精细度；不写成真人照片，也不写成卡通"),
         negative=("2d, flat illustration, anime, sketch, low poly, blurry textures, "
-                  "deformed hands, extra fingers, text, watermark"),
-        image_engines=("zimage", "h3_image", "krea2"), video_engines=("h3_video", "wan22_i2v")),
+                  "deformed hands, extra fingers, watermark, logo, captions"),
+        image_engines=("h3_image", "zimage", "krea2"), video_engines=("h3_video", "wan22_i2v")),
     StylePreset(
         key="anime", label="日系动漫",
         description="日本动画的赛璐璐画风：干净线条、平涂上色、大眼睛。",
@@ -74,7 +74,7 @@ _PRESETS = (
                          "line art, flat colors with soft gradient shading）、线条粗细、上色方式、"
                          "整体调色和饱和度、光影的软硬；不写真人照片、胶片颗粒和皮肤毛孔这类写实词"),
         negative=("photorealistic, photo, 3d render, realistic skin pores, film grain, "
-                  "deformed hands, extra fingers, text, watermark"),
+                  "deformed hands, extra fingers, watermark, logo, captions"),
         image_engines=("gpt_image", "gemini_image", "zimage"),
         video_engines=("wan22_i2v", "h3_video")),
     StylePreset(
@@ -86,7 +86,7 @@ _PRESETS = (
                          "texture）、线条和笔触、传统配色（如朱红、石青、月白）与饱和度、光影软硬；"
                          "不写真人照片和胶片颗粒这类写实词"),
         negative=("photorealistic, photo, 3d render, western cartoon, neon colors, "
-                  "deformed hands, extra fingers, text, watermark"),
+                  "deformed hands, extra fingers, watermark, logo, captions"),
         image_engines=("gpt_image", "gemini_image", "zimage"),
         video_engines=("wan22_i2v", "h3_video")),
     StylePreset(

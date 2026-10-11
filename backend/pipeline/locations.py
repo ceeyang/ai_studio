@@ -45,6 +45,19 @@ def time_phrase(time_of_day: str) -> str:
     return ""
 
 
+_TIME_TERMS = re.compile(r"\b(?:night|nighttime|day|daytime|dawn|dusk|morning|evening|midnight"
+                         r"|noon|midday|afternoon|sunset|sunrise|twilight)\b", re.I)
+_SKIN = re.compile(r"\bskin\b|\bpores?\b|complexion", re.I)
+
+
+def location_style(anchor: str) -> str:
+    """场景图的风格句：风格锚里的成像词（photo_style），再去掉写皮肤的分句——空场景里没有人。"""
+    clauses = [c for c in photo_style(anchor).split(", ") if c and not _SKIN.search(c)]
+    if clauses:
+        clauses[0] = clauses[0][:1].upper() + clauses[0][1:]
+    return ", ".join(clauses)
+
+
 def _place(loc) -> tuple[str, str]:
     """(地方的简称, 其余描述)。简称是画面提示词第一句（去掉冠词、句首小写）；没有英文提示词时用英文名字。"""
     vp = (loc.visual_prompt or "").strip()
@@ -67,14 +80,15 @@ def location_prompt(loc, anchor: str) -> str:
     if not place:
         raise JobError(f"场景 {loc.name} 还没有英文画面提示词，先在「设定」里写一句（如 a cramped "
                        "auto repair garage with tools on the walls）")
-    when = time_phrase(loc.time_of_day)
+    # 画面提示词里已经写了时段（「…at eleven at night…」）就不再补，免得「…at night, unoccupied, night.」
+    when = "" if _TIME_TERMS.search(f"{place} {rest}") else time_phrase(loc.time_of_day)
     parts = [f"Empty {place}, unoccupied{', ' + when if when else ''}."]
     if rest:
         parts.append(rest)
     # 只写正面的画面：提到演员 / 等人这类词会把人招进画面
     parts.append("Environment reference plate: the whole set is visible and still, wide eye-level "
                  "view of the bare environment.")
-    style = photo_style(anchor)
+    style = location_style(anchor)
     if style:
         # 写「Style」而不是「Photographic style」：动画 / 插画风格预设不能被说成照片
         parts.append(f"Style: {style}.")
