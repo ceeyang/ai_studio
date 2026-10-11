@@ -149,6 +149,7 @@ def test_style_line_drops_shallow_focus_and_anamorphic():
     for bad in ("depth of field", "anamorphic", "35mm", "drama", "cinematic", "still"):
         assert bad not in s, bad
     assert "desaturated" in s and s.endswith("everything in sharp focus.")
+    assert s.startswith("photorealistic live-action")      # 画风留着，只去掉 cinematic 这个词
 
 
 def test_sheet_templates_have_no_negations():
