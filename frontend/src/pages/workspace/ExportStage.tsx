@@ -44,6 +44,14 @@ export function exportTags(settings: Record<string, unknown>): string[] {
   return tags;
 }
 
+/** 成片画幅（variant 是「16x9」「9x16」这种）：播放框按它定比例，16:9 的成片不塞进竖框里 */
+export function exportAspect(variant: string): { ratio: string; landscape: boolean } {
+  const m = /^(\d+)x(\d+)$/.exec(variant);
+  if (!m) return { ratio: '9 / 16', landscape: false };
+  const [w, h] = [Number(m[1]), Number(m[2])];
+  return { ratio: `${w} / ${h}`, landscape: w > h };
+}
+
 function exportLabel(x: ExportRow): string {
   if (x.label) return x.label;
   return [x.variant, `${String(x.settings.clips ?? '?')} 镜`, ...exportTags(x.settings)].join(' · ');
@@ -363,9 +371,17 @@ function ExportsList({ rows, episodeId }: { rows: ExportRow[]; episodeId: number
   }
   const current = rows.find((x) => x.id === playing) ?? rows[0];
   const needsReview = rows.some((x) => x.settings.km_review === 'ai_draft');
+  const aspect = exportAspect(current.variant);
   return (
     <div className="export-body">
-      <video data-testid="export-player" className="export-preview" src={current.url} controls preload="metadata" />
+      <video
+        data-testid="export-player"
+        className={`export-preview${aspect.landscape ? ' landscape' : ''}`}
+        style={{ aspectRatio: aspect.ratio }}
+        src={current.url}
+        controls
+        preload="metadata"
+      />
       <div className="export-side">
         {needsReview && (
           <p className="export-review">

@@ -1,10 +1,10 @@
-// 布局守卫：每个页面在 1280 / 1580 / 1920 / 3412 宽下都不能横向溢出，主要面板里的内容也不能被挤出面板。
+// 布局守卫：每个页面在 1024 / 1280 / 1580 / 1920 / 3412 宽下都不能横向溢出，主要面板里的内容也不能被挤出面板。
 // 数据走 API + manual LLM 准备（剧本、分镜、造型方案、三视图全身描述、一个带长报错的失败任务），不需要显卡。
 import { expect, type Page, test } from '@playwright/test';
 import { answer, STORYBOARD, STRUCTURE, SYNOPSIS, VISUAL, waitJob } from './fixtures';
 
 const SLUG = 'layout-check';
-const WIDTHS = [1280, 1580, 1920, 3412];
+const WIDTHS = [1024, 1280, 1580, 1920, 3412];
 // 1×1 透明 PNG
 const PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
@@ -114,6 +114,8 @@ for (const width of WIDTHS) {
 
     await page.goto(`/jobs?job=${failedJob}`);
     await expect(page.getByTestId('job-status')).toHaveText('失败');
+    // 1280 以下详情是从右侧滑入的抽屉：同样等动画放完再量
+    await page.locator('.jd-wrap').evaluate((el) => Promise.all(el.getAnimations({ subtree: true }).map((a) => a.finished)));
     await expectNoOverflow(page, `${width} 任务`);
 
     await page.goto('/settings');

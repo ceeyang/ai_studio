@@ -86,7 +86,8 @@
 /* hidden 属性要真的藏起来：.tab-body、.cast-settings-body 这类自带 display 的类会盖过浏览器默认的 display: none */
 [hidden] { display: none !important; }
 html { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
-body { margin: 0; background: var(--bg); min-width: 1200px; }
+/* 桌面工具：1024 宽（小笔记本、分屏）也要整页不横向滚动、「下一步」在视口里；再窄才横向滚动 */
+body { margin: 0; background: var(--bg); min-width: 1024px; }
 h1, h2, h3, h4 { color: var(--text); font-weight: 600; letter-spacing: -0.01em; text-wrap: balance; }
 h2 { font-size: 20px; margin: 0 0 var(--s-3); }
 h3 { font-size: 15px; margin: 0 0 var(--s-3); }
@@ -518,8 +519,9 @@ a.pill:hover { text-decoration: none; filter: brightness(1.15); }
 
 
 /* 成片 */
-.export-body { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: var(--s-5); align-items: start; }
+.export-body { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--s-5); align-items: start; }
 .export-preview { width: 220px; aspect-ratio: 9 / 16; border-radius: var(--r-md); background: #000; display: block; outline: 1px solid rgba(255, 255, 255, 0.08); outline-offset: -1px; }
+.export-preview.landscape { width: clamp(240px, 30vw, 420px); }
 .export-list li { display: flex; flex-direction: column; gap: 2px; }
 .export-list a { font-family: var(--mono); font-size: 13px; }
 .export-list .muted { font-size: 12px; font-variant-numeric: tabular-nums; }
@@ -686,6 +688,8 @@ pre.error { background: rgba(255, 90, 95, 0.06); border-color: rgba(255, 90, 95,
 .doctor-table tr.row-warn { background: rgba(242, 193, 78, 0.03); }
 .engine-table td:first-child { font-family: var(--mono); font-weight: 600; }
 .engine-table td:last-child { color: var(--text-2); font-size: 12.5px; }
+/* 「图像 / 视频」两个字别竖着折成两行 */
+.engine-table td:nth-child(2) { white-space: nowrap; }
 
 /* =========================================================================
    项目中心：卡片网格
@@ -1571,8 +1575,10 @@ img.rail-avatar { border: 0; }
    ========================================================================= */
 .cast-stage { display: flex; flex-direction: column; gap: var(--s-4); }
 .cast-stage > .panel { margin: 0; }
-.cast-stage > .toolbar { align-items: flex-start; flex-wrap: wrap; }
-.cast-stage > .toolbar .recommend { flex: 1 1 100%; min-width: 0; }
+.cast-stage > .toolbar { align-items: center; flex-wrap: wrap; }
+/* 推荐按钮和其他按钮排一行；出了推荐列表 / 报错才独占一整行 */
+.cast-stage > .toolbar .recommend { flex: 0 1 auto; min-width: 0; }
+.cast-stage > .toolbar .recommend:has(> .recommend-list, > p) { flex-basis: 100%; }
 .cast-grid { display: grid; gap: var(--s-3); grid-template-columns: repeat(auto-fill, minmax(176px, 1fr)); }
 .cast-cell { min-width: 0; display: flex; }
 .cast-card {
@@ -1706,7 +1712,7 @@ img.rail-avatar { border: 0; }
 .fold-panel-toggle[aria-expanded="true"] .fold-chev { transform: rotate(90deg); }
 .fold-actions { margin-left: auto; }
 .fold-body { margin-top: var(--s-3); }
-.fold-panel.folded { align-self: start; }
+/* 收起的面板照样占满整行（单列时是 flex 列，align-self: start 会把它缩成标题那么宽；宽屏两列 grid 已经 align-items: start） */
 
 /* 资产选择器：分类页签 + 搜索 + 缩略图网格（多选，已选的描边） */
 .asset-picker { display: flex; flex-direction: column; gap: var(--s-3); }
@@ -1789,7 +1795,9 @@ img.rail-avatar { border: 0; }
 .import-asset-text .chip { align-self: flex-start; height: 20px; font-size: 11px; }
 .import-suffix { width: 9em; margin-left: 4px; }
 .import-report-list { margin: 4px 0 var(--s-2); padding-left: 1.2em; font-size: 13px; }
-.bible-actions { display: flex; justify-content: flex-end; }
+/* 「从其他项目导入」：和下面各块一样留内边距，别贴着侧栏的边框 */
+.bible-actions { display: flex; justify-content: flex-end; padding: var(--s-3) var(--s-4) 0; }
+.bible-actions + .bible-block { padding-top: var(--s-2); }
 .new-project-import > summary { cursor: pointer; color: var(--muted); }
 .new-project-import .fields { margin-top: var(--s-2); }
 
@@ -1797,7 +1805,7 @@ img.rail-avatar { border: 0; }
 .finish-all { display: inline-flex; align-items: center; gap: var(--s-2); flex-wrap: wrap; min-width: 0; }
 
 /* =========================================================================
-   任务页（04 · 任务）：状态分段 + 搜索筛选、按日期分组的任务列表、右侧详情 / 窄屏抽屉
+   任务页（03 · 任务）：状态分段 + 搜索筛选、按日期分组的任务列表、右侧详情 / 窄屏抽屉
    ========================================================================= */
 .mono { font-family: var(--mono); font-size: 11.5px; font-variant-numeric: tabular-nums; }
 kbd {
@@ -2066,3 +2074,10 @@ pre.json { max-height: 360px; margin: 0; color: #c8d3e6; }
   .jd-wrap { position: fixed; top: 0; right: 0; bottom: 0; z-index: 41; width: min(760px, 100vw); animation: slide-in 200ms var(--ease); }
   .jd-wrap .job-detail { height: 100%; max-height: none; border-radius: 0; border-width: 0 0 0 1px; box-shadow: var(--shadow-3); }
 }
+
+/* 横屏项目（16:9）：镜头卡片和镜头抽屉里的首帧 / 视频候选按 16:9 显示，不裁成竖条；卡片相应放宽 */
+.workspace[data-aspect="16:9"] .shot-thumb,
+.workspace[data-aspect="16:9"] .shot-drawer .cand img,
+.workspace[data-aspect="16:9"] .shot-drawer .cand video { aspect-ratio: 16 / 9; }
+.workspace[data-aspect="16:9"] .shot-grid { grid-template-columns: repeat(auto-fill, minmax(220px, 280px)); }
+.workspace[data-aspect="16:9"] .shot-drawer .cands { grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); }

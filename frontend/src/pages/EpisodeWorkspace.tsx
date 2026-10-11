@@ -3,7 +3,7 @@
 // 切阶段只改 ?stage=：访问过的阶段内容用 hidden 藏起来、保持挂载，没保存的编辑不丢，也不用问。
 import { type ComponentType, useEffect, useRef, useState } from 'react';
 import { Navigate, type RouteObject, useLocation, useParams, useSearchParams } from 'react-router-dom';
-import { useCharacters, useEpisode, useExports, useRecentDoneJobs } from '../api/queries';
+import { useCharacters, useEpisode, useExports, useProject, useRecentDoneJobs } from '../api/queries';
 import type { LeaveCheck } from '../components/confirmDiscard';
 import { EpisodeHeader, EpisodeLoadError, useSceneInfo } from '../components/EpisodeHeader';
 import { AutopilotBar, FinishAllButton } from './workspace/AutopilotBar';
@@ -58,6 +58,8 @@ function gateStep(g: ShotGate, current: StageKey): NextStep {
 
 function Workspace({ slug, id }: { slug: string; id: number }) {
   const ep = useEpisode(id);
+  // 项目画幅：镜头卡片、候选图按它的比例显示（16:9 的首帧不裁成竖条）
+  const aspect = useProject(slug).data?.aspect;
   const characters = useCharacters(slug);
   const exports = useExports(id);
   const [params, setParams] = useSearchParams();
@@ -173,7 +175,7 @@ function Workspace({ slug, id }: { slug: string; id: number }) {
   };
 
   return (
-    <div className="page workspace">
+    <div className="page workspace" data-aspect={aspect}>
       <EpisodeHeader slug={slug} ep={ep.data} stage={stage}>
         <FinishAllButton episodeId={id} hasShots={ep.data.shots.length > 0} />
       </EpisodeHeader>

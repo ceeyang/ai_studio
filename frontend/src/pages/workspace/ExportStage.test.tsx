@@ -5,7 +5,7 @@ import type { ExportRow } from '../../api/types';
 import { installFetch } from '../../test/fetch';
 import { makeCandidate, makeEpisode, makeShot, makeSlot } from '../../test/factories';
 import { renderAt } from '../../test/render';
-import { ExportStage, OPTIONS_KEY, exportTags } from './ExportStage';
+import { ExportStage, OPTIONS_KEY, exportAspect, exportTags } from './ExportStage';
 
 /** 有选定视频的镜头；stale 表示视频已过期 */
 function withVideo(id: number, code: string, stale = false) {
@@ -261,6 +261,12 @@ describe('ExportStage', () => {
     renderAt(<ExportStage />, AT);
     const item = within(await screen.findByRole('list', { name: '成片列表' })).getAllByRole('listitem')[0];
     for (const t of ['中高字幕', '高棉语配音', '片尾卡', '33.6 秒', '无原声底', '配音对齐说话']) expect(item.textContent).toContain(t);
+  });
+
+  it('播放框按成片画幅定比例：16:9 横框，9:16 竖框，认不出的按竖屏', () => {
+    expect(exportAspect('16x9')).toEqual({ ratio: '16 / 9', landscape: true });
+    expect(exportAspect('9x16')).toEqual({ ratio: '9 / 16', landscape: false });
+    expect(exportAspect('final')).toEqual({ ratio: '9 / 16', landscape: false });
   });
 
   it('点列表里的成片切换主播放器；设为定稿发 PATCH', async () => {

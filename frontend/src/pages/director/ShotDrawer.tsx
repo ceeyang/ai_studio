@@ -629,7 +629,7 @@ export function ShotDrawer({
       <div className="drawer-scrim" data-testid="drawer-scrim" aria-hidden="true" onMouseDown={() => void requestClose()} />
       <aside
         ref={box}
-        className="drawer"
+        className="drawer shot-drawer"
         role="dialog"
         aria-modal="true"
         aria-label={`镜头 ${shot.code} 详情`}
