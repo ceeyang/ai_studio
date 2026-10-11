@@ -333,6 +333,26 @@ def compose_image_prompt(image_prompt: str, anchor: str) -> str:
     return p if not a or a in p else f"{a} {p}"
 
 
+# 分镜 image_prompt 的第一句是景别、焦段、机位（「Medium shot, 50mm, eye level.」）
+_FRAMING = re.compile(r"\b(?:shot|close-?ups?|closeup|wide|medium|full[- ]body|establishing|insert"
+                      r"|over[- ]the[- ]shoulder|\d+\s?mm)\b", re.I)
+FRAMING_MAX_WORDS = 25
+
+
+def engine_image_prompt(image_prompt: str, anchor: str) -> str:
+    """发给图像引擎的首帧提示词（审查 P2-6）：分镜第一句写的是景别和机位时把它放到风格锚前面，
+    景别不再排到第 60 多个词之后；其余照旧（锚 + 正文）。只用于发给引擎，输入哈希和 inputs 摘要
+    仍按 compose_image_prompt 算，已有首帧不会因此过期。"""
+    p, a = (image_prompt or "").strip(), (anchor or "").strip()
+    if not a or a in p:
+        return p
+    parts = _SENTENCES.split(p, maxsplit=1)
+    first, rest = parts[0], (parts[1] if len(parts) > 1 else "")
+    if rest and _FRAMING.search(first) and len(first.split()) <= FRAMING_MAX_WORDS:
+        return f"{first} {a} {rest}"
+    return f"{a} {p}"
+
+
 class Speaker(NamedTuple):
     """视频提示词里怎么称呼说话人：英文简称（不写中文名；画面里的人用分镜里写的同一个简称），
     他在不在画面里（在这一镜的 cast 里），以及性别（male / female / 空），画外音要说清是男声还是女声。"""

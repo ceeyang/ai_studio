@@ -79,6 +79,37 @@ def test_no_auto_retry_for_clean_or_cut_only_take(tmp_path, db):
         assert db is not None and s.get(Project, 1).auto_retry_video
 
 
+# ---------------------------------------------------------------- P2-6 首帧先写景别再写锚
+def test_engine_image_prompt_puts_framing_before_anchor():
+    from backend.pipeline.prompting import engine_image_prompt
+
+    p = "Medium shot, 50mm, eye level. The young woman stands at frame right."
+    assert engine_image_prompt(p, "ANCHOR words.") == \
+        "Medium shot, 50mm, eye level. ANCHOR words. The young woman stands at frame right."
+    # 第一句不是景别：照旧锚在前
+    q = "The young woman stands at frame right. Rain outside."
+    assert engine_image_prompt(q, "ANCHOR.") == "ANCHOR. " + q
+    assert engine_image_prompt(p, "") == p
+    assert engine_image_prompt("ANCHOR. " + p, "ANCHOR.") == "ANCHOR. " + p
+
+
+def test_keyframe_sends_framing_first_but_hash_and_inputs_unchanged(tmp_path, db):
+    from backend.domain.models import Shot
+    from backend.pipeline.prompting import compose_image_prompt, keyframe_input_hash
+
+    ctx, runner, shot_id = setup(tmp_path, db)
+    with db.session() as s:
+        s.get(Shot, shot_id).image_prompt = "Close-up, 85mm, eye level. A woman reads a script."
+    run_keyframe(ctx, {"shot_id": shot_id})
+    sent = runner.calls[-1].workflow["5"]["inputs"]["text"]
+    assert sent == "Close-up, 85mm, eye level. ANCHOR A woman reads a script."
+    with db.session() as s:
+        shot, _, proj, style = load_shot(s, shot_id)
+        c = selected_candidate(s, "shot", shot_id, "first_frame")
+        assert c.input_hash == keyframe_input_hash(shot, proj, style, "zimage", [])
+        assert c.params["inputs"]["prompt"] == compose_image_prompt(shot.image_prompt, "ANCHOR")
+
+
 # ---------------------------------------------------------------- P1-9 视频每人只带一张脸
 def test_video_brings_one_face_cell_per_character(tmp_path, db):
     from backend.tests import test_turnaround as tt

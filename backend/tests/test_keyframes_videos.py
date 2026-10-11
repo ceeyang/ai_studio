@@ -46,7 +46,9 @@ def test_keyframe_creates_selected_candidate(tmp_path, db):
     ctx, runner, shot_id = setup(tmp_path, db)
     res = run_keyframe(ctx, {"shot_id": shot_id})
     call = runner.calls[0]
-    assert call.workflow["5"]["inputs"]["text"] == "ANCHOR " + IMG
+    # 发给引擎时景别那一句在风格锚前面（审查 P2-6）；哈希和 inputs 仍按锚在前
+    assert call.workflow["5"]["inputs"]["text"] == \
+        "medium close-up, 85mm. ANCHOR a woman reads a teleprompter in a dark studio"
     assert call.workflow["6"]["inputs"]["text"] == ""          # cfg 1：负面词不起作用，写空
     assert call.meta["negative_ignored"] == "blurry, cartoon"
     assert call.workflow["10"]["inputs"]["filename_prefix"] == "studio/demo/kf_S01"
