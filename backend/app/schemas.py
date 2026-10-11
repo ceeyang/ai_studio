@@ -648,6 +648,43 @@ class InputIn(BaseModel):
     text: str = Field(min_length=1)
 
 
+
+class KindTakesOut(ORM):
+    """一个镜头一个槽位（首帧 / 视频）的抽卡数。"""
+    takes: int                          # 成功的抽（候选数）
+    failed: int                         # 失败的任务数
+    selected_index: int | None          # 选定的是第几条（从 1 开始）；没选定为 null
+    engines: dict[str, int]             # 引擎 → 成功抽数
+
+
+class ShotTakesOut(ORM):
+    shot_id: int
+    code: str
+    first_frame: KindTakesOut
+    video: KindTakesOut
+
+
+class EngineTakesOut(ORM):
+    engine: str
+    kind: str                           # first_frame / video
+    takes: int
+    failed: int
+
+
+class TakeStatsOut(ORM):
+    """抽卡统计（GET /api/episodes/{id}/take-stats）：见 backend/domain/take_stats.py。"""
+    episode_id: int
+    shots: list[ShotTakesOut]
+    total_takes: int
+    failed: int
+    first_frame_takes: int
+    video_takes: int
+    shots_with_video: int
+    usable_rate: float | None
+    avg_takes_per_finished_shot: float | None
+    engines: list[EngineTakesOut]
+    archived_takes: dict[str, int]      # 废弃镜头（重跑分镜删掉的）的抽卡：kind → 条数
+
 TurnaroundSheetOut.model_rebuild()
 TurnaroundOut.model_rebuild()
 CharacterOut.model_rebuild()  # portraits / turnaround 引用了后面定义的 CandidateOut

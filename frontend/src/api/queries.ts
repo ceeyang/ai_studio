@@ -48,6 +48,7 @@ import type {
   Style,
   StylePreset,
   SystemHealth,
+  TakeStats,
   FitKhmerIn,
   TranslateIn,
   TurnaroundSheetKey,
@@ -79,6 +80,8 @@ export const keys = {
   bgm: (episodeId: number) => ['bgm', episodeId] as const,
   // 挂在 ['episode', id] 下：任务结束（分镜重出删了镜头）时跟着刷新
   archivedCandidates: (episodeId: number) => ['episode', episodeId, 'archived'] as const,
+  // 挂在 ['episode', id] 下：任何任务结束（成功或失败）、选定候选变了都跟着刷新
+  takeStats: (episodeId: number) => ['episode', episodeId, 'take-stats'] as const,
   rerunImpact: (episodeId: number, stage: string, blockIds: number[] | null) => ['rerunImpact', episodeId, stage, blockIds] as const,
   jobs: (status: string, limit: number) => ['jobs', status, limit] as const,
   job: (id: number) => ['job', id] as const,
@@ -803,6 +806,15 @@ export function useReorderShots(episodeId: number) {
     mutationFn: (shotIds: number[]) =>
       api.post<Shot[]>(`/api/episodes/${episodeId}/shots/reorder`, { shot_ids: shotIds }),
     onSuccess: () => invalidate(qc, keys.episode(episodeId)),
+  });
+}
+
+/** 抽卡统计：每镜首帧 / 视频抽了几次、选第几条，一集的可用率和按引擎的成功 / 失败 */
+export function useTakeStats(episodeId: number, enabled = true) {
+  return useQuery({
+    queryKey: keys.takeStats(episodeId),
+    queryFn: () => api.get<TakeStats>(`/api/episodes/${episodeId}/take-stats`),
+    enabled: enabled && episodeId > 0,
   });
 }
 

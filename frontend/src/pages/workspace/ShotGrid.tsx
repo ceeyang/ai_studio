@@ -1,7 +1,7 @@
 // 首帧 / 视频阶段的镜头卡片网格：按剧本段落分组（组头「第 N 段 · 场景名 · M 镜」+「重写本段分镜…」），
 // 上一版剧本留下的（分镜生成、段落已经没了）一组，没有段落的手工镜头放最后一组「手工添加」。上移 / 下移按全集顺序。
 import { useEffect, useRef, useState } from 'react';
-import type { Character, Location, SceneBlock, ShotDetail } from '../../api/types';
+import type { Character, Location, SceneBlock, ShotDetail, ShotTakes } from '../../api/types';
 import { RegenerateDialog } from '../../components/RegenerateDialog';
 import type { CardAction, GenStage } from '../director/shotStatus';
 import { isOrphanShot } from '../stages';
@@ -37,6 +37,8 @@ export interface ShotGridProps {
   onRegenerated(jobIds: number[], text: string): void;
   /** 剧本阶段里没保存的段落：重写那一段前先保存它 */
   blockEdits?: () => ScriptBlockEdits | null;
+  /** 抽卡统计：镜头 id → 这一镜首帧 / 视频抽了几次 */
+  takes?: ReadonlyMap<number, ShotTakes>;
 }
 
 const ORPHAN_SCOPE = '上一版剧本留下的镜头';
@@ -137,6 +139,7 @@ export function ShotGrid(props: ShotGridProps) {
                     onSplit={() => props.onSplit(s.id)}
                     onInsertAfter={() => props.onInsertAfter(s.id)}
                     onDelete={() => props.onDelete(s.id)}
+                    takes={props.takes?.get(s.id)}
                   />
                 ))}
               </div>
