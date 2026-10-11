@@ -81,4 +81,28 @@ describe('LocationImages', () => {
     expect(within(screen.getByTestId('location-3')).getByRole('img', { name: '修车行 场景图 1', hidden: true })).toBeTruthy();
     expect(within(screen.getByTestId('location-5')).getByText(/还没有场景图/)).toBeTruthy();
   });
+
+  it('设定改了：选定的场景图标「已过期」，提示重出；折叠标题也数过期的', async () => {
+    installFetch({
+      'GET /api/episodes/4': makeEpisode({ id: 4 }),
+      'GET /api/projects/demo/locations': [{ ...LOC, image_stale: true }],
+      'GET /api/projects/demo/characters': [],
+      'GET /api/projects/demo/style': null,
+      'GET /api/engines': { image: [], video: [] },
+    });
+    renderAt(<CastStage />, { route: '/projects/demo/episodes/4?stage=cast&settings=1', path: '/projects/:slug/episodes/:episodeId' });
+    const fold = await screen.findByRole('button', { name: /^设定/ });
+    // ?settings=1：一进来就展开（首帧阶段「去生成场景图」的链接）
+    expect(fold.getAttribute('aria-expanded')).toBe('true');
+    expect(fold.textContent).toContain('1 个场景图已过期');
+    const stale = within(screen.getByTestId('location-3')).getByTestId('location-image-stale');
+    expect(stale.textContent).toContain('已过期');
+    expect(stale.textContent).toContain('重出');
+  });
+
+  it('没过期时不标', () => {
+    installFetch({ 'GET /api/engines': { image: [], video: [] } });
+    renderAt(<LocationImages loc={{ ...LOC, image_stale: false }} slug="demo" />);
+    expect(screen.queryByTestId('location-image-stale')).toBeNull();
+  });
 });

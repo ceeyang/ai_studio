@@ -49,6 +49,7 @@ describe('从参考图写外观', () => {
     const { calls, user } = setup(withRef({ visual_prompt: NEW_LOOK, core_features: '齐刘海、驼色大衣' }), {
       'PATCH /api/characters/6': { ...BASE, visual_prompt: NEW_LOOK },
       'POST /api/characters/6/shots/refresh-look': { updated: [], already: [], unmatched: [] },
+      'DELETE /api/characters/6/appearance-from-photo': null,
     });
     const diff = within(panel()).getByLabelText('外观对照');
     expect(diff.textContent).toContain('old look');
@@ -64,6 +65,13 @@ describe('从参考图写外观', () => {
     await waitFor(() =>
       expect(calls.find((c) => c.url === '/api/characters/6/shots/refresh-look')?.body).toEqual({ old: ['old look'] }),
     );
+    // 用了就清掉等确认的外观：之后再改外观提示词，对照不会又冒出来
+    await waitFor(() =>
+      expect(calls.some((c) => c.method === 'DELETE' && c.url === '/api/characters/6/appearance-from-photo')).toBe(true),
+    );
+    const patchAt = calls.findIndex((c) => c.method === 'PATCH');
+    const delAt = calls.findIndex((c) => c.method === 'DELETE');
+    expect(delAt).toBeGreaterThan(patchAt);
   });
 
   it('资料有没保存的修改时不直接填入，先提示保存或撤销', async () => {
@@ -87,5 +95,43 @@ describe('从参考图写外观', () => {
     setup({ ...withRef({ visual_prompt: 'old look' }) });
     expect(within(panel()).queryByLabelText('外观对照')).toBeNull();
     expect(within(panel()).getByRole('button', { name: '重新从参考图写外观' })).toBeTruthy();
+  });
+
+  it('文本模型看不了图片：一键改用手动粘贴，并能去设置页这一步', async () => {
+    const SETTINGS = {
+      text_model: { value: null, effective: 'lm', fallback: 'lm', source: 'config' },
+      image_engine: { value: null, effective: 'zimage', fallback: 'zimage', source: 'default' },
+      video_engine: { value: null, effective: 'h3_video', fallback: 'h3_video', source: 'default' },
+      steps: [],
+      project: null,
+      choices: { llm: [{ id: 'lm', label: 'LM Studio', kind: 'openai' }, { id: 'manual', label: '手动粘贴', kind: 'manual' }], image: [], video: [] },
+    };
+    const { calls, user } = setup(withRef(), {
+      'POST /api/characters/6/appearance-from-photo': { job_ids: [41] },
+      'GET /api/jobs/41': makeJob({
+        id: 41, type: 'character.from_photo', status: 'failed',
+        error: '文本模型 lm 看不了图片。到「设置 → 按步骤单独设置」把「从参考图写外观」这一步的文本模型换成能看图的',
+      }),
+      'GET /api/settings': SETTINGS,
+      'PUT /api/settings': SETTINGS,
+    });
+    await user.click(within(panel()).getByRole('button', { name: '从参考图写外观' }));
+    const fix = await within(panel()).findByTestId('vision-fallback');
+    expect(within(fix).getByRole('link', { name: '去设置这一步' }).getAttribute('href')).toBe('/settings?step=character.from_photo');
+    await user.click(within(fix).getByRole('button', { name: '改用手动粘贴' }));
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === 'PUT')?.body).toEqual({ steps: { 'character.from_photo': 'manual' } }),
+    );
+    expect(await within(panel()).findByText(/已改成手动粘贴/)).toBeTruthy();
+  });
+
+  it('别的失败（不是看不了图）不出「改用手动粘贴」', async () => {
+    const { user } = setup(withRef(), {
+      'POST /api/characters/6/appearance-from-photo': { job_ids: [42] },
+      'GET /api/jobs/42': makeJob({ id: 42, type: 'character.from_photo', status: 'failed', error: 'lm 返回 HTTP 429：rate limited' }),
+    });
+    await user.click(within(panel()).getByRole('button', { name: '从参考图写外观' }));
+    expect(await within(panel()).findByText(/HTTP 429/)).toBeTruthy();
+    expect(within(panel()).queryByTestId('vision-fallback')).toBeNull();
   });
 });

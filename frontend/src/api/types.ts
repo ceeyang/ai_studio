@@ -317,6 +317,8 @@ export interface ShotDetail extends Shot {
   failures?: JobBrief[];
   /** 首帧引擎完全不吃参考图时，这个镜头用不上的参考图（如「老周 定妆照」）；吃参考图时为空 */
   first_frame_refs_unused?: string[];
+  /** 首帧引擎的参考图上限装不下所有出场角色的定妆照时，没带上的那几张（「小李 定妆照」）——这些人的脸只能按文字出 */
+  first_frame_portraits_dropped?: string[];
   /** image_prompt 里有角色外貌占位符时，出图实际用的文字（占位符按景别换成角色当前外貌） */
   image_prompt_resolved?: string | null;
   /** image_prompt 里的外貌占位符 → 角色名（「{{char:3}}」→「老周」） */
@@ -604,6 +606,8 @@ export interface Location {
   /** 选定的场景图（不出人物，首帧参考图里排第一），没有时为 null */
   image_candidate_id?: number | null;
   image_url?: string | null;
+  /** 选定的场景图是按旧设定（名字 / 时段 / 画面提示词）出的：设定改了，要重出 */
+  image_stale?: boolean;
   /** 全部场景图候选（上传的 + AI 出的） */
   images?: Candidate[];
   /** 排队 / 生成中的场景图任务（image.location） */

@@ -430,6 +430,8 @@ input[type='number'] { font-variant-numeric: tabular-nums; }
 }
 .chip { font-weight: 500; background: var(--surface-2); border-color: var(--border); color: var(--text-2); height: 24px; }
 .chip b { color: var(--muted); font-weight: 500; }
+/* 工作台页头的风格预设：可点（打开项目设置），样子仍是小标签 */
+button.preset-chip { height: 24px; padding: 0 10px; font-size: 12px; font-weight: 500; border-radius: var(--r-pill); }
 .badge { margin-left: 4px; }
 .badge.stale { background: var(--warn-soft); color: var(--warn); border-color: rgba(242, 193, 78, 0.35); }
 .badge.ok { background: var(--ok-soft); color: var(--ok); border-color: rgba(62, 207, 142, 0.35); }

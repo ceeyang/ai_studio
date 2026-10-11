@@ -80,7 +80,12 @@ export function CastStage({
   const style = useStyle(slug);
   const patchLoc = usePatchLocation(slug);
   const putStyle = usePutStyle(slug);
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  // ?settings=1（首帧阶段「去生成场景图」的链接）：一进来就展开设定
+  const [settingsOpen, setSettingsOpen] = useState(() => params.get('settings') === '1');
+  const wantSettings = params.get('settings') === '1';
+  useEffect(() => {
+    if (wantSettings) setSettingsOpen(true); // 阶段一直挂着时，从链接再进来也要展开
+  }, [wantSettings]);
   const confirm = useConfirm();
   // 抽屉里显示的角色：跟着地址的 ?char= 走；抽屉有没保存的修改时（左栏 / 提示 / 后退换了 ?char=）先问一句
   const [shownId, setShownId] = useState<number | null>(charId);
@@ -205,7 +210,8 @@ export function CastStage({
         >
           设定
           <span className="muted">
-            场景 {locs.length} 个{locs.length > 0 ? `（${locs.filter((l) => l.image_url).length} 个有场景图）` : ''} · 风格{style.data ? '' : '（未设）'}
+            场景 {locs.length} 个{locs.length > 0 ? `（${locs.filter((l) => l.image_url).length} 个有场景图）` : ''}
+            {locs.some((l) => l.image_stale) ? ` · ${locs.filter((l) => l.image_stale).length} 个场景图已过期` : ''} · 风格{style.data ? '' : '（未设）'}
             {styleDirty || dirtyLocs.size > 0 ? ' · 有未保存的修改' : ''}
           </span>
         </button>

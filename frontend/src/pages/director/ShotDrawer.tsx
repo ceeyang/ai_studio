@@ -1,4 +1,5 @@
 import { type ReactNode, useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { errorText } from '../../api/client';
 import { useDeleteShotRef, useEngines, usePatchShot, useProject, useSelectCandidate, useUploadShotRef } from '../../api/queries';
 import { type DialogueLine, type EngineRow, type ShotDetail, type ShotPatch, TRANSITIONS, type Transition } from '../../api/types';
@@ -92,6 +93,29 @@ function ContinueToggle({ shot, saving, onChange }: { shot: ShotDetail; saving: 
   );
 }
 
+/** 首帧参考图的两条提示：参考图上限装不下所有定妆照（哪几个人的脸没锁上）；镜头所在场景还没有场景图。 */
+function RefHints({ shot, missingLocationImage }: { shot: ShotDetail; missingLocationImage?: { name: string; to: string } | null }) {
+  if (shot.continue_from_prev) return null; // 首帧取上一镜尾帧，不打包参考图
+  const dropped = shot.first_frame_portraits_dropped ?? [];
+  const showLoc = !!missingLocationImage && shot.image_max_refs !== 0;
+  if (dropped.length === 0 && !showLoc) return null;
+  return (
+    <>
+      {dropped.length > 0 && (
+        <p className="warn small" data-testid="portraits-dropped">
+          这个镜头的图像引擎最多 {shot.image_max_refs} 张参考图，装不下所有出场角色的定妆照：{dropped.join('、')}
+          没带上，这几个人的脸只能按文字出。要锁脸就减少出场角色，或换参考图上限更大的引擎（如 H3 图像）。
+        </p>
+      )}
+      {showLoc && missingLocationImage && (
+        <p className="muted small" data-testid="location-image-missing">
+          {`「${missingLocationImage.name}」`}这个场景还没有场景图，去角色阶段的设定里生成 · <Link to={missingLocationImage.to}>去生成场景图</Link>
+        </p>
+      )}
+    </>
+  );
+}
+
 /** 构图参考：每镜最多 2 张构图 / 动作参考图，首帧参考图里排在场景图后面；引擎不吃参考图时提示用不上。 */
 function ShotRefs({ shot, episodeId }: { shot: ShotDetail; episodeId: number }) {
   const upload = useUploadShotRef(episodeId);
@@ -174,6 +198,8 @@ export interface ShotDrawerProps {
   onNeedFirstFrame?(): void;
   /** 项目 slug：引擎下拉框的「默认（…）」写成项目现在用的引擎 */
   slug?: string;
+  /** 首帧阶段、镜头所在场景还没有场景图时给：场景名和去生成的地址（角色阶段的设定） */
+  missingLocationImage?: { name: string; to: string } | null;
 }
 
 const STAGES: GenStage[] = ['keyframes', 'videos'];
@@ -190,6 +216,7 @@ export function ShotDrawer({
   onDirtyChange,
   onNeedFirstFrame,
   slug,
+  missingLocationImage,
 }: ShotDrawerProps) {
   const engines = useEngines();
   // 留空 = 跟项目的引擎（设置页只管新项目的默认，镜头上没选时就是项目的）
@@ -385,6 +412,8 @@ export function ShotDrawer({
 
         <ContinueToggle shot={shot} saving={patchContinue.isPending} onChange={(on) => patchContinue.mutate({ id: shot.id, continue_from_prev: on })} />
         {patchContinue.error && <p className="error">{errorText(patchContinue.error)}</p>}
+
+        <RefHints shot={shot} missingLocationImage={missingLocationImage} />
 
         <ShotRefs shot={shot} episodeId={episodeId} />
 

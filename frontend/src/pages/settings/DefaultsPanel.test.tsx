@@ -164,4 +164,12 @@ describe('设置页「默认模型」', () => {
       steps: { script: null, videos: 'wan' },
     });
   });
+
+  it('?step=：展开「按步骤单独设置」并把焦点放到这一步的下拉框（从失败提示跳过来）', async () => {
+    base();
+    renderAt(<SettingsPage />, { route: '/settings?step=storyboard', path: '/settings' });
+    const sel = await screen.findByLabelText('分镜用什么');
+    await waitFor(() => expect(document.activeElement).toBe(sel));
+    expect((sel.closest('details') as HTMLDetailsElement).open).toBe(true);
+  });
 });

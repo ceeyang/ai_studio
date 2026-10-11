@@ -1,4 +1,5 @@
-import { screen, within } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { installFetch } from '../test/fetch';
 import { makeEpisode, makeProject } from '../test/factories';
@@ -41,6 +42,23 @@ describe('EpisodeHeader', () => {
     expect((await screen.findByRole('link', { name: /下一集/ })).getAttribute('href')).toBe('/projects/demo/episodes/4');
     expect(screen.queryByRole('link', { name: /上一集/ })).toBeNull();
     expect(screen.getByText(/上一集/).closest('[aria-disabled="true"]')).toBeTruthy();
+  });
+
+  it('页头显示当前风格预设，点开项目设置可以改', async () => {
+    const calls = installFetch({
+      ...ROUTES,
+      'GET /api/projects/demo': makeProject({ title: '深夜直播', style_preset: 'anime' }),
+      'PATCH /api/projects/demo': makeProject({ title: '深夜直播', style_preset: 'guofeng' }),
+    });
+    renderAt(<EpisodeHeader slug="demo" ep={EP} stage="keyframes" />);
+    const user = userEvent.setup();
+    const chip = await screen.findByRole('button', { name: '风格预设：日系动漫（点开项目设置）' });
+    expect(chip.textContent).toContain('日系动漫');
+    await user.click(chip);
+    const dlg = await screen.findByRole('dialog', { name: '项目设置' });
+    await user.click(within(dlg).getByRole('radio', { name: /国风漫画/ }));
+    await user.click(within(dlg).getByRole('button', { name: '保存' }));
+    await waitFor(() => expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({ style_preset: 'guofeng' }));
   });
 
   it('加载失败：给出回到项目的链接', () => {

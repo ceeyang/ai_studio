@@ -73,3 +73,43 @@ describe('ShotDrawer 接上一镜', () => {
     expect((screen.getByRole('checkbox', { name: '接上一镜' }) as HTMLInputElement).disabled).toBe(true);
   });
 });
+
+describe('ShotDrawer 参考图提示', () => {
+  it('参考图上限装不下所有定妆照：提示哪几个人的脸没锁上', () => {
+    installFetch({ 'GET /api/engines': ENGINES });
+    renderAt(
+      <ShotDrawer
+        shot={makeShot({ id: 5, image_max_refs: 3, first_frame_portraits_dropped: ['小李 定妆照'] })}
+        episodeId={1}
+        onClose={() => {}}
+        onGenerate={() => {}}
+      />,
+    );
+    const hint = screen.getByTestId('portraits-dropped');
+    expect(hint.textContent).toContain('小李 定妆照');
+    expect(hint.textContent).toContain('最多 3 张');
+  });
+
+  it('镜头所在场景还没有场景图：一行提示，链接到角色阶段的设定', () => {
+    installFetch({ 'GET /api/engines': ENGINES });
+    renderAt(
+      <ShotDrawer
+        shot={makeShot({ id: 5, image_max_refs: 9 })}
+        episodeId={1}
+        onClose={() => {}}
+        onGenerate={() => {}}
+        missingLocationImage={{ name: '修车行', to: '/projects/demo/episodes/1?stage=cast&settings=1' }}
+      />,
+    );
+    const hint = screen.getByTestId('location-image-missing');
+    expect(hint.textContent).toContain('这个场景还没有场景图，去角色阶段的设定里生成');
+    expect(within(hint).getByRole('link').getAttribute('href')).toBe('/projects/demo/episodes/1?stage=cast&settings=1');
+  });
+
+  it('没传场景提示、也没丢定妆照：两条提示都不出', () => {
+    installFetch({ 'GET /api/engines': ENGINES });
+    renderAt(<ShotDrawer shot={makeShot({ id: 5, image_max_refs: 9 })} episodeId={1} onClose={() => {}} onGenerate={() => {}} />);
+    expect(screen.queryByTestId('portraits-dropped')).toBeNull();
+    expect(screen.queryByTestId('location-image-missing')).toBeNull();
+  });
+});

@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { errorText } from '../../api/client';
 import { useAppSettings, useSaveSettings } from '../../api/queries';
 import type { AppSettings, AppSettingsIn, EngineChoice, LlmChoice, SettingKind, SettingValue } from '../../api/types';
@@ -96,6 +97,19 @@ export function DefaultsPanel() {
   useEffect(() => {
     if (saved) setDraft(saved);
   }, [saved]);
+  // ?step=<key>（从「看不了图片」之类的失败提示跳过来）：展开按步骤设置，焦点放到这一步的下拉框
+  const [params] = useSearchParams();
+  const focusStep = params.get('step');
+  const overridesRef = useRef<HTMLDetailsElement>(null);
+  const ready = !!draft;
+  useEffect(() => {
+    if (!focusStep || !ready || !overridesRef.current) return;
+    const row = Array.from(overridesRef.current.querySelectorAll<HTMLElement>('tr[data-step]')).find((r) => r.dataset.step === focusStep);
+    if (!row) return;
+    overridesRef.current.open = true;
+    row.scrollIntoView?.({ block: 'center' });
+    row.querySelector('select')?.focus();
+  }, [focusStep, ready]);
 
   if (settings.error) {
     return (
@@ -203,7 +217,7 @@ export function DefaultsPanel() {
           ))}
         </ul>
       )}
-      <details className="step-overrides">
+      <details className="step-overrides" ref={overridesRef}>
         <summary>
           按步骤单独设置{overridden ? `（已单独设置 ${overridden} 步）` : ''}
         </summary>

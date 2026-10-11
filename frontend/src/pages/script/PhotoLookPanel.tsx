@@ -1,12 +1,16 @@
 // 角色资料页的「从参考图写外观」：上传一张参考照片 → LLM 看图写英文外观提示词（只写外观）→
 // 对照现在的外观，用户确认后才填进外观提示词。照片只给 LLM 看，不当出图参考图。
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { errorText } from '../../api/client';
 import {
+  useAppSettings,
   useAppearanceFromPhoto,
   useDiscardPhotoLook,
+  useJob,
   usePatchCharacter,
   useRefreshShotLooks,
+  useSaveSettings,
   useUploadAppearanceRef,
 } from '../../api/queries';
 import type { Character } from '../../api/types';
@@ -15,6 +19,38 @@ import { useJobNotice } from '../../components/JobNotice';
 import { refreshText } from './CharacterLooks';
 
 const DIRTY_HINT = '资料里有没保存的修改：先保存或撤销，再填入参考图写的外观';
+const STEP = 'character.from_photo';
+/** 网关在文本模型看不了图时报的错（backend/llm/gateway.py no_vision_error） */
+const NO_VISION = /看不了图片/;
+
+/** 这一步的文本模型看不了图片：一键把这一步改成「手动粘贴」（自己去网页上问），或去设置页换能看图的模型。 */
+function VisionFallback() {
+  const settings = useAppSettings();
+  const save = useSaveSettings();
+  const manual = settings.data?.choices.llm.find((c) => c.kind === 'manual');
+  return (
+    <div className="notice small" data-testid="vision-fallback">
+      {save.isSuccess ? (
+        <span>已改成手动粘贴：再点一次「从参考图写外观」，任务会停下来等你把照片和提示词贴到网页上问，再把回答贴回来。</span>
+      ) : (
+        <span>这一步的文本模型看不了图片：可以改用手动粘贴（自己把照片和提示词发给网页上的模型），或到设置页换成能看图的模型。</span>
+      )}{' '}
+      {!save.isSuccess && (
+        <button
+          type="button"
+          className="sm soft"
+          disabled={!manual || save.isPending}
+          title={manual ? undefined : '配置文件里没有手动粘贴（kind: manual）的文本模型'}
+          onClick={() => manual && save.mutate({ steps: { [STEP]: manual.id } })}
+        >
+          {save.isPending ? '改设置中…' : '改用手动粘贴'}
+        </button>
+      )}{' '}
+      <Link to={`/settings?step=${STEP}`}>去设置这一步</Link>
+      {save.error && <span className="error"> {errorText(save.error)}</span>}
+    </div>
+  );
+}
 
 export function PhotoLookPanel({ c, slug, profileDirty }: { c: Character; slug: string; profileDirty: boolean }) {
   const upload = useUploadAppearanceRef(slug);
@@ -25,6 +61,9 @@ export function PhotoLookPanel({ c, slug, profileDirty }: { c: Character; slug: 
   const confirm = useConfirm();
   const notice = useJobNotice();
   const [hint, setHint] = useState<string | null>(null);
+  const [jobId, setJobId] = useState<number | null>(null);
+  const job = useJob(jobId);
+  const noVision = job.data?.status === 'failed' && NO_VISION.test(job.data.error ?? '');
   const ref = c.appearance_ref ?? null;
   const writing = (c.active_jobs ?? []).some((j) => j.type === 'character.from_photo');
   const look = ref?.visual_prompt?.trim() ?? '';
@@ -33,7 +72,12 @@ export function PhotoLookPanel({ c, slug, profileDirty }: { c: Character; slug: 
   const busy = upload.isPending || run.isPending || discard.isPending || patch.isPending;
 
   const write = () =>
-    run.mutate(c.id, { onSuccess: (r) => notice.track(r.job_ids, '从参考图写外观') });
+    run.mutate(c.id, {
+      onSuccess: (r) => {
+        notice.track(r.job_ids, '从参考图写外观');
+        setJobId(r.job_ids[0] ?? null);
+      },
+    });
 
   const accept = async () => {
     if (profileDirty) {
@@ -54,6 +98,8 @@ export function PhotoLookPanel({ c, slug, profileDirty }: { c: Character; slug: 
     if (ref?.core_features?.trim()) body.core_features = ref.core_features.trim();
     patch.mutate(body, {
       onSuccess: () => {
+        // 用了就把等确认的外观清掉：之后再改外观提示词，对照不会又冒出来
+        discard.mutate(c.id);
         if (old.trim()) refresh.mutate({ id: c.id, old: [old] }, { onSuccess: (r) => setHint(refreshText(r)) });
       },
     });
@@ -88,6 +134,7 @@ export function PhotoLookPanel({ c, slug, profileDirty }: { c: Character; slug: 
             </button>
           </div>
           {notice.view}
+          {noVision && <VisionFallback />}
         </div>
       </div>
       {pending && (

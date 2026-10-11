@@ -175,6 +175,13 @@ export function ShotStage({
   const shots = ep.data.shots;
   const openId = Number(params.get('shot')) || null;
   const openShot = shots.find((s) => s.id === openId) ?? null;
+  // 首帧阶段：抽屉里的镜头所在场景还没有场景图时提示去角色阶段的设定里生成
+  const openBlock = openShot ? ep.data.scene_blocks.find((b) => b.id === openShot.scene_block_id) : undefined;
+  const openLoc = openBlock?.location_id != null ? (locations.data ?? []).find((l) => l.id === openBlock.location_id) : undefined;
+  const missingLocationImage =
+    stage === 'keyframes' && openLoc && !openLoc.image_url
+      ? { name: openLoc.name, to: `${workspacePath(slug, id)}?stage=cast&settings=1` }
+      : null;
   const busy = reorder.isPending || split.isPending || del.isPending || create.isPending;
   const total = shots.reduce((a, s) => a + s.duration, 0);
   const selCount = shots.filter((s) => selected.has(s.id)).length;
@@ -332,6 +339,7 @@ export function ShotStage({
           slug={slug}
           key={openShot.id}
           shot={openShot}
+          missingLocationImage={missingLocationImage}
           episodeId={id}
           generating={generating}
           count={count}

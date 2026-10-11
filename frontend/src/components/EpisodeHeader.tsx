@@ -1,12 +1,14 @@
 // 单集工作台的页头：面包屑（项目 › 第 N 集）和上一集 / 下一集（停在同一个阶段）。
 // 进度和唯一的主按钮「下一步」在下面的阶段条（pages/workspace/StageBar）。
-import type { ReactNode } from 'react';
+import { type ReactNode, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { enc, errorText } from '../api/client';
 import { useCharacters, useEpisodes, useExports, useProject } from '../api/queries';
 import type { EpisodeDetail } from '../api/types';
 import { type NextStep, type Stage, type StageKey, episodeStages } from '../pages/stages';
 import { workspacePath } from '../pages/workspace/urls';
+import { ProjectSettingsDialog } from './ProjectSettingsDialog';
+import { stylePresetLabel } from './StylePresetPicker';
 
 interface EpisodeHeaderProps {
   slug: string;
@@ -58,6 +60,8 @@ export function EpisodeHeader({ slug, ep, stage, children }: EpisodeHeaderProps)
   const project = useProject(slug);
   const episodes = useEpisodes(slug);
   const projectBase = `/projects/${enc(slug)}`;
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const preset = project.data ? stylePresetLabel(project.data.style_preset) : null;
 
   const ordered = [...(episodes.data ?? [])].sort((a, b) => a.number - b.number);
   const at = ordered.findIndex((e) => e.id === ep.id);
@@ -92,6 +96,17 @@ export function EpisodeHeader({ slug, ep, stage, children }: EpisodeHeaderProps)
         <h2>
           第 {ep.number} 集 {ep.title}
         </h2>
+        {preset && (
+          <button
+            type="button"
+            className="chip preset-chip"
+            aria-label={`风格预设：${preset}（点开项目设置）`}
+            title="风格预设决定风格锚的画风、负面词默认值和分镜写法；点开项目设置可以改"
+            onClick={() => setSettingsOpen(true)}
+          >
+            风格 · {preset}
+          </button>
+        )}
         {children}
         <span className="grow" aria-hidden="true" />
         <div className="ep-switch">
@@ -99,6 +114,7 @@ export function EpisodeHeader({ slug, ep, stage, children }: EpisodeHeaderProps)
           {switchLink(after, '下一集', 'next')}
         </div>
       </div>
+      {settingsOpen && project.data && <ProjectSettingsDialog project={project.data} onClose={() => setSettingsOpen(false)} />}
     </header>
   );
 }

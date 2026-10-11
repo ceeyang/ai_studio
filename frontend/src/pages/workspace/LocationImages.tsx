@@ -33,7 +33,14 @@ export function LocationImages({ loc, slug }: { loc: Location; slug: string }) {
 
   return (
     <div className="location-images" aria-label={`${loc.name} 的场景图`}>
-      <h5>场景图</h5>
+      <h5>
+        场景图{loc.image_stale && <span className="badge stale">已过期</span>}
+      </h5>
+      {loc.image_stale && (
+        <p className="warn small" data-testid="location-image-stale">
+          场景图已过期：选定的这张是按改之前的名字 / 时段 / 画面提示词出的，重出一张再设为场景图（换了以后这个场景里镜头的首帧会过期）。
+        </p>
+      )}
       {images.length === 0 && jobs.length === 0 && !failed ? (
         <p className="muted small">还没有场景图。出首帧时场景图排在参考图第一张，同一场景的各镜布景更一致。</p>
       ) : (
