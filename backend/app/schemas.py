@@ -10,6 +10,8 @@ from backend.llm.schemas import Transition
 from backend.post.options import ExportOptions
 
 Aspect = Literal["9:16", "16:9"]
+# 镜头视频怎么出：first_frame = 先出首帧再图生视频；refs = 参考图直出（不出首帧）
+VideoMode = Literal["first_frame", "refs"]
 Stage = Literal["script", "storyboard", "keyframes", "videos", "export", "all", "fit_khmer"]
 NextStage = Literal["keyframes", "videos", "export"]
 # 风格预设，和 backend/domain/style_presets.py 的 PRESETS 一致（有测试对齐）
@@ -572,6 +574,7 @@ class ShotFields(BaseModel):
     duration: float | None = Field(None, gt=0, le=30)
     use_end_frame: bool | None = None
     continue_from_prev: bool | None = None
+    video_mode: VideoMode | None = None      # null = 首帧模式（和 first_frame 一样）
     suggest_continue: bool | None = None     # false = 不要这条「建议接上一镜」
     transition_out: Transition | None = None
 
@@ -600,6 +603,7 @@ class ShotOut(ORM):
     duration: float
     use_end_frame: bool
     continue_from_prev: bool
+    video_mode: str | None = None    # first_frame / refs（参考图直出）；空 = first_frame
     suggest_continue: bool = False   # 分镜建议这一镜接上一镜（只是建议，用户一键打开）
     transition_out: str
     origin: str = "llm"        # llm = 分镜生成的；manual = 手工添加（含拆分出来的）
@@ -609,6 +613,15 @@ class ContinuePrevOut(BaseModel):
     shot_id: int
     code: str
     has_video: bool
+
+
+class VideoRefOut(BaseModel):
+    """参考图直出时这一镜视频要带的一张参考图（场景图 / 构图参考 / 定妆照 / 三视图 / 道具图）。"""
+    candidate_id: int
+    label: str
+    kind: str = ""
+    url: str
+    used: bool = True    # false = 超出视频引擎的参考图上限，这张带不上
 
 
 class ShotDetail(ShotOut):
@@ -629,6 +642,8 @@ class ShotDetail(ShotOut):
     image_max_refs: int | None = None
     # 开了「接上一镜」时：上一镜是哪个、有没有选定视频（没有就「等上一镜视频」）；第一镜或没开时为空
     continue_prev: ContinuePrevOut | None = None
+    # 参考图直出（video_mode = refs 且没开接上一镜）时视频要带的参考图，按发给引擎的顺序；首帧模式为空
+    video_refs: list[VideoRefOut] = Field(default_factory=list)
 
 
 class EpisodeDetail(EpisodeOut):

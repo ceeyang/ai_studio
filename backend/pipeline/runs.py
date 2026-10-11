@@ -8,6 +8,7 @@ from sqlalchemy import select
 
 from backend.domain.db import Database
 from backend.domain.models import Episode, Slot
+from backend.domain.shots import refs_mode
 from backend.engines.registry import check_ready, runtime_of
 from backend.pipeline.common import check_scene_blocks, clean_note
 from backend.pipeline.post import lines_missing_km, speakers_without_voice
@@ -43,6 +44,8 @@ class Chain:
     order: list[int] = field(default_factory=list)
     # 镜头 id → 它排队 / 正在跑的视频任务（最新的那个）：上一镜的视频还在出时，截尾帧排在它后面
     pending_video: dict[int, int] = field(default_factory=dict)
+    # 参考图直出的镜头（选了 refs、没开接上一镜）：不出首帧，视频不等首帧
+    direct: set[int] = field(default_factory=set)
 
 
 @dataclass
@@ -75,7 +78,8 @@ def _waits_prev_video(sid: int, chain: "Chain", stages: list[str], ready: set[in
 def _chain_of(s, ep) -> "Chain":
     order = [sh.id for sh in ep.shots]
     chain = Chain(cont={sh.id for sh in ep.shots if sh.continue_from_prev},
-                  prev={b: a for a, b in zip(order, order[1:])}, order=order)
+                  prev={b: a for a, b in zip(order, order[1:])}, order=order,
+                  direct={sh.id for sh in ep.shots if refs_mode(sh)})
     if chain.cont:
         from backend.domain.models import Job
         from backend.queue.manager import ACTIVE
@@ -136,6 +140,13 @@ def _family(engines, kind: str, name: str) -> str:
     return eng.family
 
 
+def _ref_mode(engines, name: str) -> bool:
+    try:
+        return bool(getattr(engines.video(name).caps, "ref_mode", False))
+    except KeyError:
+        return False   # 引擎不存在由 _family 报更准确的错
+
+
 def _uses_comfy(engines, kind: str, names) -> bool:
     for name in set(names):
         try:
@@ -163,6 +174,8 @@ def _run_precheck(check: Precheck, engines, stages: list[str], picked, codes: di
                     continue
                 missing.append(f"{codes[sid]}（接上一镜，上一镜"
                                f"{' ' + codes[pv] if pv in codes else ''} 还没有视频）")
+            elif sid in chain.direct:
+                continue   # 参考图直出：不要首帧
             elif (sid, "first_frame") not in selected:
                 missing.append(codes[sid])
         if missing:
@@ -174,7 +187,8 @@ def _run_precheck(check: Precheck, engines, stages: list[str], picked, codes: di
     if check.comfy is None:
         return
     need = (("keyframes" in stages
-             and _uses_comfy(engines, "image", [ie for sid, ie, _ in picked if sid not in chain.cont]))
+             and _uses_comfy(engines, "image", [ie for sid, ie, _ in picked
+                                                if sid not in chain.cont and sid not in chain.direct]))
             or ("videos" in stages and _uses_comfy(engines, "video", [ve for _, _, ve in picked])))
     if need:
         ok, url = check.comfy()
@@ -211,8 +225,8 @@ def portrait_warnings(db: Database, engines, episode_id: int, stages: list[str],
         locking: dict[int, set[str]] = {}   # 角色 id → 要锁脸的图像引擎
         if picked:
             for sh in picked:
-                if sh.continue_from_prev:
-                    continue   # 接上一镜：首帧是上一镜的尾帧，不出图
+                if sh.continue_from_prev or refs_mode(sh):
+                    continue   # 接上一镜：首帧是上一镜的尾帧，不出图；参考图直出：不出首帧
                 eng = sh.image_engine or proj.image_engine
                 if max_refs(eng) > 0:
                     for c in sh.cast or []:
@@ -318,11 +332,18 @@ def submit_chain(manager, db: Database, engines, episode_id: int, stages: list[s
     vid_fam: dict[int, str] = {}
     if "keyframes" in stages:
         for sid, image_engine, _ in picked:
-            if sid not in chain.cont:   # 接上一镜的不出图，不用图像引擎
+            # 接上一镜的不出图、参考图直出的不出首帧，不用图像引擎
+            if sid not in chain.cont and sid not in chain.direct:
                 img_fam[sid] = _family(engines, "image", image_engine)
     if "videos" in stages:
+        refuse = []
         for sid, _, video_engine in picked:
             vid_fam[sid] = _family(engines, "video", video_engine)
+            if sid in chain.direct and not _ref_mode(engines, video_engine):
+                refuse.append((shot_codes.get(sid, str(sid)), video_engine))
+        if refuse:
+            from backend.pipeline.videos import ref_mode_refusal
+            raise JobError("；".join(f"{code}：{ref_mode_refusal(ve)}" for code, ve in refuse))
 
     ids: list[int] = []
     kf: dict[int, list[int]] = {}
@@ -338,6 +359,8 @@ def submit_chain(manager, db: Database, engines, episode_id: int, stages: list[s
                                               owner_type="shot", owner_id=sid,
                                               depends_on=deps + wait, **common))
                 continue
+            if sid in chain.direct:
+                continue   # 参考图直出：不出首帧（视频直接用参考图出，不等首帧）
             fam = img_fam[sid]
             kf_payload = {"shot_id": sid, "force": opts.force, "candidates": max(1, opts.candidates)}
             if opts.new_conversation:

@@ -14,7 +14,7 @@ params（config.yaml engines.<name>.params）：
 """
 from __future__ import annotations
 
-from backend.engines.base import EngineCall, ImageCaps, ImageRequest, VideoCaps, VideoRequest, size_for
+from backend.engines.base import EngineCall, require_first_frame, ImageCaps, ImageRequest, VideoCaps, VideoRequest, size_for
 
 # 写进提示词的画幅说明。尺寸只是给网站的提示，实际尺寸以出图为准。
 ASPECT_TEXT = {
@@ -151,6 +151,7 @@ class _BrowserVideoEngine:
         return float(min(max(want, 1.0), c.max_seconds))
 
     def build(self, req: VideoRequest) -> EngineCall:
+        require_first_frame(req, self)   # 没有首帧（参考图直出）而引擎不支持 ref_mode 时报清楚
         w, h = size_for(self.caps.sizes, req.aspect)
         ask = self.ask_seconds(req)
         out_seconds = float(ask or self.caps.default_seconds)

@@ -223,7 +223,7 @@ export function ShotStage({
   };
 
   const onAction = (shot: ShotDetail, a: CardAction) => {
-    if (a.kind === 'busy' || a.kind === 'wait_prev') return;
+    if (a.kind === 'busy' || a.kind === 'wait_prev' || a.kind === 'refs_direct') return;
     // 视频阶段还没有首帧：回首帧阶段并打开这个镜头
     if (a.kind === 'need_first_frame') return work.goStage('keyframes', { shot: String(shot.id) });
     void generateOne(shot, stage, a.kind === 'generate' ? '生成' : a.kind === 'redo' ? '重拍' : '重试');

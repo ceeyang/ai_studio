@@ -33,7 +33,7 @@ from pathlib import Path
 
 import yaml
 
-from backend.engines.base import (EngineCall, ImageCaps, ImageRequest, VideoCaps, VideoRequest,
+from backend.engines.base import (EngineCall, require_first_frame, ImageCaps, ImageRequest, VideoCaps, VideoRequest,
                                   size_for, upload_ref)
 from backend.engines.runninghub.client import NO_KEY_HINT
 
@@ -142,6 +142,7 @@ class RunningHubVideoEngine(_RunningHubEngine):
         return max(17, (n // 4) * 4 + 1)
 
     def build(self, req: VideoRequest) -> EngineCall:
+        require_first_frame(req, self)   # 没有首帧（参考图直出）而引擎不支持 ref_mode 时报清楚
         w, h = size_for(self.caps.sizes, req.aspect)
         seconds = min(req.seconds, self.caps.max_seconds)
         frames = self.frames_for(seconds)

@@ -495,6 +495,20 @@ export const TRANSITIONS = [
 ] as const;
 export type Transition = (typeof TRANSITIONS)[number];
 
+/** 镜头视频的生成方式：首帧（先出首帧再图生视频）/ 参考图直出（不出首帧，用场景图、定妆照等直接出） */
+export type VideoMode = 'first_frame' | 'refs';
+
+/** 参考图直出时这一镜视频要带的一张参考图（按发给引擎的顺序） */
+export interface VideoRef {
+  candidate_id: number;
+  label: string;
+  /** location / shot_ref / portrait / turnaround / prop */
+  kind: string;
+  url: string;
+  /** false = 超出视频引擎的参考图上限，带不上 */
+  used: boolean;
+}
+
 export interface Shot {
   id: number;
   episode_id: number;
@@ -515,6 +529,8 @@ export interface Shot {
   duration: number;
   use_end_frame: boolean;
   continue_from_prev: boolean;
+  /** 视频怎么出：first_frame = 先出首帧再图生视频；refs = 参考图直出（不出首帧）；null = first_frame */
+  video_mode?: VideoMode | null;
   /** 分镜建议这一镜接上一镜（只是建议，没打开 continue_from_prev） */
   suggest_continue?: boolean;
   transition_out: string;
@@ -542,6 +558,8 @@ export interface ShotDetail extends Shot {
   image_max_refs?: number | null;
   /** 开了「接上一镜」：上一镜是哪个、有没有选定视频；第一镜或没开时 null */
   continue_prev?: ContinuePrev | null;
+  /** 参考图直出（video_mode = refs 且没开接上一镜）时视频要带的参考图；首帧模式为空 */
+  video_refs?: VideoRef[];
 }
 
 export interface ContinuePrev {
@@ -569,6 +587,8 @@ export interface ShotPatch {
   dialogue?: DialogueLine[];
   /** 接上一镜：首帧取上一镜选定视频的最后一帧 */
   continue_from_prev?: boolean;
+  /** 生成方式：null = 回到首帧模式 */
+  video_mode?: VideoMode | null;
   /** false = 不要「建议接上一镜」这条提示 */
   suggest_continue?: boolean;
 }

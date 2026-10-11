@@ -168,6 +168,9 @@ class Shot(Base):
     duration: Mapped[float] = mapped_column(Float, default=5.0)
     use_end_frame: Mapped[bool] = mapped_column(Boolean, default=False)
     continue_from_prev: Mapped[bool] = mapped_column(Boolean, default=False)
+    # 视频怎么出：first_frame = 先出首帧再图生视频；refs = 参考图直出（不出首帧，见 pipeline/videos.py）。
+    # 空 = first_frame。开了接上一镜时一律按首帧模式（effective_video_mode）
+    video_mode: Mapped[str | None] = mapped_column(String(16), nullable=True)
     # 分镜建议这一镜接上一镜（同一场景、动作直接延续）：只是建议，工作台上一键打开 continue_from_prev
     suggest_continue: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     transition_out: Mapped[str] = mapped_column(String(32), default="hard_cut")

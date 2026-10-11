@@ -19,7 +19,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from backend.domain.api_keys import Creds, env_creds, no_key_hint
-from backend.engines.base import (EngineCall, ImageCaps, ImageRequest, VideoCaps, VideoRequest,
+from backend.engines.base import (EngineCall, require_first_frame, ImageCaps, ImageRequest, VideoCaps, VideoRequest,
                                   size_for)
 
 RUNTIME = "api"
@@ -159,6 +159,7 @@ class _ApiVideoEngine(_ApiEngine):
         raise NotImplementedError
 
     def build(self, req: VideoRequest) -> EngineCall:
+        require_first_frame(req, self)   # 没有首帧（参考图直出）而引擎不支持 ref_mode 时报清楚
         w, h = size_for(self.caps.sizes, req.aspect)
         model = self.model()
         seconds = self._seconds(req, model)

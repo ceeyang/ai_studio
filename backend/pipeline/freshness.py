@@ -5,6 +5,9 @@
 所以期望的参考图打包也按候选那个引擎的上限截断——只因容量不同造成的差异不算过期；
 参考图资产本身换了（定妆照换了一张）、提示词 / 画幅 / 时长改了，照样判过期。
 
+参考图直出（Shot.video_mode = refs，见 domain.shots.refs_mode）的视频没有首帧：期望输入按出首帧那一套参考图
+打包（shot_refs，按视频引擎的 max_refs 用 split_refs 截断）算，换了定妆照 / 场景图 / 道具图就过期。
+
 views.shot_detail（界面过期标记和原因）、keyframes.run_keyframe / videos.run_video（批量运行跳过、
 新候选抢不抢选定）共用这里，避免几处判断走偏。已存的 input_hash 不变。"""
 from __future__ import annotations
@@ -13,9 +16,10 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from backend.domain.refs import Ref, legacy_video_refs, shot_refs, split_refs, without_props
+from backend.domain.shots import refs_mode
 from backend.pipeline.continuity import VideoRefPlan, video_ref_plan
 from backend.pipeline.prompting import (keyframe_input_hash, keyframe_inputs, video_input_hash,
-                                        video_inputs)
+                                        video_inputs, video_refs_input_hash, video_refs_inputs)
 
 
 @dataclass
@@ -29,6 +33,8 @@ class Expect:
     max_refs: int = 0
     used: list[Ref] = field(default_factory=list)
     plan: VideoRefPlan | None = None
+    dropped: list[Ref] = field(default_factory=list)   # 超出上限没带上的参考图（参考图直出的日志用）
+    refs_mode: bool = False                            # 参考图直出（没有首帧）
 
 
 def _ids(refs) -> list[int]:
@@ -116,17 +122,45 @@ def video_expect(s, engines, shot, proj, style, ff_sel, engine_name: str, has_au
                   max_refs=max_refs, used=used, plan=plan)
 
 
+def video_refs_expect(s, shot, proj, style, engine_name: str, has_audio: bool, max_refs: int,
+                      packed: list[Ref] | None = None) -> Expect:
+    """参考图直出：engine_name 出这一镜视频时的期望输入。参考图按出首帧的同一套打包（shot_refs：场景图 →
+    构图参考 → 定妆照 / 三视图 → 道具图），超出 max_refs 时 split_refs 先保住每个角色一张定妆照。"""
+    if packed is None:
+        packed = shot_refs(s, shot)
+    used, dropped = split_refs(packed, max_refs) if max_refs > 0 else ([], list(packed))
+    h = video_refs_input_hash(shot, proj, style, engine_name, has_audio, _ids(used))
+    return Expect(engine_name, h, {h},
+                  video_refs_inputs(shot, proj, style, engine_name, has_audio, used),
+                  max_refs=max_refs, used=used, dropped=dropped, refs_mode=True)
+
+
+def shot_video_expect(s, engines, shot, proj, style, ff_sel, engine_name: str, caps, *,
+                      v_pack: list[Ref] | None = None,
+                      packed: list[Ref] | None = None) -> Expect | None:
+    """按镜头的生成方式算期望：参考图直出不要首帧；首帧模式没有选定首帧时为 None。caps 为 None（引擎不在
+    配置里）时也为 None。"""
+    if caps is None:
+        return None
+    if refs_mode(shot):
+        return video_refs_expect(s, shot, proj, style, engine_name, caps.has_audio, caps.max_refs,
+                                 packed)
+    if ff_sel is None:
+        return None
+    return video_expect(s, engines, shot, proj, style, ff_sel, engine_name, caps.has_audio,
+                        caps.max_refs, v_pack=v_pack)
+
+
 def video_check(s, engines, shot, proj, style, ff_sel, cand,
                 current: Expect | None) -> tuple[bool, Expect | None]:
     """(选定视频 cand 是否最新, 说原因用的期望摘要)。current 为 None：镜头当前的视频引擎不在配置里。
-    两边的引擎都不认识时没法判断，按没过期算（和以前一样）。"""
+    两边的引擎都不认识时没法判断，按没过期算（和以前一样）。参考图直出时 ff_sel 可以是 None。"""
     if current is not None and cand.input_hash in current.ok:
         return True, current
     if cand.engine and (current is None or cand.engine != current.engine):
         caps = video_caps(engines, cand.engine)
-        if caps is not None:
-            own = video_expect(s, engines, shot, proj, style, ff_sel, cand.engine,
-                               caps.has_audio, caps.max_refs)
+        own = shot_video_expect(s, engines, shot, proj, style, ff_sel, cand.engine, caps)
+        if own is not None:
             return cand.input_hash in own.ok, own
     if current is None:
         return True, None

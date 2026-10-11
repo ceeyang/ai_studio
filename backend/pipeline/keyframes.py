@@ -9,6 +9,7 @@ from pathlib import Path
 from backend.domain.refs import shot_refs, split_refs
 from backend.domain.assets import ASSET_ENGINE
 from backend.domain.models import Shot
+from backend.domain.shots import refs_mode
 from backend.domain.slots import add_candidate, get_or_create_slot, selected_candidate
 from backend.engines.base import ImageRequest
 from backend.engines.runninghub.client import RunningHubError
@@ -22,7 +23,7 @@ from backend.queue.trace import trace_add, trace_rel, trace_update
 
 # 参考图的角色（Ref.kind → 调用明细里显示的名字）
 REF_ROLE = {"location": "场景图", "shot_ref": "构图参考", "portrait": "定妆照",
-            "turnaround": "三视图", "first_frame": "首帧", "end_frame": "尾帧"}
+            "turnaround": "三视图", "prop": "道具图", "first_frame": "首帧", "end_frame": "尾帧"}
 PARAM_KEYS = ("size", "seconds", "frames", "fps", "seed", "steps", "turbo", "model", "service",
               "site", "nondeterministic")
 
@@ -189,9 +190,13 @@ def run_keyframe(ctx, payload: dict) -> dict:
     with sv.db.session() as s:
         shot, ep, proj, style = load_shot(s, shot_id)
         continuing = bool(shot.continue_from_prev)
-    if continuing:   # 接上一镜：不出图，首帧取上一镜视频的最后一帧
+        direct, code = refs_mode(shot), shot.code
+    if continuing:   # 接上一镜：不出图，首帧取上一镜视频的最后一帧（选了参考图直出也按首帧模式）
         from backend.pipeline.continuity import run_continue_frame
         return run_continue_frame(ctx, payload)
+    if direct:   # 参考图直出：视频直接用参考图出，不要首帧
+        ctx.log(f"首帧 {code}：这一镜参考图直出，不出首帧")
+        return {"skipped": True, "candidate_ids": [], "reason": "refs_mode"}
     with sv.db.session() as s:
         shot, ep, proj, style = load_shot(s, shot_id)
         engine_name = shot.image_engine or proj.image_engine

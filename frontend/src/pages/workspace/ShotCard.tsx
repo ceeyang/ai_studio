@@ -179,7 +179,7 @@ export function ShotCard(props: ShotCardProps) {
           type="button"
           className="sm soft"
           aria-label={`${action.aria} ${code}`}
-          disabled={action.kind === 'busy' || action.kind === 'wait_prev' || generating}
+          disabled={action.kind === 'busy' || action.kind === 'wait_prev' || action.kind === 'refs_direct' || generating}
           onClick={() => props.onAction(action)}
         >
           {action.label}
