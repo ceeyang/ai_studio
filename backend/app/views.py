@@ -104,6 +104,14 @@ def owner_jobs(s: Session, owner_type: str, owner_ids: Iterable[int],
 
 
 # ------------------------------------------------------------ 镜头
+def placeholder_names(shot, proj) -> dict[str, str]:
+    from backend.pipeline.prompting import CHAR_TOKEN, char_token
+
+    names = {c.id: c.name for c in proj.characters}
+    ids = dict.fromkeys(int(x) for x in CHAR_TOKEN.findall(shot.image_prompt or ""))
+    return {char_token(i): names.get(i, "（已删除的角色）") for i in ids}
+
+
 def shot_detail(s: Session, sv, shot, proj, style, *, jobs: OwnerJobs | None = None,
                 progress: Mapping[int, float] | None = None) -> ShotDetail:
     slots = slots_for(s, "shot", shot.id)
@@ -161,7 +169,8 @@ def shot_detail(s: Session, sv, shot, proj, style, *, jobs: OwnerJobs | None = N
         "active_jobs": [job_brief(j, progress) for j in jobs.active],
         "failures": [job_brief(f, failed=True) for f in sorted(failures, key=lambda x: x.id)],
         "first_frame_refs_unused": unused,
-        "image_prompt_resolved": resolved if resolved != (shot.image_prompt or "") else None})
+        "image_prompt_resolved": resolved if resolved != (shot.image_prompt or "") else None,
+        "placeholder_names": placeholder_names(shot, proj)})
 
 
 def episode_detail(s: Session, sv, ep, *, progress: Mapping[int, float] | None = None) -> EpisodeDetail:

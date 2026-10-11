@@ -298,6 +298,8 @@ export interface ShotDetail extends Shot {
   first_frame_refs_unused?: string[];
   /** image_prompt 里有角色外貌占位符时，出图实际用的文字（占位符按景别换成角色当前外貌） */
   image_prompt_resolved?: string | null;
+  /** image_prompt 里的外貌占位符 → 角色名（「{{char:3}}」→「老周」） */
+  placeholder_names?: Record<string, string>;
 }
 
 export interface EpisodeDetail extends Episode {

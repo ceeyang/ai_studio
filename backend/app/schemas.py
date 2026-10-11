@@ -390,6 +390,8 @@ class ShotDetail(ShotOut):
     first_frame_refs_unused: list[str] = Field(default_factory=list)
     # image_prompt 里有外貌占位符 {{char:<id>}} 时，出图实际用的文字（占位符按景别换成角色当前外貌）
     image_prompt_resolved: str | None = None
+    # image_prompt 里出现的外貌占位符 → 角色名（「{{char:3}}」→「老周」），镜头抽屉显示图例
+    placeholder_names: dict[str, str] = Field(default_factory=dict)
 
 
 class EpisodeDetail(EpisodeOut):

@@ -212,3 +212,27 @@ def test_first_frame_refs_unused_when_engine_takes_no_refs(api):
     assert shot["first_frame_refs_unused"] == ["老周 定妆照"]
     api.patch(f"/api/shots/{ids[0]}", json={"image_engine": "h3_image"})
     assert api.get(f"/api/shots/{ids[0]}").json()["first_frame_refs_unused"] == []
+
+
+def test_patch_image_prompt_checks_placeholders_and_detail_lists_them(api):
+    from backend.domain.models import Character, Episode, Shot
+
+    sv = api.app.state.services
+    api.post("/api/projects", json={"title": "demo"})
+    ep_id = api.post("/api/projects/demo/episodes", json={"source_text": "x"}).json()["id"]
+    with sv.db.session() as s:
+        ep = s.get(Episode, ep_id)
+        ch = Character(project_id=ep.project_id, name="老周", visual_prompt="a stocky man in his fifties")
+        s.add(ch)
+        sh = Shot(episode_id=ep_id, order=0, code="S01", image_prompt="x")
+        s.add(sh)
+        s.flush()
+        cid, sid = ch.id, sh.id
+    r = api.patch(f"/api/shots/{sid}", json={"image_prompt": "wide. {{char:%d} He waits." % cid})
+    assert r.status_code == 400 and "写坏的外貌占位符" in r.json()["detail"]
+    r = api.patch(f"/api/shots/{sid}", json={"image_prompt": "wide. {{char:999}} He waits."})
+    assert r.status_code == 400 and "不是本项目的角色" in r.json()["detail"]
+    r = api.patch(f"/api/shots/{sid}", json={"image_prompt": "wide. {{char:%d}} He waits." % cid})
+    assert r.status_code == 200
+    assert r.json()["placeholder_names"] == {"{{char:%d}}" % cid: "老周"}
+    assert r.json()["image_prompt_resolved"] == "wide. a stocky man in his fifties. He waits."

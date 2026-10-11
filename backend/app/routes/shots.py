@@ -9,12 +9,27 @@ from backend.app.views import shot_detail
 from backend.domain.models import Episode, Shot
 from backend.domain.shots import renumber_shots
 from backend.domain.slots import delete_slots
+from backend.queue.errors import JobError
 
 router = APIRouter(prefix="/api", tags=["shots"])
 
 COPY_FIELDS = ("scene_block_id", "shot_size", "camera_move", "action", "cast", "props",
                "image_prompt", "motion_prompt", "audio_prompt", "image_engine", "video_engine",
                "use_end_frame", "continue_from_prev", "origin")
+
+
+def check_placeholders(text: str, char_ids: set[int]) -> None:
+    """手改 image_prompt：外貌占位符只能写成 {{char:编号}}、编号是本项目的角色；写坏了（少括号、
+    写成名字）出图时会原样当成文字画进去，直接报错。"""
+    from backend.pipeline.prompting import CHAR_TOKEN
+
+    rest = CHAR_TOKEN.sub("", text or "")
+    if "{{" in rest or "}}" in rest:
+        raise JobError("图像提示词里有写坏的外貌占位符：只能写成 {{char:编号}}，如 {{char:3}}")
+    bad = sorted({int(x) for x in CHAR_TOKEN.findall(text or "")} - char_ids)
+    if bad:
+        raise JobError(f"图像提示词里的外貌占位符 {'、'.join('{{char:%d}}' % x for x in bad)} "
+                       "不是本项目的角色")
 
 
 def _detail(s, sv, shot: Shot, progress=None) -> ShotDetail:
@@ -59,6 +74,9 @@ def patch_shot(shot_id: int, body: ShotFields, request: Request):
     check_engines(sv, data.get("image_engine"), data.get("video_engine"))
     with sv.db.session() as s:
         shot = get_or_404(s, Shot, shot_id, "镜头")
+        if data.get("image_prompt"):
+            ep = s.get(Episode, shot.episode_id)
+            check_placeholders(data["image_prompt"], {c.id for c in ep.project.characters})
         for k, v in data.items():
             if v is None and k not in ("image_engine", "video_engine"):
                 continue  # 只有引擎覆盖可以清空（回到项目默认）

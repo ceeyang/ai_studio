@@ -49,9 +49,15 @@ describe('ShotDrawer', () => {
 
   it('图像提示词里有外貌占位符：显示出图时实际用的文字；没有占位符不显示', async () => {
     installFetch({ 'GET /api/engines': ENGINES });
-    const shot = { ...SHOT, image_prompt: 'wide. {{char:3}} He waits.', image_prompt_resolved: 'wide. Chinese man in his fifties. He waits.' };
+    const shot = {
+      ...SHOT,
+      image_prompt: 'wide. {{char:3}} He waits.',
+      image_prompt_resolved: 'wide. Chinese man in his fifties. He waits.',
+      placeholder_names: { '{{char:3}}': '老周' },
+    };
     const { unmount } = renderAt(<ShotDrawer shot={shot} episodeId={1} onClose={() => {}} onGenerate={() => {}} />);
     expect(screen.getByText('wide. Chinese man in his fifties. He waits.')).toBeTruthy();
+    expect(screen.getByTestId('placeholder-legend').textContent).toBe('外貌占位符：{{char:3}} = 老周');
     unmount();
     renderAt(<ShotDrawer shot={SHOT} episodeId={1} onClose={() => {}} onGenerate={() => {}} />);
     expect(screen.queryByText(/角色外貌占位符/)).toBeNull();

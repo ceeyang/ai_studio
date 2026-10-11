@@ -290,6 +290,14 @@ export function ShotDrawer({
             onValuesChange={setFields}
             onSave={(_v, changed) => patch.mutate({ id: shot.id, ...toShotPatch(changed) })}
           />
+          {Object.keys(shot.placeholder_names ?? {}).length > 0 && (
+            <p className="muted small" data-testid="placeholder-legend">
+              外貌占位符：
+              {Object.entries(shot.placeholder_names ?? {})
+                .map(([tok, name]) => `${tok} = ${name}`)
+                .join('；')}
+            </p>
+          )}
           {shot.image_prompt_resolved && (
             <details className="muted small resolved-prompt">
               <summary>{'图像提示词里的 {{char:N}} 是角色外貌占位符，出图时按景别换成角色当前造型：'}</summary>
