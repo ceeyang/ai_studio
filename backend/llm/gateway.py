@@ -163,6 +163,8 @@ class LLMGateway:
             kw: dict[str, Any] = {"images": images} if images else {}
             if getattr(provider, "accepts_log", False):   # 网页文本模型：等回复时往任务日志写进度
                 kw["log"] = emit
+            if getattr(provider, "accepts_scope", False):  # 网页文本模型：按集、按步骤续接网页会话
+                kw["scope_key"] = info.get("key")
             # 调用明细：发请求前先记下发了什么（任务跑着时就能看到），出结果后补回复和解析结果
             seq = trace_add("llm", info.get("title") or pcfg.id, {
                 "task": info.get("task"), "step": info.get("step"), "key": info.get("key"),

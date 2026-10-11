@@ -65,6 +65,8 @@ export const CLAUDE = {
   settle_seconds: 4,
   no_image_grace: 12,
   echo_seconds: 5,
+  // 对话地址里的对话 id（第 1 组）：续接网页会话时认地址用，和 backend/engines/browser/sites/claude.py 一致
+  conversation_re: '/chat/([0-9A-Za-z][0-9A-Za-z-]{7,})',
   expected_seconds: 60,
   fullSize: (src) => [src],
 };

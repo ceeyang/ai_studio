@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { FoldPanel } from './FoldPanel';
 import { errorText } from '../../api/client';
-import { useBrowserStatus, useOpenBrowserLogin } from '../../api/queries';
+import { useAppSettings, useBrowserStatus, useOpenBrowserLogin, useSaveSettings } from '../../api/queries';
 import type { BrowserSiteStatus, BrowserStatus } from '../../api/types';
 import { engineLabel } from '../../format';
 
@@ -158,6 +158,33 @@ function CdpBody({ st }: { st: BrowserStatus }) {
   );
 }
 
+/** 全局开关「重新生成时续接之前的网页会话」：读写 /api/settings 的 web_reuse_conversation（老后端没有这一项时按开着算） */
+function ReuseConversation({ hint }: { hint?: string | null }) {
+  const settings = useAppSettings();
+  const save = useSaveSettings();
+  if (!settings.data) return null;
+  const on = settings.data.web_reuse_conversation ?? true;
+  return (
+    <div className="web-reuse" data-testid="web-reuse-conversation">
+      <label className="check">
+        <input
+          type="checkbox"
+          checked={on}
+          disabled={save.isPending}
+          onChange={(e) => save.mutate({ web_reuse_conversation: e.target.checked })}
+        />{' '}
+        重新生成时续接之前的网页会话
+      </label>
+      <p className="muted small">
+        同一角色 / 镜头 / 场景 / 道具在同一网站上重新出图、以及剧本 / 分镜用网页文本模型时，接着上次的对话发（网页里能看到前后几版）；超过
+        20 轮自动新开。关掉后每次都新开对话；单次不想续接，在出图的地方勾「新开对话」。
+      </p>
+      {hint && <p className="muted small" data-testid="web-reuse-hint">{hint}</p>}
+      {save.error && <p className="error small">保存失败：{errorText(save.error)}</p>}
+    </div>
+  );
+}
+
 /** 设置页「网页出图」：扩展方式显示连接、各网站登录和安装步骤；cdp 方式保留「打开浏览器登录」。 */
 export function BrowserPanel() {
   const status = useBrowserStatus();
@@ -173,6 +200,7 @@ export function BrowserPanel() {
       {!st && !status.error && <p className="muted">读取中…</p>}
       {st?.transport === 'extension' && <ExtensionBody st={st} />}
       {st?.transport === 'cdp' && <CdpBody st={st} />}
+      <ReuseConversation hint={st?.conversation && !st.conversation.supported ? st.conversation.hint : null} />
     </FoldPanel>
   );
 }

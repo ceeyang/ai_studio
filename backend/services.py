@@ -64,6 +64,9 @@ def build_services(cfg: Config, db: Database, manager: Any) -> Services:
     # ChatGPT / Gemini / Claude 网页文本模型（走浏览器扩展）：config.yaml 没写也加上（扩展没连上时设置页里不可选）
     ensure_web_providers(cfg.llm)
     browser = BrowserRunner(BrowserSession(cfg.browser))
+    # 重新生成时续接之前的网页会话（按角色 / 镜头 / 场景 / 道具 / 某集某一步），设置页可关
+    from backend.engines.browser.conversations import ConversationBook
+    browser.conversations = ConversationBook(db, store)
     # 每次调用 LLM 时现读设置：按步骤单独设置 → 全局默认文本模型 → config.yaml
     llm = LLMGateway(cfg.llm, build_providers(cfg.llm, creds=keys.resolve, browser=browser),
                      gpu_guard=manager.gpu_exclusive, override=store.llm_provider)

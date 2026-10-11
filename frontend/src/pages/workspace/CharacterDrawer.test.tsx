@@ -288,6 +288,30 @@ describe('角色抽屉', () => {
     expect(posts(calls)[0]).toMatchObject({ url: '/api/characters/6/portraits/draw', body: { count: 2, engine: 'gpt_image' } });
   });
 
+  it('浏览器引擎抽卡：显示会话链接；勾「新开对话」时请求带 new_conversation: true', async () => {
+    const { calls, user } = setup(CHEN, {
+      'GET /api/engines': { image: [{ name: 'gpt_image', family: 'chatgpt_web', runtime: 'browser', caps: { max_refs: 4 } }], video: [] },
+      'GET /api/browser/conversations?scope_kind=character&scope_id=6': {
+        reuse_enabled: true, supported: true, hint: null, max_turns: 20,
+        items: [{ site: 'chatgpt', label: 'ChatGPT', url: 'https://chatgpt.com/c/chen', turns: 4, updated_at: null }],
+      },
+      'POST /api/characters/6/portraits/draw': { job_ids: [84] },
+    });
+    const d = await drawer();
+    const pick = within(d).getByLabelText('抽卡引擎');
+    await waitFor(() => expect(within(pick).getByRole('option', { name: 'ChatGPT 网页' })).toBeTruthy());
+    await user.selectOptions(pick, 'gpt_image');
+    const links = await within(d).findAllByRole('link', { name: '在网页里打开这条会话' });
+    expect(links[0].getAttribute('href')).toBe('https://chatgpt.com/c/chen');
+    await user.click(within(d).getByRole('checkbox', { name: '抽卡 新开对话' }));
+    await user.click(within(d).getByRole('button', { name: /^抽卡/ }));
+    await waitFor(() => expect(posts(calls)).toHaveLength(1));
+    expect(posts(calls)[0]).toMatchObject({
+      url: '/api/characters/6/portraits/draw',
+      body: { count: 2, engine: 'gpt_image', new_conversation: true },
+    });
+  });
+
   it('抽卡采样完成（value>=max）但任务还在跑：占位显示"解码保存中"而不是卡在 100%', async () => {
     const running = { ...CHEN, active_jobs: [{ id: 80, type: 'image.portrait', status: 'running' as const }] };
     installFetch({ ...ROUTES, 'GET /api/projects/demo/characters': [running] });

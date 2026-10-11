@@ -267,6 +267,23 @@ class JobTrace(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
+class BrowserConversation(Base):
+    """网页会话记录：同一个作用域（角色 / 镜头 / 场景 / 道具 / 某集某一步）在同一个网站上用的那条网页对话。
+    重新生成时接着这条对话发（见 backend/engines/browser/conversations.py）。"""
+    __tablename__ = "browser_conversations"
+    __table_args__ = (UniqueConstraint("site", "scope_kind", "scope_id", name="uq_browser_conv_scope"),)
+    id: Mapped[int] = mapped_column(primary_key=True)
+    site: Mapped[str] = mapped_column(String(20))                 # chatgpt / gemini / claude
+    scope_kind: Mapped[str] = mapped_column(String(20))           # character / shot / location / prop / episode
+    scope_id: Mapped[str] = mapped_column(String(120))            # 角色 id；episode 是「集 id:步骤」
+    project_id: Mapped[int | None] = mapped_column(Integer, nullable=True, index=True)
+    url: Mapped[str] = mapped_column(String(500), default="")
+    conversation_id: Mapped[str] = mapped_column(String(120), default="")
+    turns: Mapped[int] = mapped_column(Integer, default=0)        # 在这条对话里发过几次请求
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
 class Export(Base):
     __tablename__ = "exports"
     id: Mapped[int] = mapped_column(primary_key=True)

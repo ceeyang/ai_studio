@@ -2,7 +2,7 @@
 import { Fragment, useState } from 'react';
 import { errorText } from '../../api/client';
 import { useJobTraces } from '../../api/queries';
-import type { JobTrace } from '../../api/types';
+import type { JobTrace, TraceConversation } from '../../api/types';
 import { Lightbox, type LightboxItem } from '../../components/Lightbox';
 
 type Data = Record<string, unknown>;
@@ -302,6 +302,30 @@ function FfmpegDetail({ jobId, d }: { jobId: number; d: Data }) {
   );
 }
 
+/** 网页引擎 / 网页文本模型这次用的会话：「续接会话 <链接>」「新开会话 <链接>（原因）」 */
+export function ConversationLine({ conv }: { conv: unknown }) {
+  if (!conv || typeof conv !== 'object') return null;
+  const c = conv as Partial<TraceConversation>;
+  if (c.mode !== 'continue' && c.mode !== 'new') return null;
+  const text = c.mode === 'continue' ? '续接会话' : '新开会话';
+  const url = str(c.url);
+  const reason = str(c.reason);
+  return (
+    <p className="trace-conv small" data-testid="trace-conversation">
+      {text}
+      {url && (
+        <>
+          {' '}
+          <a href={url} target="_blank" rel="noreferrer">
+            {url}
+          </a>
+        </>
+      )}
+      {reason && <span className="muted">（{reason}）</span>}
+    </p>
+  );
+}
+
 function TraceRow({ jobId, t }: { jobId: number; t: JobTrace }) {
   const d = t.data;
   const status = str(d.status);
@@ -316,6 +340,7 @@ function TraceRow({ jobId, t }: { jobId: number; t: JobTrace }) {
           )}
         </summary>
         <div className="trace-body">
+          <ConversationLine conv={d.conversation} />
           {t.kind === 'llm' && <LlmDetail jobId={jobId} d={d} />}
           {t.kind === 'engine' && <EngineDetail jobId={jobId} d={d} />}
           {t.kind === 'ffmpeg' && <FfmpegDetail jobId={jobId} d={d} />}

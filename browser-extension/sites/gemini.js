@@ -77,6 +77,8 @@ export const GEMINI = {
   settle_seconds: 4,
   no_image_grace: 12,
   echo_seconds: 5,
+  // 对话地址里的对话 id（第 1 组）：续接网页会话时认地址用，和 backend/engines/browser/sites/gemini.py 一致
+  conversation_re: '/app/([0-9A-Za-z]{8,})',
   expected_seconds: 60,
   /** 取原图时依次试的地址：googleusercontent 的尺寸参数换成 =s0（原尺寸），再试页面里那张。 */
   fullSize: (src) => {

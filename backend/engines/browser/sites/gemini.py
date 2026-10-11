@@ -68,5 +68,6 @@ GEMINI = SiteSpec(
     min_image_px=384,
     settle_seconds=4.0,
     no_image_grace=12.0,
+    conversation_re=r"/app/([0-9A-Za-z]{8,})",
     expected_seconds=60.0,
 )

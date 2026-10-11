@@ -225,3 +225,42 @@ describe('设置页「默认模型」', () => {
     expect((within(step).getByRole('option', { name: 'Gemini 网页（浏览器扩展，免费额度，较慢）（扩展需要重新加载）' }) as HTMLOptionElement).disabled).toBe(true);
   });
 });
+
+describe('设置页「网页出图」里的会话续接开关', () => {
+  const BROWSER = {
+    'GET /api/engines': { image: [{ name: 'gpt_image', family: 'chatgpt_web', runtime: 'browser', caps: {} }], video: [] },
+    'GET /api/browser/status': {
+      transport: 'extension', running: true, connected: true, extension: { connected: true, version: '0.3.0' }, logged_in: {},
+      conversation: { supported: false, hint: '重新加载扩展可复用会话' },
+    },
+  };
+
+  it('显示当前值和说明；关掉时 PUT { web_reuse_conversation: false }；扩展不支持时显示 hint', async () => {
+    let reuse = true;
+    const calls = base({
+      ...BROWSER,
+      'GET /api/settings': () => settings({ web_reuse_conversation: reuse }),
+      'PUT /api/settings': (c: { body: unknown }) => {
+        reuse = (c.body as { web_reuse_conversation: boolean }).web_reuse_conversation;
+        return settings({ web_reuse_conversation: reuse });
+      },
+    });
+    renderAt(<SettingsPage />, { route: '/settings', path: '/settings' });
+    const user = userEvent.setup();
+    const box = (await screen.findByRole('checkbox', { name: '重新生成时续接之前的网页会话' })) as HTMLInputElement;
+    expect(box.checked).toBe(true);
+    const block = screen.getByTestId('web-reuse-conversation');
+    expect(block.textContent).toContain('超过 20 轮自动新开');
+    expect((await screen.findByTestId('web-reuse-hint')).textContent).toBe('重新加载扩展可复用会话');
+    await user.click(box);
+    await waitFor(() => expect(calls.find((c) => c.method === 'PUT')?.body).toEqual({ web_reuse_conversation: false }));
+    await waitFor(() => expect(box.checked).toBe(false));
+  });
+
+  it('设置里是关着的：开关不勾', async () => {
+    base({ ...BROWSER, 'GET /api/settings': settings({ web_reuse_conversation: false }) });
+    renderAt(<SettingsPage />, { route: '/settings', path: '/settings' });
+    const box = (await screen.findByRole('checkbox', { name: '重新生成时续接之前的网页会话' })) as HTMLInputElement;
+    expect(box.checked).toBe(false);
+  });
+});

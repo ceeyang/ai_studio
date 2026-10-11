@@ -10,7 +10,9 @@
  *    等待和轮询在这里做：后台标签页里的定时器会被浏览器节流，service worker 里的不会。
  * 3. 报状态：每个网站开着几个标签页、登录 cookie 在不在（chrome.cookies，只看名字不读值）、开着的标签页上
  *    有没有登录按钮。
- * 4. rpc（v0.2 起，网页文本模型）：studio 一步步驱动页面——开一个专门写文本的标签页（不用出图的那个）、
+ * 4. 续接会话（v0.3 起）：出图任务带 conversation_url 时在那条之前的对话里接着出图（打不开就新开），
+ *    结果里报回对话地址，studio 按角色 / 镜头 / 场景 / 道具记下来，下次重新生成时续接。
+ * 5. rpc（v0.2 起，网页文本模型）：studio 一步步驱动页面——开一个专门写文本的标签页（不用出图的那个）、
  *    跳转、调 content/dom.js 的函数（只许 lib/protocol.js 的 RPC_DOM_OPS 里那些）。流程和选择器都在 studio
  *    那边（backend/engines/browser/chat.py），改了不用重新加载扩展。
  *
@@ -455,13 +457,18 @@ async function doJob(msg, spec, job) {
     const { tabId, fresh, how } = await acquireTab(spec, opts);
     log(`${spec.label}：${how}`);
     if (opts.activate_tab) await chrome.tabs.update(tabId, { active: true });
+    let conversation = null;
     const images = await generate(
       new TabDriver(tabId), spec,
-      { prompt: msg.prompt, refs: msg.refs || [], timeout: msg.timeout, reuseConversation: !!opts.reuse_conversation, fresh },
-      { isCanceled: () => job.canceled, log, progress, poll: 1 },
+      {
+        prompt: msg.prompt, refs: msg.refs || [], timeout: msg.timeout, reuseConversation: !!opts.reuse_conversation, fresh,
+        conversationUrl: msg.conversation_url || '',
+      },
+      { isCanceled: () => job.canceled, log, progress, poll: 1, onConversation: (c) => { conversation = c; } },
     );
     images.forEach((img, i) => imageMessages(id, i, img).forEach(send));
-    send({ type: 'result', job_id: id, count: images.length });
+    // v0.3 起：报回对话地址（studio 按角色 / 镜头等记下来，下次重新生成时续接）
+    send({ type: 'result', job_id: id, count: images.length, conversation });
   } catch (e) {
     if (e instanceof Canceled) return;
     const kind = e instanceof FlowError ? e.kind : 'browser';

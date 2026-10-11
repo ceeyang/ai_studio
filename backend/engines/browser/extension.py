@@ -19,7 +19,9 @@ browser-extension/ 是一个 MV3 扩展，装在用户日常用的 Chrome/Edge �
     rpc_result {id, ok, result | kind+error}                  rpc 的回执
   studio → 扩展
     welcome  {server_version, options}
-    job      {job_id, site, prompt, refs: [{name, mime, b64}], aspect, timeout, options}
+    job      {job_id, site, prompt, refs: [{name, mime, b64}], aspect, timeout, options, conversation_url}
+             conversation_url（v0.3 起）：在这条之前的对话里接着出图（打不开就新开）；result 里带回
+             conversation {url, continued, note}：结束时标签页地址、是否真的续接上了、退回新对话的原因
     cancel   {job_id}
     status_request {}
     open     {urls}                                           在用户浏览器里打开这些网址（登录用）
@@ -54,6 +56,7 @@ from backend.queue.errors import JobCanceled
 
 PROTOCOL = 1
 RPC_FEATURE = "rpc"          # 扩展 hello 里报的能力：有它才能用网页文本模型（v0.2 起）
+CONVERSATION_FEATURE = "conversation"   # 有它出图任务才能续接之前的网页会话、报回对话地址（v0.3 起）
 RPC_TIMEOUT = 90.0
 KINDS = {"not_logged_in", "quota", "refused", "timeout", "no_image", "page", "browser"}
 # 扩展那边开标签页、等页面加载、传参考图都不算在 timeout（等出图）里，多给这么久再判超时
@@ -206,6 +209,14 @@ class ExtensionHub:
                 pass
 
     # ------------------------------------------------------------ rpc（网页文本模型）
+    def supports(self, feature: str) -> bool:
+        c = self._conn
+        return c is not None and feature in (c.hello.get("features") or [])
+
+    def version(self) -> str:
+        c = self._conn
+        return str((c.hello.get("version") if c is not None else None) or "?")
+
     def text_problem(self, site: str, label: str) -> str | None:
         """这个网站现在能不能用网页文本模型；不能时返回中文原因（扩展没连上 / 版本太旧要重新加载）。"""
         c = self._conn
@@ -257,7 +268,9 @@ class ExtensionHub:
     def generate(self, site: str, label: str, prompt: str, refs: list[Path], *, aspect: str | None,
                  timeout: float, cancel: threading.Event, log: Callable[[str], None],
                  progress: Callable[[int, int], None] | None = None,
-                 clock: Callable[[], float] = time.monotonic, poll: float = 0.5) -> list[ExtImage]:
+                 clock: Callable[[], float] = time.monotonic, poll: float = 0.5,
+                 conversation_url: str | None = None, info: dict | None = None) -> list[ExtImage]:
+        """info（可选）：扩展在 result 里报的会话情况 {url, continued, note} 填进去（v0.3 起才有）。"""
         conn = self._conn
         if conn is None:
             raise BrowserError("browser", not_connected_text())
@@ -265,16 +278,20 @@ class ExtensionHub:
         q: queue.Queue = queue.Queue()
         self._jobs[job_id] = q
         try:
-            self.send({"type": "job", "job_id": job_id, "site": site, "prompt": prompt,
-                       "refs": [ref_payload(p) for p in refs], "aspect": aspect, "timeout": timeout,
-                       "options": self.options}, conn)
+            msg = {"type": "job", "job_id": job_id, "site": site, "prompt": prompt,
+                   "refs": [ref_payload(p) for p in refs], "aspect": aspect, "timeout": timeout,
+                   "options": self.options}
+            if conversation_url:
+                msg["conversation_url"] = conversation_url
+            self.send(msg, conn)
             ver = conn.hello.get("version")
             log(f"{label}：任务已发给浏览器扩展{f'（v{ver}）' if ver else ''}，在你的浏览器里出图")
-            return self._wait(job_id, q, label, timeout, cancel, log, progress, clock, poll)
+            return self._wait(job_id, q, label, timeout, cancel, log, progress, clock, poll, info)
         finally:
             self._jobs.pop(job_id, None)
 
-    def _wait(self, job_id, q, label, timeout, cancel, log, progress, clock, poll) -> list[ExtImage]:
+    def _wait(self, job_id, q, label, timeout, cancel, log, progress, clock, poll,
+              info: dict | None = None) -> list[ExtImage]:
         deadline = clock() + timeout + JOB_GRACE_SECONDS
         chunks: dict[int, dict] = {}
         while True:
@@ -306,6 +323,8 @@ class ExtensionHub:
                 kind = msg.get("kind") if msg.get("kind") in KINDS else "browser"
                 raise BrowserError(kind, str(msg.get("message") or f"{label} 出图失败（扩展没说原因）"))
             elif t == "result":
+                if info is not None and isinstance(msg.get("conversation"), dict):
+                    info.update(msg["conversation"])
                 return self._assemble(chunks, int(msg.get("count") or 0), label)
 
     def _try_send(self, msg: dict) -> None:
@@ -357,6 +376,11 @@ def decode(img: ExtImage, label: str):
 def reload_text(version: str, why: str) -> str:
     return (f"浏览器扩展需要重新加载：现在连着的是 v{version}，{why}。在 chrome://extensions（Edge 是 edge://extensions）"
             "里找到「AI Studio 网页出图桥」点「重新加载」（转圈箭头），再重试")
+
+
+def conversation_reload_text(version: str) -> str:
+    return (f"浏览器扩展 v{version} 不支持续接网页出图会话，这次新开对话：在 chrome://extensions（Edge 是 "
+            "edge://extensions）里把「AI Studio 网页出图桥」重新加载一下，就能复用会话")
 
 
 def not_connected_text() -> str:

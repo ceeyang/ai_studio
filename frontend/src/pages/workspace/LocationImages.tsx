@@ -7,6 +7,7 @@ import { useDrawLocationImages, useStepDefault, useUploadLocationImage, useUseLo
 import type { Location } from '../../api/types';
 import { ImageEngineSelect } from '../../components/ImageEngineSelect';
 import { Lightbox } from '../../components/Lightbox';
+import { WebConversation } from '../../components/WebConversation';
 import { engineLabel } from '../../format';
 import { useEvents } from '../../ws/EventsContext';
 import { hasEnglishPrompt } from '../stages';
@@ -20,6 +21,8 @@ export function LocationImages({ loc, slug }: { loc: Location; slug: string }) {
   const use = useUseLocationImage(slug);
   const [count, setCount] = useState(2);
   const [engine, setEngine] = useState('');
+  // 网页出图：这次不续接之前的网页对话（提交后复位）
+  const [newConv, setNewConv] = useState(false);
   const [preview, setPreview] = useState<number | null>(null);
   const stepDefault = useStepDefault(slug, 'location');
   const images = loc.images ?? [];
@@ -107,7 +110,12 @@ export function LocationImages({ loc, slug }: { loc: Location; slug: string }) {
           className="sm"
           disabled={draw.isPending || !canDraw}
           title={canDraw ? '按画面提示词出空场景（不出人物）' : '先在上面写英文画面提示词并保存'}
-          onClick={() => draw.mutate({ id: loc.id, count, engine: engine || undefined })}
+          onClick={() =>
+            draw.mutate(
+              { id: loc.id, count, engine: engine || undefined, new_conversation: newConv || undefined },
+              { onSuccess: () => setNewConv(false) },
+            )
+          }
         >
           {jobs.length > 0 ? `出场景图（${jobs.length} 张进行中）` : '出场景图'}
         </button>
@@ -127,6 +135,14 @@ export function LocationImages({ loc, slug }: { loc: Location; slug: string }) {
           />
         </label>
       </div>
+      <WebConversation
+        scopeKind="location"
+        scopeId={loc.id}
+        engine={engine || stepDefault}
+        newConversation={newConv}
+        onNewConversationChange={setNewConv}
+        label={`${loc.name} 场景图`}
+      />
       {!canDraw && <p className="muted small">先写英文画面提示词（画面中不出人）再出场景图，也可以直接上传。</p>}
       {error && <p className="error small">{errorText(error)}</p>}
       {preview !== null && images[preview] && (

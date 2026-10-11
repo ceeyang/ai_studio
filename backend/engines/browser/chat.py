@@ -14,6 +14,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any, Protocol
 
+from backend.engines.browser.conversations import conversation_id
 from backend.engines.browser.errors import BrowserError, excerpt
 from backend.engines.browser.extension import ExtensionHub, ref_payload
 from backend.engines.browser.sites.base import SiteSpec
@@ -26,6 +27,7 @@ START_TIMEOUT = 90.0       # 发出去这么久还没开始回复（没在生成
 SETTLE_SECONDS = 3.0       # 不在生成、回复文字连续这么久不变才算写完
 REPORT_EVERY = 20.0        # 等回复时每隔多久在任务日志里写一次进度
 SEND_WAIT = 30.0           # 发送按钮是灰的（图片还在处理）最多等多久
+CONTINUE_CHECK = 15.0      # 打开之前的对话后最多等这么久看到之前的回复，看不到就当这条对话没了
 
 
 class ChatDriver(Protocol):
@@ -141,6 +143,34 @@ class ChatFlow:
         if any(h in here for h in LOGIN_URL_HINTS) or self.d.visible(self.spec.login_wall):
             raise not_logged_in(self.spec)
 
+    def open_existing(self, url: str, check_secs: float = CONTINUE_CHECK) -> str | None:
+        """打开之前的那条对话。打得开（地址还是那条对话、输入框出来了、看得到之前的回复）返回 None；
+        打不开返回中文原因（调用方新开对话）。没登录照样抛错。"""
+        s = self.spec
+        want = conversation_id(s, url)
+        self.d.goto(url)
+        start = self.clock()
+        while True:
+            self.check_login()
+            here = self.d.url()
+            if want and conversation_id(s, here) != want:
+                return f"会话打不开（跳到了 {here or '空白页'}，可能已被删除）"
+            if self.d.visible(s.prompt_box):
+                break
+            if self.clock() - start > s.ready_timeout:
+                return f"会话页面 {s.ready_timeout:.0f} 秒内没出现输入框（当前地址 {here}）"
+            self.d.sleep(self.poll)
+        start = self.clock()
+        while True:   # 之前的回复要在页面上：一条都看不到说明这条对话已经没了（或者是空的）
+            _, n = self.d.reply_text(self.reply_sel, self.reply_ex)
+            if n > 0:
+                if s.dismiss_buttons and self.d.visible(s.dismiss_buttons):
+                    self.d.click(s.dismiss_buttons)
+                return None
+            if self.clock() - start > check_secs:
+                return "会话里看不到之前的回复（可能已被删除或清空）"
+            self.d.sleep(self.poll)
+
     def open_chat(self, fresh: bool) -> None:
         s = self.spec
         if not fresh:
@@ -226,8 +256,10 @@ class ChatFlow:
             return True
         return bool(s.busy_marker) and self.d.visible(s.busy_marker)
 
-    def wait_reply(self, before: int, timeout: float, before_text: str = "") -> str:
-        """等回复写完：不在生成，并且回复文字连续 settle 秒不变。返回回复全文。"""
+    def wait_reply(self, before: int, timeout: float, before_text: str = "", *, strict: bool = False) -> str:
+        """等回复写完：不在生成，并且回复文字连续 settle 秒不变。返回回复全文。
+        strict（续接的对话里）：回复条数比发送前多了才算新回复，最后一条还是旧的就当没有回复，
+        长会话里不会把上一次的回复当成这次的。"""
         s = self.spec
         start = self.clock()
         started = False
@@ -245,7 +277,7 @@ class ChatFlow:
                                               "输出太长的步骤（剧本、分镜）换 API 或本机 Claude")
             busy = self.busy()
             text, n = self.d.reply_text(self.reply_sel, self.reply_ex)
-            if n <= before and text == before_text:   # 还是发送前就有的那条（或没有回复）
+            if n <= before and (strict or text == before_text):   # 还是发送前就有的那条（或没有回复）
                 text = ""
             started = started or busy or bool(text.strip())
             alert = self.d.text(s.alert) if s.alert else ""
@@ -273,17 +305,38 @@ class ChatFlow:
 def ask(d: ChatDriver, spec: SiteSpec, prompt: str, images: Sequence[Path] = (), *, timeout: float,
         log: Log, fresh: bool = False, clock: Callable[[], float] = time.monotonic, poll: float = 1.0,
         settle: float = SETTLE_SECONDS, start_timeout: float = START_TIMEOUT,
-        report_every: float = REPORT_EVERY) -> str:
-    """开新对话问一次，返回最后一条回复的全文。fresh：标签页刚新开（已经在新对话上），不用再跳转。"""
+        report_every: float = REPORT_EVERY, conversation_url: str | None = None,
+        info: dict | None = None, continue_prefix: str = "") -> str:
+    """问一次，返回这次新回复的全文。fresh：标签页刚新开（已经在新对话上），不用再跳转。
+    conversation_url：续接这条对话（打不开就新开，原因写进 info["note"]）；续接上时提示词前面加 continue_prefix。
+    info（可选）：填 {url: 结束时标签页地址, continued: 是否真的续接上了, note: 退回新对话的原因}。"""
     f = ChatFlow(d, spec, log=log, clock=clock, poll=poll, settle=settle, start_timeout=start_timeout,
                  report_every=report_every)
-    log(f"{f.label}：打开新对话")
-    f.open_chat(fresh)
+    continued, note = False, ""
+    if conversation_url:
+        log(f"{f.label}：打开之前的会话 {conversation_url}")
+        why = f.open_existing(conversation_url)
+        if why is None:
+            continued = True
+        else:
+            note = why
+            log(f"{f.label}：{why}，新开对话")
+    if not continued:
+        log(f"{f.label}：打开新对话")
+        f.open_chat(fresh and not conversation_url)
     before_text, before = d.reply_text(f.reply_sel, f.reply_ex)
     f.upload(list(images or ()))
+    if continued and continue_prefix:
+        prompt = f"{continue_prefix}\n\n{prompt}"
     f.submit(prompt)
     t0 = clock()
     log(f"{f.label}：已发送（{len(prompt)} 字），等回复写完（最长 {timeout:.0f} 秒）")
-    text = f.wait_reply(before, timeout, before_text)
+    text = f.wait_reply(before, timeout, before_text, strict=continued)
     log(f"{f.label}：回复写完，{len(text)} 字，用时 {clock() - t0:.0f} 秒")
+    if info is not None:
+        try:
+            here = d.url()
+        except BrowserError:
+            here = ""
+        info.update(url=here, continued=continued, note=note)
     return text

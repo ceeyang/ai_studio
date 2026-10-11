@@ -1,5 +1,5 @@
 /*
- * 通用网页出图流程：新对话 → 传参考图 → 输提示词 → 提交 → 等图出完 → 取原图。
+ * 通用网页出图流程：新对话（或续接之前的对话）→ 传参考图 → 输提示词 → 提交 → 等图出完 → 取原图。
  * 逐条照搬 backend/engines/browser/flow.py（同样的判断、同样的超时、同样的中文原因），只是页面操作换成
  * 扩展的 driver（background.js 里的 TabDriver，单测里是假的），所有方法都是 async。
  *
@@ -16,6 +16,25 @@ import { sniffMime } from './protocol.js';
 export const PROGRESS_MAX = 100;
 /** 等图时每隔多少秒往任务日志写一次诊断（停止按钮、候选图被排除的原因）。 */
 export const DIAG_EVERY = 30;
+/** 打开之前的对话后最多等这么多秒看到之前的回复，看不到就当这条对话没了（同 flow.py 的 CONTINUE_CHECK）。 */
+export const CONTINUE_CHECK = 15;
+/** 续接时等页面上已有的图加载稳定（再记「之前的图」）最多这么多秒（同 flow.py 的 SNAPSHOT_WAIT）。 */
+export const SNAPSHOT_WAIT = 10;
+
+/** 网址是这个网站上的一条对话时返回对话 id，否则 ''（首页、新对话页、登录页、别的网站）。 */
+export function conversationId(spec, url) {
+  if (!url || !spec.conversation_re) return '';
+  let u;
+  try {
+    u = new URL(url);
+  } catch (_e) {
+    return '';
+  }
+  const host = u.hostname.toLowerCase();
+  if (!(spec.hosts || [spec.host]).some((h) => host === h || host.endsWith('.' + h))) return '';
+  const m = new RegExp(spec.conversation_re).exec(u.pathname || '');
+  return m ? m[1] : '';
+}
 
 export class FlowError extends Error {
   constructor(kind, message) {
@@ -62,6 +81,9 @@ class Flow {
     this.poll = poll;
     this.echo = new Set(); // 网站回显的参考图（提交后马上出现的图）
     this.nRefs = 0;
+    this.continued = false; // 在之前的对话里接着发
+    this.before = new Set(); // 提交前页面上就有的图（之前几轮的结果、参考图）
+    this.beforeReply = ''; // 提交前最后一条回复的文字
   }
 
   async checkCancel() {
@@ -117,6 +139,54 @@ class Flow {
       }
       await this.d.sleep(this.poll);
     }
+  }
+
+  /** 打开之前的对话：打得开（地址还是那条、输入框出来了、看得到之前的回复）返回 ''，打不开返回中文原因。 */
+  async openExisting(url) {
+    const s = this.spec;
+    const want = conversationId(s, url);
+    await this.d.goto(url);
+    let start = this.clock();
+    for (;;) {
+      await this.checkCancel();
+      const here = String((await this.d.url()) || '');
+      if ((s.login_hosts || []).some((h) => here.includes(`://${h}/`))) throw notLoggedIn(s);
+      if (await this.d.visible(s.login_wall)) throw notLoggedIn(s);
+      if (want && conversationId(s, here) !== want) return `会话打不开（跳到了 ${here || '空白页'}，可能已被删除）`;
+      if (await this.d.visible(s.prompt_box)) break;
+      if (this.clock() - start > s.ready_timeout) {
+        return `会话页面 ${Math.round(s.ready_timeout)} 秒内没出现输入框（当前地址 ${here}）`;
+      }
+      await this.d.sleep(this.poll);
+    }
+    start = this.clock();
+    while ((await this.d.count(s.assistant_turn)) <= 0) {
+      // 之前的回复要在页面上：一条都看不到说明这条对话已经没了（或是空的）
+      await this.checkCancel();
+      if (this.clock() - start > CONTINUE_CHECK) return '会话里看不到之前的回复（可能已被删除或清空）';
+      await this.d.sleep(this.poll);
+    }
+    await this.dismiss();
+    this.continued = true;
+    return '';
+  }
+
+  /** 提交前记下页面上已有的图和最后一条回复；续接时先等已有的图加载稳定。 */
+  async snapshot() {
+    const s = this.spec;
+    const start = this.clock();
+    let last = null;
+    let srcs = [];
+    for (;;) {
+      const all = [...(await this.d.images(s.result_images)), ...(await this.d.images(s.user_images))];
+      srcs = [...new Set(all.map((i) => i.src).filter(Boolean))].sort();
+      const key = srcs.join('\n');
+      if (!this.continued || key === last || this.clock() - start > SNAPSHOT_WAIT) break;
+      last = key;
+      await this.d.sleep(this.poll);
+    }
+    this.before = new Set(srcs);
+    this.beforeReply = this.continued ? await this.d.text(s.assistant_turn, s.reply_exclude) : '';
   }
 
   /** 输入框里的参考图缩略图数：缩略图选择器和「输入框那一块里的图片数」取大的，网站改版也数得出来。 */
@@ -216,6 +286,7 @@ class Flow {
     for (const i of await this.d.images(s.result_images)) {
       if (!i.src) { skip(i, '无地址'); continue; }
       if (mine.has(i.src)) { skip(i, '是用户上传的图'); continue; }
+      if (this.before.has(i.src)) { skip(i, '是之前几轮的图'); continue; }
       if (this.echo.has(i.src)) { skip(i, '是回显的参考图'); continue; }
       if (out.has(i.src)) continue;
       if (!i.complete) { skip(i, '还没加载完'); continue; }
@@ -252,7 +323,8 @@ class Flow {
           `${s.label} 超过 ${Math.round(timeout)} 秒还没出完图，已放弃（浏览器里那条对话还在，可以去看看卡在哪，再重试）`,
         );
       }
-      const reply = await this.d.text(s.assistant_turn, s.reply_exclude);
+      let reply = await this.d.text(s.assistant_turn, s.reply_exclude);
+      if (this.continued && reply === this.beforeReply) reply = ''; // 还是上一轮的回复，这次的还没出来
       const alert = s.alert ? await this.d.text(s.alert) : '';
       for (const t of [alert, reply]) {
         if (match(s.quota_patterns, t)) {
@@ -262,7 +334,7 @@ class Flow {
       if (await this.d.visible(s.login_wall)) throw notLoggedIn(s);
       const busy = await this.isBusy();
       let imgs = await this.results();
-      if (this.nRefs && elapsed <= s.echo_seconds && imgs.length) {
+      if ((this.nRefs || this.continued) && elapsed <= s.echo_seconds && imgs.length) {
         // 生成的图不可能几秒内就出来：这时冒出来的是网站回显的参考图
         for (const i of imgs) this.echo.add(i.src);
         imgs = [];
@@ -347,17 +419,32 @@ class Flow {
 }
 
 /**
- * 跑一次出图。job: {prompt, refs: [{name, mime, b64}], timeout, reuseConversation, fresh}
- * 返回 [{src, mime, b64, via}]。
+ * 跑一次出图。job: {prompt, refs: [{name, mime, b64}], timeout, reuseConversation, fresh, conversationUrl}
+ * conversationUrl（v0.3 起）：在这条之前的对话里接着出图，打不开就新开。
+ * 返回 [{src, mime, b64, via}]；onConversation（可选）收到 {url, continued, note}：结束时标签页地址、
+ * 是否真的续接上了、退回新对话的原因。
  */
-export async function generate(d, spec, job, { isCanceled, log, progress, clock, poll = 1 } = {}) {
+export async function generate(d, spec, job, { isCanceled, log, progress, clock, poll = 1, onConversation } = {}) {
   const lg = log || (() => {});
   const pg = progress || (() => {});
   const clk = clock || (() => Date.now() / 1000);
   const f = new Flow(d, spec, { isCanceled, log: lg, progress: pg, clock: clk, poll });
   pg(0, PROGRESS_MAX);
-  lg(`${spec.label}：打开新对话`);
-  await f.openChat({ reuseConversation: !!job.reuseConversation, fresh: !!job.fresh });
+  let note = '';
+  if (job.conversationUrl) {
+    lg(`${spec.label}：打开之前的会话 ${job.conversationUrl}`);
+    note = await f.openExisting(job.conversationUrl);
+    if (note) lg(`${spec.label}：${note}，新开对话`);
+  }
+  if (!f.continued) {
+    lg(`${spec.label}：打开新对话`);
+    // 续接失败时标签页停在别的页面上：一定要跳到新对话
+    await f.openChat({
+      reuseConversation: !job.conversationUrl && !!job.reuseConversation,
+      fresh: !job.conversationUrl && !!job.fresh,
+    });
+  }
+  await f.snapshot();
   await f.upload(job.refs || []);
   await f.submit(job.prompt);
   const timeout = Number(job.timeout) || 300;
@@ -366,5 +453,7 @@ export async function generate(d, spec, job, { isCanceled, log, progress, clock,
   const imgs = await f.waitImages(timeout);
   lg(`${spec.label}：出了 ${imgs.length} 张图，用时 ${Math.round(clk() - t0)} 秒，取原图`);
   pg(PROGRESS_MAX, PROGRESS_MAX);
-  return f.download(imgs);
+  const out = await f.download(imgs);
+  if (onConversation) onConversation({ url: String((await d.url()) || ''), continued: f.continued, note });
+  return out;
 }

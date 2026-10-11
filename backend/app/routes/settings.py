@@ -37,6 +37,8 @@ class SettingsIn(BaseModel):
     image_engine: str | None = None
     video_engine: str | None = None
     steps: dict[str, str | None] | None = None
+    # 网页出图 / 网页文本模型重新生成时续接之前的网页会话（默认开）
+    web_reuse_conversation: bool | None = None
 
 
 def _engine_rows(sv, kind: str) -> list[dict]:
@@ -166,6 +168,7 @@ def build_settings_out(sv, st: AppSettings, project=None) -> dict[str, Any]:
         "video_engine": engine_row(st.video_engine, video_names, default_video_engine(sv, st=st),
                                    default_video_engine(sv, st=bare)),
         "steps": steps,
+        "web_reuse_conversation": bool(st.web_reuse_conversation),
         "project": project.slug if project is not None else None,
         "choices": {
             "llm": [llm_choice(sv, p) for p in cfg.llm.providers],
@@ -220,6 +223,8 @@ def put_settings(body: SettingsIn, request: Request):
         v = v or None
         _check(sv, STEP_KIND[step], v, STEP_LABEL[step])
         values[f"step:{step}"] = v
+    if data.get("web_reuse_conversation") is not None:
+        values["web_reuse_conversation"] = bool(data["web_reuse_conversation"])
     sv.settings.save(values)
     return _out(sv, None)
 

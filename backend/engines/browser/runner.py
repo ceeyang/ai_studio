@@ -20,14 +20,17 @@ from pathlib import Path
 from PIL import Image
 
 from backend.engines.base import EngineCall
+from backend.engines.browser import conversations as conv
 from backend.engines.browser import flow
 from backend.engines.browser.driver import PageDriver, PlaywrightDriver
 from backend.engines.browser.errors import EXT_DIR, BrowserError
-from backend.engines.browser.extension import RPC_FEATURE, ExtensionHub, decode
+from backend.engines.browser.extension import (CONVERSATION_FEATURE, RPC_FEATURE, ExtensionHub,
+                                               conversation_reload_text, decode)
 from backend.engines.browser.session import BrowserSession, cookie_names_for
 from backend.engines.browser.sites import SITES
 from backend.engines.browser.sites.base import SiteSpec
 from backend.queue.errors import JobCanceled
+from backend.queue.trace import annotate_last
 
 EXT = {"PNG": ".png", "JPEG": ".jpg", "WEBP": ".webp"}
 ASPECT_TOLERANCE = 0.015   # 宽高比差 1.5% 以内不裁
@@ -67,6 +70,8 @@ class BrowserRunner:
         self.hub = hub or ExtensionHub({"reuse_conversation": cfg.reuse_conversation,
                                         "reuse_user_tabs": cfg.reuse_user_tabs,
                                         "activate_tab": cfg.activate_tab})
+        # 网页会话记录（ConversationBook，build_services 里装上）：没有就每次新开对话、不记
+        self.conversations = None
 
     @property
     def transport(self) -> str:
@@ -144,7 +149,7 @@ class BrowserRunner:
             needs_reload = bool(info["connected"]) and RPC_FEATURE not in (info.get("features") or [])
             return {"transport": "extension", "running": info["connected"], "connected": info["connected"],
                     "extension": info, "extension_dir": str(EXT_DIR), "sites": sites,
-                    "needs_reload": needs_reload,
+                    "needs_reload": needs_reload, "conversation": self.conversation_support(),
                     "logged_in": {k: v["logged_in"] for k, v in sites.items()}}
         sess = self.session
         exe = sess.executable()
@@ -159,6 +164,36 @@ class BrowserRunner:
                 "endpoint": sess.endpoint, "user_data_dir": str(sess.cfg.user_data_dir),
                 "logged_in": logged}
 
+    # ------------------------------------------------------------ 会话续接
+    def conversation_support(self) -> dict:
+        """出图能不能续接网页会话：cdp 能；extension 要扩展报了 conversation 能力（v0.3 起）。"""
+        if self.transport != "extension":
+            return {"supported": True, "hint": None}
+        if not self.hub.connected:
+            return {"supported": False, "hint": None}
+        if self.hub.supports(CONVERSATION_FEATURE):
+            return {"supported": True, "hint": None}
+        return {"supported": False, "hint": conversation_reload_text(self.hub.version())}
+
+    def _plan(self, spec: SiteSpec, log: Callable[[str], None]) -> conv.Plan | None:
+        book = self.conversations
+        scope = conv.current_scope()
+        if book is None or scope is None or not scope.for_images:
+            return None
+        plan = book.plan(spec.key, scope)
+        if self.transport == "extension" and not self.hub.supports(CONVERSATION_FEATURE):
+            # 旧扩展：没法续接、也报不回对话地址——照旧新开对话，提示重新加载扩展
+            why = conversation_reload_text(self.hub.version())
+            log(f"{spec.label}：{why}")
+            plan.fallback(why)
+            plan.scope = None     # 读不到对话地址，不记
+            return plan
+        if plan.continuing:
+            log(f"{spec.label}：续接之前的会话 {plan.url}（已发过 {plan.turns} 轮）")
+        elif plan.reason:
+            log(f"{spec.label}：新开对话（{plan.reason}）")
+        return plan
+
     # ------------------------------------------------------------ 出图
     def run(self, call: EngineCall, *, run_dir: Path, cancel: threading.Event,
             on_progress: Callable[[int, int], None] | None = None,
@@ -169,6 +204,11 @@ class BrowserRunner:
         if spec is None or not spec.result_images:
             can = [k for k, s in self.sites.items() if s.result_images]
             raise BrowserError("browser", f"网站 {req.get('site')!r} 不能出图，可选：{', '.join(can)}")
+        plan = self._plan(spec, log)
+        if plan is not None and plan.continuing:
+            # 在已有对话里接着发：提示词照样完整，开头说明这是一张新图，不是改上一张
+            req = {**req, "prompt": f"{conv.CONTINUE_IMAGE_PREFIX} {req['prompt']}",
+                   "conversation_url": plan.url}
         run_dir = Path(run_dir)
         run_dir.mkdir(parents=True, exist_ok=True)
         (run_dir / "workflow.api.json").write_text(
@@ -181,20 +221,39 @@ class BrowserRunner:
 
         refs = [Path(p) for p in req.get("refs") or []]
         timeout = float(req.get("timeout") or 300)
+        page: dict = {}
         with self.site_lock(spec.key, spec.label, log, cancel):
             if self.transport == "extension":
-                got = self._via_extension(spec, req, refs, timeout, cancel, log, on_progress)
+                got = self._via_extension(spec, req, refs, timeout, cancel, log, on_progress, page)
             else:
                 with self._page_factory(spec) as driver:
                     got = flow.generate(driver, spec, req["prompt"], refs, timeout=timeout, cancel=cancel,
-                                        log=log, progress=on_progress, poll=self.poll)
+                                        log=log, progress=on_progress, poll=self.poll,
+                                        conversation_url=req.get("conversation_url"), info=page)
+        if plan is not None:
+            self._record(plan, spec, page, log)
         return self._save(got, run_dir, spec, req.get("aspect"), bool(req.get("fit_aspect", True)), log)
+
+    def _record(self, plan: conv.Plan, spec: SiteSpec, page: dict, log: Callable[[str], None]) -> None:
+        if plan.scope is None:   # 旧扩展：没续接、读不到地址
+            info = {"mode": "new", "url": None, "reason": plan.reason or None, "site": spec.key,
+                    "scope": None, "turns": 1}
+        else:
+            info = self.conversations.record(plan, spec, page.get("url"), continued=page.get("continued"),
+                                             note=page.get("note") or "")
+            log(conv.describe(info, spec.label))
+            if info.get("mode") == "continue":
+                info["prompt_prefix"] = conv.CONTINUE_IMAGE_PREFIX
+        annotate_last("engine", {"conversation": info})
 
     def _via_extension(self, spec: SiteSpec, req: dict, refs: list[Path], timeout: float,
                        cancel: threading.Event, log: Callable[[str], None],
-                       on_progress: Callable[[int, int], None] | None) -> list[flow.GeneratedImage]:
+                       on_progress: Callable[[int, int], None] | None,
+                       page: dict | None = None) -> list[flow.GeneratedImage]:
+        extra = {"conversation_url": req["conversation_url"]} if req.get("conversation_url") else {}
         imgs = self.hub.generate(spec.key, spec.label, req["prompt"], refs, aspect=req.get("aspect"),
-                                 timeout=timeout, cancel=cancel, log=log, progress=on_progress)
+                                 timeout=timeout, cancel=cancel, log=log, progress=on_progress,
+                                 info=page, **extra)
         got: list[flow.GeneratedImage] = []
         for img in imgs:
             w, h, fmt = decode(img, spec.label)

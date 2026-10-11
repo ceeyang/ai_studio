@@ -1,4 +1,8 @@
-"""通用网页出图流程：新对话 → 传参考图 → 输提示词 → 提交 → 等图出完 → 下原图。
+"""通用网页出图流程：新对话（或续接之前的对话）→ 传参考图 → 输提示词 → 提交 → 等图出完 → 下原图。
+
+续接之前的对话（conversation_url）时：先确认那条对话打得开（地址还是那条、输入框出来了、看得到之前的
+回复），打不开就新开；提交前记下页面上已有的图片地址和最后一条回复，等图时只认这之后新出的图，
+长会话里不会把上一张图当成这次的结果。
 
 只通过 PageDriver 操作页面，网站差异全在 SiteSpec（sites/）。任何一步不对都抛 BrowserError，
 文案说清楚是没登录、到限额、被拒、超时还是网站改版，不静默失败。
@@ -22,6 +26,8 @@ from backend.queue.errors import JobCanceled
 Log = Callable[[str], None]
 Progress = Callable[[int, int], None]
 PROGRESS_MAX = 100
+CONTINUE_CHECK = 15.0     # 打开之前的对话后最多等这么久看到之前的回复，看不到就当这条对话没了
+SNAPSHOT_WAIT = 10.0      # 续接时等页面上已有的图加载稳定（再记「之前的图」）最多这么久
 
 
 @dataclass
@@ -57,6 +63,9 @@ class _Flow:
         self.log, self.progress, self.clock, self.poll = log, progress, clock, poll
         self.echo: set[str] = set()     # 网站回显的参考图（提交后马上出现的图）
         self.n_refs = 0
+        self.continued = False          # 在之前的对话里接着发
+        self.before: set[str] = set()   # 提交前页面上就有的图（之前几轮的结果、参考图）
+        self.before_reply = ""          # 提交前最后一条回复的文字
 
     def check_cancel(self) -> None:
         if self.cancel.is_set():
@@ -87,6 +96,51 @@ class _Flow:
                                    f"（当前地址 {self.d.url()}）。网络不通，或网站改版了——"
                                    f"要更新 backend/engines/browser/sites/{s.key}.py 里的 prompt_box")
             self.d.sleep(self.poll)
+
+    def open_existing(self, url: str) -> str | None:
+        """打开之前的对话：打得开返回 None，打不开返回中文原因（调用方新开）。没登录照样抛错。"""
+        from backend.engines.browser.conversations import conversation_id
+
+        s = self.spec
+        want = conversation_id(s, url)
+        self.d.goto(url)
+        start = self.clock()
+        while True:
+            self.check_cancel()
+            if self.d.visible(s.login_wall):
+                raise not_logged_in(s)
+            here = self.d.url()
+            if want and conversation_id(s, here) != want:
+                return f"会话打不开（跳到了 {here or '空白页'}，可能已被删除）"
+            if self.d.visible(s.prompt_box):
+                break
+            if self.clock() - start > s.ready_timeout:
+                return f"会话页面 {s.ready_timeout:.0f} 秒内没出现输入框（当前地址 {here}）"
+            self.d.sleep(self.poll)
+        start = self.clock()
+        while self.d.count(s.assistant_turn) <= 0:   # 之前的回复要在页面上
+            self.check_cancel()
+            if self.clock() - start > CONTINUE_CHECK:
+                return "会话里看不到之前的回复（可能已被删除或清空）"
+            self.d.sleep(self.poll)
+        self.dismiss()
+        self.continued = True
+        return None
+
+    def snapshot(self) -> None:
+        """提交前记下页面上已有的图和最后一条回复；续接时先等已有的图加载稳定。"""
+        s = self.spec
+        start = self.clock()
+        last: tuple[str, ...] | None = None
+        while True:
+            srcs = tuple(sorted({i.src for i in self.d.images(s.result_images) if i.src}
+                                | {i.src for i in self.d.images(s.user_images) if i.src}))
+            if not self.continued or srcs == last or self.clock() - start > SNAPSHOT_WAIT:
+                break
+            last = srcs
+            self.d.sleep(self.poll)
+        self.before = set(srcs)
+        self.before_reply = self.d.text(s.assistant_turn, s.reply_exclude) if self.continued else ""
 
     def upload(self, refs: list[Path]) -> None:
         s = self.spec
@@ -139,7 +193,8 @@ class _Flow:
         out: dict[str, ImageInfo] = {}
         seen: set[tuple[str, int, int]] = set()   # 同一张图网站会再放一个副本（地址不同）：alt+尺寸相同只留第一张
         for i in self.d.images(s.result_images):
-            if not i.src or i.src in mine or i.src in self.echo or i.src in out or not i.complete:
+            if not i.src or i.src in mine or i.src in self.before or i.src in self.echo or i.src in out \
+                    or not i.complete:
                 continue
             if i.alt and (i.alt, i.width, i.height) in seen:
                 continue
@@ -167,6 +222,8 @@ class _Flow:
                 raise BrowserError("timeout", f"{s.label} 超过 {timeout:.0f} 秒还没出完图，已放弃"
                                    "（浏览器里那条对话还在，可以去看看卡在哪，再重试）")
             reply = self.d.text(s.assistant_turn, s.reply_exclude)
+            if self.continued and reply == self.before_reply:   # 还是上一轮的回复，这次的还没出来
+                reply = ""
             alert = self.d.text(s.alert) if s.alert else ""
             for t in (alert, reply):
                 if _match(s.quota_patterns, t):
@@ -176,7 +233,7 @@ class _Flow:
                 raise not_logged_in(s)
             busy = self.d.visible(s.stop_button) or bool(s.busy_marker and self.d.visible(s.busy_marker))
             imgs = self._results()
-            if self.n_refs and elapsed <= s.echo_seconds and imgs:
+            if (self.n_refs or self.continued) and elapsed <= s.echo_seconds and imgs:
                 # 生成的图不可能几秒内就出来：这时冒出来的是网站回显的参考图
                 self.echo.update(i.src for i in imgs)
                 imgs = []
@@ -237,13 +294,25 @@ class _Flow:
 def generate(driver: PageDriver, spec: SiteSpec, prompt: str, refs: list[Path], *, timeout: float,
              cancel: threading.Event | None = None, log: Log | None = None,
              progress: Progress | None = None, clock: Callable[[], float] = time.monotonic,
-             poll: float = 1.0) -> list[GeneratedImage]:
+             poll: float = 1.0, conversation_url: str | None = None,
+             info: dict | None = None) -> list[GeneratedImage]:
+    """conversation_url：在这条之前的对话里接着出图（打不开就新开）。
+    info（可选）：填 {url: 结束时标签页地址, continued: 是否真的续接上了, note: 退回新对话的原因}。"""
     log = log or (lambda m: None)
     progress = progress or (lambda v, m: None)
     f = _Flow(driver, spec, cancel=cancel, log=log, progress=progress, clock=clock, poll=poll)
     progress(0, PROGRESS_MAX)
-    log(f"{spec.label}：打开新对话")
-    f.open_chat()
+    note = ""
+    if conversation_url:
+        log(f"{spec.label}：打开之前的会话 {conversation_url}")
+        why = f.open_existing(conversation_url)
+        if why:
+            note = why
+            log(f"{spec.label}：{why}，新开对话")
+    if not f.continued:
+        log(f"{spec.label}：打开新对话")
+        f.open_chat()
+    f.snapshot()
     f.upload(list(refs))
     f.submit(prompt)
     log(f"{spec.label}：已提交，等出图（最长 {timeout:.0f} 秒）")
@@ -254,4 +323,6 @@ def generate(driver: PageDriver, spec: SiteSpec, prompt: str, refs: list[Path], 
     got = f.download(imgs)
     for g in got:
         log(f"{spec.label}：原图 {g.width}×{g.height} {g.format}（{'下载按钮' if g.via == 'download' else '直接取图片地址'}）")
+    if info is not None:
+        info.update(url=driver.url(), continued=f.continued, note=note)
     return got

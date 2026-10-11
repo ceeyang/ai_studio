@@ -97,3 +97,24 @@ def browser_status(request: Request):
     if sv.browser.transport == "extension":
         sv.browser.hub.request_status()   # 让扩展马上再报一次（下一次刷新就是新的）
     return sv.browser.status()
+
+
+@router.get("/browser/conversations")
+def browser_conversations(request: Request, scope_kind: str, scope_id: str):
+    """某个角色 / 镜头 / 场景 / 道具（scope_kind=character|shot|location|prop）在各网站上记下的网页会话：
+    重新生成时会接着这条对话发。界面上显示「在网页里打开这条会话」的链接用。"""
+    from backend.engines.browser.conversations import IMAGE_KINDS, MAX_TURNS, TEXT_KINDS
+
+    if scope_kind not in (*IMAGE_KINDS, *TEXT_KINDS):
+        raise JobError(f"没有这种作用域：{scope_kind}，可选：{', '.join((*IMAGE_KINDS, *TEXT_KINDS))}")
+    sv = services(request)
+    browser = sv.browser
+    book = getattr(browser, "conversations", None) if browser is not None else None
+    sites = getattr(browser, "sites", {}) if browser is not None else {}
+    items = book.list(scope_kind, scope_id) if book is not None else []
+    support = browser.conversation_support() if browser is not None else {"supported": False, "hint": None}
+    return {"reuse_enabled": book.enabled() if book is not None else False,
+            "supported": bool(support.get("supported")), "hint": support.get("hint"),
+            "max_turns": getattr(book, "max_turns", MAX_TURNS),
+            "items": [{"site": r["site"], "label": sites[r["site"]].label if r["site"] in sites else r["site"],
+                       "url": r["url"], "turns": r["turns"], "updated_at": r["updated_at"]} for r in items]}

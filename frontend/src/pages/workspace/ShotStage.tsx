@@ -134,6 +134,7 @@ export function ShotStage({
     try {
       for (const b of batches) {
         const body: RunIn = { stage: b.stage, candidates: count, force: b.force };
+        if (b.newConversation) body.new_conversation = true;
         if (b.ids.length > 0) body.shots = b.ids.map(String);
         const r = await run.mutateAsync(body);
         ids.push(...r.job_ids);
@@ -201,10 +202,16 @@ export function ShotStage({
   };
 
   /** 单个镜头：「生成」不强制；「重拍」「重试」强制（不强制的话后端看选定的结果还是最新的会跳过） */
-  const generateOne = async (shot: ShotDetail, st: GenStage, verb: '生成' | '重拍' | '重试') => {
+  const generateOne = async (
+    shot: ShotDetail,
+    st: GenStage,
+    verb: '生成' | '重拍' | '重试',
+    opts?: { newConversation?: boolean },
+  ) => {
     notice.clear();
     const cell = cellOf(st);
     const batch: GateBatch = { stage: st, ids: [shot.id], force: verb !== '生成' };
+    if (opts?.newConversation) batch.newConversation = true;
     const parts = [{ type: cell.type, n: st === 'keyframes' ? count : 1 }];
     if (parts[0].n > CONFIRM_OVER && !(await confirmBatch(`${verb}${cell.label}？`, parts))) return;
     await submit([batch], `${verb}${cell.label} ${shot.code}`);
@@ -363,7 +370,7 @@ export function ShotStage({
             drawerDirty.set(false);
             setShot(null);
           }}
-          onGenerate={(st) => void generateOne(openShot, st, hasSelected(openShot, st) ? '重拍' : '生成')}
+          onGenerate={(st, _saved, opts) => void generateOne(openShot, st, hasSelected(openShot, st) ? '重拍' : '生成', opts)}
           onNeedFirstFrame={() => {
             if (stage !== 'keyframes') work.goStage('keyframes', { shot: String(openShot.id) });
           }}

@@ -8,6 +8,7 @@ import type { Prop, PropPatch } from '../../api/types';
 import { EditableFields, type FieldSpec } from '../../components/EditableFields';
 import { ImageEngineSelect } from '../../components/ImageEngineSelect';
 import { Lightbox } from '../../components/Lightbox';
+import { WebConversation } from '../../components/WebConversation';
 import { engineLabel } from '../../format';
 import { useEvents } from '../../ws/EventsContext';
 
@@ -38,6 +39,8 @@ export function PropCard({ prop, slug, onDirtyChange }: { prop: Prop; slug: stri
   const use = useUsePropImage(slug);
   const [count, setCount] = useState(1);
   const [engine, setEngine] = useState('');
+  // 网页出图：这次不续接之前的网页对话（提交后复位）
+  const [newConv, setNewConv] = useState(false);
   const [preview, setPreview] = useState<number | null>(null);
   const stepDefault = useStepDefault(slug, 'prop');
   const images = prop.images ?? [];
@@ -136,7 +139,12 @@ export function PropCard({ prop, slug, onDirtyChange }: { prop: Prop; slug: stri
             className="sm"
             disabled={draw.isPending || !canDraw}
             title={canDraw ? '只拍这个道具、白底' : '道具还没有英文说法，先写英文补充描述并保存'}
-            onClick={() => draw.mutate({ id: prop.id, count, engine: engine || undefined })}
+            onClick={() =>
+              draw.mutate(
+                { id: prop.id, count, engine: engine || undefined, new_conversation: newConv || undefined },
+                { onSuccess: () => setNewConv(false) },
+              )
+            }
           >
             {jobs.length > 0 ? `出道具图（${jobs.length} 张进行中）` : '出道具图'}
           </button>
@@ -156,6 +164,14 @@ export function PropCard({ prop, slug, onDirtyChange }: { prop: Prop; slug: stri
             />
           </label>
         </div>
+        <WebConversation
+          scopeKind="prop"
+          scopeId={prop.id}
+          engine={engine || stepDefault}
+          newConversation={newConv}
+          onNewConversationChange={setNewConv}
+          label={`${prop.name} 道具图`}
+        />
         {error && <p className="error small">{errorText(error)}</p>}
       </div>
       {preview !== null && images[preview] && (

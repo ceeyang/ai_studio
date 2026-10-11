@@ -14,6 +14,8 @@ export interface GateBatch {
   ids: number[];
   /** 已有选定结果（重拍）或过期的要强制，否则后端会跳过「已是最新」的格子 */
   force: boolean;
+  /** 网页出图这次不续接之前的网页会话（镜头抽屉勾了「新开对话」） */
+  newConversation?: boolean;
 }
 
 export type ShotGate =

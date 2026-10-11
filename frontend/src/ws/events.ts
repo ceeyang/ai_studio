@@ -85,6 +85,8 @@ export function invalidationsFor(ev: WsEvent): QueryKey[] {
       if (ev.job.type === 'image.prop') out.push(['props']);
       if (SETTLED.includes(ev.job.status)) {
         out.push(['episode'], ['exports']);
+        // 网页出图 / 网页文本模型可能新开或续接了一条网页会话：抽屉里的「在网页里打开这条会话」跟着刷新
+        out.push(['browser-conversations']);
         if (EPISODES_TYPES.includes(ev.job.type)) out.push(['episodes']);
         if (LLM_TYPES.includes(ev.job.type)) out.push(['characters'], ['locations'], ['style'], ['props']);
       }

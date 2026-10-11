@@ -72,7 +72,8 @@ def draw_location_images(loc_id: int, body: LocationDrawIn, request: Request):
     eng = sv.engines.image(engine_name)
     check_ready(eng)
     m = manager(request)
-    return RunOut(job_ids=[m.submit(TASK, {"location_id": loc_id, "engine": engine_name},
+    return RunOut(job_ids=[m.submit(TASK, {"location_id": loc_id, "engine": engine_name,
+                                           **({"new_conversation": True} if body.new_conversation else {})},
                                     project_id=project_id, owner_type="location", owner_id=loc_id,
                                     model_family=eng.family)
                            for _ in range(body.count)])

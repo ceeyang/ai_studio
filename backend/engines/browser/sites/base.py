@@ -56,4 +56,6 @@ class SiteSpec:
     # 带参考图时，提交后这么多秒内就出现的「结果图」当成网站回显的参考图（user_images 选择器失效时兜底）
     echo_seconds: float = 5.0
     expected_seconds: float = 90.0           # 进度条按这个时长估
+    # 对话地址里的对话 id（正则，第 1 组是 id）：续接网页会话时认地址用（chatgpt.com/c/<id> …）
+    conversation_re: str = ""
     extra: dict = field(default_factory=dict)

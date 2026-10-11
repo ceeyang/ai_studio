@@ -93,6 +93,15 @@ describe('invalidationsFor', () => {
     ]);
   });
 
+  it('任务结束时刷新网页会话（「在网页里打开这条会话」）；进行中不刷新', () => {
+    expect(invalidationsFor({ type: 'job', job: makeJob({ id: 6, type: 'image.keyframe', status: 'done' }) })).toContainEqual([
+      'browser-conversations',
+    ]);
+    expect(invalidationsFor({ type: 'job', job: makeJob({ id: 6, type: 'image.keyframe', status: 'running' }) })).not.toContainEqual([
+      'browser-conversations',
+    ]);
+  });
+
   it('日志事件只刷新那个任务；进度和队列事件不刷新任何查询', () => {
     expect(invalidationsFor({ type: 'log', job_id: 9, line: 'x' })).toEqual([['job', 9]]);
     expect(invalidationsFor({ type: 'progress', job_id: 9, value: 1, max: 2 })).toEqual([]);

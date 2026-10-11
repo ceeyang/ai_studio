@@ -17,6 +17,7 @@ import {
 import type { Candidate, Character, DesignOption, RefreshLooksOut } from '../../api/types';
 import { useConfirm } from '../../components/ConfirmDialog';
 import { ImageEngineSelect } from '../../components/ImageEngineSelect';
+import { WebConversation } from '../../components/WebConversation';
 import { engineLabel } from '../../format';
 import { Lightbox } from '../../components/Lightbox';
 import { useEvents } from '../../ws/EventsContext';
@@ -217,6 +218,8 @@ export function CharacterLooks({
   const [preview, setPreview] = useState<number | null>(null);
   const [count, setCount] = useState(2);
   const [engine, setEngine] = useState('');
+  // 网页出图：这次不续接之前的网页对话（提交后复位）
+  const [newConv, setNewConv] = useState(false);
   // 「默认」是设置页定妆照这一步的设置，没设置就是项目的图像引擎
   const portraitDefault = useStepDefault(slug, 'portrait');
   const [suggestJob, setSuggestJob] = useState<number | null>(null);
@@ -231,7 +234,12 @@ export function CharacterLooks({
   /** 外貌换了之后：把镜头里抄着旧外貌（old）的地方换成新造型 */
   const syncShots = (old: string[]) =>
     refresh.mutate({ id: c.id, old: old.filter((x) => x.trim()) }, { onSuccess: (r) => setRefreshMsg(refreshText(r)) });
-  const drawAgain = () => draw.mutate({ id: c.id, count, engine: engine || undefined });
+  const drawWith = (visual_prompt?: string) =>
+    draw.mutate(
+      { id: c.id, count, visual_prompt, engine: engine || undefined, new_conversation: newConv || undefined },
+      { onSuccess: () => setNewConv(false) },
+    );
+  const drawAgain = () => drawWith();
 
   /** 设为当前造型：资料有没保存的修改时先提示；否则确认后才切换（带提示词的会覆盖外貌描述）。 */
   const usePortrait = async (p: Candidate) => {
@@ -350,6 +358,14 @@ export function CharacterLooks({
           {suggesting ? 'AI 推荐中…' : 'AI 推荐造型'}
         </button>
       </div>
+      <WebConversation
+        scopeKind="character"
+        scopeId={c.id}
+        engine={engine || portraitDefault}
+        newConversation={newConv}
+        onNewConversationChange={setNewConv}
+        label="抽卡"
+      />
       {suggestFailed && (
         <p className="error">
           推荐造型失败：{job.data?.error ?? job.data?.status} · <Link to={`/jobs?job=${suggestJob}`}>查看任务</Link>
@@ -368,7 +384,7 @@ export function CharacterLooks({
               opt={o}
               index={i}
               busy={draw.isPending || patch.isPending}
-              onDraw={(prompt) => draw.mutate({ id: c.id, count, visual_prompt: prompt, engine: engine || undefined })}
+              onDraw={(prompt) => drawWith(prompt)}
               onSetPrompt={setPrompt}
             />
           ))}

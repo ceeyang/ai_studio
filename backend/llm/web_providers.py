@@ -1,8 +1,9 @@
 """网页文本模型：在用户自己浏览器里已登录的 ChatGPT / Gemini / Claude 网页上问（免费额度，不用 API Key）。
 
-走浏览器扩展（browser-extension，v0.2 起有 rpc）：每次调用开一个新对话（在专门写文本的标签页里，不用出图的
-那个），把 system 和对话拼成一条提示词发出去，等回复写完、文字稳定，读最后一条回复的全文；json_mode 时要求
-「只输出 JSON，放在 ```json 代码块里」，解析交给网关（extract_json，不合格按网关的重试）。页面流程见
+走浏览器扩展（browser-extension，v0.2 起有 rpc）：在专门写文本的标签页里（不用出图的那个）开一个新对话，
+归属到某集某一步的调用（剧本、分镜每段、推荐角色）重新生成时续接上次那条对话（backend/engines/browser/
+conversations.py；超过 20 轮、对话打不开、设置里关掉时新开）。把 system 和对话拼成一条提示词发出去，
+等回复写完、文字稳定，读这次新增的那条回复的全文；json_mode 时要求「只输出 JSON，放在 ```json 代码块里」，解析交给网关（extract_json，不合格按网关的重试）。页面流程见
 backend/engines/browser/chat.py。
 
 同一个网站同时只跑一件事：和网页出图共用 BrowserRunner 的网站锁（出图在跑时排队等）。
@@ -18,6 +19,7 @@ from typing import Any
 from backend.config import ProviderCfg
 from backend.engines.browser.errors import BrowserError, excerpt
 from backend.llm.base import LLMError, LLMResult
+from backend.queue.trace import annotate_last
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +85,7 @@ class WebChatProvider:
     """LLMProvider：在网页上问。browser 是 BrowserRunner（或返回它的函数）；没有时调用就报错。"""
 
     accepts_log = True
+    accepts_scope = True      # 网关把这次 LLM 调用的 key 传进来（scope_key），按集、按步骤续接网页会话
 
     def __init__(self, cfg: ProviderCfg, *, browser: Any = None,
                  clock: Callable[[], float] = time.monotonic, chat: Callable[..., str] | None = None,
@@ -103,8 +106,9 @@ class WebChatProvider:
         return b() if callable(b) and not hasattr(b, "hub") else b
 
     def complete(self, system: str, messages: list[dict], *, json_mode: bool = True, images=None,
-                 log: Callable[[str], None] | None = None) -> LLMResult:
+                 log: Callable[[str], None] | None = None, scope_key: str | None = None) -> LLMResult:
         from backend.engines.browser import chat as chat_mod
+        from backend.engines.browser import conversations as conv
 
         runner = self.runner()
         label = _label(self.site, runner)
@@ -135,8 +139,23 @@ class WebChatProvider:
                 if tab is None:
                     raise LLMError(f"{label}：浏览器扩展没给出标签页")
                 say(f"{label}：{info.get('how') or '用一个标签页'}")
+                # 网页会话续接：只有归属到某集某一步的调用（剧本、分镜、推荐角色）才续接，写梗概等每次新对话
+                scope = conv.current_scope()
+                scope = scope.child(scope_key or "") if scope is not None and scope.for_text else None
+                book = getattr(runner, "conversations", None)
+                plan = book.plan(self.site, scope) if (book is not None and scope is not None) else None
+                extra: dict = {}
+                page: dict = {}
+                if plan is not None:
+                    extra = {"conversation_url": plan.url, "info": page,
+                             "continue_prefix": conv.CONTINUE_TEXT_PREFIX}
                 text = ask(make_driver(runner.hub, tab), spec, prompt, list(images or ()), timeout=timeout,
-                           log=say, fresh=bool(info.get("fresh")))
+                           log=say, fresh=bool(info.get("fresh")), **extra)
+                if plan is not None:
+                    got = book.record(plan, spec, page.get("url"), continued=page.get("continued"),
+                                      note=page.get("note") or "")
+                    say(conv.describe(got, label))
+                    annotate_last("llm", {"conversation": got})
         except BrowserError as e:
             raise LLMError(str(e)) from None
         if json_mode and "{" not in text:

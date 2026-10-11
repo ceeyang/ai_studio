@@ -32,6 +32,7 @@ class RunOptions:
     export: dict | None = None   # ExportOptions 的字段：subtitles / dub / end_card / trim
     scene_block_ids: list[int] | None = None   # 只重写这些段落的分镜（只对 storyboard 有效）
     note: str | None = None      # 修改意见：写进 script / storyboard 提示词，非空时等同 force
+    new_conversation: bool = False   # 网页引擎这次不续接之前的网页会话、新开一条（只作用于这一阶段）
 
 
 @dataclass
@@ -298,10 +299,12 @@ def submit_chain(manager, db: Database, engines, episode_id: int, stages: list[s
             payload["note"] = note
         if opts.scene_block_ids:
             payload["scene_block_ids"] = list(opts.scene_block_ids)
+        if opts.new_conversation:
+            payload["new_conversation"] = True
         if stages[1:]:
             payload["then"] = stages[1:]
-            # 修改意见和按段只作用于这一阶段，不带进后续阶段
-            payload["options"] = asdict(replace(opts, note=None, scene_block_ids=None))
+            # 修改意见、按段、新开网页对话只作用于这一阶段，不带进后续阶段
+            payload["options"] = asdict(replace(opts, note=None, scene_block_ids=None, new_conversation=False))
         return [manager.submit(first, payload, owner_type="episode", owner_id=episode_id,
                                depends_on=deps, **common)]
 
@@ -337,6 +340,8 @@ def submit_chain(manager, db: Database, engines, episode_id: int, stages: list[s
                 continue
             fam = img_fam[sid]
             kf_payload = {"shot_id": sid, "force": opts.force, "candidates": max(1, opts.candidates)}
+            if opts.new_conversation:
+                kf_payload["new_conversation"] = True
             kf[sid] = [manager.submit("image.keyframe", kf_payload, owner_type="shot",
                                       owner_id=sid, model_family=fam, depends_on=deps, **common)
                        for _ in range(max(1, opts.candidates))]

@@ -223,6 +223,26 @@ describe('ShotStage', () => {
     expect(posts(calls)[0].body).toEqual({ stage: 'keyframes', candidates: 1, force: true, shots: ['11'] });
   });
 
+  it('抽屉里首帧用网页引擎：勾「新开对话」后重出首帧，请求带 new_conversation: true', async () => {
+    const shot = makeShot({ id: 11, code: 'S01', image_engine: 'gpt_image', slots: [chosen(1, 'first_frame')] });
+    const calls = installFetch(
+      routes({
+        'GET /api/episodes/4': makeEpisode({ id: 4, shots: [shot] }),
+        'GET /api/engines': { image: [{ name: 'gpt_image', family: 'chatgpt_web', runtime: 'browser', caps: {} }], video: [] },
+        'GET /api/browser/conversations?scope_kind=shot&scope_id=11': { reuse_enabled: true, supported: true, hint: null, max_turns: 20, items: [] },
+        'POST /api/episodes/4/run': { job_ids: [94] },
+      }),
+    );
+    renderAt(<Harness />, { ...AT, route: '/projects/demo/episodes/4?stage=keyframes&shot=11' });
+    const user = userEvent.setup();
+    const dlg = await screen.findByRole('dialog', { name: '镜头 S01 详情' });
+    expect(await within(dlg).findByText('还没有网页会话，第一次出图会新开。')).toBeTruthy();
+    await user.click(within(dlg).getByRole('checkbox', { name: '首帧 新开对话' }));
+    await user.click(within(dlg).getByRole('button', { name: '重拍首帧' }));
+    await waitFor(() => expect(posts(calls)).toHaveLength(1));
+    expect(posts(calls)[0].body).toEqual({ stage: 'keyframes', candidates: 1, force: true, shots: ['11'], new_conversation: true });
+  });
+
   it('没有主按钮（全页唯一的主按钮在阶段条），也不打 data-next-action', async () => {
     installFetch(routes());
     const { container } = renderAt(<Harness />, AT);

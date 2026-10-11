@@ -43,6 +43,8 @@ def draw_portraits(char_id: int, body: PortraitDrawIn, request: Request):
     payload: dict = {"character_id": char_id, "engine": engine_name}
     if vp:
         payload["visual_prompt"] = vp
+    if body.new_conversation:
+        payload["new_conversation"] = True
     m = manager(request)
     return RunOut(job_ids=[m.submit("image.portrait", payload, project_id=project_id,
                                     owner_type="character", owner_id=char_id,
@@ -183,7 +185,8 @@ def turnaround_generate(char_id: int, body: TurnaroundGenerateIn, request: Reque
         project_id = c.project_id
     m = manager(request)
     return RunOut(job_ids=[m.submit("image.turnaround",
-                                    {"character_id": char_id, "sheet": sh, "engine": engine_name},
+                                    {"character_id": char_id, "sheet": sh, "engine": engine_name,
+                                     **({"new_conversation": True} if body.new_conversation else {})},
                                     project_id=project_id, owner_type="character",
                                     owner_id=char_id, model_family=engine.family)
                            for sh in sheets for _ in range(body.count)])

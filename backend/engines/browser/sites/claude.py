@@ -54,5 +54,6 @@ CLAUDE = SiteSpec(
     min_image_px=384,
     settle_seconds=4.0,
     no_image_grace=12.0,
+    conversation_re=r"/chat/([0-9A-Za-z][0-9A-Za-z-]{7,})",
     expected_seconds=60.0,
 )

@@ -98,6 +98,8 @@ export const CHATGPT = {
   settle_seconds: 5,
   no_image_grace: 15,
   echo_seconds: 5,
+  // 对话地址里的对话 id（第 1 组）：续接网页会话时认地址用，和 backend/engines/browser/sites/chatgpt.py 一致
+  conversation_re: '/c/([0-9A-Za-z][0-9A-Za-z-]{7,})',
   expected_seconds: 120,
   /** 取原图时依次试的地址：ChatGPT 页面里的就是原图。 */
   fullSize: (src) => [src],

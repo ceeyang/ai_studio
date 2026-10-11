@@ -191,6 +191,7 @@ class TurnaroundGenerateIn(BaseModel):
     sheets: list[Literal["body", "face"]] | None = None   # 不给就全身 + 头像各一张
     count: int = Field(1, ge=1, le=4)                     # 每种出几张候选
     engine: str | None = None                             # 不给用默认（H3 + 定妆照锁脸）
+    new_conversation: bool = False                        # 网页引擎：这次不续接之前的网页会话，新开一条
 
 
 class TurnaroundSelectIn(BaseModel):
@@ -205,6 +206,7 @@ class PortraitDrawIn(BaseModel):
     count: int = Field(1, ge=1, le=4)
     visual_prompt: str | None = None     # 不给就用角色当前的外貌提示词
     engine: str | None = None            # 不给用项目的图像引擎
+    new_conversation: bool = False                        # 网页引擎：这次不续接之前的网页会话，新开一条
 
 
 class SuggestIn(BaseModel):
@@ -269,6 +271,7 @@ class LocationOut(ORM):
 class LocationDrawIn(BaseModel):
     count: int = Field(2, ge=1, le=4)
     engine: str | None = None
+    new_conversation: bool = False                        # 网页引擎：这次不续接之前的网页会话，新开一条
 
 
 class LocationPatch(BaseModel):
@@ -584,6 +587,7 @@ class RunIn(BaseModel):
     note: str | None = Field(None, max_length=500)   # 修改意见，写进提示词；非空时等同 force
     # 不强制的剧本/分镜运行会删掉有选定首帧/视频或改过的镜头时，要带 confirm=true 才提交
     confirm: bool = False
+    new_conversation: bool = False                        # 网页引擎：这次不续接之前的网页会话，新开一条
 
 
 class FitKhmerIn(BaseModel):

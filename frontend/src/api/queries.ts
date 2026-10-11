@@ -9,10 +9,12 @@ import type {
   AppSettingsIn,
   ArchivedCandidate,
   Bgm,
+  BrowserConversations,
   BrowserLoginOut,
   BrowserStatus,
   Candidate,
   Character,
+  ConversationScopeKind,
   CharacterIn,
   CharacterPatch,
   DoctorCheck,
@@ -83,6 +85,8 @@ export const keys = {
   queue: ['queue'] as const,
   doctor: ['doctor'] as const,
   browserStatus: ['browserStatus'] as const,
+  // 网页会话续接：出图任务结束时按 ['browser-conversations'] 前缀刷新
+  browserConversations: (kind: ConversationScopeKind, id: string) => ['browser-conversations', kind, id] as const,
   config: ['config'] as const,
   health: ['health'] as const,
   // 设置页「默认模型」；带项目时图片/视频步骤的生效值按项目算
@@ -243,6 +247,19 @@ export function useBrowserStatus(enabled = true) {
     queryKey: keys.browserStatus,
     queryFn: () => api.get<BrowserStatus>('/api/browser/status'),
     refetchInterval: 5000,
+    retry: false,
+    enabled,
+  });
+}
+
+/** 这个角色 / 镜头 / 场景 / 道具在各网站上记着的网页会话（重新出图时续接）、设置里开没开续接。 */
+export function useBrowserConversations(kind: ConversationScopeKind, id: number | string, enabled = true) {
+  const sid = String(id);
+  return useQuery({
+    queryKey: keys.browserConversations(kind, sid),
+    queryFn: () =>
+      api.get<BrowserConversations>(`/api/browser/conversations?scope_kind=${enc(kind)}&scope_id=${enc(sid)}`),
+    staleTime: 30000,
     retry: false,
     enabled,
   });
@@ -465,11 +482,25 @@ export function useCreateCharacter(slug: string) {
 export function useDrawPortraits(slug: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, count, visual_prompt, engine }: { id: number; count: number; visual_prompt?: string; engine?: string }) =>
+    mutationFn: ({
+      id,
+      count,
+      visual_prompt,
+      engine,
+      new_conversation,
+    }: {
+      id: number;
+      count: number;
+      visual_prompt?: string;
+      engine?: string;
+      /** 网页出图这次不续接之前的会话 */
+      new_conversation?: boolean;
+    }) =>
       api.post<RunOut>(`/api/characters/${id}/portraits/draw`, {
         count,
         ...(visual_prompt ? { visual_prompt } : {}),
         ...(engine ? { engine } : {}),
+        ...(new_conversation ? { new_conversation: true } : {}),
       }),
     onSuccess: () => invalidate(qc, keys.characters(slug), ['jobs'], keys.queue),
   });
@@ -527,10 +558,21 @@ export function usePatchTurnaroundLook(slug: string) {
 export function useGenerateTurnaround(slug: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, sheets, engine }: { id: number; sheets?: TurnaroundSheetKey[]; engine?: string }) =>
+    mutationFn: ({
+      id,
+      sheets,
+      engine,
+      new_conversation,
+    }: {
+      id: number;
+      sheets?: TurnaroundSheetKey[];
+      engine?: string;
+      new_conversation?: boolean;
+    }) =>
       api.post<RunOut>(`/api/characters/${id}/turnaround/generate`, {
         ...(sheets ? { sheets } : {}),
         ...(engine ? { engine } : {}),
+        ...(new_conversation ? { new_conversation: true } : {}),
       }),
     onSuccess: () => invalidate(qc, keys.characters(slug), ['jobs'], keys.queue),
   });
@@ -577,8 +619,12 @@ export function usePatchLocation(slug: string) {
 export function useDrawLocationImages(slug: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, count, engine }: { id: number; count: number; engine?: string }) =>
-      api.post<RunOut>(`/api/locations/${id}/images/draw`, { count, ...(engine ? { engine } : {}) }),
+    mutationFn: ({ id, count, engine, new_conversation }: { id: number; count: number; engine?: string; new_conversation?: boolean }) =>
+      api.post<RunOut>(`/api/locations/${id}/images/draw`, {
+        count,
+        ...(engine ? { engine } : {}),
+        ...(new_conversation ? { new_conversation: true } : {}),
+      }),
     onSuccess: () => invalidate(qc, keys.locations(slug), ['jobs'], keys.queue),
   });
 }
@@ -627,8 +673,12 @@ export function usePatchProp(slug: string) {
 export function useDrawPropImages(slug: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, count, engine }: { id: number; count: number; engine?: string }) =>
-      api.post<RunOut>(`/api/props/${id}/images/draw`, { count, ...(engine ? { engine } : {}) }),
+    mutationFn: ({ id, count, engine, new_conversation }: { id: number; count: number; engine?: string; new_conversation?: boolean }) =>
+      api.post<RunOut>(`/api/props/${id}/images/draw`, {
+        count,
+        ...(engine ? { engine } : {}),
+        ...(new_conversation ? { new_conversation: true } : {}),
+      }),
     onSuccess: () => invalidate(qc, keys.props(slug), ['jobs'], keys.queue),
   });
 }

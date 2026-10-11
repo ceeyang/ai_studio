@@ -90,5 +90,6 @@ CHATGPT = SiteSpec(
     min_image_px=384,
     settle_seconds=5.0,
     no_image_grace=15.0,
+    conversation_re=r"/c/([0-9A-Za-z][0-9A-Za-z-]{7,})",
     expected_seconds=120.0,
 )

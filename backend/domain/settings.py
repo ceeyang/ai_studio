@@ -43,6 +43,7 @@ STEP_KIND = {**{k: "llm" for k in LLM_STEPS}, **{k: "image" for k in IMAGE_STEPS
              **{k: "video" for k in VIDEO_STEPS}}
 STEP_LABEL = {**LLM_STEPS, **IMAGE_STEPS, **VIDEO_STEPS}
 GLOBAL_KEYS = {"text_model": "llm", "image_engine": "image", "video_engine": "video"}
+FLAG_KEYS = ("web_reuse_conversation",)   # 开关类的全局设置（存 true / false；没有这一行 = 默认）
 FALLBACK_IMAGE = "zimage"
 FALLBACK_VIDEO = "h3_video"
 SHEET_ENGINE = "h3_image"          # 三视图没设置时优先用 H3（带定妆照锁脸）
@@ -54,6 +55,8 @@ class AppSettings:
     image_engine: str | None = None
     video_engine: str | None = None
     steps: dict[str, str] = field(default_factory=dict)    # 只放设置了的步骤
+    # 网页出图 / 网页文本模型重新生成时续接之前的网页会话（backend/engines/browser/conversations.py），默认开
+    web_reuse_conversation: bool = True
 
     def step(self, key: str) -> str | None:
         return self.steps.get(key) or None
@@ -69,6 +72,8 @@ class SettingsStore:
         st = AppSettings(**{k: (rows.get(k) or None) for k in GLOBAL_KEYS})
         st.steps = {k[5:]: v for k, v in rows.items()
                     if k.startswith("step:") and v and k[5:] in STEP_KIND}
+        if isinstance(rows.get(FLAG_KEYS[0]), bool):
+            st.web_reuse_conversation = rows[FLAG_KEYS[0]]
         return st
 
     def save(self, values: dict[str, Any]) -> None:

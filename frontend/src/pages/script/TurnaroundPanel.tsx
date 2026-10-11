@@ -16,6 +16,7 @@ import {
 import type { Character, JobBrief, TurnaroundCell, TurnaroundSheet, TurnaroundSheetKey } from '../../api/types';
 import { useUnsavedGuard } from '../../components/EditableFields';
 import { ImageEngineSelect } from '../../components/ImageEngineSelect';
+import { WebConversation } from '../../components/WebConversation';
 import { engineLabel } from '../../format';
 import { useEvents } from '../../ws/EventsContext';
 import { isDecoding } from '../../ws/events';
@@ -172,6 +173,8 @@ export function TurnaroundPanel({
   useEffect(() => setLook(t?.look ?? ''), [t?.look]);
   const [lookJobId, setLookJobId] = useState<number | null>(null);
   const [engine, setEngine] = useState('');
+  // 网页出图：这次不续接之前的网页对话（提交后复位）
+  const [newConv, setNewConv] = useState(false);
   // 「默认」按设置页三视图这一步的设置算（没设置：有 H3 用 H3，否则项目的图像引擎）
   const sheetDefault = useStepDefault(slug, 'turnaround');
   const job = useJob(lookJobId);
@@ -219,7 +222,10 @@ export function TurnaroundPanel({
         return; // 错误由 patchLook.error 显示
       }
     }
-    gen.mutate({ id: c.id, ...(sheets ? { sheets } : {}), engine: eng });
+    gen.mutate(
+      { id: c.id, ...(sheets ? { sheets } : {}), engine: eng, new_conversation: newConv || undefined },
+      { onSuccess: () => setNewConv(false) },
+    );
   };
 
   return (
@@ -242,6 +248,14 @@ export function TurnaroundPanel({
           </button>
           {blockedReason && <span className="muted small">{blockedReason}</span>}
         </div>
+        <WebConversation
+          scopeKind="character"
+          scopeId={c.id}
+          engine={engine || sheetDefault || t.default_engine}
+          newConversation={newConv}
+          onNewConversationChange={setNewConv}
+          label="三视图"
+        />
       </div>
 
       <div className="turn-look">

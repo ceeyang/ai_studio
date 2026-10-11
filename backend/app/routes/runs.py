@@ -64,7 +64,8 @@ def run_stage(episode_id: int, body: RunIn, request: Request):
     opts = RunOptions(shots=body.shots, candidates=body.candidates, force=body.force,
                       priority=body.priority,
                       export=body.export.model_dump() if body.export else None,
-                      scene_block_ids=body.scene_block_ids, note=body.note)
+                      scene_block_ids=body.scene_block_ids, note=body.note,
+                      new_conversation=body.new_conversation)
     notes = continue_wait_notes(sv.db, episode_id, stages, body.shots)   # 提交前算：跳过的是哪些
     ids = submit_chain(manager(request), sv.db, sv.engines, episode_id, stages, opts,
                        precheck=_precheck(sv))

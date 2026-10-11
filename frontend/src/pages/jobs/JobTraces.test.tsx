@@ -6,7 +6,7 @@ import { makeJob } from '../../test/factories';
 import { installFetch } from '../../test/fetch';
 import { renderAt } from '../../test/render';
 import { JobsPage } from '../JobsPage';
-import { JobTraces, mediaUrl, traceSummary } from './JobTraces';
+import { ConversationLine, JobTraces, mediaUrl, traceSummary } from './JobTraces';
 
 const LLM: JobTrace = {
   id: 1,
@@ -145,5 +145,40 @@ describe('JobTraces', () => {
     expect(headings.indexOf('调用明细')).toBeGreaterThan(headings.indexOf('日志'));
     expect(screen.getByText('调试信息')).toBeTruthy();
     await waitFor(() => expect(screen.getByText('LLM · storyboard · claude · 第 1 次 · 18.6s')).toBeTruthy());
+  });
+});
+
+describe('调用明细里的网页会话', () => {
+  it('续接：「续接会话 <链接>」，链接在新标签页打开', () => {
+    renderAt(<ConversationLine conv={{ mode: 'continue', url: 'https://chatgpt.com/c/abc', reason: null, site: 'chatgpt', scope: 'shot:11', turns: 3 }} />);
+    const line = screen.getByTestId('trace-conversation');
+    expect(line.textContent).toBe('续接会话 https://chatgpt.com/c/abc');
+    const a = within(line).getByRole('link');
+    expect(a.getAttribute('href')).toBe('https://chatgpt.com/c/abc');
+    expect(a.getAttribute('target')).toBe('_blank');
+  });
+
+  it('新开：有原因时括号里写；url 空时只写文字；没有 conversation 不显示', () => {
+    const { unmount } = renderAt(
+      <ConversationLine conv={{ mode: 'new', url: null, reason: '用户勾了新开对话', site: 'gemini', scope: 'character:6', turns: 0 }} />,
+    );
+    const line = screen.getByTestId('trace-conversation');
+    expect(line.textContent).toBe('新开会话（用户勾了新开对话）');
+    expect(within(line).queryByRole('link')).toBeNull();
+    unmount();
+    renderAt(<ConversationLine conv={undefined} />);
+    expect(screen.queryByTestId('trace-conversation')).toBeNull();
+  });
+
+  it('引擎调用的明细里显示会话行', async () => {
+    installFetch({
+      'GET /api/jobs/7/traces': {
+        job_id: 7,
+        traces: [{ ...ENGINE, data: { ...ENGINE.data, conversation: { mode: 'new', url: 'https://gemini.google.com/app/x', reason: '超过 20 轮', site: 'gemini', scope: 'shot:3', turns: 21 } } }],
+      },
+    });
+    renderAt(<JobTraces jobId={7} active={false} />);
+    const line = await screen.findByTestId('trace-conversation');
+    expect(line.textContent).toBe('新开会话 https://gemini.google.com/app/x（超过 20 轮）');
   });
 });

@@ -48,6 +48,31 @@ describe('LocationImages', () => {
     await waitFor(() => expect(calls.some((c) => c.url === '/api/locations/3/image')).toBe(true));
   });
 
+  it('网页引擎出场景图：勾「新开对话」时请求带 new_conversation: true，提交后复位；不勾不带', async () => {
+    const calls = installFetch({
+      'GET /api/engines': { image: [{ name: 'gpt_image', family: 'chatgpt_web', runtime: 'browser', caps: {} }], video: [] },
+      'GET /api/browser/conversations?scope_kind=location&scope_id=3': {
+        reuse_enabled: true, supported: true, hint: null, max_turns: 20,
+        items: [{ site: 'chatgpt', label: 'ChatGPT', url: 'https://chatgpt.com/c/loc3', turns: 2, updated_at: null }],
+      },
+      'POST /api/locations/3/images/draw': { job_ids: [1] },
+    });
+    renderAt(<LocationImages loc={LOC} slug="demo" />);
+    const user = userEvent.setup();
+    await waitFor(() => expect(within(screen.getByLabelText('修车行 场景图引擎')).getByRole('option', { name: /ChatGPT 网页/ })).toBeTruthy());
+    await user.selectOptions(screen.getByLabelText('修车行 场景图引擎'), 'gpt_image');
+    expect((await screen.findByRole('link', { name: '在网页里打开这条会话' })).getAttribute('href')).toBe('https://chatgpt.com/c/loc3');
+    const box = screen.getByRole('checkbox', { name: '修车行 场景图 新开对话' }) as HTMLInputElement;
+    await user.click(box);
+    await user.click(screen.getByRole('button', { name: '出场景图' }));
+    await waitFor(() => expect(calls.filter((c) => c.method === 'POST')).toHaveLength(1));
+    expect(calls.filter((c) => c.method === 'POST')[0].body).toEqual({ count: 2, engine: 'gpt_image', new_conversation: true });
+    await waitFor(() => expect(box.checked).toBe(false));
+    await user.click(screen.getByRole('button', { name: '出场景图' }));
+    await waitFor(() => expect(calls.filter((c) => c.method === 'POST')).toHaveLength(2));
+    expect(calls.filter((c) => c.method === 'POST')[1].body).toEqual({ count: 2, engine: 'gpt_image' });
+  });
+
   it('生成中显示进度卡，失败显示原因；没有英文提示词时不能出图', () => {
     installFetch({ 'GET /api/engines': { image: [], video: [] } });
     const { unmount } = renderAt(

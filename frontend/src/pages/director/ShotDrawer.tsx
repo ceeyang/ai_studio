@@ -16,6 +16,7 @@ import { AssetPicker, aspectMismatch } from '../../components/AssetPicker';
 import { useConfirm } from '../../components/ConfirmDialog';
 import { confirmDiscard } from '../../components/confirmDiscard';
 import { EditableFields, type FieldSpec, type FieldValues, type FieldsState, useUnsavedGuard } from '../../components/EditableFields';
+import { WebConversation, isWebImageEngine } from '../../components/WebConversation';
 import { engineLabel, engineOptionDisabled, engineOptionText } from '../../format';
 import { ArchivedCandidates } from './ArchivedCandidates';
 import { CandidateGrid } from './CandidateGrid';
@@ -347,8 +348,9 @@ export interface ShotDrawerProps {
   /** 生成任务（首帧/视频）提交后、还没拿到响应期间为 true：生成按钮禁用，防止重复点击提交两次。 */
   generating?: boolean;
   onClose(): void;
-  /** 已有选定结果时是「重拍」（父组件强制提交）。saved：先把改过的提示词 / 对白保存了 */
-  onGenerate(stage: GenStage, saved?: boolean): void;
+  /** 已有选定结果时是「重拍」（父组件强制提交）。saved：先把改过的提示词 / 对白保存了；
+   *  opts.newConversation：首帧用网页引擎出、勾了「新开对话」（这次不续接之前的网页会话） */
+  onGenerate(stage: GenStage, saved?: boolean, opts?: { newConversation?: boolean }): void;
   /** 候选数：和导演台工具栏共用一份 */
   count?: number;
   onCountChange?(n: number): void;
@@ -395,6 +397,8 @@ export function ShotDrawer({
   const [dialogueDirty, setDialogueDirty] = useState(false);
   const [dialogueDraft, setDialogueDraft] = useState<DialogueLine[] | null>(null);
   const [saving, setSaving] = useState(false);
+  // 首帧用网页引擎出：这次不续接之前的网页对话（提交后复位）
+  const [newConv, setNewConv] = useState(false);
   const box = useRef<HTMLElement>(null);
   const frameBtn = useRef<HTMLButtonElement>(null);
   const fieldsDirty = !!fields?.dirty;
@@ -451,7 +455,10 @@ export function ShotDrawer({
         setSaving(false);
       }
     }
-    if (saveFirst) onGenerate(stage, true);
+    if (stage === 'keyframes' && newConv && webFrame) {
+      onGenerate(stage, saveFirst, { newConversation: true });
+      setNewConv(false);
+    } else if (saveFirst) onGenerate(stage, true);
     else onGenerate(stage);
   };
 
@@ -476,6 +483,9 @@ export function ShotDrawer({
   const draftImage = fields?.values.image_engine ?? savedImage;
   const imageMaxRefs =
     draftImage === savedImage ? shot.image_max_refs : engineMaxRefs(engines.data?.image, draftImage || imageDefault);
+  // 首帧这次要用的图像引擎（镜头上没选就是项目的）：网页引擎时才有「新开对话」
+  const frameEngine = draftImage || imageDefault;
+  const webFrame = isWebImageEngine(frameEngine, engines.data?.image);
 
   const failures = STAGES.map((st) => ({ st, job: failedJob(shot, st) })).filter((x) => x.job && !activeJob(shot, x.st));
 
@@ -556,6 +566,14 @@ export function ShotDrawer({
               </select>
             </label>
           </div>
+          <WebConversation
+            scopeKind="shot"
+            scopeId={shot.id}
+            engine={frameEngine}
+            newConversation={newConv}
+            onNewConversationChange={setNewConv}
+            label="首帧"
+          />
           {failures.map(({ st, job }) => (
             <p key={st} className="error">
               {`${CELL[st === 'keyframes' ? 'first_frame' : 'video'].label}上次生成失败：${job?.error || '没有错误信息'}`}

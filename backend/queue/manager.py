@@ -23,6 +23,7 @@ from sqlalchemy import func, or_, select
 
 from backend.domain.db import Database
 from backend.domain.models import Job, utcnow
+from backend.engines.browser.conversations import scope_for_job, use_scope
 from backend.queue.context import JobContext
 from backend.queue.errors import JobCanceled, JobError, NeedsInput
 from backend.queue.events import EventBus
@@ -396,6 +397,7 @@ class JobManager:
         with self.db.session() as s:
             j = s.get(Job, jid)
             job_type, payload, family, is_gpu = j.type, dict(j.payload or {}), j.model_family, j.gpu
+            project_id = j.project_id
         cancel = self._cancel.setdefault(jid, threading.Event())
         status, error, result = "done", None, None
         try:
@@ -410,7 +412,9 @@ class JobManager:
             if cancel.is_set():
                 raise JobCanceled()
             tracer = self._tracer(jid)
-            with use_tracer(tracer):
+            # 网页会话续接的作用域（角色 / 镜头 / 场景 / 道具 / 某集）：网页出图和网页文本模型从这里取
+            scope = scope_for_job(job_type, payload, project_id)
+            with use_tracer(tracer), use_scope(scope):
                 try:
                     result = spec.fn(JobContext(self, jid, cancel), payload)
                 finally:

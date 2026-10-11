@@ -97,8 +97,9 @@ export function loggedIn(cookie, page) {
  * 扩展支持的能力，hello 里报给 studio。studio 看到 'rpc' 才会用网页文本模型（老版本扩展没有，要重新加载）。
  * rpc：studio 一步步驱动页面操作（开标签页、跳转、调 content/dom.js 的函数），文本流程在 studio 那边
  * （backend/engines/browser/chat.py），选择器也从 studio 发过来——改流程、改选择器不用重新加载扩展。
+ * conversation（v0.3 起）：出图任务能续接之前的网页对话（job.conversation_url），结果里报回对话地址。
  */
-export const FEATURES = ['rpc'];
+export const FEATURES = ['rpc', 'conversation'];
 
 /** rpc 能调的 content/dom.js 函数（只读页面和往输入框里输入、点按钮、传图，别的不让调）。 */
 export const RPC_DOM_OPS = [

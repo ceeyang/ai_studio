@@ -142,6 +142,8 @@ export interface AppSettings {
   /** 带了 ?project= 时：图片/视频步骤的生效值按这个项目算 */
   project: string | null;
   choices: { llm: LlmChoice[]; image: EngineChoice[]; video: EngineChoice[] };
+  /** 重新生成时续接之前的网页会话（网页出图、网页文本模型）；老后端没有这一项时按开着算 */
+  web_reuse_conversation?: boolean;
 }
 
 /** GET /api/api-services 的一项：一家 API 服务。只有掩码（sk-…abcd），没有明文 Key */
@@ -196,6 +198,8 @@ export interface AppSettingsIn {
   image_engine?: string | null;
   video_engine?: string | null;
   steps?: Record<string, string | null>;
+  /** 重新生成时续接之前的网页会话 */
+  web_reuse_conversation?: boolean;
 }
 
 /** POST /api/browser/login。extension：让扩展在用户自己的浏览器里打开两个网站；
@@ -240,10 +244,49 @@ export interface BrowserStatus {
   sites?: Record<string, BrowserSiteStatus>;
   /** 连着的扩展版本太旧（没有 rpc）：网页文本模型用不了，要在扩展管理页重新加载 */
   needs_reload?: boolean;
+  /** 扩展支不支持续接网页会话；不支持时 hint 说怎么办（如「重新加载扩展可复用会话」） */
+  conversation?: { supported: boolean; hint: string | null };
   // cdp
   executable?: string | null;
   endpoint?: string;
   user_data_dir?: string;
+}
+
+/** 网页会话续接的作用域：同一个角色 / 镜头 / 场景 / 道具在同一个网站上重新出图时接着上次的对话 */
+export type ConversationScopeKind = 'character' | 'shot' | 'location' | 'prop';
+
+/** 一个网站上记着的网页会话 */
+export interface BrowserConversationItem {
+  /** chatgpt / gemini */
+  site: string;
+  /** ChatGPT / Gemini */
+  label: string;
+  url: string;
+  /** 这条会话已经发了几轮 */
+  turns: number;
+  updated_at: string | null;
+}
+
+/** GET /api/browser/conversations?scope_kind=&scope_id= */
+export interface BrowserConversations {
+  /** 设置里的「重新生成时续接之前的网页会话」 */
+  reuse_enabled: boolean;
+  /** 连着的扩展支不支持续接；不支持时 hint 说怎么办 */
+  supported: boolean;
+  hint: string | null;
+  /** 超过这么多轮自动新开 */
+  max_turns: number;
+  items: BrowserConversationItem[];
+}
+
+/** 调用明细里网页引擎这次用的会话（trace data 的 conversation） */
+export interface TraceConversation {
+  mode: 'continue' | 'new';
+  url: string | null;
+  reason: string | null;
+  site: string;
+  scope: string;
+  turns: number;
 }
 
 export interface Engines {
@@ -528,6 +571,8 @@ export interface RunIn {
   note?: string;
   /** 不强制的剧本/分镜运行会删掉有选定首帧/视频或改过的镜头时，用户已确认 */
   confirm?: boolean;
+  /** 网页出图这次不续接之前的网页会话，强制新开对话 */
+  new_conversation?: boolean;
 }
 
 /** 按高棉语时长改写中文（POST /api/episodes/{id}/dialogue/fit-khmer）。 */
