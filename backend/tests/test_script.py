@@ -145,6 +145,7 @@ def test_structure_prompt_knows_shot_budget_and_aspect(tmp_path, db):
     assert "整集的节拍加起来不超过 5 个" in system and "不超过 87 个字" in system
     assert "16:9 横屏" in system and "9:16" not in system
     assert "反转" in system and "单独占一个节拍" in system
+    assert "和它的文字长短成比例" in system and "一句台词加听的人的一个反应" in system
     assert "大约 5 个镜头" in user
 
 
@@ -234,7 +235,7 @@ def test_rerun_visual_keeps_chosen_look(tmp_path, db):
 
 
 # 内置剧本模板的内容哈希（统一成 LF 后 sha256 前 16 位）和规则版本绑在一起
-SCRIPT_TEMPLATE_HASHES = {("script_structure", 2): "5d1f0d3de3c6698f",
+SCRIPT_TEMPLATE_HASHES = {("script_structure", 2): "0f71c3456df6b738",
                           ("script_visual", 2): "d4a150a183a70949"}
 
 

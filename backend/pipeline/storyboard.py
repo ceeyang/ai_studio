@@ -106,14 +106,33 @@ def pinyin_pattern(name: str) -> re.Pattern | None:
     return re.compile(r"(?<![A-Za-z])(?:" + "|".join(alts) + r")(?![A-Za-z])", re.I)
 
 
-def pinyin_hits(text: str, names) -> list[tuple[str, str]]:
-    """[(角色名, 原文里写的拼音)]。"""
+# 连写起来正好是常见英文单词的拼音（常娥 → change、图图 → tutu、安娜 → anna……）：
+# 不当成角色名拼音，不打回、不替换，只在日志里提一句
+ENGLISH_WORDS = frozenset((
+    "change chan dian hang hen hang ban bang can cane den dime dine dong fan fang gang hen lane lean "
+    "line long main man mane many men mine moan mole nan nine pan pang pen pine ping pong ran rang "
+    "rein ring sane san sang shame shine shoe sue tan tang ten tune tutu wan wane wen wine wing yen "
+    "zen anna bean bin bone cuba gene hue lingo mango mean mono nina pain panda pena rain renee "
+    "sangria shin shine shone sine tango tine tone wane").split())
+
+
+def _is_english(written: str) -> bool:
+    """连写成一个词、而且是常见英文单词（分开写的「Chang E」还是拼音名）。"""
+    return written.isalpha() and written.lower() in ENGLISH_WORDS
+
+
+def pinyin_hits(text: str, names, *, english: list | None = None) -> list[tuple[str, str]]:
+    """[(角色名, 原文里写的拼音)]。连写起来是常见英文单词的不算（english 里记下来）。"""
     out = []
     for name in names:
         pat = pinyin_pattern(name)
         if pat is None:
             continue
         for m in pat.finditer(text or ""):
+            if _is_english(m.group(0)):
+                if english is not None:
+                    english.append((name, m.group(0)))
+                continue
             out.append((name, m.group(0)))
     return out
 
@@ -139,8 +158,11 @@ def replace_pinyin(shots, refs: dict[str, str]) -> int:
             for name, ref in refs.items():
                 pat = pinyin_pattern(name)
                 if pat is not None:
-                    text, k = pat.subn(ref, text)
-                    n += k
+                    def sub(m: re.Match, ref: str = ref) -> str:
+                        return m.group(0) if _is_english(m.group(0)) else ref
+                    new = pat.sub(sub, text)
+                    n += sum(1 for m in pat.finditer(text) if not _is_english(m.group(0)))
+                    text = new
             setattr(sh, field, text)
     return n
 
@@ -150,14 +172,35 @@ MAX_CHARS_PER_SECOND = 5.5
 _PUNCT = re.compile(r"[\s，。、；：？！…—「」『』“”‘’（）《》,.;:?!'\"()\-~～·]")
 
 
-def token_problems(shots, char_ids: dict[str, int]) -> list[str]:
+COPIED_NGRAM = 8
+
+
+def _copied(text: str, look: str, n: int = COPIED_NGRAM) -> str | None:
+    """text 里有没有和 look 连续 n 个词一样的片段（不分大小写），有就返回那一段。"""
+    tw = re.findall(r"[a-z0-9][a-z0-9'-]*", (text or "").lower())
+    lw = re.findall(r"[a-z0-9][a-z0-9'-]*", (look or "").lower())
+    grams = {tuple(tw[i:i + n]) for i in range(len(tw) - n + 1)}
+    for i in range(len(lw) - n + 1):
+        if tuple(lw[i:i + n]) in grams:
+            return " ".join(lw[i:i + n])
+    return None
+
+
+def token_problems(shots, char_ids: dict[str, int], looks: dict[str, str] | None = None) -> list[str]:
     """image_prompt 里的外貌占位符：只能指向角色表里的人、cast 里的每个人都要有、不在 cast 里的不要写；
-    motion_prompt / audio_prompt / props 里不能有占位符（视频提示词不会替换它们）。"""
+    motion_prompt / audio_prompt / props 里不能有占位符（视频提示词不会替换它们）。
+    looks（角色名 → 外貌）给了时，image_prompt 里又抄了外貌连续 8 个词以上也报错：出图时占位符会再填一遍。"""
     from backend.pipeline.prompting import CHAR_TOKEN, char_token
 
     known = {cid: name for name, cid in char_ids.items()}
     out = []
     for i, sh in enumerate(shots, start=1):
+        for name in sh.cast:
+            hit = _copied(sh.image_prompt or "", (looks or {}).get(name, ""))
+            if hit:
+                out.append(f"第 {i} 镜 image_prompt 里抄了 {name} 的外貌（「{hit}」…），外貌由占位符"
+                           f"{char_token(char_ids[name]) if name in char_ids else ''}出图时自动填，"
+                           "你只写简短指代和动作")
         ids = {int(x) for x in CHAR_TOKEN.findall(sh.image_prompt or "")}
         bad = sorted(ids - set(known))
         if bad:
@@ -603,13 +646,21 @@ def run_storyboard(ctx, payload: dict) -> dict:
                                  "英文描述")
             problems = speaker_problems(out.shots, list(char_ids))
             if placeholders:
-                problems += token_problems(out.shots, char_ids)
+                problems += token_problems(out.shots, char_ids,
+                                           {c["name"]: c.get("visual_prompt") or "" for c in characters})
             if not last:
                 problems += pinyin_problems(out.shots, list(char_ids))
                 problems += speech_rate_problems(out.shots)
             elif replace_pinyin(out.shots, short_refs):
                 # 最后一次机会：拼音名直接换成英文外貌简称，不为这个让整段失败
                 ctx.log(f"{label}：镜头提示词里还有角色名拼音，已换成英文外貌简称")
+            english: list = []
+            for sh in out.shots:
+                for f in PROMPT_FIELDS:
+                    pinyin_hits(getattr(sh, f, "") or "", list(char_ids), english=english)
+            if english:
+                ctx.log(f"{label}：提示词里的 {'、'.join(sorted({w for _, w in english}))} 和角色名拼音"
+                        "同形，按英文单词处理，没有改")
             if problems:
                 raise ValueError("；".join(problems))
             # 最后一次机会（网关按真实调用次数告诉我们；手工粘贴的输出也算）不再因为「差得太多」打回，

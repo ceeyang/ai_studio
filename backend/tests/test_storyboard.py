@@ -815,3 +815,29 @@ def test_v2_storyboard_is_not_rewritten_after_look_refresh(tmp_path, db):
         for b in ep.scene_blocks:
             shots = [x for x in ep.shots if x.scene_block_id == b.id]
             assert edited_shot_ids(ep.stage_hashes[f"storyboard:{b.id}"], shots) == []
+
+
+def test_pinyin_that_is_an_english_word_is_left_alone():
+    """常娥 → change、图图 → tutu：连写是常见英文单词的不当拼音名，不打回也不替换。"""
+    from types import SimpleNamespace as NS
+
+    from backend.pipeline.storyboard import pinyin_hits, pinyin_problems, replace_pinyin
+
+    english: list = []
+    assert pinyin_hits("a slow change of light, a pink tutu", ["常娥", "图图"], english=english) == []
+    assert [w for _, w in english] == ["change", "tutu"]
+    sh = NS(image_prompt="x", motion_prompt="Chang E waves; the light starts to change",
+            audio_prompt="", props=[])
+    assert len(pinyin_problems([sh], ["常娥"])) == 1           # 分开写的 Chang E 照样算
+    assert replace_pinyin([sh], {"常娥": "the girl"}) == 1
+    assert sh.motion_prompt == "the girl waves; the light starts to change"
+
+
+def test_image_prompt_that_copies_the_look_next_to_placeholder_is_rejected(tmp_path, db):
+    bad = shots_json(2)
+    bad["shots"][0]["image_prompt"] = bad["shots"][0]["image_prompt"].replace(
+        "The young woman sits still.", LOOK + ". The young woman sits still.")
+    ctx, ep_id, prov = setup(tmp_path, db, [bad, shots_json(2), shots_json(2)])
+    run_storyboard(ctx, {"episode_id": ep_id})
+    err = prov.calls[1]["messages"][2]["content"]
+    assert "第 1 镜 image_prompt 里抄了 林夏 的外貌" in err
