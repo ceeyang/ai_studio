@@ -25,6 +25,7 @@ from backend.domain.style_presets import get_preset
 
 # 用到 LLM 的步骤：key 就是 LLMGateway.generate 的 step（默认等于任务名）
 LLM_STEPS: dict[str, str] = {
+    "episode.idea": "AI 写梗概（新建剧集）",
     "script": "剧本",
     "storyboard": "分镜",
     "character.suggest": "推荐造型",

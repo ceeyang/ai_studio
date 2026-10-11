@@ -1,5 +1,5 @@
 import { useQueries } from '@tanstack/react-query';
-import { type CSSProperties, type FormEvent, useState } from 'react';
+import { type CSSProperties, type FormEvent, useEffect, useId, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { api, enc, errorText } from '../api/client';
 import {
@@ -19,7 +19,7 @@ import {
   useAppSettings,
   useStylePresets,
 } from '../api/queries';
-import type { Aspect, EngineRow, Episode, EpisodeStats, Project, ProjectOverview, SettingValue, StylePresetKey } from '../api/types';
+import type { Aspect, EngineRow, Episode, EpisodeIdeaIn, EpisodeIdeaOut, EpisodeStats, Project, ProjectOverview, SettingValue, StylePresetKey } from '../api/types';
 import { useConfirm } from '../components/ConfirmDialog';
 import { Dialog } from '../components/Dialog';
 import { ProjectSettingsDialog } from '../components/ProjectSettingsDialog';
@@ -461,14 +461,55 @@ function ProjectsOverview() {
 const MIN_SECONDS = 5;
 const MAX_SECONDS = 3600;
 
+/** 「AI 写梗概 / AI 续写」：按项目的风格预设、标题、时长和前几集写；框里有字时只往后追加，不覆盖 */
+function useEpisodeIdea(slug: string, onText: (add: string) => void) {
+  const [writing, setWriting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const ctl = useRef<AbortController | null>(null);
+  useEffect(() => () => ctl.current?.abort(), []);
+  const write = async (body: EpisodeIdeaIn) => {
+    ctl.current?.abort();
+    const c = new AbortController();
+    ctl.current = c;
+    setWriting(true);
+    setError(null);
+    try {
+      const r = await api.post<EpisodeIdeaOut>(`/api/projects/${enc(slug)}/episode-idea`, body, c.signal);
+      if (!c.signal.aborted && r.text.trim()) onText(r.text.trim());
+    } catch (e) {
+      if (!c.signal.aborted) setError(errorText(e));
+    } finally {
+      if (ctl.current === c) {
+        ctl.current = null;
+        setWriting(false);
+      }
+    }
+  };
+  const cancel = () => {
+    ctl.current?.abort();
+    ctl.current = null;
+    setWriting(false);
+  };
+  return { writing, error, write, cancel };
+}
+
 function NewEpisodeDialog({ slug, nextNumber, onClose }: { slug: string; nextNumber: number; onClose: () => void }) {
   const create = useCreateEpisode(slug);
+  const project = useProject(slug);
   const navigate = useNavigate();
+  const sourceId = useId();
   const [title, setTitle] = useState('');
   const [text, setText] = useState('');
   const [seconds, setSeconds] = useState('30');
   // 和剧本页的目标时长字段同一范围：太短的集剧本页一个字都存不了
   const secondsOk = seconds.trim() !== '' && Number(seconds) >= MIN_SECONDS && Number(seconds) <= MAX_SECONDS;
+  // 结果接在框里现有文字后面（先换行），用户写的一个字都不动
+  const idea = useEpisodeIdea(slug, (add) => setText((cur) => (cur.trim() ? `${cur.replace(/\s+$/, '')}\n${add}` : add)));
+  const hasText = text.trim() !== '';
+  // 第一集框又是空的：至少要有标题才知道写什么（后面的集可以接着前情写）
+  const canWrite = hasText || title.trim() !== '' || nextNumber > 1;
+  const writeIdea = () =>
+    idea.write({ title: title.trim(), target_seconds: secondsOk ? Number(seconds) : 30, number: nextNumber, text });
   const submit = (e: FormEvent) => {
     e.preventDefault();
     create.mutate(
@@ -497,17 +538,40 @@ function NewEpisodeDialog({ slug, nextNumber, onClose }: { slug: string; nextNum
           </label>
         </div>
         {!secondsOk && <p className="error">目标时长要在 {MIN_SECONDS}–{MAX_SECONDS} 秒之间</p>}
-        <label className="field">
-          <span>原文或梗概</span>
-          <textarea rows={14} value={text} onChange={(e) => setText(e.target.value)} />
-        </label>
+        <div className="field">
+          <div className="field-head">
+            <label htmlFor={sourceId}>原文或梗概</label>
+            <span className="field-head-actions">
+              {idea.writing && (
+                <button type="button" className="ghost sm" onClick={idea.cancel}>
+                  停止
+                </button>
+              )}
+              <button
+                type="button"
+                className="sm"
+                disabled={idea.writing || !canWrite}
+                title={canWrite ? undefined : '先写本集标题，或在框里写一句点子'}
+                onClick={writeIdea}
+              >
+                {idea.writing ? '正在写…' : hasText ? 'AI 续写' : 'AI 写梗概'}
+              </button>
+            </span>
+          </div>
+          <textarea id={sourceId} rows={14} value={text} onChange={(e) => setText(e.target.value)} />
+          <p className="muted small">
+            AI 按项目的风格预设{project.data ? `（${stylePresetLabel(project.data.style_preset)}）` : ''}、标题、时长和前几集写；
+            框里有字时接着往后写，写好的内容可以再改。
+          </p>
+          {idea.error && <p className="error">{idea.error}</p>}
+        </div>
         {create.error && <p className="error">{errorText(create.error)}</p>}
         <div className="modal-foot">
           <span className="muted">{text.trim() ? `${Array.from(text.trim()).length} 字` : ''}</span>
           <button type="button" className="ghost" disabled={create.isPending} onClick={onClose}>
             取消
           </button>
-          <button type="submit" className="primary" disabled={!text.trim() || !secondsOk || create.isPending}>
+          <button type="submit" className="primary" disabled={!text.trim() || !secondsOk || create.isPending || idea.writing}>
             {create.isPending ? '创建中…' : '创建剧集'}
           </button>
         </div>

@@ -336,6 +336,81 @@ describe('ProjectsPage', () => {
     });
   });
 
+  it('新建剧集：AI 写梗概填入空框，框里有字后变成「AI 续写」只往后追加；出错显示原因不丢字；写的时候能停', async () => {
+    const replies: (unknown | (() => unknown))[] = [
+      { text: '订婚宴上，林夏当众撕了婚书。', mode: 'new' },
+      { text: '未婚夫冷笑：你撕的是假的。', mode: 'continue' },
+      new Response(JSON.stringify({ detail: 'AI 写梗概失败：连不上 fake' }), { status: 502 }),
+      () => new Promise(() => {}),
+    ];
+    const calls = installFetch({
+      'GET /api/projects': [makeProject()],
+      'GET /api/engines': ENGINES,
+      'GET /api/projects/demo': makeProject({ style_preset: 'guofeng' }),
+      'GET /api/projects/demo/episodes': [
+        { id: 3, project_id: 1, number: 1, title: '旧的一集', source_text: 'x', target_seconds: 60, status: 'draft' },
+      ],
+      'GET /api/projects/demo/overview': { episode_count: 1, cover_url: null, episodes: [] },
+      'GET /api/projects/demo/characters': [],
+      'GET /api/projects/demo/locations': [],
+      'GET /api/projects/demo/style': null,
+      'POST /api/projects/demo/episode-idea': () => {
+        const r = replies.shift();
+        return typeof r === 'function' ? (r as () => unknown)() : r;
+      },
+    });
+    renderAt(<ProjectsPage />, { route: '/projects/demo', path: '/projects/:slug' });
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole('button', { name: '新建剧集' }));
+    const box = screen.getByLabelText('原文或梗概') as HTMLTextAreaElement;
+    const dialog = screen.getByRole('dialog', { name: '新建剧集 · 第 2 集' });
+    expect(await within(dialog).findByText(/风格预设（国风漫画）/)).toBeTruthy();
+    const aiBtn = screen.getByRole('button', { name: 'AI 写梗概' }) as HTMLButtonElement;
+    expect(aiBtn.classList.contains('primary')).toBe(false);
+    await user.type(screen.getByLabelText('本集标题'), '撕婚书');
+    await user.click(aiBtn);
+    await waitFor(() => expect(box.value).toBe('订婚宴上，林夏当众撕了婚书。'));
+    const ideaCalls = () => calls.filter((c) => c.url.endsWith('/episode-idea'));
+    expect(ideaCalls()[0].body).toEqual({ title: '撕婚书', target_seconds: 30, number: 2, text: '' });
+    // 框里有字：按钮变「AI 续写」，结果接在后面（先换行），不覆盖
+    await user.click(screen.getByRole('button', { name: 'AI 续写' }));
+    await waitFor(() => expect(box.value).toBe('订婚宴上，林夏当众撕了婚书。\n未婚夫冷笑：你撕的是假的。'));
+    expect(ideaCalls()[1].body).toMatchObject({ text: '订婚宴上，林夏当众撕了婚书。' });
+    // 出错：对话框里显示原因，已有文字不丢
+    await user.click(screen.getByRole('button', { name: 'AI 续写' }));
+    expect(await screen.findByText(/AI 写梗概失败：连不上 fake/)).toBeTruthy();
+    expect(box.value).toBe('订婚宴上，林夏当众撕了婚书。\n未婚夫冷笑：你撕的是假的。');
+    // 写的时候显示「正在写…」并禁用，可以停
+    await user.click(screen.getByRole('button', { name: 'AI 续写' }));
+    const busy = await screen.findByRole('button', { name: '正在写…' });
+    expect((busy as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.queryByText(/AI 写梗概失败/)).toBeNull();
+    expect((screen.getByRole('button', { name: '创建剧集' }) as HTMLButtonElement).disabled).toBe(true);
+    await user.click(screen.getByRole('button', { name: '停止' }));
+    expect(screen.getByRole('button', { name: 'AI 续写' })).toBeTruthy();
+    expect(box.value).toBe('订婚宴上，林夏当众撕了婚书。\n未婚夫冷笑：你撕的是假的。');
+  });
+
+  it('新建剧集：第一集标题和框都空时 AI 写梗概不能点', async () => {
+    installFetch({
+      'GET /api/projects': [makeProject()],
+      'GET /api/engines': ENGINES,
+      'GET /api/projects/demo': makeProject(),
+      'GET /api/projects/demo/episodes': [],
+      'GET /api/projects/demo/overview': { episode_count: 0, cover_url: null, episodes: [] },
+      'GET /api/projects/demo/characters': [],
+      'GET /api/projects/demo/locations': [],
+      'GET /api/projects/demo/style': null,
+    });
+    renderAt(<ProjectsPage />, { route: '/projects/demo', path: '/projects/:slug' });
+    const user = userEvent.setup();
+    await user.click((await screen.findAllByRole('button', { name: '新建剧集' }))[0]);
+    const btn = screen.getByRole('button', { name: 'AI 写梗概' }) as HTMLButtonElement;
+    expect(btn.disabled).toBe(true);
+    await user.type(screen.getByLabelText('原文或梗概'), '女主重生');
+    expect((screen.getByRole('button', { name: 'AI 续写' }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
   it('项目总览：卡片带封面、集数和最新一集的工作台入口；没有首帧时用首字占位', async () => {
     installFetch({
       'GET /api/projects': [makeProject(), makeProject({ id: 2, slug: 'b', title: '夜班' })],

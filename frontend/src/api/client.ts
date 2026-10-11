@@ -33,8 +33,9 @@ export function detailText(detail: unknown): string {
   return JSON.stringify(detail);
 }
 
-/** body 是 FormData 时原样发送（multipart，浏览器自己带 boundary），否则按 JSON 发。 */
-export async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+/** body 是 FormData 时原样发送（multipart，浏览器自己带 boundary），否则按 JSON 发。
+ *  signal：可取消的请求（取消时原样抛出 AbortError，不当成「连不上」）。 */
+export async function request<T>(method: string, path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
   let res: Response;
   const form = body instanceof FormData;
   try {
@@ -42,8 +43,10 @@ export async function request<T>(method: string, path: string, body?: unknown): 
       method,
       headers: body === undefined || form ? undefined : { 'Content-Type': 'application/json' },
       body: body === undefined ? undefined : form ? body : JSON.stringify(body),
+      signal,
     });
-  } catch {
+  } catch (e) {
+    if (signal?.aborted) throw e;
     throw new ApiError(0, '连不上工作台服务，确认 uv run studio-server 正在运行');
   }
   const text = await res.text();
@@ -67,7 +70,7 @@ export async function request<T>(method: string, path: string, body?: unknown): 
 
 export const api = {
   get: <T>(path: string) => request<T>('GET', path),
-  post: <T>(path: string, body: unknown = {}) => request<T>('POST', path, body),
+  post: <T>(path: string, body: unknown = {}, signal?: AbortSignal) => request<T>('POST', path, body, signal),
   patch: <T>(path: string, body: unknown) => request<T>('PATCH', path, body),
   put: <T>(path: string, body: unknown) => request<T>('PUT', path, body),
   del: (path: string) => request<null>('DELETE', path),

@@ -285,6 +285,19 @@ class EpisodeIn(BaseModel):
     number: int | None = Field(None, ge=1)
 
 
+class EpisodeIdeaIn(BaseModel):
+    """新建剧集对话框里的「AI 写梗概 / AI 续写」：框里已有的文字作为点子或开头。"""
+    title: str = Field("", max_length=200)
+    target_seconds: float = Field(30.0, gt=0, le=3600)
+    number: int | None = Field(None, ge=1)
+    text: str = Field("", max_length=20000)
+
+
+class EpisodeIdeaOut(BaseModel):
+    text: str
+    mode: Literal["new", "expand", "continue"]
+
+
 class EpisodePatch(BaseModel):
     title: str | None = None
     source_text: str | None = None

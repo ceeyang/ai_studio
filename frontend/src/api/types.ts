@@ -220,6 +220,20 @@ export interface EpisodeIn {
   target_seconds: number;
 }
 
+/** 新建剧集对话框「AI 写梗概 / AI 续写」：text 是框里已有的文字（点子或开头） */
+export interface EpisodeIdeaIn {
+  title: string;
+  target_seconds: number;
+  number?: number;
+  text: string;
+}
+
+/** mode=continue 时 text 只是接在后面的新内容 */
+export interface EpisodeIdeaOut {
+  text: string;
+  mode: 'new' | 'expand' | 'continue';
+}
+
 export interface EpisodePatch {
   title?: string;
   source_text?: string;

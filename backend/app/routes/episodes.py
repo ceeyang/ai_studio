@@ -7,12 +7,14 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from sqlalchemy import func, select, update
 
 from backend.app.deps import get_or_404, manager, project_by_slug, read_upload, services
-from backend.app.schemas import (BgmOut, EpisodeDetail, EpisodeIn, EpisodeOut, EpisodePatch, ExportOut,
-                                 ExportPatch, SceneBlockOut, SceneBlockPatch)
+from backend.app.schemas import (BgmOut, EpisodeDetail, EpisodeIdeaIn, EpisodeIdeaOut, EpisodeIn,
+                                 EpisodeOut, EpisodePatch, ExportOut, ExportPatch, SceneBlockOut,
+                                 SceneBlockPatch)
 from backend.app.views import candidate_out, episode_detail, export_out
 from backend.domain.models import Episode, Export, Job, SceneBlock, Shot
 from backend.domain.music import bgm_of, clear_bgm, set_bgm
 from backend.domain.slots import delete_slots
+from backend.pipeline.episode_idea import IdeaFailed, write_episode_idea
 from backend.queue.manager import ACTIVE
 
 router = APIRouter(prefix="/api", tags=["episodes"])
@@ -38,6 +40,18 @@ def create_episode(slug: str, body: EpisodeIn, request: Request):
         s.add(ep)
         s.flush()
         return EpisodeOut.model_validate(ep)
+
+
+@router.post("/projects/{slug}/episode-idea", response_model=EpisodeIdeaOut)
+def episode_idea(slug: str, body: EpisodeIdeaIn, request: Request):
+    """新建剧集对话框的「AI 写梗概 / AI 续写」：同步调用 LLM，返回 {text, mode}。
+    mode=continue 时 text 只是接在后面的新内容；new / expand 是完整梗概。什么都不存。"""
+    try:
+        r = write_episode_idea(services(request), slug, title=body.title,
+                               target_seconds=body.target_seconds, number=body.number, text=body.text)
+    except IdeaFailed as e:
+        raise HTTPException(502, str(e)) from None
+    return EpisodeIdeaOut(text=r.text, mode=r.mode)
 
 
 @router.get("/projects/{slug}/episodes/by-number/{number}", response_model=EpisodeDetail)
