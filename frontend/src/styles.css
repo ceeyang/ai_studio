@@ -211,8 +211,6 @@ progress.is-decoding { animation: pulse 1.6s ease-in-out infinite; }
 .page { display: flex; flex-direction: column; gap: var(--s-4); }
 .page > .panel { margin-bottom: 0; }
 .split { display: grid; grid-template-columns: minmax(300px, 360px) minmax(0, 1fr); gap: var(--s-4); align-items: start; }
-.split.jobs { grid-template-columns: minmax(380px, 0.9fr) minmax(0, 1.4fr); }
-.split.jobs > .panel:last-child { position: sticky; top: calc(var(--taskbar-h) + var(--s-4)); }
 .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); gap: var(--s-3); }
 
 .panel {
@@ -478,21 +476,6 @@ a.pill:hover { text-decoration: none; filter: brightness(1.15); }
 .table tr.clickable:hover { background: var(--surface-hover); }
 .table td.num, .table .num { font-variant-numeric: tabular-nums; font-family: var(--mono); font-size: 12.5px; color: var(--text-2); }
 
-/* 任务列表 */
-.jobs-table tr.clickable td:first-child { position: relative; color: var(--muted); font-family: var(--mono); font-size: 12px; white-space: nowrap; font-variant-numeric: tabular-nums; }
-.jobs-table tr.selected td:first-child::before {
-  content: ''; position: absolute; left: 0; top: 8px; bottom: 8px; width: 3px; border-radius: 0 3px 3px 0; background: var(--accent);
-}
-/* 编号、类型不许任意断行（之前 134 被拆成竖排三位、image.turnaround 断在词中间）；
-   只有报错允许任意处断行——里面常有不带空格的长路径，否则整列被撑宽、耗时列被挤出面板 */
-.jobs-table td { vertical-align: middle; padding: 8px 10px; }
-/* 任务名别被挤成两个字一行；耗时不折行 */
-.jobs-table td:nth-child(2) { overflow-wrap: break-word; min-width: 7.5em; }
-.jobs-table td:nth-child(4) { white-space: nowrap; }
-.jobs-table td .error { font-size: 12px; margin-top: 4px; white-space: normal; color: #ff9a9d; overflow-wrap: anywhere; text-wrap: pretty; }
-.jobs-table td:last-child { font-variant-numeric: tabular-nums; color: var(--text-2); white-space: nowrap; }
-
-
 .media-busy {
   position: absolute; left: 6px; right: 6px; bottom: 6px; padding: 3px 6px; border-radius: var(--r-xs);
   font-size: 11.5px; text-align: center; font-variant-numeric: tabular-nums;
@@ -668,11 +651,6 @@ pre.error { background: rgba(255, 90, 95, 0.06); border-color: rgba(255, 90, 95,
   position: relative;
 }
 
-/* 任务详情 */
-.job-meta { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; margin-bottom: var(--s-4); background: var(--divider); border: 1px solid var(--divider); border-radius: var(--r-md); overflow: hidden; }
-.job-meta > div { background: var(--surface-0); padding: 8px 12px; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.job-meta dt { font-size: 11px; color: var(--muted); }
-.job-meta dd { margin: 0; font-size: 12.5px; font-variant-numeric: tabular-nums; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* 人工输入 */
 .manual {
@@ -1154,7 +1132,6 @@ pre.error { background: rgba(255, 90, 95, 0.06); border-color: rgba(255, 90, 95,
   .area-browser { grid-area: browser; }
   .area-engines { grid-area: engines; }
   .area-config { grid-area: config; }
-  .split.jobs { grid-template-columns: minmax(0, 0.7fr) minmax(0, 1.3fr); }
   .project-grid { grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
   .detail-body { grid-template-columns: minmax(0, 1fr) 440px; }
   .episode-grid { grid-template-columns: repeat(auto-fill, minmax(640px, 1fr)); }
@@ -1169,8 +1146,6 @@ pre.error { background: rgba(255, 90, 95, 0.06); border-color: rgba(255, 90, 95,
   :root { --nav-w: 188px; }
   .content { padding: var(--s-4) var(--s-4) var(--s-6); }
   .taskbar { padding: var(--s-2) var(--s-4); }
-  .split.jobs { grid-template-columns: minmax(340px, 0.8fr) minmax(0, 1.2fr); }
-  .job-meta { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .detail-body { grid-template-columns: minmax(0, 1fr) 300px; }
   .continue-card { gap: var(--s-4); padding: var(--s-4); }
   .continue-cover { width: 56px; }
@@ -1377,9 +1352,6 @@ div.error.banner.job-notice a { color: #ffd0d1; text-decoration: underline; }
 .nav-hint { margin: 2px var(--s-2) 0; font-size: 11.5px; color: var(--muted); line-height: 1.5; }
 
 /* 任务页 */
-.jobs-head select { margin-left: auto; }
-.jobs-table .job-id { font: inherit; color: inherit; padding: 0; }
-.jobs-more { justify-content: center; margin-top: var(--s-3); }
 .debug-list { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px var(--s-3); margin: var(--s-2) 0; font-size: 12px; }
 .debug-list dt { color: var(--muted); }
 .debug-list dd { margin: 0; font-family: var(--mono); overflow-wrap: anywhere; }
@@ -1722,3 +1694,274 @@ img.rail-avatar { border: 0; }
 .shot-ref-actions { display: flex; gap: var(--s-2); flex-wrap: wrap; align-items: center; }
 .ff-from-asset { display: flex; gap: var(--s-2); align-items: center; flex-wrap: wrap; }
 .prop-name { display: flex; align-items: center; gap: var(--s-2); margin: 0; font-family: var(--mono); font-size: 13px; overflow-wrap: anywhere; }
+
+/* =========================================================================
+   任务页（04 · 任务）：状态分段 + 搜索筛选、按日期分组的任务列表、右侧详情 / 窄屏抽屉
+   ========================================================================= */
+.mono { font-family: var(--mono); font-size: 11.5px; font-variant-numeric: tabular-nums; }
+kbd {
+  display: inline-grid; place-items: center; min-width: 18px; height: 18px; padding: 0 4px;
+  font: 500 11px/1 var(--mono); color: var(--text-2);
+  background: var(--surface-2); border: 1px solid var(--border); border-bottom-width: 2px; border-radius: var(--r-xs);
+}
+.jobs-head .jobs-retry-all { margin-left: auto; }
+
+.jobs-filters { display: flex; flex-direction: column; gap: var(--s-3); }
+.seg {
+  display: inline-flex; flex-wrap: wrap; gap: 2px; align-self: flex-start;
+  padding: 3px; background: var(--surface-0); border: 1px solid var(--border); border-radius: var(--r-md);
+}
+.seg .seg-item {
+  height: 30px; padding: 0 12px; gap: 6px; border: 0; border-radius: var(--r-sm);
+  background: transparent; color: var(--muted); font-weight: 500;
+}
+.seg .seg-item:hover:not(:disabled) { background: var(--surface-2); border: 0; color: var(--text); }
+.seg .seg-item:active:not(:disabled) { transform: none; }
+.seg .seg-item[aria-pressed="true"] { background: var(--surface-3); color: var(--text); box-shadow: var(--shadow-1); }
+.seg-count {
+  min-width: 18px; height: 18px; padding: 0 5px; border-radius: var(--r-pill);
+  display: inline-grid; place-items: center;
+  font: 600 11px/1 var(--font); font-variant-numeric: tabular-nums;
+  background: var(--surface-2); color: var(--text-2);
+}
+.seg .s-running .seg-count { background: var(--accent-soft); color: var(--accent); }
+.seg .s-waiting_input .seg-count { background: var(--warn-soft); color: var(--warn); }
+.seg .s-queued .seg-count { background: var(--info-soft); color: var(--info); }
+.seg .s-failed .seg-count { background: var(--danger-soft); color: var(--danger); }
+.seg .s-done .seg-count { background: var(--ok-soft); color: var(--ok); }
+
+.jobs-filter-row { display: flex; flex-wrap: wrap; gap: var(--s-2); align-items: center; }
+.search-box { position: relative; display: flex; align-items: center; flex: 1 1 320px; max-width: 520px; }
+.search-box svg { position: absolute; left: 10px; width: 16px; height: 16px; color: var(--muted); pointer-events: none; }
+.search-box input { width: 100%; padding-left: 32px !important; padding-right: 36px !important; }
+.search-box kbd { position: absolute; right: 9px; pointer-events: none; transition: opacity 120ms ease-out; }
+.search-box input:focus ~ kbd, .search-box input:not(:placeholder-shown) ~ kbd { opacity: 0; }
+.jobs-filter-row select { min-width: 130px; }
+
+.jobs-layout {
+  display: grid; gap: var(--s-4); align-items: start;
+  grid-template-columns: minmax(400px, 0.85fr) minmax(0, 1.25fr);
+}
+.jobs-list-panel { padding: var(--s-2); margin: 0; min-width: 0; }
+.job-list { display: flex; flex-direction: column; gap: var(--s-1); border-radius: var(--r-md); }
+.job-list:focus-visible { box-shadow: none; }
+.job-group { display: flex; flex-direction: column; gap: 2px; }
+.job-group + .job-group { margin-top: var(--s-2); }
+.job-group-head {
+  position: sticky; top: var(--taskbar-h); z-index: 1;
+  display: flex; align-items: center; gap: var(--s-2);
+  padding: 8px 10px 6px; font-size: 11.5px; font-weight: 600; letter-spacing: 0.04em; color: var(--text-2);
+  background: var(--surface-1);
+}
+.job-group-head .muted { font-weight: 500; font-variant-numeric: tabular-nums; }
+
+.job-row {
+  position: relative;
+  display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; gap: 10px; align-items: start;
+  padding: 10px 12px; border-radius: var(--r-md); cursor: pointer;
+  border: 1px solid transparent;
+  transition-property: background-color, border-color;
+  transition-duration: 120ms; transition-timing-function: ease-out;
+}
+.job-row:hover { background: var(--surface-hover); }
+.job-row.is-active { border-color: var(--border-strong); }
+.job-list:focus-visible .job-row.is-active { border-color: var(--accent-line); box-shadow: 0 0 0 1px var(--accent-line); }
+.job-row[aria-selected="true"] { background: var(--accent-soft); border-color: var(--accent-line); }
+.job-row[aria-selected="true"]::before {
+  content: ''; position: absolute; left: -1px; top: 10px; bottom: 10px; width: 3px; border-radius: 0 3px 3px 0; background: var(--accent);
+}
+.job-row .pill { margin-top: 1px; }
+.jr-main { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.jr-title { font-size: 13.5px; font-weight: 500; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jr-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 0; font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.jr-meta > * + *::before { content: '·'; margin: 0 6px; color: var(--faint); }
+.jr-meta .mono { color: var(--faint); }
+.job-row.is-running .jr-dur { color: var(--accent); }
+.jr-error {
+  font-size: 12px; color: #ff9a9d; line-height: 1.45;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.job-row .thin-progress { margin-top: 4px; }
+.job-row.is-done .jr-title, .job-row.is-canceled .jr-title { color: var(--text-2); }
+
+/* 类型色点：按步骤分组上色 */
+.type-dot { width: 8px; height: 8px; margin-top: 6px; border-radius: 3px; background: var(--idle); flex: none; }
+.type-dot.t-script, .type-dot.t-storyboard { background: #a78bfa; }
+.type-dot.t-portrait, .type-dot.t-turnaround, .type-dot.t-character { background: #f472b6; }
+.type-dot.t-scene { background: #2dd4bf; }
+.type-dot.t-keyframe { background: var(--info); }
+.type-dot.t-video { background: var(--accent); }
+.type-dot.t-post { background: var(--warn); }
+.type-dot.t-export { background: var(--ok); }
+
+/* 细进度条：确定进度 / 不定进度 / 解码中 */
+.thin-progress { position: relative; height: 3px; border-radius: var(--r-pill); background: var(--surface-3); overflow: hidden; }
+.thin-progress > span {
+  position: absolute; left: 0; top: 0; bottom: 0; border-radius: inherit;
+  background: linear-gradient(90deg, #ff5a2a, var(--accent));
+  transition: width 300ms var(--ease);
+}
+.thin-progress.is-indeterminate > span { width: 35%; animation: thin-sweep 1.4s var(--ease) infinite; }
+.thin-progress.is-decoding > span { animation: pulse 1.6s ease-in-out infinite; }
+@keyframes thin-sweep { from { transform: translateX(-100%); } to { transform: translateX(290%); } }
+
+.jobs-more { display: flex; align-items: center; justify-content: center; gap: var(--s-3); padding: var(--s-3) 0 var(--s-2); }
+.jobs-state { display: flex; flex-direction: column; align-items: center; gap: var(--s-2); padding: var(--s-8) var(--s-4); text-align: center; }
+.jobs-state > p.error { align-self: stretch; text-align: left; }
+.jobs-state strong { color: var(--text); font-weight: 600; }
+
+/* 骨架屏 */
+.skeleton {
+  display: block; height: 12px; border-radius: var(--r-xs);
+  background: linear-gradient(90deg, var(--surface-2) 0%, var(--surface-3) 50%, var(--surface-2) 100%);
+  background-size: 200% 100%; animation: shimmer 1.4s linear infinite;
+}
+.skeleton.dot { width: 8px; height: 8px; margin-top: 4px; }
+.skeleton.w-60 { width: 60%; }
+.skeleton.w-40 { width: 40%; }
+.skeleton.h-80 { height: 80px; }
+.job-row.is-skeleton { cursor: default; grid-template-columns: 10px minmax(0, 1fr); }
+.job-row.is-skeleton:hover { background: none; }
+.job-row.is-skeleton .jr-main { gap: 8px; }
+.skeleton-stack { display: flex; flex-direction: column; gap: 12px; padding-top: var(--s-3); }
+@keyframes shimmer { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+
+/* 详情 */
+.jd-wrap, .jobs-detail-empty { position: sticky; top: calc(var(--taskbar-h) + var(--s-4)); min-width: 0; }
+.jobs-detail-empty {
+  margin: 0; min-height: 260px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: var(--s-2);
+  text-align: center; border-style: dashed;
+}
+.jobs-detail-empty strong { color: var(--text-2); font-weight: 600; }
+.jobs-detail-empty .muted { max-width: 34em; line-height: 1.9; }
+.jd-backdrop { display: none; }
+.job-detail:focus, .job-detail:focus-visible { outline: none; box-shadow: var(--shadow-1); }
+.job-detail {
+  margin: 0; padding: var(--s-5) var(--s-5) var(--s-4);
+  max-height: calc(100vh - var(--taskbar-h) - var(--s-8)); overflow: auto;
+}
+.jd-head { display: flex; align-items: flex-start; gap: var(--s-3); }
+.jd-title { flex: 1; min-width: 0; display: flex; align-items: center; flex-wrap: wrap; gap: var(--s-2); }
+.jd-title h3 { margin: 0; font-size: 16px; line-height: 1.35; overflow-wrap: anywhere; }
+.jd-title .type-dot { margin-top: 0; }
+.jd-close { width: 30px; height: 30px; font-size: 18px; line-height: 1; flex: none; }
+.jd-sub { display: flex; flex-wrap: wrap; align-items: center; margin: 6px 0 var(--s-4); font-size: 12.5px; color: var(--muted); }
+.jd-sub > * + *::before { content: '·'; margin: 0 8px; color: var(--faint); }
+.jd-actions { display: flex; flex-wrap: wrap; gap: var(--s-2); margin-bottom: var(--s-4); }
+.jd-actions:empty { display: none; }
+
+.jd-error {
+  margin: 0 0 var(--s-4); border: 1px solid rgba(255, 90, 95, 0.35); border-radius: var(--r-md);
+  background: linear-gradient(180deg, rgba(255, 90, 95, 0.1), rgba(255, 90, 95, 0.04));
+  padding: var(--s-3) var(--s-4);
+}
+.jd-error-head { display: flex; align-items: flex-start; gap: var(--s-3); }
+.jd-error-icon {
+  flex: none; width: 20px; height: 20px; margin-top: 2px; border-radius: 50%;
+  background: radial-gradient(circle, #1a0506 0 1.5px, transparent 2px) 50% 74% / 100% 100% no-repeat,
+    linear-gradient(#1a0506, #1a0506) 50% 30% / 2px 7px no-repeat, var(--danger);
+}
+.jd-error-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.jd-error-label { font-size: 11px; letter-spacing: 0.06em; color: #ff9a9d; }
+.jd-error-text strong { color: #ffd0d1; font-weight: 600; line-height: 1.5; overflow-wrap: anywhere; }
+.jd-error-hint { margin: var(--s-2) 0 0 32px; font-size: 12.5px; color: var(--text-2); }
+.jd-error-more { margin: var(--s-2) 0 0 32px; }
+.jd-error-more summary { cursor: pointer; font-size: 12.5px; color: var(--text-2); }
+.jd-error-more pre { margin-top: var(--s-2); max-height: 260px; }
+
+.jd-tabs {
+  position: sticky; top: calc(var(--s-5) * -1); z-index: 2;
+  display: flex; gap: 2px; margin: 0 calc(var(--s-5) * -1) var(--s-4); padding: 0 var(--s-4);
+  background: var(--surface-1); border-bottom: 1px solid var(--divider);
+}
+.jd-tabs [role="tab"] {
+  height: 40px; padding: 0 12px; border: 0; border-radius: 0; background: transparent;
+  border-bottom: 2px solid transparent; color: var(--muted); font-size: 13px;
+}
+.jd-tabs [role="tab"]:hover:not(:disabled) { background: transparent; border: 0; border-bottom: 2px solid var(--border-strong); color: var(--text); }
+.jd-tabs [role="tab"][aria-selected="true"] { color: var(--text); border-bottom-color: var(--accent); }
+.jd-tabs [role="tab"]:active:not(:disabled) { transform: none; }
+.jd-panel { min-width: 0; }
+.jd-panel h5 { margin: 0; font-size: 12px; font-weight: 500; color: var(--muted); }
+
+.jd-overview { display: flex; flex-direction: column; gap: var(--s-4); }
+.jd-overview .manual { margin: 0; }
+.jd-timeline { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.jd-timeline li {
+  position: relative; display: grid; grid-template-columns: 14px 64px minmax(0, 1fr) auto; align-items: center; gap: 0 10px;
+  padding: 7px 0; font-size: 12.5px; font-variant-numeric: tabular-nums;
+}
+.jd-timeline li:not(:last-child)::after {
+  content: ''; position: absolute; left: 6px; top: 22px; bottom: -8px; width: 2px; background: var(--divider);
+}
+.jd-timeline li.is-done:not(:last-child)::after { background: var(--border-strong); }
+.tl-dot { width: 14px; height: 14px; border-radius: 50%; border: 2px solid var(--border-strong); background: var(--surface-1); position: relative; z-index: 1; }
+.jd-timeline .is-done .tl-dot { background: var(--text-2); border-color: var(--text-2); }
+.jd-timeline .tl-done .tl-dot { background: var(--ok); border-color: var(--ok); }
+.jd-timeline .tl-failed .tl-dot { background: var(--danger); border-color: var(--danger); }
+.jd-timeline .tl-canceled .tl-dot { background: var(--idle); border-color: var(--idle); }
+.jd-timeline .is-current .tl-dot { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); animation: pulse 1.6s ease-in-out infinite; }
+.tl-label { color: var(--text-2); font-weight: 500; }
+.jd-timeline .is-pending .tl-label, .jd-timeline .is-pending time { color: var(--faint); }
+.jd-timeline time { color: var(--text); }
+.tl-note { color: var(--muted); white-space: nowrap; }
+.jd-timeline .is-current .tl-note { color: var(--accent); }
+.tl-progress { grid-column: 3 / -1; display: flex; align-items: center; gap: var(--s-2); margin-top: 6px; }
+.tl-progress .thin-progress { flex: 1; height: 4px; }
+
+.jd-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px var(--s-4); margin: 0; font-size: 12.5px; padding: var(--s-3) var(--s-4); background: var(--surface-0); border: 1px solid var(--divider); border-radius: var(--r-md); }
+.jd-facts dt { color: var(--muted); }
+.jd-facts dd { margin: 0; color: var(--text); overflow-wrap: anywhere; }
+.jd-tail-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+.jd-tail-head button.link { font-size: 12.5px; font-weight: 500; }
+.log.is-tail { min-height: 0; max-height: 160px; margin: 0; }
+
+/* 日志页签 */
+.job-log-bar { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2); margin-bottom: var(--s-2); }
+.job-log-bar .grow { flex: 1; }
+.job-log-search { width: 220px; height: 30px !important; font-size: 12.5px; }
+.job-log-bar button.is-on { color: var(--accent); border-color: var(--accent-line); }
+.job-log .log { max-height: min(60vh, 560px); min-height: 220px; padding-left: 0; white-space: pre-wrap; }
+.log-line { display: block; padding-left: 52px; position: relative; }
+.log-line::before {
+  content: attr(data-n); position: absolute; left: 0; width: 40px; text-align: right;
+  color: #3f444f; user-select: none; font-variant-numeric: tabular-nums;
+}
+.log-line:hover { background: rgba(255, 255, 255, 0.025); }
+.log mark { background: rgba(242, 193, 78, 0.28); color: #fff3cf; border-radius: 2px; }
+.log-empty { display: block; padding-left: var(--s-3); color: var(--faint); }
+
+/* 调试信息 */
+.jd-debug { display: flex; flex-direction: column; gap: var(--s-3); }
+.json-block-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; }
+pre.json { max-height: 360px; margin: 0; color: #c8d3e6; }
+.job-detail .job-traces { margin-top: 0; }
+
+/* 顶部任务条：运行中那块整块可点到详情；「取消」单独 */
+.taskbar .current { padding: 0 6px 0 4px; }
+.taskbar .current::before { display: none; }
+.taskbar .current-link {
+  display: inline-flex; align-items: center; gap: var(--s-2); height: 26px; padding: 0 8px;
+  border-radius: var(--r-pill); color: var(--text); text-decoration: none;
+  transition: background-color 120ms ease-out;
+}
+.taskbar .current-link::before {
+  content: ''; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); flex: none;
+  box-shadow: 0 0 0 3px var(--accent-soft); animation: pulse 1.6s ease-in-out infinite;
+}
+.taskbar .current-link:hover { background: var(--surface-3); color: var(--text); text-decoration: none; }
+.taskbar .current-ctx { color: var(--muted); }
+.taskbar .current-label { max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.taskbar .current-elapsed { color: var(--accent); font-size: 12px; }
+.taskbar .current progress { width: 110px; height: 4px; }
+.taskbar a.pill:hover { text-decoration: none; }
+
+/* 窄屏：详情变成从右侧滑出的全高抽屉 */
+@media (max-width: 1279px) {
+  .jobs-layout { grid-template-columns: minmax(0, 1fr); }
+  .jobs-detail-empty { display: none; }
+  .jd-backdrop { display: block; position: fixed; inset: 0; z-index: 40; background: rgba(5, 6, 8, 0.55); animation: fade 160ms ease-out; }
+  .jd-wrap { position: fixed; top: 0; right: 0; bottom: 0; z-index: 41; width: min(760px, 100vw); animation: slide-in 200ms var(--ease); }
+  .jd-wrap .job-detail { height: 100%; max-height: none; border-radius: 0; border-width: 0 0 0 1px; box-shadow: var(--shadow-3); }
+}

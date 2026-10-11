@@ -8,7 +8,7 @@ function nav(page: Page, name: string) {
 /** 到任务页，点开等待输入的那个任务，确认要的是哪一份输入，粘贴并提交。 */
 async function answerWaitingJob(page: Page, key: RegExp, text: string) {
   await nav(page, '任务').click();
-  await page.getByRole('row').filter({ hasText: '等待输入' }).first().click();
+  await page.getByRole('listbox', { name: '任务列表' }).getByRole('option').filter({ hasText: '等待输入' }).first().click();
   await expect(page.getByTestId('input-key')).toHaveText(key);
   await page.getByLabel('模型输出').fill(text);
   await page.getByRole('button', { name: '提交结果' }).click();
@@ -146,7 +146,7 @@ test('重新生成分镜（带修改意见）：等待输入的提示词里带�
 
   // 任务页：等待输入的那一份用户提示词里写着修改意见，并附上了上一版的镜头
   await nav(page, '任务').click();
-  await page.getByRole('row').filter({ hasText: '等待输入' }).first().click();
+  await page.getByRole('listbox', { name: '任务列表' }).getByRole('option').filter({ hasText: '等待输入' }).first().click();
   await expect(page.getByTestId('input-key')).toHaveText(/^storyboard:\d+$/);
   const user = page.getByLabel('用户提示词（user）');
   await expect(user).toHaveValue(new RegExp(`修改意见：${NOTE}`));

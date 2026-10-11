@@ -19,6 +19,6 @@ describe('splitTraceback', () => {
     ].join('\n');
     const r = splitTraceback(log);
     expect(r.hasTrace).toBe(true);
-    expect(r.brief).toBe(['[10:00] 视频 S01', '（调用栈已收进「完整日志」）', 'RuntimeError: 显存不足', '[10:02] 任务失败'].join('\n'));
+    expect(r.brief).toBe(['[10:00] 视频 S01', '（调用栈已收起，勾选「显示调用栈」查看）', 'RuntimeError: 显存不足', '[10:02] 任务失败'].join('\n'));
   });
 });
