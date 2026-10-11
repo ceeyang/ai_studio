@@ -12,7 +12,8 @@ from sqlalchemy.orm import Session
 from backend.app.schemas import (ArchivedCandidateOut, CandidateOut, ContinuePrevOut, EpisodeDetail, ExportOut, JobBrief, JobContext,
                                  SceneBlockOut, ShotDetail, SlotOut)
 from backend.domain.models import Character, Episode, Job, Project, Shot
-from backend.domain.refs import SHOT_REF_SLOT, shot_ref_images, shot_refs, split_refs
+from backend.domain.refs import (SHOT_REF_SLOT, legacy_video_refs, shot_ref_images, shot_refs,
+                                 split_refs)
 from backend.domain.shots import prev_shot
 from backend.domain.slots import selected_candidate, slots_for
 from backend.pipeline.continuity import continue_hash, continue_inputs, video_ref_plan
@@ -124,7 +125,7 @@ def shot_detail(s: Session, sv, shot, proj, style, *, jobs: OwnerJobs | None = N
                 progress: Mapping[int, float] | None = None) -> ShotDetail:
     slots = [x for x in slots_for(s, "shot", shot.id) if x.kind != SHOT_REF_SLOT]
     refs = shot_refs(s, shot)
-    v_pack = shot_refs(s, shot, video=True)
+    v_pack = legacy_video_refs(s, shot)   # 以前的视频打包（每人定妆照 + 三视图格），算老视频的哈希
     ie = shot.image_engine or proj.image_engine
     ff_cap = _max_refs(sv, "image", ie)
     ff_refs, ff_dropped = split_refs(refs, ff_cap)   # 和 keyframes.run_keyframe 同一个截断规则
@@ -168,6 +169,11 @@ def shot_detail(s: Session, sv, shot, proj, style, *, jobs: OwnerJobs | None = N
             # 按以前规则出的视频不算过期：一律带参考图；接上一镜一律不带
             legacy_ok["video"] = {video_input_hash(shot, proj, style, ff.selected_candidate_id, ve,
                                                    has_audio, [r.candidate_id for r in v_pack[:v_cap]])}
+            old_plan = video_ref_plan(s, shot, ff_sel, lambda n: _max_refs(sv, "image", n),
+                                      packed=v_pack)
+            legacy_ok["video"].add(video_input_hash(
+                shot, proj, style, ff.selected_candidate_id, ve, has_audio,
+                [r.candidate_id for r in old_plan.refs[:v_cap]]))
             if plan.continued:
                 legacy_ok["video"].add(video_input_hash(shot, proj, style, ff.selected_candidate_id,
                                                         ve, has_audio, []))

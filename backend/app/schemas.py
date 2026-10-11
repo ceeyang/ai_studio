@@ -42,6 +42,9 @@ class ProjectPatch(BaseModel):
     seed: int | None = None
     negative: str | None = None
     archived: bool | None = None
+    # 镜头节奏：每镜几秒；0 = 跟随视频引擎（清空）
+    shot_seconds: Literal[0, 3, 4, 5] | None = None
+    auto_retry_video: bool | None = None     # 视频开头没接上首帧时自动重拍一次
 
 
 class ProjectOut(ORM):
@@ -55,6 +58,8 @@ class ProjectOut(ORM):
     negative: str
     style_preset: str = "live_action"
     style_bible_id: int | None
+    shot_seconds: float | None = None
+    auto_retry_video: bool = False
     archived: bool
     created_at: datetime
 

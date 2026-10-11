@@ -72,3 +72,39 @@ def test_upgrade_restores_shot_sequence_from_refs(tmp_path):
         assert c.execute("SELECT max(id) FROM shots").fetchone()[0] == 10
     finally:
         c.close()
+
+
+def test_single_head_and_new_columns_keep_shots_autoincrement(tmp_path):
+    """只出声角色、镜头节奏、自动重拍、建议接上一镜：加列不能重建 shots 表（会丢 AUTOINCREMENT），
+    迁移只有一个 head，老数据按默认值补上。"""
+    from alembic.script import ScriptDirectory
+
+    d = Database(tmp_path / "m.db")
+    cfg = _cfg(d)
+    assert len(ScriptDirectory.from_config(cfg).get_heads()) == 1
+    command.upgrade(cfg, "b4e8d2c6f1a3")
+    c = sqlite3.connect(d.path)
+    c.execute("INSERT INTO projects (id, slug, title, aspect, image_engine, video_engine, seed, "
+              "negative, style_preset, archived, created_at) VALUES "
+              "(1,'p','p','9:16','z','w',1,'','live_action',0,'2026-01-01')")
+    c.execute("INSERT INTO characters (id, project_id, name, description, visual_prompt, "
+              "core_features, design_options, turnaround_look) VALUES (1,1,'站长','','','','[]','')")
+    c.execute("INSERT INTO episodes (id, project_id, number, title, source_text, target_seconds, "
+              "status, stage_hashes) VALUES (1,1,1,'','',60,'draft','{}')")
+    c.execute("INSERT INTO shots (id, episode_id, \"order\", code, shot_size, camera_move, "
+              "action, dialogue, \"cast\", props, image_prompt, motion_prompt, audio_prompt, "
+              "duration, use_end_frame, continue_from_prev, transition_out, origin) VALUES "
+              "(5,1,0,'','','','','[]','[]','[]','','','',3,0,0,'hard_cut','llm')")
+    c.commit()
+    c.close()
+    command.upgrade(cfg, "head")
+    d.engine.dispose()
+    assert "AUTOINCREMENT" in _ddl(d.path, "shots")
+    c = sqlite3.connect(d.path)
+    try:
+        assert c.execute("SELECT voice_only FROM characters").fetchone()[0] == 0
+        assert c.execute("SELECT shot_seconds, auto_retry_video FROM projects").fetchone() \
+            == (None, 0)
+        assert c.execute("SELECT suggest_continue FROM shots").fetchone()[0] == 0
+    finally:
+        c.close()

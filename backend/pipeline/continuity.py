@@ -83,13 +83,17 @@ def _ref_chars(refs: list[Ref]) -> list[int]:
     return sorted({r.character_id for r in refs if r.character_id is not None})
 
 
-def video_ref_plan(s, shot, ff, image_max_refs: Callable[[str], int]) -> VideoRefPlan:
+def video_ref_plan(s, shot, ff, image_max_refs: Callable[[str], int],
+                   packed: list[Ref] | None = None) -> VideoRefPlan:
     """选定首帧 ff 下视频带哪些参考图。videos.run_video 和 views.shot_detail（过期判断）共用。
 
     - 普通首帧：锁过脸（带了定妆照 / 三视图）就带全部出场角色的定妆照，没锁就一张不带（两张脸会打架）；
     - 接上一镜的首帧：尾帧里锁过脸的角色接着带（沿用上一镜）；这一镜 cast 里有、上一镜 cast 里没有的角色
-      （从画外进来，尾帧里还没有这个人）总要带上定妆照——不然 H3 会自己编一张脸（第三次样片 S06）。"""
-    packed = shot_refs(s, shot, video=True)
+      （从画外进来，尾帧里还没有这个人）总要带上定妆照——不然 H3 会自己编一张脸（第三次样片 S06）。
+
+    packed 不给时按现在的规则打包（每人一张脸）；给了（以前的打包，legacy_video_refs）用来算老视频的哈希。"""
+    if packed is None:
+        packed = shot_refs(s, shot, video=True)
     if insert_kind(shot.image_prompt or "", shot.shot_size or "") in ("hands", "body"):
         # 只露手 / 腰 / 物件的插入镜头：画面里没有脸，带定妆照只会让 H3 中途剪进一张脸（第一次样片那类）
         return VideoRefPlan([], False, "first_frame", continued=ff is not None

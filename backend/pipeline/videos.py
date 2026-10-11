@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import shutil
 
-from backend.domain.refs import shot_refs
+from backend.domain.refs import legacy_video_refs
 from backend.domain.slots import add_candidate, get_or_create_slot, selected_candidate
 from backend.engines.base import VideoRequest
 from backend.pipeline.common import job_services
@@ -142,9 +142,11 @@ def run_video(ctx, payload: dict) -> dict:
                                       shot.dialogue, anchor=style.anchor_text if style else "",
                                       has_audio=has_audio, speakers=_speakers(proj, shot))
         negative = join_negative(proj.negative, style.negative if style else "")
-        packed = shot_refs(s, shot, video=True)
-        legacy = packed[:engine.caps.max_refs]   # 以前的规则：不管首帧，一律带定妆照 / 三视图
+        old_pack = legacy_video_refs(s, shot)   # 以前每人带定妆照 + 三视图格（审查 P1-9 之前）
+        legacy = old_pack[:engine.caps.max_refs]   # 更早的规则：不管首帧，一律带定妆照 / 三视图
         plan = video_ref_plan(s, shot, ff, lambda n: image_max_refs(sv.engines, n))
+        old_plan = video_ref_plan(s, shot, ff, lambda n: image_max_refs(sv.engines, n),
+                                  packed=old_pack)
         if plan.dropped:
             src = ("首帧是上一镜视频的尾帧，上一镜没用定妆照锁脸" if plan.continued
                    else f"首帧是 {ff.engine} 出的图，没用定妆照锁脸")
@@ -163,7 +165,9 @@ def run_video(ctx, payload: dict) -> dict:
         # 一律带参考图的老规则；接上一镜以前一律不带参考图
         h_legacy = video_input_hash(shot, proj, style, ff.id, engine_name, has_audio,
                                     [r.candidate_id for r in legacy])
-        ok_hashes = {h, h_legacy}
+        ok_hashes = {h, h_legacy,
+                     video_input_hash(shot, proj, style, ff.id, engine_name, has_audio,
+                                      [r.candidate_id for r in old_plan.refs[:engine.caps.max_refs]])}
         if plan.continued:
             ok_hashes.add(video_input_hash(shot, proj, style, ff.id, engine_name, has_audio, []))
         inputs = video_inputs(shot, proj, style, ff.id, engine_name, has_audio, used)
@@ -189,50 +193,76 @@ def run_video(ctx, payload: dict) -> dict:
                         for c in shot.cast or [])
         if on_screen and ep.shots and ep.shots[-1].id == shot.id:
             extra.append(STAY_IN_FRAME)   # 全集最后一镜：人留在画面里，结尾的压迫感不散
-    # 连续性要求只加在发给引擎的提示词里，不进输入哈希
-    call = engine.build(VideoRequest(prompt=with_continuity(prompt, place, extra), first_frame=first,
-                                     aspect=aspect, seed=seed,
-                                     seconds=seconds, min_seconds=min_seconds,
-                                     negative=negative, refs=refs,
-                                     prefix=f"studio/{slug}/clip_{code}"))
-    ctx.log(f"视频 {code} · {engine_name} · {seconds:.1f}s · seed {seed} · 参考图 {len(refs)} 张"
-            f"{'（原生有声）' if has_audio else '（无声）'}"
-            f"{'：' + '、'.join(labels.values()) if labels else ''}")
-    files, run_dir = run_comfy(ctx, call, slug, labels)
-    video = next((f for f in files if f.suffix.lower() in VIDEO_EXTS), None)
-    if video is None:
-        raise JobError(f"镜头 {code} 没有产出视频文件：{[f.name for f in files]}")
-    dst = sv.media.new_media_path(slug, "video", video.suffix)
-    shutil.copyfile(video, dst)
-    canceled: JobCanceled | None = None
-    try:
-        qc = scene_qc(ctx, sv, dst, code, first)
-    except JobCanceled as e:
-        # 视频已经出好了：先登记成候选（没做自检），再把取消报上去，GPU 的活不白干
-        qc, canceled = None, e
-        ctx.log(f"视频 {code}：跳切检测时任务被取消，视频先登记成候选（没做跳切自检）")
-    with sv.db.session() as s:
-        slot = get_or_create_slot(s, "shot", shot_id, "video")
-        params = {**call.meta, "first_frame_candidate_id": ff.id,
-                  "identity": plan.identity, "locked_chars": plan.locked_chars,
-                  "workflow": sv.media.rel(run_dir / "workflow.api.json"), "inputs": inputs}
-        if qc is not None:
-            params["qc"] = qc
-        # 新的一条自检有问题（疑似跳切 / 开头没接上首帧）、而当前选定的是干净且没过期的：不抢选定
-        # （无人值守时坏片不进成片），重拍也一样
-        keep = qc_bad(qc) and clean_selection(s, shot_id, ok_hashes)
-        c = add_candidate(s, slot, file_path=sv.media.rel(dst), engine=engine_name,
-                          params=params,
-                          input_hash=h, job_id=ctx.job_id, auto_select=not keep,
-                          force_select=bool(payload.get("force")) and not keep)  # 重拍：新的一条直接选中
-        if keep:
-            ctx.log(f"视频 {code}：新的一条自检有问题，没有替换当前选定的视频；要用它请手动选")
-        if qc_bad(qc):
-            c.note = qc_note(qc)
-        cid = c.id
-    if canceled is not None:
-        raise canceled
-    out = {"candidate_ids": [cid], "file": sv.media.rel(dst)}
+        auto_retry = bool(getattr(proj, "auto_retry_video", False))
+        base_seed, taken = proj.seed, len(slot.candidates)
+    cids: list[int] = []
+    retry_of: int | None = None
+    for attempt in range(2):
+        if attempt:
+            # 自动重拍：同一个任务里换种子再出一条（只一次）。在同一个任务里做，接上一镜的下一镜
+            # （依赖这个任务）截尾帧时拿到的就是重拍后的选定视频
+            seed = shot_seed(base_seed, shot_id, taken + attempt)
+        # 连续性要求只加在发给引擎的提示词里，不进输入哈希
+        call = engine.build(VideoRequest(prompt=with_continuity(prompt, place, extra),
+                                         first_frame=first, aspect=aspect, seed=seed,
+                                         seconds=seconds, min_seconds=min_seconds,
+                                         negative=negative, refs=refs,
+                                         prefix=f"studio/{slug}/clip_{code}"))
+        ctx.log(f"视频 {code} · {engine_name} · {seconds:.1f}s · seed {seed} · 参考图 {len(refs)} 张"
+                f"{'（原生有声）' if has_audio else '（无声）'}"
+                f"{'（自动重拍）' if attempt else ''}"
+                f"{'：' + '、'.join(labels.values()) if labels else ''}")
+        files, run_dir = run_comfy(ctx, call, slug, labels)
+        video = next((f for f in files if f.suffix.lower() in VIDEO_EXTS), None)
+        if video is None:
+            raise JobError(f"镜头 {code} 没有产出视频文件：{[f.name for f in files]}")
+        dst = sv.media.new_media_path(slug, "video", video.suffix)
+        shutil.copyfile(video, dst)
+        canceled: JobCanceled | None = None
+        try:
+            qc = scene_qc(ctx, sv, dst, code, first)
+        except JobCanceled as e:
+            # 视频已经出好了：先登记成候选（没做自检），再把取消报上去，GPU 的活不白干
+            qc, canceled = None, e
+            ctx.log(f"视频 {code}：跳切检测时任务被取消，视频先登记成候选（没做跳切自检）")
+        with sv.db.session() as s:
+            slot = get_or_create_slot(s, "shot", shot_id, "video")
+            params = {**call.meta, "first_frame_candidate_id": ff.id,
+                      "identity": plan.identity, "locked_chars": plan.locked_chars,
+                      "workflow": sv.media.rel(run_dir / "workflow.api.json"), "inputs": inputs}
+            if qc is not None:
+                params["qc"] = qc
+            if retry_of is not None:
+                params["retry_of"] = retry_of
+            if retry_of is None:
+                # 新的一条自检有问题（疑似跳切 / 开头没接上首帧）、而当前选定的是干净且没过期的：
+                # 不抢选定（无人值守时坏片不进成片），重拍也一样
+                keep = qc_bad(qc) and clean_selection(s, shot_id, ok_hashes)
+                force_select = bool(payload.get("force")) and not keep   # 重拍：新的一条直接选中
+            else:
+                # 自动重拍的这条：干净就换上它（第一条开头没接上）；还是有问题就不抢，留着第一条
+                keep = qc_bad(qc)
+                force_select = not keep
+            c = add_candidate(s, slot, file_path=sv.media.rel(dst), engine=engine_name,
+                              params=params, input_hash=h, job_id=ctx.job_id,
+                              auto_select=not keep, force_select=force_select)
+            if keep and retry_of is None:
+                ctx.log(f"视频 {code}：新的一条自检有问题，没有替换当前选定的视频；要用它请手动选")
+            if qc_bad(qc):
+                c.note = qc_note(qc)
+            cid = c.id
+        cids.append(cid)
+        if canceled is not None:
+            raise canceled
+        if attempt or not (auto_retry and qc and qc.get("start_mismatch")):
+            break
+        retry_of = cid
+        ctx.log(f"视频 {code}：开头没接上首帧，项目开了「自动重拍」，换种子再出一条（只重拍一次）")
+    if retry_of is not None:
+        ctx.log(f"视频 {code}：自动重拍"
+                + ("这条接上了首帧，已选用它" if not qc_bad(qc) else
+                   "的这条还是有问题，没有替换第一条；两条都留在候选里，看一下再选"))
+    out = {"candidate_ids": cids, "file": sv.media.rel(dst)}
     if qc is not None:
         out["qc"] = qc
     return out

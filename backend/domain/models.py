@@ -45,6 +45,10 @@ class Project(Base):
         ForeignKey("style_bibles.id", ondelete="SET NULL"), nullable=True)
     # 片尾卡：{"seconds": 3, "background": "#0b1a33", "lines": [{text, font, size, bold}]}
     end_card: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    # 镜头节奏：每镜几秒（3 / 4 / 5）；空 = 跟随视频引擎的甜区（default_seconds）
+    shot_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    # 视频开头没接上首帧（出片自检 start_mismatch）时，同一个任务里换种子自动重拍一次
+    auto_retry_video: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     archived: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
@@ -72,6 +76,8 @@ class Character(Base):
     design_options: Mapped[list] = mapped_column(JSON, default=list)
     # 三视图设定图用的全身描述（英文，从头到脚，LLM 按外貌提示词整理，可改）；空就用外貌提示词
     turnaround_look: Mapped[str] = mapped_column(Text, default="")
+    # 只出声、不出镜（画外音、电话里的声音）：不抽定妆照，分镜角色表里不给外貌占位符
+    voice_only: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
 
     project: Mapped[Project] = relationship(back_populates="characters")
     variations: Mapped[list[Variation]] = relationship(cascade="all, delete-orphan",
@@ -160,6 +166,8 @@ class Shot(Base):
     duration: Mapped[float] = mapped_column(Float, default=5.0)
     use_end_frame: Mapped[bool] = mapped_column(Boolean, default=False)
     continue_from_prev: Mapped[bool] = mapped_column(Boolean, default=False)
+    # 分镜建议这一镜接上一镜（同一场景、动作直接延续）：只是建议，工作台上一键打开 continue_from_prev
+    suggest_continue: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     transition_out: Mapped[str] = mapped_column(String(32), default="hard_cut")
     # llm：分镜生成的，重跑会被替换/清理；manual：用户手工加的，重跑分镜时要保留
     origin: Mapped[str] = mapped_column(String(16), default="llm")

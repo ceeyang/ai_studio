@@ -459,7 +459,9 @@ def test_video_packs_cell(tmp_path, db):
     gen_sheet(ctx, ids["chen"], "face")
     assert stale(sv, ids["shot"], "video")
     run_video(ctx, {"shot_id": ids["shot"]})
-    assert len(runner.calls[-1].meta["refs"]) == 2
+    # 审查 P1-9：视频每人只带一张脸，有头像格就用头像格（不再定妆照 + 格子两张）
+    face = cell(sv, ids["chen"], "face_front")[0]
+    assert runner.calls[-1].meta["refs"] == [str(sv.media.abs(face.file_path))]
     assert not stale(sv, ids["shot"], "video")
 
 

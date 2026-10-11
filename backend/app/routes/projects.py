@@ -130,6 +130,9 @@ def patch_project(slug: str, body: ProjectPatch, request: Request):
             # 负面词没自己改过（还是旧预设的默认值或空）就换成新预设的默认值
             if (p.negative or "").strip() in ("", get_preset(p.style_preset).negative):
                 p.negative = get_preset(new_preset).negative
+        if data.get("shot_seconds") == 0:   # 0 = 跟随视频引擎的甜区
+            p.shot_seconds = None
+            data.pop("shot_seconds")
         for k, v in data.items():
             if v is not None:
                 setattr(p, k, v)

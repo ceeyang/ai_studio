@@ -11,8 +11,9 @@
 - 上一镜尾帧：开了「接上一镜」的镜头不出图，首帧直接取上一镜视频的最后一帧（pipeline/continuity.py），
   所以不会走到参考图打包。
 
-视频只带出场角色（定妆照 + 三视图格）：场景和构图已经由首帧定下，再塞场景图给视频模型只会让它中途剪到
-空场景（和以前剪到定妆照影棚背景一样）。
+视频只带出场角色，每人一张脸（头像格优先，没有就定妆照，见 _video_cast_refs）：场景和构图已经由首帧
+定下，再塞场景图给视频模型只会让它中途剪到空场景（和以前剪到定妆照影棚背景一样）；参考图越多也越容易
+中途重新构图。以前每人带定妆照 + 三视图格，老视频的哈希按 legacy_video_refs 认，不判过期。
 
 没有场景图、构图参考和三视图时打包结果和只带定妆照时完全一样，老镜头的输入哈希不变。
 """
@@ -79,6 +80,40 @@ def _cast_refs(s: Session, shot) -> list[Ref]:
     return portraits + cells
 
 
+# 视频每个角色只带一张脸：头像格优先（3/4 脸在前；镜头本身是正脸特写时正脸在前），没有头像格就带定妆照
+_VIDEO_FACE_VIEWS = ("face_three_quarter", "face_front")
+
+
+def _video_cast_refs(s: Session, shot) -> list[Ref]:
+    """视频参考图（审查 P1-9）：每个出场角色只带 1 张。H3 视频的首帧已经定了场景、服装和构图，参考图只为
+    锁脸；以前每人带定妆照 + 三视图格，参考图越多越容易中途重新构图、剪进参考图。没有定妆照的角色不带
+    （头像格也是按定妆照锁的脸）。"""
+    from backend.domain.turnaround import cell_state
+
+    view = view_for_shot(shot)
+    order = (view, *[v for v in _VIDEO_FACE_VIEWS if v != view]) if view in _VIDEO_FACE_VIEWS \
+        else _VIDEO_FACE_VIEWS
+    out: list[Ref] = []
+    for ch in _cast(s, shot):
+        p = portrait_of(s, ch.id)
+        if p is None:
+            continue
+        for v in order:
+            sel, stale = cell_state(s, ch, v)
+            if sel is not None and not stale:
+                out.append(Ref(sel.id, sel.file_path, f"{ch.name} 三视图·{VIEW_LABELS[v]}",
+                               "turnaround", ch.id))
+                break
+        else:
+            out.append(Ref(p.id, p.file_path, f"{ch.name} 定妆照", "portrait", ch.id))
+    return out
+
+
+def legacy_video_refs(s: Session, shot) -> list[Ref]:
+    """以前视频带的参考图（每人定妆照 + 一张三视图格）：老视频的输入哈希按它算，换规则后不判过期。"""
+    return _cast_refs(s, shot)
+
+
 # ------------------------------------------------------------ 镜头构图参考图
 def shot_ref_images(s: Session, shot_id: int) -> list[Candidate]:
     from sqlalchemy import select
@@ -116,10 +151,10 @@ def remove_shot_ref(s: Session, shot_id: int, candidate_id: int) -> None:
 
 # ------------------------------------------------------------ 打包
 def shot_refs(s: Session, shot, *, video: bool = False) -> list[Ref]:
-    """按 §6.4 的顺序打包这一镜的参考图。video=True 时只带出场角色（视频用）。"""
-    cast = _cast_refs(s, shot)
+    """按 §6.4 的顺序打包这一镜的参考图。video=True 时只带出场角色（视频用，每人一张脸）。"""
     if video:
-        return cast
+        return _video_cast_refs(s, shot)
+    cast = _cast_refs(s, shot)
     head: list[Ref] = []
     loc = shot_location(s, shot)
     img = location_image_of(s, loc.id) if loc is not None else None
