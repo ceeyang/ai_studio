@@ -231,7 +231,8 @@ def run_turnaround_sheet(ctx, payload: dict) -> dict:
             raise JobError(f"角色 {ch.name} 还没有外貌提示词，先写一个或用 AI 推荐造型")
         prompt, negative = sheet_inputs(ch, sheet)
         portrait_id = portrait.id if (portrait and refs) else None
-        h = sheet_hash(sheet, prompt, negative, engine_name, portrait_id)
+        h = sheet_hash(sheet, look_of(ch), proj.style_bible.anchor_text if proj.style_bible else "",
+                       negative, engine_name, portrait_id)
         seed = shot_seed(proj.seed, char_id, ctx.job_id)
         slug, name = proj.slug, ch.name
     call = engine.build(ImageRequest(prompt=prompt, negative=negative, aspect=spec.aspect,

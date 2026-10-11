@@ -65,6 +65,51 @@ BODY_TEMPLATE = (
     "side of the image, both eyes still visible, the near shoulder closer to the camera. Figure 3: "
     "side profile view, body and head turned 90 degrees to face the right edge of the image, only "
     "one eye and one ear visible, shoulders perpendicular to the camera. Figure 4, far right: back "
+    "view, facing away from the camera, the back of the head and the back of the outfit visible. "
+    "Character: {description} All four figures are the identical person with the "
+    "identical face, hairstyle, outfit, colors and accessories. Every figure is shown in full from "
+    "the top of the head to the soles of the shoes, all four the same height and the same scale, "
+    "standing on one shared ground line. The figures are small in the frame, each about 80 percent of "
+    "the image height, with clear empty background above the heads and below the shoes and a wide "
+    "margin at the image edges. Neutral relaxed standing pose, feet together, arms hanging "
+    "relaxed at the sides, calm neutral expression. Orthographic camera at chest height with a long "
+    "telephoto lens, true-to-scale proportions, every figure in sharp focus. Plain seamless pure white "
+    "studio background, one continuous seamless backdrop, flat even soft studio lighting "
+    "identical across all four figures, faint soft shadow under the feet. "
+    "{style} Crisp detail on the face, hair and fabric. Only the four figures of this one person on "
+    "the clean white background, empty hands, nothing else in the image."
+)
+FACE_TEMPLATE = (
+    "Professional character head turnaround sheet, photographic headshot reference: the same person "
+    "photographed three times and placed side by side in one horizontal row, exactly three head and "
+    "shoulders close-up portraits separated by wide empty gaps. Portrait 1, far left: front view, face "
+    "looking straight into the camera, both ears visible. Portrait 2, center: three-quarter view, "
+    "halfway between the front view and the side profile: head and shoulders turned 45 degrees toward "
+    "the right side of the image, the far cheek partly hidden, the far ear hidden, eyes looking the "
+    "same direction as the nose. Portrait 3, far right: side profile, head "
+    "and shoulders turned 90 degrees to face the right edge of the image, only one eye and one ear "
+    "visible. Character: {description} All three portraits are the identical person with the "
+    "identical face, skin, hairstyle and clothing. Close-up framing: each portrait shows only the head, "
+    "neck and the top of the shoulders, cut off at the collarbones; all "
+    "three heads the same size and at the same height, with plain background above every head and "
+    "between the portraits. Calm "
+    "neutral expression, relaxed closed mouth. Orthographic camera at eye level with a long "
+    "telephoto lens, true-to-scale proportions, every face in sharp focus. Plain seamless pure white "
+    "studio background, one continuous seamless backdrop, flat even soft studio lighting identical "
+    "across all three portraits. {style} Crisp detail on the skin, eyes and hair. Only the three "
+    "portraits of this one person on the clean white background, nothing else in the image."
+)
+TEMPLATES = {"body": BODY_TEMPLATE, "face": FACE_TEMPLATE}
+# 以前的模板（否定句写法）：老设定图的输入哈希按它算，换了模板不判过期（过期的格子不进参考图，
+# 会让所有带三视图的首帧、视频一起过期重出）
+_V1_BODY_TEMPLATE = (
+    "Professional character turnaround sheet, photographic model sheet: the same person "
+    "photographed four times and placed side by side in one horizontal row, exactly four full-body "
+    "figures with wide empty space between them. Figure 1, far left: front view, facing the camera "
+    "straight on. Figure 2: three-quarter view, body and face turned 45 degrees toward the right "
+    "side of the image, both eyes still visible, the near shoulder closer to the camera. Figure 3: "
+    "side profile view, body and head turned 90 degrees to face the right edge of the image, only "
+    "one eye and one ear visible, shoulders perpendicular to the camera. Figure 4, far right: back "
     "view, facing away from the camera, the back of the head and the back of the outfit visible, "
     "face not visible. Character: {description} All four figures are the identical person with the "
     "identical face, hairstyle, outfit, colors and accessories. Every figure is shown in full from "
@@ -79,7 +124,7 @@ BODY_TEMPLATE = (
     "{style} Crisp detail on the face, hair and fabric. No text, no labels, no numbers, no props, "
     "no other people."
 )
-FACE_TEMPLATE = (
+_V1_FACE_TEMPLATE = (
     "Professional character head turnaround sheet, photographic headshot reference: the same person "
     "photographed three times and placed side by side in one horizontal row, exactly three head and "
     "shoulders close-up portraits separated by wide empty gaps. Portrait 1, far left: front view, face "
@@ -99,18 +144,37 @@ FACE_TEMPLATE = (
     "three portraits. {style} Crisp detail on the skin, eyes and hair. No text, no labels, no "
     "numbers, no props, no other people."
 )
-TEMPLATES = {"body": BODY_TEMPLATE, "face": FACE_TEMPLATE}
+_V1_TEMPLATES = {"body": _V1_BODY_TEMPLATE, "face": _V1_FACE_TEMPLATE}
 SHEET_NEGATIVE = ("background scenery, room, floor clutter, props, text, labels, numbers, "
                   "watermark, cropped head, cropped feet, overlapping figures, different outfits, "
                   "different people, extra person")
-DEFAULT_STYLE = "Photorealistic live-action photography."
+DEFAULT_STYLE = "Photorealistic live-action photography, everything in sharp focus."
+# 设定图要正交、整张清晰：风格锚里的浅景深、虚化、变形宽银幕、光晕、焦段、剧情类型词都不要
+_SHEET_DROP = re.compile(r"depth of field|bokeh|anamorphic|halation|\blens\b|\d+\s?mm\b|focus|blur"
+                         r"|drama|cinematic|still\b|\bshot on\b", re.I)
+STYLE_WORDS = 25
 
 
 def style_line(anchor: str) -> str:
-    """风格锚只取第一句（画风 / 媒介）。后面写的场景、光线、色调会把背景带成车间，设定图不要。"""
+    """设定图用的风格句：风格锚里只和成像有关的分句（photo_style，去掉场景、天气、光源），再去掉
+    浅景深、变形镜头、光晕、焦段这类和「正交、整张清晰」矛盾的分句，最后写明全部清晰。"""
+    from backend.pipeline.prompting import photo_style  # 包 backend.pipeline 会反过来导入本模块
+
+    kept: list[str] = []
+    for clause in (c.strip() for c in photo_style(anchor).split(",")):
+        if clause and not _SHEET_DROP.search(clause) \
+                and len(" ".join(kept + [clause]).split()) <= STYLE_WORDS:
+            kept.append(clause)
+    if not kept:
+        return DEFAULT_STYLE
+    text = ", ".join(kept).rstrip(" .")
+    return text[:1].upper() + text[1:] + ", everything in sharp focus."
+
+
+def _v1_style_line(anchor: str) -> str:
     first = re.split(r"(?<=[.!?。])\s+", (anchor or "").strip(), maxsplit=1)[0].strip()
     if not first:
-        return DEFAULT_STYLE
+        return "Photorealistic live-action photography."
     return first if first[-1] in ".!?。" else first + "."
 
 
@@ -149,17 +213,32 @@ def sheet_inputs(char: Character, sheet: str) -> tuple[str, str]:
     return prompt, negative
 
 
-def sheet_hash(sheet: str, prompt: str, negative: str, engine_name: str,
+def sheet_hash(sheet: str, look: str, anchor: str, negative: str, engine_name: str,
                portrait_id: int | None) -> str:
-    """不含种子：重出输入不变；改全身描述 / 风格 / 换定妆照（引擎吃参考图时）才算过期。"""
+    """只算数据，不含种子和模板文字：重出输入不变；改全身描述 / 风格锚 / 换定妆照（引擎吃参考图时）
+    才算过期。模板文字改了不判过期（和剧本、分镜的规则版本一个道理）。"""
+    return input_hash("turnaround_sheet_inputs", sheet, (look or "").strip(), anchor or "",
+                      negative, engine_name, portrait_id if uses_refs(engine_name) else None)
+
+
+def legacy_sheet_hash(sheet: str, look: str, anchor: str, negative: str, engine_name: str,
+                      portrait_id: int | None) -> str:
+    """以前的算法：整段提示词（老模板）的哈希。老设定图按它比，不因为换了模板就过期。"""
+    prompt = _V1_TEMPLATES[sheet].format(description=(look or "").strip(),
+                                         style=_v1_style_line(anchor))
     return input_hash("turnaround_sheet", sheet, prompt, negative, engine_name,
                       portrait_id if uses_refs(engine_name) else None)
 
 
-def current_sheet_hash(s: Session, char: Character, sheet: str, engine_name: str) -> str:
-    prompt, negative = sheet_inputs(char, sheet)
+def current_sheet_hashes(s: Session, char: Character, sheet: str, engine_name: str) -> set[str]:
+    _, negative = sheet_inputs(char, sheet)
+    style = char.project.style_bible
+    anchor = style.anchor_text if style else ""
     p = portrait_of(s, char.id)
-    return sheet_hash(sheet, prompt, negative, engine_name, p.id if p else None)
+    pid = p.id if p else None
+    look = look_of(char)
+    return {sheet_hash(sheet, look, anchor, negative, engine_name, pid),
+            legacy_sheet_hash(sheet, look, anchor, negative, engine_name, pid)}
 
 
 def cell_hash(sheet_hash_: str, view: str) -> str:
@@ -167,7 +246,7 @@ def cell_hash(sheet_hash_: str, view: str) -> str:
 
 
 def _sheet_stale(s: Session, char: Character, sheet: str, cand: Candidate | None) -> bool:
-    return cand is None or cand.input_hash != current_sheet_hash(s, char, sheet, cand.engine)
+    return cand is None or cand.input_hash not in current_sheet_hashes(s, char, sheet, cand.engine)
 
 
 def sheet_state(s: Session, char: Character, sheet: str) -> tuple[Candidate | None, bool]:

@@ -133,9 +133,56 @@ def test_views_and_sheets():
 
 
 def test_style_line_keeps_only_the_medium():
-    assert style_line(ANCHOR) == "Photorealistic live-action commercial photography, fine film grain."
-    assert style_line("") == "Photorealistic live-action photography."
-    assert style_line("Anime cel shading, bold outlines") == "Anime cel shading, bold outlines."
+    assert style_line(ANCHOR) == ("Photorealistic live-action commercial photography, fine film grain, "
+                                  "everything in sharp focus.")
+    assert style_line("") == "Photorealistic live-action photography, everything in sharp focus."
+    # 动漫风格锚：photo_style 认不出成像词时退到默认写实（以前取第一句）
+    assert style_line("Anime cel shading, bold outlines").endswith("everything in sharp focus.")
+
+
+def test_style_line_drops_shallow_focus_and_anamorphic():
+    """设定图要正交、整张清晰：锚里的浅景深、变形宽银幕、光晕、焦段、剧情类型词不进风格句。"""
+    anchor = ("Photorealistic live-action cinematic still, Chinese urban-fringe drama, shot on a 35mm "
+              "anamorphic lens with shallow depth of field, subtle Kodak Vision3 500T film grain, "
+              "colors are slightly desaturated, skin looks real.")
+    s = style_line(anchor).lower()
+    for bad in ("depth of field", "anamorphic", "35mm", "drama", "cinematic", "still"):
+        assert bad not in s, bad
+    assert "desaturated" in s and s.endswith("everything in sharp focus.")
+
+
+def test_sheet_templates_have_no_negations():
+    """默认三视图引擎（H3）没有负面提示词：模板里不写「No text / without borders / no smile」这类否定句，
+    改成正面写法。"""
+    import re as _re
+
+    for sheet in ("body", "face"):
+        low = sheet_prompt(sheet, FULL, ANCHOR).lower()
+        assert not _re.search(r"\bno\b|\bwithout\b|\bnot\b", low.replace(FULL.lower(), "")), sheet
+        assert "nothing else in the image" in low and "seamless backdrop" in low
+
+
+def test_old_sheet_made_with_v1_template_is_not_stale(tmp_path, db):
+    """模板换成正面写法后，按老模板出的设定图不判过期（过期的格子不进参考图，会牵连首帧、视频）。"""
+    from backend.domain.slots import add_candidate
+    from backend.domain.turnaround import SHEET_NEGATIVE, legacy_sheet_hash, look_of, sheet_state
+    from backend.pipeline.prompting import join_negative
+
+    sv = make_services(tmp_path, db)
+    proj_id, ep_id = seed_episode(db, image_engine="zimage")
+    with db.session() as s:
+        ch = Character(project_id=proj_id, name="陈师傅", visual_prompt=LOOK)
+        s.add(ch)
+        s.flush()
+        neg = join_negative("", "", SHEET_NEGATIVE)
+        h = legacy_sheet_hash("body", look_of(ch), "", neg, "zimage", None)
+        add_candidate(s, get_or_create_slot(s, "character", ch.id, sheet_slot_kind("body")),
+                      file_path="x.png", engine="zimage", params={}, input_hash=h, job_id=None)
+        sel, stale = sheet_state(s, ch, "body")
+        assert sel is not None and stale is False
+        ch.visual_prompt = LOOK + ", red scarf"
+        s.flush()
+        assert sheet_state(s, ch, "body")[1] is True
 
 
 def test_body_sheet_prompt_is_fixed_template():
@@ -146,7 +193,7 @@ def test_body_sheet_prompt_is_fixed_template():
     for phrase in ("turnaround sheet", "exactly four full-body figures", "far left: front view",
                    "three-quarter view", "side profile", "90 degrees", "far right: back view",
                    "same height and the same scale", "orthographic", "seamless", "white",
-                   "even", "no text"):
+                   "even", "nothing else in the image"):
         assert phrase in low, phrase
     assert low.index("front view") < low.index("three-quarter view") < low.index("side profile") \
         < low.index("back view")
