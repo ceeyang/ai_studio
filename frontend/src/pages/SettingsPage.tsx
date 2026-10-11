@@ -26,7 +26,7 @@ export function SettingsPage() {
   return (
     <div className="page">
       <header className="page-head">
-        <span className="eyebrow">05 · 设置</span>
+        <span className="eyebrow">04 · 设置</span>
         <h2>设置</h2>
       </header>
       <div className="settings-layout">

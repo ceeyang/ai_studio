@@ -137,8 +137,9 @@ export function Layout() {
         </div>
         {link('/jobs', '任务', 'jobs', '03')}
         {link('/settings', '设置', 'settings', '04')}
+        {/* 画幅是每个项目自己的（9:16 / 16:9 …），这里不写死 */}
         <div className="nav-foot" aria-hidden="true">
-          9:16 竖屏 · 本地单机
+          本地单机
         </div>
       </nav>
       <div className="main">

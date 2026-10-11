@@ -37,20 +37,20 @@ const STATS: TakeStats = {
 };
 
 describe('抽卡统计文案', () => {
-  it('镜头一行：抽数、失败、选第几条；只抽过一条不说选第几条；都没抽过为 null', () => {
-    expect(shotTakesText(STATS.shots[0])).toBe('首帧 3 抽（选第 3 条） · 视频 5 抽，失败 1（选第 4 条）');
+  it('镜头一行：抽数（含失败）、失败、选第几条；只抽过一条不说选第几条；都没抽过为 null', () => {
+    expect(shotTakesText(STATS.shots[0])).toBe('首帧 3 抽（选第 3 条） · 视频 6 抽（失败 1，选第 4 条）');
     expect(shotTakesText(shotTakes(1, 'S09', { takes: 1, selected_index: 1 }, {}))).toBe('首帧 1 抽');
     expect(shotTakesText(STATS.shots[1])).toBeNull();
     expect(shotTakesText(undefined)).toBeNull();
   });
 
-  it('本集合计：总抽数、失败、可用率、平均每镜、按引擎、废弃镜头', () => {
+  it('本集合计：总抽数（含失败，括号里分出成 / 失败）、视频可用率、平均每镜、按引擎、废弃镜头', () => {
     expect(takeStatsSummary(STATS)).toBe(
-      '本集共抽 8 次，失败 1 次，可用率 20%，平均每镜 9.0 抽；按引擎：首帧 Z-Image 快速 3 抽、视频 H3 视频（有声） 5 抽（失败 1）；废弃镜头的抽卡 2 条',
+      '本集共抽 9 次（出成 8 条，失败 1 次），视频可用率 20%，平均每镜 9.0 抽；按引擎：首帧 Z-Image 快速 3 抽、视频 H3 视频（有声） 6 抽（失败 1）；废弃镜头的抽卡 2 条',
     );
     const fresh = { ...STATS, total_takes: 0, failed: 0, usable_rate: null, avg_takes_per_finished_shot: null, engines: [], archived_takes: {} };
     expect(takeStatsSummary(fresh)).toBeNull();
-    expect(takeStatsSummary({ ...fresh, total_takes: 2, first_frame_takes: 2 })).toBe('本集共抽 2 次，失败 0 次');
+    expect(takeStatsSummary({ ...fresh, total_takes: 2, first_frame_takes: 2 })).toBe('本集共抽 2 次');
   });
 });
 
@@ -77,8 +77,8 @@ describe('ShotStage 里的抽卡统计', () => {
       'GET /api/jobs': [],
     });
     renderAt(<Harness />, { route: '/projects/demo/episodes/4?stage=videos', path: '/projects/:slug/episodes/:episodeId' });
-    expect((await screen.findByTestId('take-stats')).textContent).toContain('本集共抽 8 次，失败 1 次，可用率 20%');
-    expect(screen.getByTestId('takes-S01').textContent).toBe('首帧 3 抽（选第 3 条） · 视频 5 抽，失败 1（选第 4 条）');
+    expect((await screen.findByTestId('take-stats')).textContent).toContain('本集共抽 9 次（出成 8 条，失败 1 次），视频可用率 20%');
+    expect(screen.getByTestId('takes-S01').textContent).toBe('首帧 3 抽（选第 3 条） · 视频 6 抽（失败 1，选第 4 条）');
     expect(screen.queryByTestId('takes-S02')).toBeNull();
   });
 

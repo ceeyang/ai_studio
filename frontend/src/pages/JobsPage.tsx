@@ -1,4 +1,4 @@
-// 「04 · 任务」：上面状态分段 + 搜索 + 类型 / 项目筛选（都记在地址栏），左边按日期分组的任务列表，右边任务详情
+// 「03 · 任务」：上面状态分段 + 搜索 + 类型 / 项目筛选（都记在地址栏），左边按日期分组的任务列表，右边任务详情
 // （窄屏时详情变成从右侧滑出的抽屉）。地址 /jobs?job=293 可以直达、分享、刷新保持。
 import { useQueryClient } from '@tanstack/react-query';
 import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react';
@@ -262,7 +262,7 @@ export function JobsPage() {
   return (
     <div className={`page jobs-page${selectedId ? ' has-detail' : ''}`}>
       <header className="page-head jobs-head">
-        <span className="eyebrow">04 · 任务</span>
+        <span className="eyebrow">03 · 任务</span>
         <h2>任务</h2>
         {status === 'failed' && failed.length > 0 && (
           <button type="button" className="jobs-retry-all" disabled={retrying} onClick={() => void retryAllFailed()}>

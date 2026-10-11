@@ -104,7 +104,7 @@ export function errorBrief(error: string | null | undefined, max = 80): string {
 export function jobEngine(j: Job): string {
   const e = j.payload?.engine;
   if (typeof e === 'string' && e) return engineLabel(e);
-  return j.model_family ?? '';
+  return j.model_family ? engineLabel(j.model_family) : '';
 }
 
 /** 搜索：#id、编号、任务类型中文名、所属对象（项目 / 集 / 镜头）、引擎都能搜；空格分开的词都要命中 */

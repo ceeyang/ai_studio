@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { makeJob } from '../../test/factories';
-import { dateGroup, errorBrief, fmtSeconds, groupByDate, matchesSearch, relTime, typeGroupOf } from './jobList';
+import { dateGroup, errorBrief, fmtSeconds, groupByDate, jobEngine, matchesSearch, relTime, typeGroupOf } from './jobList';
 
 const NOW = new Date(2026, 9, 11, 15, 0, 0).getTime(); // 本地时间 2026-10-11 15:00
 const local = (d: number, h: number, m = 0) => new Date(2026, 9, d, h, m).toISOString();
@@ -53,6 +53,13 @@ describe('jobList', () => {
     expect(matchesSearch(j, '视频 demo')).toBe(true);
     expect(matchesSearch(j, '视频 other')).toBe(false);
     expect(matchesSearch(j, '  ')).toBe(true);
+  });
+
+  it('引擎：payload 里的引擎和退回的模型族都显示中文名，不认识的照原样', () => {
+    expect(jobEngine(makeJob({ payload: { engine: 'gemini_image' } }))).toBe('Gemini 网页');
+    expect(jobEngine(makeJob({ payload: {}, model_family: 'gemini_web' }))).toBe('Gemini 网页');
+    expect(jobEngine(makeJob({ payload: {}, model_family: 'something_new' }))).toBe('something_new');
+    expect(jobEngine(makeJob({ payload: {}, model_family: null }))).toBe('');
   });
 
   it('类型分组和秒数格式', () => {

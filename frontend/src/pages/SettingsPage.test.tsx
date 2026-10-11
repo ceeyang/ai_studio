@@ -140,10 +140,10 @@ describe('SettingsPage', () => {
     expect(await screen.findByText('读不到配置文件（HTTP 500）')).toBeTruthy();
   });
 
-  it('页头「05 · 设置」；环境检查标题不带 doctor；引擎表主文案是中文名，id 小字', async () => {
+  it('页头「04 · 设置」；环境检查标题不带 doctor；引擎表主文案是中文名，id 小字', async () => {
     installFetch({ 'GET /api/doctor': [DOCTOR[0]], 'GET /api/engines': ENGINES, 'GET /api/config': {} });
     renderAt(<SettingsPage />, { route: '/settings', path: '/settings' });
-    expect(screen.getByText('05 · 设置')).toBeTruthy();
+    expect(screen.getByText('04 · 设置')).toBeTruthy();
     expect(screen.getByRole('heading', { level: 2, name: '设置' })).toBeTruthy();
     expect(screen.getByRole('heading', { name: '环境检查' })).toBeTruthy();
     expect(screen.queryByText(/doctor/)).toBeNull();

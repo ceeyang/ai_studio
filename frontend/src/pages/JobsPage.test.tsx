@@ -45,7 +45,7 @@ function renderPage(route: string, events?: EventsState) {
 }
 
 describe('JobsPage · 列表与筛选', () => {
-  it('页头「04 · 任务」；状态分段带数量，点了写进地址栏；重试失败任务后跳到新任务', async () => {
+  it('页头「03 · 任务」；状态分段带数量，点了写进地址栏；重试失败任务后跳到新任务', async () => {
     const done = makeJob({ id: 2, status: 'done' });
     const calls = installFetch({
       'GET /api/jobs?limit=100': [FAILED, done],
@@ -56,7 +56,7 @@ describe('JobsPage · 列表与筛选', () => {
     });
     renderPage('/jobs');
     const user = userEvent.setup();
-    expect(screen.getByText('04 · 任务')).toBeTruthy();
+    expect(screen.getByText('03 · 任务')).toBeTruthy();
     expect(screen.getByRole('heading', { level: 2, name: '任务' })).toBeTruthy();
     await screen.findByRole('option', { name: /#3/ });
     const seg = screen.getByRole('group', { name: '状态筛选' });

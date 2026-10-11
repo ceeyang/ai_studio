@@ -769,7 +769,7 @@ function ProjectDetail({ slug }: { slug: string }) {
             {del.error && <p className="error">{errorText(del.error)}</p>}
             {episodes.data && eps.length === 0 && (
               <div className="panel empty">
-                <p>还没有剧集。点右上角“新建剧集”，粘贴梗概开始第一集。</p>
+                <p>还没有剧集。点右上角「新建剧集」，粘贴梗概开始第一集。</p>
               </div>
             )}
             <ul className="episode-grid">
