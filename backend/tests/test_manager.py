@@ -64,6 +64,33 @@ def test_job_runs_to_done(db, managers):
     assert any(e["type"] == "job" and e["job"]["status"] == "done" for e in m.bus.events)
 
 
+def test_log_inside_uncommitted_write_does_not_lock(db, managers):
+    """处理器在自己没提交的写事务里打日志：以前另开连接写 jobs.log 会被自己的写锁卡 30 秒，
+    再报 database is locked（分镜任务 #282）。现在日志等会话结束后再写库，顺序不乱。"""
+    from sqlalchemy import text
+    reg = HandlerRegistry()
+
+    @reg.register("w")
+    def w(ctx, payload):
+        ctx.log("开始")
+        with db.session() as s:
+            s.execute(text("CREATE TABLE IF NOT EXISTS t (x INTEGER)"))
+            s.execute(text("INSERT INTO t VALUES (1)"))
+            s.flush()
+            t0 = time.monotonic()
+            ctx.log("事务里的日志")
+            assert time.monotonic() - t0 < 2
+        ctx.log("结束")
+        return {}
+
+    m = make(db, reg, managers)
+    jid = m.submit("w", {})
+    j = wait_status(m, jid, "done", "failed")
+    assert j["status"] == "done", j.get("error")
+    lines = j["log"]
+    assert lines.index("开始") < lines.index("事务里的日志") < lines.index("结束")
+
+
 def test_failures_record_error(db, managers):
     reg = HandlerRegistry()
 

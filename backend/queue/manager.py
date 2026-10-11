@@ -223,10 +223,16 @@ class JobManager:
 
     def append_log(self, job_id: int, msg: str) -> None:
         line = f"[{time.strftime('%H:%M:%S')}] {msg}\n"
-        with self.db.session() as s:
-            j = s.get(Job, job_id)
-            if j is not None:
-                j.log = (j.log or "") + line
+
+        def write() -> None:
+            with self.db.session() as s:
+                j = s.get(Job, job_id)
+                if j is not None:
+                    j.log = (j.log or "") + line
+
+        # 处理器常在自己没提交的写事务里打日志：这时另开连接写库会被自己的写锁卡到超时
+        # （database is locked），所以先推给页面，等这个线程的会话结束后再写库
+        self.db.after_session(write)
         self.bus.publish({"type": "log", "job_id": job_id, "line": line})
 
     @contextmanager
