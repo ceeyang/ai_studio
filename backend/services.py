@@ -28,12 +28,17 @@ class Services:
     browser: Any = None      # BrowserRunner（gpt_image / gemini_image）
     runninghub: Any = None   # RunningHubRunner（config 里配了 runninghub 才有）
     settings: Any = None     # SettingsStore（设置页的默认模型、按步骤单独设置）
+    api: Any = None          # ApiRunner（OpenAI / Gemini 官方 API 的出图、视频引擎）
+    api_keys: Any = None     # ApiKeyStore（设置页「API 服务」：Key、Base URL、模型名）
 
     def prompts(self, slug: str) -> PromptLibrary:
         return PromptLibrary(BUILTIN_DIR, self.media.project_dir(slug) / "prompts")
 
 
 def build_services(cfg: Config, db: Database, manager: Any) -> Services:
+    from backend.domain.api_keys import ApiKeyStore
+    from backend.engines.api.engines import API_FAMILIES
+    from backend.engines.api.runner import ApiRunner
     from backend.engines.browser.engines import BROWSER_FAMILIES
     from backend.engines.browser.runner import BrowserRunner
     from backend.engines.browser.session import BrowserSession
@@ -42,6 +47,7 @@ def build_services(cfg: Config, db: Database, manager: Any) -> Services:
     from backend.engines.runninghub.client import RunningHubClient
     from backend.engines.runninghub.engines import FAMILY as RH_FAMILY
     from backend.engines.runninghub.runner import RunningHubRunner
+    from backend.llm.api_providers import ensure_api_providers
     from backend.llm.gateway import LLMGateway
     from backend.llm.providers import build_providers
 
@@ -51,8 +57,11 @@ def build_services(cfg: Config, db: Database, manager: Any) -> Services:
     from backend.domain.settings import SettingsStore
 
     store = SettingsStore(db)
+    keys = ApiKeyStore(db)
+    # OpenAI / Anthropic / Gemini 的 API 文本模型：config.yaml 没写也加上（没配 Key 时设置页里不可选）
+    ensure_api_providers(cfg.llm)
     # 每次调用 LLM 时现读设置：按步骤单独设置 → 全局默认文本模型 → config.yaml
-    llm = LLMGateway(cfg.llm, build_providers(cfg.llm), gpu_guard=manager.gpu_exclusive,
+    llm = LLMGateway(cfg.llm, build_providers(cfg.llm, creds=keys.resolve), gpu_guard=manager.gpu_exclusive,
                      override=store.llm_provider)
     # 换模型族、或本机 LLM 要用显卡时，先让 ComfyUI 把模型卸掉
     manager.on_family_switch = lambda old, new: runner.free()
@@ -66,15 +75,18 @@ def build_services(cfg: Config, db: Database, manager: Any) -> Services:
     manager.idle_free_seconds = cfg.comfyui.idle_free_seconds
     manager.on_gpu_idle = on_gpu_idle
     # 网页出图每个网站一条串行通道，不占 GPU worker、不触发换模型族/释放显存
-    manager.lanes = BROWSER_FAMILIES
+    # 官方 API 的出图 / 视频引擎也不占显卡：每个引擎族一条串行通道
+    manager.lanes = (*BROWSER_FAMILIES, *API_FAMILIES)
     rh = None
     if cfg.runninghub is not None:
         # 云端任务不占本机显卡：单独一条串行通道
-        manager.lanes = (*BROWSER_FAMILIES, RH_FAMILY)
+        manager.lanes = (*BROWSER_FAMILIES, *API_FAMILIES, RH_FAMILY)
         rh = RunningHubRunner(RunningHubClient(cfg.runninghub.base_url, cfg.runninghub.api_key(),
                                                api_key_env=cfg.runninghub.api_key_env,
                                                poll_interval=cfg.runninghub.poll_interval))
-    return Services(cfg=cfg, db=db, media=MediaStore(cfg.data_dir), engines=EngineRegistry(cfg),
+    return Services(cfg=cfg, db=db, media=MediaStore(cfg.data_dir),
+                    engines=EngineRegistry(cfg, api_creds=keys.resolve),
                     llm=llm, ffmpeg=FFmpeg(cfg.ffmpeg.ffmpeg, cfg.ffmpeg.ffprobe),
                     comfy=runner, comfy_client=client,
-                    browser=BrowserRunner(BrowserSession(cfg.browser)), runninghub=rh, settings=store)
+                    browser=BrowserRunner(BrowserSession(cfg.browser)), runninghub=rh, settings=store,
+                    api=ApiRunner(keys.resolve), api_keys=keys)

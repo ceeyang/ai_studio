@@ -143,7 +143,48 @@ def check_runninghub(cfg: Config, engines) -> list[Check]:
     return out
 
 
-def run_doctor(cfg: Config, engines, comfy, ffmpeg, *, browser=None,
+def _used_api_names(settings) -> set[str]:
+    """设置页里选了的文本模型 / 引擎（看 API 服务没配 Key 时是不是要紧）。"""
+    if settings is None:
+        return set()
+    try:
+        st = settings.load()
+    except Exception:  # noqa: BLE001
+        return set()
+    return {v for v in (st.text_model, st.image_engine, st.video_engine, *st.steps.values()) if v}
+
+
+def check_api_services(api_keys, settings=None) -> list[Check]:
+    """API 服务（OpenAI / Anthropic / Gemini）：Key 配了没有、从哪来、最近一次「测试连接」的结果。
+    不联网（测试要在设置页点「测试连接」）。没配 Key：设置页里选了用它的模型 / 引擎才算警告。"""
+    from backend.domain.api_keys import SERVICES, env_creds, mask
+
+    used = _used_api_names(settings)
+    out: list[Check] = []
+    for sid, svc in SERVICES.items():
+        c = api_keys.resolve(sid) if api_keys is not None else env_creds(sid)
+        users = sorted({svc.llm_provider, *svc.engines} & used)
+        if not c.configured:
+            if users:
+                out.append(Check("API 服务", svc.label, "warn",
+                                 f"没有配置 Key，设置页里选了的 {'、'.join(users)} 用不了：到上面「API 服务」填 Key"))
+            else:
+                out.append(Check("API 服务", svc.label, "ok",
+                                 "未配置 Key（没在用；要用时到「API 服务」填）"))
+            continue
+        src = "设置页填的" if c.source == "settings" else f"环境变量 {c.env_name}"
+        detail = f"已配置（{src} · {mask(c.api_key)}）· {c.base_url}"
+        last = (api_keys.last_test.get(sid) if api_keys is not None else None) or None
+        if last is None:
+            out.append(Check("API 服务", svc.label, "ok", detail + " · 还没测试连接"))
+        elif last.get("ok"):
+            out.append(Check("API 服务", svc.label, "ok", f"{detail} · 测试通过：{last.get('message')}"))
+        else:
+            out.append(Check("API 服务", svc.label, "fail", f"{detail} · 测试失败：{last.get('message')}"))
+    return out
+
+
+def run_doctor(cfg: Config, engines, comfy, ffmpeg, *, browser=None, api_keys=None, settings=None,
                http_get: Callable[[str], Any] = _http_get,
                which: Callable[[str], str | None] = shutil.which) -> list[Check]:
     out: list[Check] = []
@@ -186,6 +227,7 @@ def run_doctor(cfg: Config, engines, comfy, ffmpeg, *, browser=None,
 
     out += check_browser(engines, browser)
     out += check_runninghub(cfg, engines)
+    out += check_api_services(api_keys, settings)
 
     for p in cfg.llm.providers:
         if p.kind == "openai":
@@ -199,8 +241,9 @@ def run_doctor(cfg: Config, engines, comfy, ffmpeg, *, browser=None,
         elif p.kind == "claude":
             exe = which("claude")
             out.append(Check("LLM", p.id, "ok" if exe else "fail", exe or "找不到 claude 命令"))
-        else:
+        elif p.kind == "manual":
             out.append(Check("LLM", p.id, "ok", "手动粘贴结果"))
+        # openai_api / anthropic / gemini：见上面「API 服务」
 
     try:
         v = ffmpeg.version()

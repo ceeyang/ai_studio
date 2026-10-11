@@ -50,8 +50,14 @@ def engines(request: Request):
 
     def row(name):
         e = reg.get(name)
-        return {"name": name, "label": getattr(e, "label", None) or name, "family": e.family,
-                "runtime": runtime_of(e), "caps": asdict(e.caps)}
+        pre = getattr(e, "preflight", None)
+        note = pre() if callable(pre) else None
+        out = {"name": name, "label": getattr(e, "label", None) or name, "family": e.family,
+               "runtime": runtime_of(e), "caps": asdict(e.caps), "ready": note is None, "note": note}
+        if runtime_of(e) == "api":
+            out["service"] = e.service
+            out["model"] = e.model()
+        return out
 
     return {"image": [row(n) for n in reg.names("image")],
             "video": [row(n) for n in reg.names("video")]}
@@ -67,7 +73,8 @@ def config(request: Request):
 def doctor(request: Request):
     sv = services(request)
     return [asdict(c) for c in run_doctor(sv.cfg, sv.engines, sv.comfy_client, sv.ffmpeg,
-                                          browser=sv.browser)]
+                                          browser=sv.browser, api_keys=getattr(sv, "api_keys", None),
+                                          settings=getattr(sv, "settings", None))]
 
 
 @router.post("/browser/login")

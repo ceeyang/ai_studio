@@ -84,7 +84,10 @@ def portrait_upper_look(visual_prompt: str) -> str:
 
 
 def seed_label(call, seed: int) -> str:
-    return "无种子（网页出图每次不同）" if getattr(call, "runner", "") == "browser" else f"seed {seed}"
+    runner = getattr(call, "runner", "")
+    if runner == "browser":
+        return "无种子（网页出图每次不同）"
+    return "无种子（API 出图每次不同）" if runner == "api" else f"seed {seed}"
 
 
 def _load_char(s, char_id: int) -> Character:

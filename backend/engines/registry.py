@@ -1,12 +1,15 @@
 """引擎注册表：按 config.yaml 的 engines.<name>.enabled 加载。
 
 ComfyUI 引擎带工作流模板（template_name），网页引擎（gpt_image / gemini_image）没有模板；
-RunningHub 云端引擎只在 config.yaml 的 runninghub.engines 里配了才有。"""
+RunningHub 云端引擎只在 config.yaml 的 runninghub.engines 里配了才有。
+官方 API 引擎（openai_image / gemini_api_image / veo_video / sora_video）总是加载（除非 enabled: false），
+没配 Key 时 preflight 报「先在 API 服务里填 Key」，提交会被拒绝。"""
 from __future__ import annotations
 
 from typing import Any
 
 from backend.config import Config
+from backend.engines.api.engines import API_ENGINES
 from backend.engines.base import ImageCaps, VideoCaps
 from backend.engines.browser.engines import BROWSER_ENGINES
 from backend.engines.comfyui.engines import (H3ImageEngine, H3VideoEngine, Krea2Engine,
@@ -20,7 +23,7 @@ ENGINE_CLASSES = {cls.name: cls for cls in (ZImageEngine, Krea2Engine, H3ImageEn
 
 
 def runtime_of(engine: Any) -> str:
-    """comfyui（本机显卡）、browser（驱动已登录的网页）或 runninghub（云端）。"""
+    """comfyui（本机显卡）、browser（驱动已登录的网页）、runninghub（云端）或 api（官方 API）。"""
     return getattr(engine, "runtime", "comfyui")
 
 
@@ -33,7 +36,8 @@ def check_ready(engine: Any) -> None:
 
 
 class EngineRegistry:
-    def __init__(self, cfg: Config):
+    def __init__(self, cfg: Config, *, api_creds=None):
+        """api_creds：API 服务的 Key 解析（ApiKeyStore.resolve）；不给只看环境变量。"""
         self._engines: dict[str, Any] = {}
         self.load_errors: dict[str, str] = {}   # 配错没加载的引擎 → 原因（doctor 报）
         for name, cls in ENGINE_CLASSES.items():
@@ -45,7 +49,12 @@ class EngineRegistry:
                 self._engines[name] = cls(tpl, ec.params)
             else:
                 self._engines[name] = cls(ec.params)
-        rh, self.load_errors = load_runninghub_engines(cfg, set(ENGINE_CLASSES))
+        for cls in API_ENGINES:
+            ec = cfg.engine(cls.name)
+            if ec.enabled:
+                self._engines[cls.name] = cls(ec.params, creds=api_creds)
+        reserved = set(ENGINE_CLASSES) | {cls.name for cls in API_ENGINES}
+        rh, self.load_errors = load_runninghub_engines(cfg, reserved)
         self._engines.update(rh)
 
     def get(self, name: str) -> Any:

@@ -32,7 +32,7 @@ class ComfyCfg(BaseModel):
 
 class ProviderCfg(BaseModel):
     id: str
-    kind: Literal["openai", "claude", "manual"]
+    kind: Literal["openai", "claude", "manual", "openai_api", "anthropic", "gemini"]
     label: str | None = None           # 设置页上显示的名字；不写按类型给一个
     base_url: str | None = None
     model: str | None = None
@@ -56,6 +56,9 @@ class ProviderCfg(BaseModel):
             return f"Claude（本机 Claude Code{' · ' + self.model if self.model else ''}）"
         if self.kind == "manual":
             return "手动粘贴（自己去网页上问，再把结果贴回来）"
+        api = {"openai_api": "OpenAI GPT", "anthropic": "Anthropic Claude", "gemini": "Google Gemini"}
+        if self.kind in api:
+            return f"{api[self.kind]}（API{' · ' + self.model if self.model else ''}）"
         if self.local_gpu:
             return f"本机 LM Studio（{self.model or self.id}，占显卡）"
         return f"{self.id}（{self.model or 'OpenAI 兼容接口'}）"

@@ -219,11 +219,16 @@ class ClaudeProvider:
                          seconds=time.monotonic() - t0)
 
 
-def build_providers(cfg: LLMCfg) -> dict[str, LLMProvider]:
+def build_providers(cfg: LLMCfg, *, creds=None) -> dict[str, LLMProvider]:
+    """creds：API 服务的 Key 解析（ApiKeyStore.resolve），不给只看环境变量。"""
+    from backend.llm.api_providers import PROVIDER_CLASSES
+
     out: dict[str, LLMProvider] = {}
     for p in cfg.providers:
         if p.kind == "openai":
             out[p.id] = OpenAIProvider(p)
         elif p.kind == "claude":
             out[p.id] = ClaudeProvider(p)
+        elif p.kind in PROVIDER_CLASSES:
+            out[p.id] = PROVIDER_CLASSES[p.kind](p, creds=creds)
     return out

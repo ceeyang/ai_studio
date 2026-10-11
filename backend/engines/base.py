@@ -89,8 +89,9 @@ class EngineCall:
     model_family: str
     meta: dict = field(default_factory=dict)
     dropped_refs: list[str] = field(default_factory=list)
-    # 谁来执行：comfyui（workflow 是 API 格式工作流）或 browser（workflow 是网页出图请求，见 engines/browser）
-    runner: Literal["comfyui", "browser"] = "comfyui"
+    # 谁来执行：comfyui（workflow 是 API 格式工作流）、browser（网页出图请求，见 engines/browser）、
+    # runninghub（云端工作流）或 api（官方 API 请求，见 engines/api；里面没有 Key）
+    runner: Literal["comfyui", "browser", "runninghub", "api"] = "comfyui"
 
 
 class ImageEngine(Protocol):

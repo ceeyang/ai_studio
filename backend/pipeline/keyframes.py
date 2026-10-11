@@ -26,7 +26,8 @@ def load_shot(s, shot_id: int):
 
 def run_comfy(ctx, call, slug: str, ref_labels: dict[str, str] | None = None):
     """执行引擎调用：ComfyUI 工作流交给 ComfyRunner，网页出图（call.runner == "browser"）交给
-    BrowserRunner，RunningHub 云端（call.runner == "runninghub"）交给 RunningHubRunner。
+    BrowserRunner，RunningHub 云端（call.runner == "runninghub"）交给 RunningHubRunner，
+    官方 API（call.runner == "api"）交给 ApiRunner。
     都把产物下载到任务目录，返回文件列表和任务目录。"""
     sv = ctx.services
     kind = getattr(call, "runner", "comfyui")
@@ -35,13 +36,22 @@ def run_comfy(ctx, call, slug: str, ref_labels: dict[str, str] | None = None):
         raise JobError("网页出图的浏览器没有配置")
     if kind == "runninghub" and getattr(sv, "runninghub", None) is None:
         raise JobError("RunningHub 没有配置（config.yaml 的 runninghub）")
+    if kind == "api" and getattr(sv, "api", None) is None:
+        raise JobError("官方 API 引擎没有初始化")
     if kind == "comfyui" and sv.comfy is None:
         raise JobError("ComfyUI 未配置")
     labels = ref_labels or {}
     for ref in call.dropped_refs:
         ctx.log(f"超出引擎参考图上限，已丢弃：{labels.get(ref, ref)}")
     run_dir = sv.media.run_dir(slug, ctx.job_id)
-    if kind == "runninghub":
+    if kind == "api":
+        from backend.engines.api.runner import ApiError
+        try:
+            files = sv.api.run(call, run_dir=run_dir, cancel=ctx.cancel_event,
+                               on_progress=ctx.progress, log=ctx.log)
+        except ApiError as e:
+            raise JobError(str(e)) from None
+    elif kind == "runninghub":
         try:
             files = sv.runninghub.run(call, run_dir=run_dir, cancel=ctx.cancel_event,
                                       on_progress=ctx.progress, log=ctx.log)
@@ -126,7 +136,8 @@ def run_keyframe(ctx, payload: dict) -> dict:
         raise JobError(f"镜头 {code} 没有 image_prompt")
     call = engine.build(ImageRequest(prompt=prompt, negative=negative, aspect=aspect, seed=seed,
                                      refs=refs, prefix=f"studio/{slug}/kf_{code}"))
-    seed_text = "无种子（网页出图每次不同）" if call.runner == "browser" else f"seed {seed}"
+    seed_text = ("无种子（网页出图每次不同）" if call.runner == "browser"
+                 else "无种子（API 出图每次不同）" if call.runner == "api" else f"seed {seed}")
     ctx.log(f"首帧 {code} · {engine_name} · {seed_text} · 参考图 {len(refs)} 张"
             f"{'：' + '、'.join(labels.values()) if labels else ''}")
     for n in notes:

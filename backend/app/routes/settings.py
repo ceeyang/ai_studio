@@ -50,6 +50,26 @@ def _engine_rows(sv, kind: str) -> list[dict]:
     return rows
 
 
+def llm_choice(sv, p) -> dict:
+    """文本模型下拉的一项。API 的三家（OpenAI / Anthropic / Gemini）没配 Key 时 ready=false，
+    名字里带上现在用的模型名（设置页「API 服务」里改）。"""
+    from backend.domain.api_keys import env_creds, no_key_hint
+    from backend.llm.api_providers import API_LABEL, KIND_SERVICE
+
+    row = {"id": p.id, "label": p.display_name(), "kind": p.kind, "model": p.model,
+           "ready": True, "note": None}
+    svc = KIND_SERVICE.get(p.kind)
+    if svc:
+        keys = getattr(sv, "api_keys", None)
+        c = keys.resolve(svc) if keys is not None else env_creds(svc)
+        model = c.model("text", p.model)
+        row.update(model=model, service=svc, ready=c.configured,
+                   note=None if c.configured else no_key_hint(svc))
+        if not p.label:
+            row["label"] = f"{API_LABEL[p.kind]}（API · {model}）"
+    return row
+
+
 def _config_provider(cfg, task: str) -> str | None:
     try:
         return cfg.llm.provider_for(CONFIG_TASK.get(task, task)).id
@@ -65,10 +85,11 @@ def build_settings_out(sv, st: AppSettings, project=None) -> dict[str, Any]:
     invalid（设置值已经不在可选项里）。"""
     cfg = sv.cfg
     providers = {p.id: p for p in cfg.llm.providers}
+    labels = {p.id: llm_choice(sv, p)["label"] for p in cfg.llm.providers}
     image_names, video_names = set(sv.engines.names("image")), set(sv.engines.names("video"))
 
     def name_of(pid):
-        return providers[pid].display_name() if pid in providers else pid
+        return labels[pid] if pid in labels else pid
 
     def llm_row(value, fallback, fallback_source):
         ok = value in providers
@@ -134,8 +155,7 @@ def build_settings_out(sv, st: AppSettings, project=None) -> dict[str, Any]:
         "steps": steps,
         "project": project.slug if project is not None else None,
         "choices": {
-            "llm": [{"id": p.id, "label": p.display_name(), "kind": p.kind, "model": p.model}
-                    for p in cfg.llm.providers],
+            "llm": [llm_choice(sv, p) for p in cfg.llm.providers],
             "image": _engine_rows(sv, "image"),
             "video": _engine_rows(sv, "video"),
         },
