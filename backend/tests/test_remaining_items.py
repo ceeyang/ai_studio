@@ -320,6 +320,70 @@ def test_shot_api_exposes_and_dismisses_continue_suggestion(api):
     assert r.json()["suggest_continue"] is False
 
 
+# ---------------------------------------------------------------- P2-8 中文字幕对齐实际开口
+def test_timeline_cues_follow_detected_onsets():
+    from backend.post.subtitles import timeline_cues
+
+    dlg = [[{"speaker": "a", "zh": "你终于来了。", "start": 0.5, "end": 1.5},
+             {"speaker": "b", "zh": "您认识我？", "start": 2.0, "end": 3.0}]]
+    plain = timeline_cues(dlg, [10.0], [5.0])
+    assert [(c.start, c.end) for c in plain] == [(10.5, 11.5), (12.0, 13.0)]
+    moved = timeline_cues(dlg, [10.0], [5.0], onsets=[[1.2, None]])
+    # 第一句挪到实际开口 1.2s，长度不变（1.0s）；第二句没对上说话段，留在台词时间
+    assert [(round(c.start, 2), round(c.end, 2)) for c in moved] == [(11.2, 12.0), (12.0, 13.0)]
+    # 挪了以后不超过本镜结尾
+    tail = timeline_cues([dlg[0][:1]], [0.0], [3.2], onsets=[[2.6]])
+    assert tail[0].start == 2.6 and tail[0].end <= 3.2
+
+
+def test_export_zh_subtitles_align_detected_without_dub(tmp_path, db, monkeypatch):
+    from backend.domain.models import Shot
+    from backend.pipeline.export import run_export
+    from backend.tests.helpers import FakeCtx, make_services, seed_episode
+    from backend.tests.test_fit_pipeline import SpeechFFmpeg
+    from backend.tests.test_post_pipeline import add_video
+
+    class FF(SpeechFFmpeg):
+        def run(self, cmd, cwd=None, **kw):
+            return None
+
+    sv = make_services(tmp_path, db, ffmpeg=FF([(1.2, 2.0), (3.5, 4.0)]))
+    _, ep_id = seed_episode(db)
+    with db.session() as s:
+        sh = Shot(episode_id=ep_id, order=0, code="S01", duration=5.0, dialogue=[
+            {"speaker": "林夏", "zh": "你终于来了。", "start": 0.6, "end": 1.6}])
+        s.add(sh)
+        s.flush()
+        sid = sh.id
+    add_video(sv, sid)
+    seen = []
+    import backend.pipeline.export as ex
+
+    real = ex.build_subtitles_ass
+
+    def spy(cues, *a, **kw):
+        seen.append([(c.start, c.end) for c in cues])
+        return real(cues, *a, **kw)
+
+    monkeypatch.setattr(ex, "build_subtitles_ass", spy)
+    ctx = FakeCtx(sv, job_id=5)
+    res = run_export(ctx, {"episode_id": ep_id,
+                           "options": {"subtitles": "zh", "align": "detected"}})
+    assert seen == [[(1.2, 2.2)]]
+    assert "_zh_aligned_" in res["file"]
+    assert any("字幕对齐实际说话：1/1" in m for m in ctx.logs)
+    seen.clear()
+    run_export(FakeCtx(sv, job_id=6), {"episode_id": ep_id, "options": {"subtitles": "zh"}})
+    assert seen == [[(0.6, 1.6)]]                    # 默认还是按台词时间
+
+
+def test_export_label_for_subtitle_alignment():
+    from backend.post.options import export_label
+
+    assert "字幕对齐说话" in export_label("9x16", {"subtitles": "zh", "align": "detected"})
+    assert "配音对齐说话" in export_label("9x16", {"dub": "km", "align": "detected"})
+
+
 # ---------------------------------------------------------------- P2-5 三视图模板按画风写
 LOOK_A = "Japanese teenage girl, short black bob, navy sailor school uniform with a red ribbon."
 

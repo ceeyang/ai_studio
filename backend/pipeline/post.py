@@ -23,7 +23,7 @@ from backend.post.dub import DubLine, edge_tts_save, fit_rate, plan_dub_lines
 from backend.post.options import ExportOptions
 from backend.post.speech import align_onsets
 from backend.post.timeline import trim_limit
-from backend.queue.errors import JobError
+from backend.queue.errors import JobCanceled, JobError
 from backend.queue.handlers import HANDLERS
 
 OUTPUT_FPS = 24
@@ -341,6 +341,41 @@ def align_to_speech(ctx, cut: Cut, lines: list[DubLine], starts: list[float],
         found = "、".join(f"{a:.2f}–{b:.2f}" for a, b in segs) or "（没检测到）"
         ctx.log(f"{cut.codes[i]} 说话段 {found}；配音起点 {'、'.join(notes)}")
     return out, detected
+
+
+def detected_onsets(ctx, sv, cut: Cut, durations: list[float]
+                    ) -> tuple[list[list[float | None]], int, int]:
+    """不配音的导出：每镜每句台词在 H3 音轨里实际开口的时间（相对本镜开头，找不到是 None），
+    给中文字幕和配乐压低用。返回 (onsets, 对上的句数, 总句数)。检测失败的镜头整镜用台词时间。"""
+    cfg = sv.cfg.dub
+    out: list[list[float | None]] = []
+    hit = total = 0
+    detect = getattr(sv.ffmpeg, "speech_segments", None)
+    for i, dlg in enumerate(cut.dialogue):
+        lines = list(dlg or [])
+        total += len(lines)
+        if not lines or detect is None or i >= len(cut.clips) or i >= len(durations):
+            out.append([None] * len(lines))
+            continue
+        ctx.check_canceled()
+        try:
+            segs = detect(cut.clips[i], min_db=cfg.speech_min_db,
+                          periodicity=cfg.speech_periodicity, limit=durations[i])
+        except JobCanceled:
+            raise
+        except Exception as e:   # 检测失败只记日志，这一镜按台词时间
+            ctx.log(f"{cut.codes[i]}：说话段检测没跑成，字幕用台词时间（{str(e)[:120]}）")
+            out.append([None] * len(lines))
+            continue
+        plan = [float(d.get("start") or 0) for d in lines]
+        times = align_onsets(plan, segs, max_shift=cfg.align_max_shift)
+        row: list[float | None] = []
+        for t in times:
+            ok = any(abs(a - t) < 1e-6 for a, _ in segs)
+            row.append(t if ok else None)
+            hit += ok
+        out.append(row)
+    return out, hit, total
 
 
 def load_dub_manifest(sv, cut: Cut, limits, align: str = "timeline") -> dict:

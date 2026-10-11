@@ -16,7 +16,8 @@ class ExportOptions(BaseModel):
     end_card: bool = False             # 接项目的片尾卡
     trim: bool = True                  # 按分镜时长裁掉台词说完后的多余尾巴
     bed: bool = True                   # 保留原声底：False = H3 原音轨整条静音（只剩配音）
-    align: AlignMode = "timeline"      # detected：配音放到 H3 音轨里实际开口的位置
+    # detected：配音（不配音时是中文字幕和配乐压低）放到 H3 音轨里实际开口的位置
+    align: AlignMode = "timeline"
     # 配乐（剧集上传的背景音乐，post/music.py）：音量、淡入淡出、有台词时自动压低
     music: bool = False
     music_db: float = Field(-18.0, ge=-40.0, le=6.0)
@@ -65,7 +66,8 @@ def export_label(variant: str, settings: dict) -> str:
     if settings.get("bed") is False:
         parts.append("无原声底")
     if settings.get("align") == "detected":
-        parts.append("配音对齐说话")
+        # 不配音时对齐的是中文字幕（和配乐压低）
+        parts.append("配音对齐说话" if settings.get("dub") == "km" else "字幕对齐说话")
     if settings.get("music") is True:
         parts.append("配乐")
     if settings.get("end_card") is True:

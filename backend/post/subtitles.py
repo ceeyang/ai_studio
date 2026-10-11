@@ -64,13 +64,22 @@ def subtitle_zh(d: dict) -> str:
 
 
 def timeline_cues(shots_dialogue: list[list[dict]], starts: list[float],
-                  durations: list[float]) -> list[Cue]:
-    """把每镜的台词（相对本镜开头）换算到成片时间轴：加上本镜起点，end 不超过本镜结尾，相邻两条不重叠。"""
+                  durations: list[float],
+                  onsets: list[list[float | None]] | None = None) -> list[Cue]:
+    """把每镜的台词（相对本镜开头）换算到成片时间轴：加上本镜起点，end 不超过本镜结尾，相邻两条不重叠。
+
+    onsets（每镜每句在 H3 音轨里实际开口的时间，相对本镜开头；None = 没对上说话段）给了时，这句字幕从
+    实际开口处开始，长度和台词计划的一样（审查 P2-8：不配音的导出也能让字幕跟着嘴走）。"""
     cues: list[Cue] = []
-    for dialogue, start, dur in zip(shots_dialogue, starts, durations):
-        for d in dialogue or []:
-            a = start + float(d.get("start") or 0)
-            b = start + min(float(d.get("end") or 0), dur)
+    for i, (dialogue, start, dur) in enumerate(zip(shots_dialogue, starts, durations)):
+        found = onsets[i] if onsets is not None and i < len(onsets) else []
+        for k, d in enumerate(dialogue or []):
+            a_rel, b_rel = float(d.get("start") or 0), float(d.get("end") or 0)
+            hit = found[k] if k < len(found) else None
+            if hit is not None:
+                a_rel, b_rel = float(hit), float(hit) + max(b_rel - a_rel, 0.0)
+            a = start + a_rel
+            b = start + min(b_rel, dur)
             if b - a < 0.05:
                 continue
             cues.append(Cue(a, b, subtitle_zh(d), (d.get("km") or "").strip(),

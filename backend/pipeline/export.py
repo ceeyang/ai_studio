@@ -11,8 +11,8 @@ from datetime import datetime
 from backend.domain.models import Export
 from backend.domain.music import bgm_of
 from backend.pipeline.common import job_services
-from backend.pipeline.post import (OUTPUT_FPS, clip_limits, episode_has_ai_draft, lines_missing_km,
-                                   load_cut, load_dub_manifest, mark_exported)
+from backend.pipeline.post import (OUTPUT_FPS, clip_limits, detected_onsets, episode_has_ai_draft,
+                                   lines_missing_km, load_cut, load_dub_manifest, mark_exported)
 from backend.post.dub import build_dub_mix_cmd
 from backend.post.music import build_music_mix_cmd, duck_windows
 from backend.post.options import ExportOptions
@@ -114,11 +114,17 @@ def run_export(ctx, payload: dict) -> dict:
                                             bed_db=bed_db, duck_db=sv.cfg.dub.duck_db,
                                             loudness=sv.cfg.dub.loudness if lines else None))
             cur = dubbed
+        onsets = None
+        if not rows and opts.align == "detected" and (opts.subtitles != "none" or music_src):
+            # 不配音也可以让中文字幕（和配乐压低）跟着 H3 实际开口的位置走，找不到说话段的句子用台词时间
+            onsets, hit, total = detected_onsets(ctx, sv, cut, asm.durations)
+            if total:
+                ctx.log(f"字幕对齐实际说话：{hit}/{total} 句对上了 H3 的说话段，其余用台词时间")
         if music_src is not None:
-            # 压低窗口跟着实际说话的位置：有配音按配音，否则按台词时间
+            # 压低窗口跟着实际说话的位置：有配音按配音，否则按台词时间（选了对齐时按实际开口）
             spans = ([(c.start, c.end) for c in dub_cues(rows, asm.starts, cut.dialogue)] if rows
                      else [(c.start, c.end) for c in timeline_cues(cut.dialogue, asm.starts,
-                                                                   asm.durations)])
+                                                                   asm.durations, onsets)])
             windows = duck_windows(spans, total=asm.total) if opts.music_duck else []
             ctx.log(f"叠配乐 {opts.music_db:g} dB，淡入 {opts.music_fade_in:g}s / 淡出 "
                     f"{opts.music_fade_out:g}s"
@@ -139,13 +145,13 @@ def run_export(ctx, payload: dict) -> dict:
             if opts.subtitles != "none":
                 # 有配音时字幕跟着配音实际播放的位置走，否则按台词时间
                 cues = (dub_cues(rows, asm.starts, cut.dialogue) if rows
-                        else timeline_cues(cut.dialogue, asm.starts, asm.durations))
+                        else timeline_cues(cut.dialogue, asm.starts, asm.durations, onsets))
                 (work / "subs.ass").write_text(
                     build_subtitles_ass(cues, width, height, mode=opts.subtitles, zh_font=st.zh_font,
                                         km_font=st.km_font), encoding="utf-8")
                 subs_name = "subs.ass"
                 ctx.log(f"烧字幕（{opts.subtitles}）{len(cues)} 条"
-                        + ("，时间跟配音走" if rows else ""))
+                        + ("，时间跟配音走" if rows else "，时间跟实际开口走" if onsets else ""))
             spec = None
             if opts.end_card:
                 card_seconds = float(card.get("seconds") or 3.0)
