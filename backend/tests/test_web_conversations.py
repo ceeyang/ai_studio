@@ -532,3 +532,13 @@ def test_run_route_puts_new_conversation_on_first_stage_only(api):
     assert api.get(f"/api/jobs/{r.json()['job_ids'][0]}").json()["payload"]["new_conversation"] is True
     r = api.post(f"/api/episodes/{ep_id}/run", json={"stage": "keyframes", "force": True})
     assert "new_conversation" not in api.get(f"/api/jobs/{r.json()['job_ids'][0]}").json()["payload"]
+
+
+
+def test_video_and_keyframe_use_separate_conversations():
+    """网页出视频按镜头单独一条对话（shot_video），不和首帧（shot）共用：Gemini 做过视频的对话只肯出视频。"""
+    from backend.engines.browser.conversations import IMAGE_JOB_SCOPES, IMAGE_KINDS
+
+    assert IMAGE_JOB_SCOPES["image.keyframe"] == ("shot", "shot_id")
+    assert IMAGE_JOB_SCOPES["video.shot"] == ("shot_video", "shot_id")
+    assert "shot_video" in IMAGE_KINDS

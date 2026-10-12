@@ -18,10 +18,10 @@ from backend.tests.test_browser_extension import EXT, hello, send_image, wait_fo
 
 
 # ---------------------------------------------------------------- 会话续接（上游的 conversations.py）
-def test_video_shot_shares_scope_with_keyframe_and_muse_conversation_id():
-    # 网页出视频和这个镜头的首帧在同一网站上共用一条对话
-    assert scope_for_job("video.shot", {"shot_id": 9}, 1) == Scope("shot", "9", 1)
-    assert scope_for_job("video.shot", {"shot_id": 9}, 1) == scope_for_job("image.keyframe", {"shot_id": 9}, 1)
+def test_video_shot_has_its_own_scope_and_muse_conversation_id():
+    # 网页出视频按镜头单独一条对话，不和首帧共用（Gemini 做过视频的对话只肯出视频，2026-10-12 实测）
+    assert scope_for_job("video.shot", {"shot_id": 9}, 1) == Scope("shot_video", "9", 1)
+    assert scope_for_job("video.shot", {"shot_id": 9}, 1) != scope_for_job("image.keyframe", {"shot_id": 9}, 1)
     assert conversation_id(MUSE, "https://muse.ai/thread/48629b31-5210-43c3-ad51-6fe8295e032d") == \
         "48629b31-5210-43c3-ad51-6fe8295e032d"
     assert conversation_id(MUSE, "https://muse.ai/thread/new") == ""       # 新对话入口

@@ -67,7 +67,7 @@ export const GEMINI = {
   ],
   refusal_patterns: [
     /can[’']?t (help|create|generate|make)/i, /(unable|not able) to (create|generate|help|make)/i,
-    /just a language model/i, /我无法/i, /无法(生成|创建|制作|帮)/i, /只是一个语言模型/i,
+    /just a language model/i, /can only generate videos/i, /我无法/i, /无法(生成|创建|制作|帮)/i, /只是一个语言模型/i,
     /不能(生成|创建|制作|帮)/i,
   ],
   image_src_hint: ['googleusercontent.com', 'blob:'],

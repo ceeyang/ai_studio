@@ -62,7 +62,7 @@ GEMINI = SiteSpec(
         r"明天再"),
     refusal_patterns=rx(
         r"can[’']?t (help|create|generate|make)", r"(unable|not able) to (create|generate|help|make)",
-        r"just a language model", r"我无法", r"无法(生成|创建|制作|帮)", r"只是一个语言模型",
+        r"just a language model", r"can only generate videos", r"我无法", r"无法(生成|创建|制作|帮)", r"只是一个语言模型",
         r"不能(生成|创建|制作|帮)"),
     image_src_hint=("googleusercontent.com", "blob:"),
     min_image_px=384,

@@ -3,6 +3,8 @@
 作用域（同一站点内各自一条对话）：
 - 出图（gpt_image / gemini_image）：角色的定妆照、三视图等所有图 → character:<角色 id>；镜头首帧 → shot:<镜头 id>；
   场景图 → location:<id>；道具图 → prop:<id>。
+- 网页出视频（gemini_video / muse_video）：镜头视频 → shot_video:<镜头 id>，和首帧分开：Gemini 做过视频的对话
+  只肯出视频（2026-10-12 实测：首帧续接进 S01 出视频时开的对话，回「I can only generate videos」）。
 - 网页文本模型（web_chatgpt / web_gemini / web_claude / web_muse）：按集、按步骤 → episode:<集 id>:<步骤 key>。
   剧本两步各一条（script_structure / script_visual）；分镜是按段落调用的（每段一次 LLM 调用，key 是
   storyboard:<段落 id>），所以每段一条对话：重写某段分镜就接着这段上次的对话，几十段不会挤进同一条对话里
@@ -33,12 +35,12 @@ log = logging.getLogger(__name__)
 
 MAX_TURNS = 20               # 一条对话发过这么多轮就新开（太长的对话网页会变慢、模型也容易被前文带偏）
 SETTING_KEY = "web_reuse_conversation"
-IMAGE_KINDS = ("character", "shot", "location", "prop")
+IMAGE_KINDS = ("character", "shot", "shot_video", "location", "prop")
 TEXT_KINDS = ("episode",)
 # 续接时加在出图提示词前面：别让网站把这次当成「改上一张图」
 CONTINUE_IMAGE_PREFIX = ("Generate a NEW image for this request (do not edit or reuse the previous image "
                          "unless asked; this request is complete on its own).")
-# 续接时加在出视频提示词前面（网页出视频和这个镜头的首帧共用一条对话）
+# 续接时加在出视频提示词前面（网页出视频按镜头单独一条对话，和首帧分开）
 CONTINUE_VIDEO_PREFIX = ("Generate a NEW video for this request from the image attached to THIS message "
                          "(do not reuse a previous video; this request is complete on its own).")
 # 续接时加在文本提示词前面：这是一个新的、完整的请求
@@ -52,8 +54,8 @@ IMAGE_JOB_SCOPES: dict[str, tuple[str, str]] = {
     "image.keyframe": ("shot", "shot_id"),
     "image.location": ("location", "location_id"),
     "image.prop": ("prop", "prop_id"),
-    # 网页出视频（gemini_video / muse_video）：和这个镜头的首帧在同一个网站上时共用同一条对话
-    "video.shot": ("shot", "shot_id"),
+    # 网页出视频（gemini_video / muse_video）：按镜头单独一条对话，不和首帧共用（做过视频的 Gemini 对话只肯出视频）
+    "video.shot": ("shot_video", "shot_id"),
 }
 # 文本任务类型 → payload 里集 id 的键（作用域再按 LLM 调用的 key 细分到步骤 / 段落）
 TEXT_JOB_SCOPES: dict[str, str] = {

@@ -181,9 +181,13 @@ def browser_conversations(request: Request, scope_kind: str, scope_id: str):
     book = getattr(browser, "conversations", None) if browser is not None else None
     sites = getattr(browser, "sites", {}) if browser is not None else {}
     items = book.list(scope_kind, scope_id) if book is not None else []
+    if scope_kind == "shot" and book is not None:
+        # 镜头的视频单独一条对话（shot_video）：一起列出来，标上「出视频」
+        items = [*items, *({**r, "video": True} for r in book.list("shot_video", scope_id))]
     support = browser.conversation_support() if browser is not None else {"supported": False, "hint": None}
     return {"reuse_enabled": book.enabled() if book is not None else False,
             "supported": bool(support.get("supported")), "hint": support.get("hint"),
             "max_turns": getattr(book, "max_turns", MAX_TURNS),
-            "items": [{"site": r["site"], "label": sites[r["site"]].label if r["site"] in sites else r["site"],
+            "items": [{"site": r["site"], "label": (sites[r["site"]].label if r["site"] in sites else r["site"])
+                       + ("（出视频）" if r.get("video") else ""),
                        "url": r["url"], "turns": r["turns"], "updated_at": r["updated_at"]} for r in items]}
