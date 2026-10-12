@@ -35,6 +35,9 @@ class VideoCaps:
     allowed_seconds: tuple[float, ...] = ()
     # 能不能不用首帧、只用参考图（场景图 / 构图参考 / 定妆照 / 道具图）出视频（参考图直出）；上限沿用 max_refs
     ref_mode: bool = False
+    # 首帧模式下还带不带参考图：False = 有首帧时只发首帧（网页引擎：几张附图里分不清哪张是首帧），参考图只在
+    # 参考图直出时用。过期判断里首帧模式的参考图上限按 0 算（pipeline/freshness.shot_video_expect）
+    frame_refs: bool = True
 
 
 def dedupe_negative(text: str) -> str:

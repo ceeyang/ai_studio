@@ -147,8 +147,10 @@ def shot_video_expect(s, engines, shot, proj, style, ff_sel, engine_name: str, c
                                  packed)
     if ff_sel is None:
         return None
+    # 首帧模式不带参考图的引擎（caps.frame_refs=False，Gemini / Muse 网页）：上限按 0 算，和它实际发的一致
+    cap = caps.max_refs if getattr(caps, "frame_refs", True) else 0
     return video_expect(s, engines, shot, proj, style, ff_sel, engine_name, caps.has_audio,
-                        caps.max_refs, v_pack=v_pack)
+                        cap, v_pack=v_pack)
 
 
 def video_check(s, engines, shot, proj, style, ff_sel, cand,

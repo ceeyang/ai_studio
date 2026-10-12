@@ -47,7 +47,10 @@ def test_engines_registered_with_caps(reg):
     assert (gv.family, mv.family) == ("gemini_web", "muse_web")   # 和同网站的出图共用一条通道
     assert (gv.caps.duration_control, gv.caps.allowed_seconds, gv.caps.default_seconds) == ("fixed", (10.0,), 10.0)
     assert (mv.caps.duration_control, mv.caps.allowed_seconds) == ("prompt", (3.0, 5.0, 10.0))
-    assert gv.caps.has_audio and mv.caps.has_audio and gv.caps.max_refs == mv.caps.max_refs == 0
+    assert gv.caps.has_audio and mv.caps.has_audio
+    # 参考图直出（固定时长引擎设计 §3.5）：附图当人物 / 场景参考，上限先按 3 张（待实测）；首帧模式只发首帧
+    assert gv.caps.max_refs == mv.caps.max_refs == 3 and gv.caps.ref_mode and mv.caps.ref_mode
+    assert not gv.caps.frame_refs and not mv.caps.frame_refs
 
 
 def test_disabled_browser_engine_not_loaded():

@@ -7,7 +7,11 @@
 - 关键物件和揭示：剧情要靠某个物件或画面信息才成立时（反转、伏笔、照片、字条、手机屏幕、证件），必须在这 {{ count }} 个镜头之内给它单独一个特写插入镜头（insert shot，大特写或特写）——插入镜头占本段的镜头数，不能额外多出镜头。镜头数固定；放不下时优先保留插入镜头和主线动作，次要动作省略。image_prompt 把物件上看得见的内容写具体（照片里是谁、在做什么、旁边有什么），观众不看台词也能看懂。
 - 道具统一说法：反复出现的关键道具（车、包、照片、手机等）第一次出现时定一个具体的英文说法（颜色、款式、材质、大小），之后每个镜头的 image_prompt 都逐字重复同一个说法，不换同义词（不要一会儿 scooter 一会儿 e-bike）；motion_prompt 里用简短指代就够了（如 the red scooter），但不能换成别的东西。下面给了「已定的道具英文说法」的，这些道具再出现时直接逐字沿用。props 列出本镜出现的关键道具的英文说法（和 image_prompt 里的写法一字不差），没有就写空数组。
 - shot_size 只用：大特写、特写、近景、中景、全景。
-- duration 是秒数，默认 {{ shot_seconds }}，最长 {{ max_seconds }}；台词多的镜头可以长一些。{% if first_block is defined and first_block %}
+{% if beats_mode is defined and beats_mode %}- duration 是秒数：视频引擎{% if duration_control == 'fixed' %}每次固定出 {{ '%g' % gen_unit }} 秒、不能指定时长{% else %}只认 {{ allowed_seconds | join(' / ') }} 秒几档{% endif %}，所以这里每个镜头就是一次生成，duration 尽量写满 {{ '%g' % gen_unit }} 秒（不超过 {{ '%g' % gen_unit }}；本段预算不够时可以短一些，但不要短于 {{ '%g' % (gen_unit / 2) }} 秒）。
+- 多拍镜头（beats）：每个镜头在一次生成里按时间切成 2–4 拍，每拍 2–4 秒，相邻两拍换景别或换机位（如 中景 → 特写 → 近景），出来的视频自带剪切节奏。beats 是数组，每拍写 start、end（相对本镜开头的秒数）、shot_size（大特写 / 特写 / 近景 / 中景 / 全景）、camera_move（从下面运镜词表里选）、action（英文，30 个词以内，写这一拍画面里谁在做什么，人物用和 motion_prompt 一样的简短指代，如 the stocky man）。第 1 拍从 0 开始，后一拍的 start 等于前一拍的 end，最后一拍的 end 等于 duration，不留空、不重叠。台词仍写在 dialogue 里，每句的 start 落在说这句话的那一拍里。整镜的 shot_size、camera_move 写第 1 拍的，image_prompt 画第 1 拍开始的那一瞬间（首帧），motion_prompt 概括整镜。短于 {{ '%g' % (gen_unit / 2) }} 秒的镜头可以不写 beats（写 null）。
+{% elif snap_seconds is defined and snap_seconds %}- duration 是秒数，视频引擎只认 {{ snap_seconds | join(' / ') }} 秒这几档，只能从这几档里选，默认 {{ shot_seconds }}；台词多的镜头可以长一些。
+{% else %}- duration 是秒数，默认 {{ shot_seconds }}，最长 {{ max_seconds }}；台词多的镜头可以长一些。
+{% endif %}{% if first_block is defined and first_block %}
 - 这是全集的第一段：第 1 个镜头是全集最抓人的画面（冲突、悬念或反常的那一瞬间），duration 写 2–3 秒，节奏要快，不要用环境空镜或交代背景开场；省下的时长分给本段后面的镜头。{% endif %}
 - 画外音：说话的人不在画面里（不在这一镜的 cast 里）时，audio_prompt 写 off-screen voice（如 off-screen voice of the stocky man, low and tired），motion_prompt 写明画面里的人闭着嘴在听（lips closed, listening），不要写画面里的人开口说话。
 - 不写人名：image_prompt、motion_prompt、audio_prompt 里提到人时一律用英文外貌简称（如 the stocky man、the young woman），中文名不行，拼音也不行（不能写 Lao Zhou、Lin Xiaoman、Xiaoman 这类）。
@@ -30,13 +34,13 @@
 
 输出前自检（逐条检查，不满足就改好再输出）：
 1. 正好 {{ count }} 个镜头。
-2. 每镜 duration 在 2 到 {{ max_seconds }} 秒之间{% if block_seconds is defined and block_seconds %}，所有镜头的 duration 加起来在 {{ '%g' % block_seconds }} 秒左右（误差不超过 10%）{% endif %}；每句台词的 end 不超过本镜 duration。
+2. 每镜 duration 在 2 到 {{ max_seconds }} 秒之间{% if beats_mode is defined and beats_mode %}（每镜是一次生成，尽量写满 {{ '%g' % gen_unit }} 秒；长镜头都有 beats：2–4 拍、每拍 2–4 秒、首尾相接、最后一拍的 end 等于 duration，台词落在对应拍里）{% elif snap_seconds is defined and snap_seconds %}（只用 {{ snap_seconds | join(' / ') }} 这几档）{% endif %}{% if block_seconds is defined and block_seconds %}，所有镜头的 duration 加起来在 {{ '%g' % block_seconds }} 秒左右（误差不超过 10%）{% endif %}；每句台词的 end 不超过本镜 duration。
 3. image_prompt、motion_prompt、audio_prompt、props 全部是英文，不能出现任何中文字符（包括角色名、地名、中文标点），也不能出现角色名的拼音。画面上要出现的中文字（招牌、字条）只能写在英文双引号里，如 a shop sign reading "老周修车"；其他地方一律用英文。
 4. cast 和 dialogue 的 speaker 只用角色表里的名字；cast 里每个人在 image_prompt 里都有自己的外貌占位符。
 5. image_prompt 你写的部分 60–120 个英文单词，没有抄风格锚。
 
 只输出一个 JSON 对象，不要 markdown 代码块，不要解释：
-{"shots": [{"shot_size": "近景", "camera_move": "slow push in", "action": "这一镜发生了什么（中文）", "cast": ["角色名"], "dialogue": [{"speaker": "角色名", "zh": "台词", "start": 0.6, "end": 2.4}], "image_prompt": "...", "motion_prompt": "...", "audio_prompt": "...", "props": ["a dented red thermos with a chipped lid"], "duration": {{ shot_seconds }}, "transition_out": "hard_cut", "continue_from_prev": false}]}
+{% if beats_mode is defined and beats_mode %}{"shots": [{"shot_size": "中景", "camera_move": "static", "action": "这一镜发生了什么（中文）", "cast": ["角色名"], "dialogue": [{"speaker": "角色名", "zh": "台词", "start": 3.6, "end": 5.6}], "image_prompt": "...", "motion_prompt": "...", "audio_prompt": "...", "props": ["a dented red thermos with a chipped lid"], "duration": {{ '%g' % gen_unit }}, "beats": [{"start": 0, "end": 3.5, "shot_size": "中景", "camera_move": "static", "action": "The stocky man sets the thermos on the counter and looks toward the door"}, {"start": 3.5, "end": 6.5, "shot_size": "近景", "camera_move": "slow push in", "action": "The stocky man frowns and speaks toward the young woman at frame left"}, {"start": 6.5, "end": {{ '%g' % gen_unit }}, "shot_size": "特写", "camera_move": "static", "action": "Close on the dented red thermos as his hand slowly lets go of it"}], "transition_out": "hard_cut", "continue_from_prev": false}]}{% else %}{"shots": [{"shot_size": "近景", "camera_move": "slow push in", "action": "这一镜发生了什么（中文）", "cast": ["角色名"], "dialogue": [{"speaker": "角色名", "zh": "台词", "start": 0.6, "end": 2.4}], "image_prompt": "...", "motion_prompt": "...", "audio_prompt": "...", "props": ["a dented red thermos with a chipped lid"], "duration": {{ shot_seconds }}, "transition_out": "hard_cut", "continue_from_prev": false}]}{% endif %}
 === user ===
 风格锚（系统会自动接在每个 image_prompt 前面，你不用抄；光线和色彩的写法和它保持一致）：
 {{ anchor or "（暂无）" }}

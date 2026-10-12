@@ -265,8 +265,10 @@ def test_engine_without_ref_mode_refused_in_job(tmp_path, db):
 
 def test_engine_build_without_first_frame_raises_for_non_ref_engines(tmp_path, db):
     sv = make_services(tmp_path, db, comfy=FakeRunner())
-    # 目前只有 Seedance API 打开了 ref_mode（多模态参考，见 SeedanceEngine docstring）
-    assert {n for n in sv.engines.names("video") if sv.engines.video(n).caps.ref_mode} == {"seedance_video"}
+    # 打开了 ref_mode 的：Seedance API（多模态参考，见 SeedanceEngine docstring），Gemini / Muse 网页
+    #（附图当人物 / 场景参考，固定时长引擎设计 §3.5）
+    assert {n for n in sv.engines.names("video") if sv.engines.video(n).caps.ref_mode} == \
+        {"seedance_video", "gemini_video", "muse_video"}
     for name in sv.engines.names("video"):
         eng = sv.engines.video(name)
         if eng.caps.ref_mode:

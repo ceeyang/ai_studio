@@ -109,13 +109,21 @@ VIDEO_ASPECT_TEXT = {
 }
 
 
-def web_video_prompt(prompt: str, aspect: str, seconds: float | None, first_frame: bool) -> str:
-    """一行写完（不能有换行）。seconds 为 None 时不写时长（网站不认）。"""
+def web_video_prompt(prompt: str, aspect: str, seconds: float | None, first_frame: bool,
+                     n_refs: int = 0) -> str:
+    """一行写完（不能有换行）。seconds 为 None 时不写时长（网站不认）。
+    first_frame：附图是首帧（照旧「用附图做第一帧」）；否则 n_refs 张附图是人物 / 场景参考（参考图直出），
+    写明不是第一帧，免得网站把定妆照的灰底当开头画面。"""
     parts = ["Generate one video now using your video generation tool.",
              "Do not ask any questions and do not answer with text only."]
     if first_frame:
         parts.append("Use the attached image exactly as the first frame of the video: keep the same people, "
                      "framing, colors and lighting, and animate from it.")
+    elif n_refs:
+        what = "image is a reference" if n_refs == 1 else "images are references"
+        parts.append(f"The attached {what} for the characters' faces, hair and clothing and for the "
+                     "location only - not the first frame: do not start the video on them, do not show "
+                     "their plain studio backgrounds, and compose new shots in the described scene.")
     fmt = f"Video format: {VIDEO_ASPECT_TEXT[aspect]}"
     if seconds:
         fmt += f", exactly {seconds:g} seconds long"
@@ -156,19 +164,30 @@ class _BrowserVideoEngine:
         w, h = size_for(self.caps.sizes, req.aspect)
         ask = self.ask_seconds(req)
         out_seconds = float(ask or self.caps.default_seconds)
-        text = web_video_prompt(req.prompt, req.aspect, ask, first_frame=True)
+        if req.first_frame is not None:
+            # 首帧模式：只发首帧（几张附图里网站分不清哪张是首帧），参考图记进没带上的
+            keep: list = []
+            sent = [str(req.first_frame)]
+        else:
+            # 参考图直出：场景图、定妆照、道具图当附图（最多 max_refs 张）
+            keep = list(req.refs[: self.caps.max_refs])
+            sent = [str(p) for p in keep]
+        text = web_video_prompt(req.prompt, req.aspect, ask, first_frame=req.first_frame is not None,
+                                n_refs=len(keep))
         timeout = float(self.overrides.get("timeout") or self.default_timeout)
         request = {"runner": RUNTIME, "site": self.site, "kind": "video", "prompt": text, "aspect": req.aspect,
-                   "refs": [str(req.first_frame)], "timeout": timeout, "fit_aspect": False}
+                   "refs": sent, "timeout": timeout, "fit_aspect": False}
         meta = {"prompt": req.prompt, "web_prompt": text, "site": self.site, "size": [w, h], "seed": None,
                 "nondeterministic": True, "seconds": out_seconds, "frames": self.frames_for(out_seconds),
-                "fps": self.caps.fps, "first_frame": str(req.first_frame), "refs": [],
+                "fps": self.caps.fps,
+                "first_frame": str(req.first_frame) if req.first_frame is not None else None,
+                "refs": [str(p) for p in keep],
                 "duration_control": self.caps.duration_control, "asked_seconds": ask,
                 "shot_seconds": req.seconds}
         if req.negative:
             meta["negative_ignored"] = req.negative
         return EngineCall(self.name, request, "video", self.family, meta=meta,
-                          dropped_refs=[str(p) for p in req.refs], runner="browser")
+                          dropped_refs=[str(p) for p in req.refs[len(keep):]], runner="browser")
 
 
 class GeminiVideoEngine(_BrowserVideoEngine):
@@ -179,9 +198,11 @@ class GeminiVideoEngine(_BrowserVideoEngine):
     site = "gemini"
     label = "Gemini 网页（Veo）"
     default_timeout = 900.0
-    caps = VideoCaps(max_refs=0, supports_end_frame=False, has_audio=True, fps=24,
+    # 参考图直出（ref_mode）：附图当人物 / 场景参考，上传上限先按 3 张（待实测，设计文档 2026-10-12 固定时长引擎 §3.5）；
+    # 首帧模式只发首帧（frame_refs=False）
+    caps = VideoCaps(max_refs=3, supports_end_frame=False, has_audio=True, fps=24,
                      sizes={"9:16": (720, 1280), "16:9": (1280, 720)}, default_seconds=10.0, max_seconds=10.0,
-                     duration_control="fixed", allowed_seconds=(10.0,))
+                     duration_control="fixed", allowed_seconds=(10.0,), ref_mode=True, frame_refs=False)
 
 
 class MuseVideoEngine(_BrowserVideoEngine):
@@ -192,9 +213,11 @@ class MuseVideoEngine(_BrowserVideoEngine):
     site = "muse"
     label = "Muse 网页"
     default_timeout = 600.0
-    caps = VideoCaps(max_refs=0, supports_end_frame=False, has_audio=True, fps=24,
+    # 参考图直出：同 Gemini，上传上限先按 3 张（待实测）
+    caps = VideoCaps(max_refs=3, supports_end_frame=False, has_audio=True, fps=24,
                      sizes={"9:16": (704, 1248), "16:9": (1248, 704)}, default_seconds=10.0, max_seconds=10.0,
-                     duration_control="prompt", allowed_seconds=(3.0, 5.0, 10.0))
+                     duration_control="prompt", allowed_seconds=(3.0, 5.0, 10.0), ref_mode=True,
+                     frame_refs=False)
 
 
 # ---------------------------------------------------------------- 生成器页出视频（即梦 / 可灵）

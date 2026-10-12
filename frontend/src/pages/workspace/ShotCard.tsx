@@ -140,6 +140,15 @@ export function ShotCard(props: ShotCardProps) {
               {code}
             </span>
             <span className="shot-dur">{shot.duration.toFixed(1)} 秒</span>
+            {(shot.beats?.length ?? 0) > 0 && (
+              <span
+                className="badge shot-beats"
+                data-testid={`beats-${code}`}
+                title="多拍镜头：一次生成里按时间戳切几拍（抽屉里能看 / 改每一拍）"
+              >
+                {shot.beats?.length} 拍
+              </span>
+            )}
             {shot.dialogue.length > 0 && (
               <span className="shot-lines" title={`${shot.dialogue.length} 句台词`}>
                 {shot.dialogue.length} 句

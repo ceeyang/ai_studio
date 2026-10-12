@@ -1,7 +1,7 @@
 import { type FormEvent, useState } from 'react';
 import { errorText } from '../api/client';
 import { usePatchProject } from '../api/queries';
-import type { Project, ProjectPatch, StylePresetKey } from '../api/types';
+import type { FixedEnginePack, Project, ProjectPatch, StylePresetKey } from '../api/types';
 import { Dialog } from './Dialog';
 import { StylePresetPicker, stylePresetLabel } from './StylePresetPicker';
 
@@ -13,13 +13,24 @@ const PACES: { value: 0 | 3 | 4 | 5; label: string }[] = [
   { value: 5, label: '慢：每镜约 5 秒' },
 ];
 
+/** 固定时长视频引擎怎么用满的选项；组镜拆分还没做，先列出来但不能选 */
+const PACKS: { value: FixedEnginePack; label: string; disabled?: boolean }[] = [
+  { value: 'beats', label: '多拍镜头（一次生成里切 2–4 拍）' },
+  { value: 'off', label: '不合并（一镜一生成）' },
+  { value: 'group', label: '组镜拆分（即将支持）', disabled: true },
+];
+
+function packOf(p: Project): FixedEnginePack {
+  return p.fixed_engine_pack ?? 'beats';
+}
+
 function paceOf(p: Project): 0 | 3 | 4 | 5 {
   const v = Math.round(p.shot_seconds ?? 0);
   return v === 3 || v === 4 || v === 5 ? v : 0;
 }
 
 /**
- * 项目设置：风格预设、镜头节奏、视频自动重拍。只发改了的字段。
+ * 项目设置：风格预设、镜头节奏、固定时长视频引擎怎么用满、视频自动重拍。只发改了的字段。
  * 改预设不会自动重写已有的风格锚和外观，要重新生成剧本才按新预设写；
  * 改节奏影响之后的剧本镜头预算和分镜（整集运行会提示分镜要重出）。
  */
@@ -28,11 +39,13 @@ export function ProjectSettingsDialog({ project, onClose }: { project: Project; 
   const [preset, setPreset] = useState<StylePresetKey>(project.style_preset ?? 'live_action');
   const [pace, setPace] = useState(paceOf(project));
   const [retry, setRetry] = useState(!!project.auto_retry_video);
+  const [pack, setPack] = useState<FixedEnginePack>(packOf(project));
   const presetChanged = preset !== (project.style_preset ?? 'live_action');
   const body: ProjectPatch = {
     ...(presetChanged ? { style_preset: preset } : {}),
     ...(pace !== paceOf(project) ? { shot_seconds: pace } : {}),
     ...(retry !== !!project.auto_retry_video ? { auto_retry_video: retry } : {}),
+    ...(pack !== packOf(project) ? { fixed_engine_pack: pack } : {}),
   };
   const changed = Object.keys(body).length > 0;
   const submit = (e: FormEvent) => {
@@ -42,7 +55,7 @@ export function ProjectSettingsDialog({ project, onClose }: { project: Project; 
   return (
     <Dialog
       title="项目设置"
-      subtitle={`「${project.title}」的风格预设、镜头节奏和视频自动重拍。`}
+      subtitle={`「${project.title}」的风格预设、镜头节奏、固定时长视频引擎用法和视频自动重拍。`}
       onClose={onClose}
       guard={() => changed}
       busy={patch.isPending}
@@ -67,6 +80,23 @@ export function ProjectSettingsDialog({ project, onClose }: { project: Project; 
         </label>
         <p className="muted small">
           决定一集拆成几个镜头（目标时长 ÷ 每镜秒数）。改了之后，剧本的镜头预算和分镜按新节奏写；已有的分镜要重新生成才会变。
+        </p>
+        <label>
+          固定时长视频引擎怎么用满
+          <select
+            aria-label="固定时长视频引擎怎么用满"
+            value={pack}
+            onChange={(e) => setPack(e.target.value as FixedEnginePack)}
+          >
+            {PACKS.map((p) => (
+              <option key={p.value} value={p.value} disabled={p.disabled}>
+                {p.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <p className="muted small">
+          Gemini 网页每次固定出 10 秒、Muse 只认 3 / 5 / 10 秒。多拍镜头：每个镜头就是一次生成，分镜在里面按时间切 2–4 拍（换景别、换机位），一次出满不浪费；不合并：一镜一生成，短镜头多出来的秒数白出。能精确控时长的引擎不受影响。改了之后重新生成分镜才生效，已有的镜头不动。
         </p>
         <label className="check">
           <input type="checkbox" checked={retry} onChange={(e) => setRetry(e.target.checked)} />

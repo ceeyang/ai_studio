@@ -5,6 +5,8 @@ import {
   useDeleteShotRef,
   useEngineAdvice,
   useEngines,
+  useEpisode,
+  useMergeNextAsBeats,
   useFirstFrameFromAsset,
   usePatchShot,
   useProject,
@@ -21,6 +23,7 @@ import { WebConversation, isWebImageEngine } from '../../components/WebConversat
 import { useMediaGroup } from '../../components/MediaViewer';
 import { engineLabel, engineOptionText } from '../../format';
 import { ArchivedCandidates } from './ArchivedCandidates';
+import { BeatsEditor, WasteNotice } from './BeatsPanel';
 import { CandidateGrid } from './CandidateGrid';
 import { DialogueEditor } from './DialogueEditor';
 import { ShotEngineHint } from './EngineAdvice';
@@ -517,6 +520,14 @@ export function ShotDrawer({
   const select = useSelectCandidate(episodeId);
   const patchContinue = usePatchShot(episodeId);
   const patchMode = usePatchShot(episodeId);
+  const patchBeats = usePatchShot(episodeId);
+  const merge = useMergeNextAsBeats(episodeId);
+  // 下一镜（浪费提醒的「并进下一镜」要看它在不在同一段落、合起来放不放得下）；剧集还没拉到时 undefined
+  const episode = useEpisode(episodeId);
+  const ordered = episode.data ? [...episode.data.shots].sort((a, b) => a.order - b.order) : null;
+  const at = ordered ? ordered.findIndex((x) => x.id === shot.id) : -1;
+  const nextShot = ordered && at >= 0 ? (ordered[at + 1] ?? null) : undefined;
+  const [beatsDirty, setBeatsDirty] = useState(false);
   const confirm = useConfirm();
   const [fields, setFields] = useState<FieldsState | null>(null);
   // 引擎建议的「用这个」：改草稿里的视频引擎（不保存），seq 每次加一
@@ -534,10 +545,10 @@ export function ShotDrawer({
   const fieldsDirty = !!fields?.dirty;
   // 提示词或对白有没保存的修改：生成按钮先保存（生成按旧内容跑就白跑了）
   const unsaved = fieldsDirty || dialogueDirty;
-  // 关抽屉另有确认；换到别的页面由全站的离开拦截问
-  useUnsavedGuard(unsaved);
+  // 关抽屉另有确认；换到别的页面由全站的离开拦截问（多拍的拍没保存也算）
+  useUnsavedGuard(unsaved || beatsDirty);
   const latest = useRef({ dirty: false, onClose });
-  latest.current = { dirty: fieldsDirty || dialogueDirty, onClose };
+  latest.current = { dirty: fieldsDirty || dialogueDirty || beatsDirty, onClose };
   const dirtyCb = useRef(onDirtyChange);
   dirtyCb.current = onDirtyChange;
   useEffect(() => {
@@ -775,6 +786,23 @@ export function ShotDrawer({
           onChange={(mode) => patchMode.mutate({ id: shot.id, video_mode: mode })}
         />
         {patchMode.error && <p className="error">{errorText(patchMode.error)}</p>}
+
+        <WasteNotice
+          shot={shot}
+          engine={videoRow}
+          next={nextShot}
+          merging={merge.isPending}
+          error={merge.error ? errorText(merge.error) : null}
+          onMerge={() => merge.mutate(shot.id)}
+        />
+
+        <BeatsEditor
+          shot={shot}
+          saving={patchBeats.isPending}
+          error={patchBeats.error ? errorText(patchBeats.error) : null}
+          onSave={(beats) => patchBeats.mutate({ id: shot.id, beats })}
+          onDirtyChange={setBeatsDirty}
+        />
 
         {!direct && <RefHints shot={shot} maxRefs={imageMaxRefs} missingLocationImage={missingLocationImage} />}
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import shutil
 
+from backend.domain.beats import beat_boundaries
 from backend.domain.slots import add_candidate, get_or_create_slot, selected_candidate
 from backend.engines.base import VideoRequest
 from backend.pipeline.common import job_services
@@ -12,7 +13,7 @@ from backend.domain.shots import refs_mode, refs_mode_overridden
 from backend.pipeline.freshness import shot_video_expect, video_caps, video_check, video_refs_expect
 from backend.pipeline.keyframes import load_shot, ref_labels, ref_roles, run_comfy
 from backend.domain.models import Location, SceneBlock
-from backend.pipeline.prompting import (STAY_IN_FRAME, Speaker, compose_video_prompt,
+from backend.pipeline.prompting import (STAY_IN_FRAME, Speaker, beats_reminder, compose_video_prompt,
                                         entering_clause, gender_of, insert_kind, token_refs, join_negative,
                                         location_summary, short_ref, voice_refs,
                                         shot_image_prompt, shot_seed, with_continuity)
@@ -164,8 +165,19 @@ def _ghost_qc(ctx, sv, path, code: str, refs: list[tuple[str, object]]) -> list[
     return hits
 
 
+# 多拍镜头：落在拍边界 ±这么多秒内的剪切是预期的（时间戳提示词要的硬切），不算「疑似跳切」
+BEAT_CUT_WINDOW = 0.8
+
+
+def split_beat_cuts(cuts: list[float], beats) -> tuple[list[float], list[float]]:
+    """(疑似跳切, 拍边界上的预期剪切)。"""
+    edges = beat_boundaries(beats)
+    expected = [c for c in cuts if any(abs(float(c) - e) <= BEAT_CUT_WINDOW for e in edges)]
+    return [c for c in cuts if c not in expected], expected
+
+
 def scene_qc(ctx, sv, path, code: str, first=None, voices: list[dict] | None = None,
-             refs: list[tuple[str, object]] | None = None) -> dict | None:
+             refs: list[tuple[str, object]] | None = None, beats=None) -> dict | None:
     """出片自检：找片段内部的硬切；给了首帧图时再看视频开头是不是从首帧开始；给了台词（voices，见
     voice_lines）时粗查说话人的声音性别（基频）对不对；给了这条视频带的参考图（refs）时查中段有没有把
     参考图叠进画面。检测本身失败只记日志，不影响出片。"""
@@ -179,6 +191,9 @@ def scene_qc(ctx, sv, path, code: str, first=None, voices: list[dict] | None = N
         except Exception as e:
             ctx.log(f"视频 {code}：跳切检测没跑成，跳过（{_why(e)}）")
         else:
+            cuts, expected = split_beat_cuts(list(cuts or []), beats)
+            if expected:
+                qc["beat_cuts"] = expected   # 多拍镜头拍边界上的剪切：预期的，不报
             if cuts:
                 ctx.log(f"视频 {code}：{cut_note(cuts)}")
             qc["hard_cuts"] = cuts
@@ -321,7 +336,10 @@ def run_video(ctx, payload: dict) -> dict:
         prompt = compose_video_prompt(shot.motion_prompt, shot_image_prompt(shot, proj),
                                       shot.audio_prompt,
                                       shot.dialogue, anchor=style.anchor_text if style else "",
-                                      has_audio=has_audio, speakers=speakers)
+                                      has_audio=has_audio, speakers=speakers, beats=shot.beats,
+                                      reminder=beats_reminder(proj.characters, speakers)
+                                      if shot.beats else "")
+        beats = list(shot.beats or [])
         negative = join_negative(proj.negative, style.negative if style else "")
         # 期望输入和老规则的哈希（和界面过期判断同一套，见 pipeline.freshness）
         if direct:
@@ -420,7 +438,7 @@ def run_video(ctx, payload: dict) -> dict:
         shutil.copyfile(video, dst)
         canceled: JobCanceled | None = None
         try:
-            qc = scene_qc(ctx, sv, dst, code, first, voices, ghost_refs)
+            qc = scene_qc(ctx, sv, dst, code, first, voices, ghost_refs, beats=beats)
         except JobCanceled as e:
             # 视频已经出好了：先登记成候选（没做自检），再把取消报上去，GPU 的活不白干
             qc, canceled = None, e

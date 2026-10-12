@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from backend.domain.archive import archive_and_delete_slots
+from backend.domain.beats import (PACK_BEATS, effective_pack, episode_shot_count, generation_unit,
+                                  is_fixed_length, scale_beats, snap_seconds)
 from backend.domain.backup import BACKUP_KEEP, backup_database
 from backend.domain.hashing import input_hash
 from backend.domain.models import Episode, Shot
@@ -77,6 +79,11 @@ def cjk_problems(shots, names=()) -> list[str]:
         bad = "".join(cjk_outside_quotes(p, names) for p in (getattr(sh, "props", None) or []))
         if bad:
             out.append(f"第 {i} 镜 props 里有中文「{bad[:20]}」")
+        # 多拍镜头每拍的 action 直接拼进发给视频引擎的英文时间戳提示词
+        bad = "".join(cjk_outside_quotes(getattr(b, "action", "") or "", names)
+                      for b in (getattr(sh, "beats", None) or []))
+        if bad:
+            out.append(f"第 {i} 镜 beats 的 action 里有中文「{bad[:20]}」")
     return out
 
 
@@ -271,6 +278,28 @@ def speech_rate_problems(shots) -> list[str]:
     return out
 
 
+BEATS_REQUIRED_FROM = 4.5   # 多拍模式下这么长（秒）以上的镜头必须写 beats
+
+
+def beats_problems(shots, beats_mode: bool) -> list[str]:
+    """多拍镜头模式：长镜头要写 beats（一次生成里切 2–4 拍），台词要落在某一拍里。
+    beats 本身的格式（拍数、长度、首尾相接）由 ShotOut 校验。"""
+    if not beats_mode:
+        return []
+    out = []
+    for i, sh in enumerate(shots, start=1):
+        beats = getattr(sh, "beats", None) or []
+        if not beats:
+            if float(sh.duration) >= BEATS_REQUIRED_FROM:
+                out.append(f"第 {i} 镜 {float(sh.duration):g} 秒没有写 beats：视频引擎一次固定出一段，"
+                           "这一镜要拆成 2–4 拍（每拍 2–4 秒，换景别或机位），写进 beats")
+            continue
+        for d in sh.dialogue:
+            if not any(b.start - 0.2 <= d.start < b.end for b in beats):
+                out.append(f"第 {i} 镜台词「{d.zh}」的 start={d.start:g} 不在任何一拍里")
+    return out
+
+
 def block_seconds(target_seconds: float, count: int, total_count: int) -> float:
     """这一段镜头总时长的预算：按镜头数分整集目标时长。"""
     return round(float(target_seconds) * count / max(total_count, 1), 1)
@@ -358,6 +387,30 @@ class StoryboardPlan:
     preset: str = "live_action"
     # 只出声、不出镜的角色名：角色表里不给占位符，不能进 cast
     voice_only: set[str] = field(default_factory=set)
+    # 视频引擎怎么控时长（VideoCaps.duration_control / allowed_seconds / default_seconds），渲染进分镜提示词
+    duration_control: str = "param"
+    allowed_seconds: tuple[float, ...] = ()
+    default_seconds: float = 5.0
+    # 引擎感知的时长规划（不是老行为时才有，记进段落记录的 "plan"，见 judge_storyboard_block）：
+    #   {"mode": "beats", "control", "unit", "allowed"}：固定时长引擎 + 项目选了多拍镜头，每镜一次生成、2–4 拍；
+    #   {"mode": "snap", "allowed"}：能精确控时长、但只认几档的引擎（即梦 5 / 10 / 15…），时长对齐到档位。
+    # None = 老行为（一镜一生成，每镜按镜头节奏）
+    duration_plan: dict | None = None
+    # 按别的时长规划重算段落预算用（judge_storyboard_block 比老记录的指纹）
+    target_seconds: float = 0.0
+    weights: list[float] = field(default_factory=list)
+    pace: float = 5.0
+
+    @property
+    def beats_mode(self) -> bool:
+        return bool(self.duration_plan) and self.duration_plan.get("mode") == "beats"
+
+    def replanned(self, duration_plan: dict | None) -> "StoryboardPlan":
+        """同样的输入、换一种时长规划（老记录是按哪种规划出的，就按哪种算它的指纹）。"""
+        shot_seconds, counts, secs = plan_counts(self.target_seconds, self.weights, self.pace,
+                                                 duration_plan)
+        blocks = [{**b, "count": n, "seconds": sec} for b, n, sec in zip(self.blocks, counts, secs)]
+        return replace(self, shot_seconds=shot_seconds, blocks=blocks, duration_plan=duration_plan)
 
 
 def pace_seconds(pace: float | None, caps) -> float:
@@ -366,6 +419,35 @@ def pace_seconds(pace: float | None, caps) -> float:
     if not pace:
         return caps.default_seconds
     return float(min(max(float(pace), MIN_SHOT_SECONDS), caps.max_seconds))
+
+
+def duration_plan_for(caps, pack: str | None) -> dict | None:
+    """引擎感知的时长规划（见 StoryboardPlan.duration_plan）。固定时长引擎在 off 模式下照老行为
+    （一镜一生成，不对齐档位：Gemini 只有 10 秒一档，对齐了每镜都成 10 秒），导出时截到镜头时长。"""
+    allowed = [float(x) for x in getattr(caps, "allowed_seconds", ()) or ()]
+    if is_fixed_length(caps):
+        if effective_pack(pack) != PACK_BEATS:
+            return None
+        return {"mode": "beats", "control": caps.duration_control,
+                "unit": float(generation_unit(caps)), "allowed": allowed}
+    if allowed:
+        return {"mode": "snap", "allowed": allowed}
+    return None
+
+
+def plan_counts(target: float, weights: list[float], pace: float, duration_plan: dict | None
+                ) -> tuple[float, list[int], list[float]]:
+    """(每镜几秒, 每段镜头数, 每段预算秒数)。多拍镜头模式每镜是一次生成：整集镜头数 = 目标时长 ÷ 生成单元
+    向上取整（每镜不超过一个生成单元）；其余按镜头节奏（老算法）。"""
+    if duration_plan and duration_plan.get("mode") == "beats":
+        shot_seconds = float(duration_plan["unit"])
+        total = episode_shot_count(target, shot_seconds)
+    else:
+        shot_seconds = float(pace)
+        total = shot_budget(target, shot_seconds)
+    counts = allocate_shots(total, weights)
+    total_count = sum(counts)
+    return shot_seconds, counts, [block_seconds(target, n, total_count) for n in counts]
 
 
 FIRST_SHOT_MAX = 3.5   # 全集第一镜：模板要求 2–3 秒，超过这个数只在日志里提醒
@@ -385,10 +467,10 @@ def build_storyboard_plan(s: Session, sv, episode_id: int) -> StoryboardPlan:
         caps = sv.engines.video(proj.video_engine).caps
     except KeyError as e:
         raise JobError(str(e)) from None
-    shot_seconds, max_seconds = pace_seconds(proj.shot_seconds, caps), caps.max_seconds
-    counts = allocate_shots(shot_budget(ep.target_seconds, shot_seconds),
-                            [len(b.text) for b in blocks])
-    total_count = sum(counts)
+    pace, max_seconds = pace_seconds(proj.shot_seconds, caps), caps.max_seconds
+    dplan = duration_plan_for(caps, getattr(proj, "fixed_engine_pack", None))
+    weights = [float(len(b.text)) for b in blocks]
+    shot_seconds, counts, secs = plan_counts(ep.target_seconds, weights, pace, dplan)
     anchor = proj.style_bible.anchor_text if proj.style_bible else ""
     characters = [{"name": c.name, "visual_prompt": c.visual_prompt or c.description}
                  for c in proj.characters]
@@ -400,13 +482,17 @@ def build_storyboard_plan(s: Session, sv, episode_id: int) -> StoryboardPlan:
     locs = {l.id: {"name": l.name, "time_of_day": l.time_of_day, "atmosphere": l.atmosphere,
                    "visual_prompt": l.visual_prompt} for l in proj.locations}
     plan = [{"id": b.id, "order": b.order, "text": b.text, "location": locs.get(b.location_id),
-             "count": n, "seconds": block_seconds(ep.target_seconds, n, total_count)}
-            for b, n in zip(blocks, counts)]
+             "count": n, "seconds": sec}
+            for b, n, sec in zip(blocks, counts, secs)]
     return StoryboardPlan(ep=ep, shot_seconds=shot_seconds, max_seconds=max_seconds, anchor=anchor,
                           characters=characters, char_ids=char_ids, blocks=plan,
                           prompts=sv.prompts(proj.slug), aspect=proj.aspect or "9:16",
                           char_table=char_table, preset=proj.style_preset or "live_action",
-                          voice_only={c.name for c in proj.characters if c.voice_only})
+                          voice_only={c.name for c in proj.characters if c.voice_only},
+                          duration_control=caps.duration_control,
+                          allowed_seconds=tuple(float(x) for x in caps.allowed_seconds or ()),
+                          default_seconds=float(caps.default_seconds), duration_plan=dplan,
+                          target_seconds=float(ep.target_seconds), weights=weights, pace=pace)
 
 
 def previous_shot_lines(db, block_id: int) -> list[str]:
@@ -437,7 +523,9 @@ def previous_shot_lines(db, block_id: int) -> list[str]:
 #       全镜逐字一致（视频对白按它认说话人）；只露手 / 腰的插入镜头只写部位、系统只填服装
 #   v7：只出声、不出镜的角色不进 cast、不给占位符；每镜给 continue_from_prev（建议接上一镜）；
 #       全集第一镜 2–3 秒
-STORYBOARD_RULES_VERSION = 7
+#   v8：按视频引擎控时长的方式写 duration（只认几档的只用这几档）；固定时长引擎 + 多拍镜头模式：每镜是一次生成，
+#       写 beats（2–4 拍，首尾相接），台词落在对应拍里
+STORYBOARD_RULES_VERSION = 8
 RULES_OUTDATED_HINT = "分镜规则已更新，要按新规则重出请强制重跑"
 
 # 镜头上会被用户改动的字段：生成时记下每镜的哈希，之后对不上就是改过（含拆分出来的新镜头）
@@ -541,7 +629,11 @@ def rebase_after_look_change(s: Session, sv, char, old_looks: list[str],
 
 
 def shot_content_hash(sh) -> str:
-    return input_hash("shot-content", **{f: getattr(sh, f, None) for f in SHOT_CONTENT_FIELDS})
+    # 多拍镜头的拍只在有的时候算进去：老镜头（没有 beats）的哈希不变，不会全被当成「改过」
+    # （和 D3 的 video_mode 一样不进 SHOT_CONTENT_FIELDS）
+    beats = getattr(sh, "beats", None)
+    return input_hash("shot-content", **{f: getattr(sh, f, None) for f in SHOT_CONTENT_FIELDS},
+                      **({"beats": beats} if beats else {}))
 
 
 @dataclass
@@ -563,6 +655,24 @@ def judge_block(record, inputs_fp: str, rules: str, has_llm_shots: bool) -> Bloc
     if isinstance(record, str) and record and has_llm_shots:
         return BlockCheck(True, True, True)
     return BlockCheck(False, False, False)
+
+
+PLAN_OUTDATED_HINT = "视频引擎的时长规划变了（换了视频引擎或「固定时长视频引擎怎么用满」），要按新规划重出请强制重跑"
+
+
+def judge_storyboard_block(plan: "StoryboardPlan", blk: dict, record, prev_action: str, rules: str,
+                           has_llm_shots: bool) -> tuple[BlockCheck, bool]:
+    """(判断, 时长规划变了没)。段落记录里记着出镜头时的时长规划（"plan"，没有 = 老行为）：和现在的不一样时，
+    按记录当时的规划重算指纹来比——换了引擎时长规划（或项目选项）只提示，不自动重跑删镜头
+    （设计文档 2026-10-12 固定时长引擎 §3.1、§3.4）。"""
+    rec_plan = record.get("plan") if isinstance(record, dict) else None
+    if isinstance(record, dict) and rec_plan != plan.duration_plan:
+        old = plan.replanned(rec_plan)
+        oblk = next((b for b in old.blocks if b["id"] == blk["id"]), blk)
+        fp = pick_fp(record, *block_fps(old, oblk, prev_action))
+        return judge_block(record, fp, rules, has_llm_shots), has_llm_shots
+    fp = pick_fp(record, *block_fps(plan, blk, prev_action))
+    return judge_block(record, fp, rules, has_llm_shots), False
 
 
 def upgraded_record(inputs_fp: str) -> dict:
@@ -595,13 +705,24 @@ def known_props(db, block_ids: list[int]) -> list[str]:
         return out[:30]
 
 
+def timing_vars(plan: "StoryboardPlan") -> dict:
+    """视频引擎怎么控时长，渲染进分镜提示词（只进提示词；指纹靠段落记录里的 "plan"）。"""
+    dp = plan.duration_plan or {}
+    return {"duration_control": plan.duration_control,
+            "allowed_seconds": [f"{x:g}" for x in plan.allowed_seconds],
+            "default_seconds": plan.default_seconds,
+            "beats_mode": plan.beats_mode, "gen_unit": dp.get("unit"),
+            "snap_seconds": [f"{x:g}" for x in dp.get("allowed", [])] if dp.get("mode") == "snap" else []}
+
+
 def storyboard_prompt_fp(prompts, anchor, characters, location, text, count, shot_seconds,
                          max_seconds, prev_action, note: str | None = None,
                          previous_shots: list[str] | None = None,
                          block_seconds: float | None = None,
                          props: list[str] | None = None,
                          aspect: str = "9:16", preset: str | None = None,
-                         first_block: bool = False) -> tuple[str, str, str]:
+                         first_block: bool = False,
+                         timing: dict | None = None) -> tuple[str, str, str]:
     """某段落这次会用到的分镜提示词及其输入指纹（不调用 LLM）。
 
     note 是修改意见；previous_shots 是这一段上一版的镜头（只在有修改意见时提供）；
@@ -612,7 +733,7 @@ def storyboard_prompt_fp(prompts, anchor, characters, location, text, count, sho
         anchor=anchor, characters=characters, location=location, text=text,
         count=count, shot_seconds=shot_seconds, max_seconds=max_seconds, prev_action=prev_action,
         block_seconds=block_seconds, previous_shots=[], known_props=list(props or []),
-        aspect=aspect, first_block=first_block, **prompt_vars(preset))
+        aspect=aspect, first_block=first_block, **prompt_vars(preset), **(timing or {}))
     legacy = [{"name": c.get("name", ""), "visual_prompt": c.get("visual_prompt", "")}
               for c in characters]
     fp = storyboard_inputs_fp(anchor, legacy, location, text, count, shot_seconds,
@@ -678,7 +799,7 @@ def run_storyboard(ctx, payload: dict) -> dict:
                                                prev_action, note, previous,
                                                block_seconds=blk["seconds"], props=props,
                                                aspect=plan_data.aspect, preset=plan_data.preset,
-                                               first_block=idx == 0)
+                                               first_block=idx == 0, timing=timing_vars(plan_data))
         # 模板里写了占位符的说明才按占位符校验（项目目录里的老覆盖模板不知道占位符）
         placeholders = "{{char:" in system
         fp_new, fp_old = block_fps(plan_data, blk, prev_action)
@@ -688,7 +809,8 @@ def run_storyboard(ctx, payload: dict) -> dict:
             existing = s.scalar(select(func.count()).select_from(Shot)
                                 .where(Shot.scene_block_id == blk["id"], Shot.origin == "llm"))
             record = (ep.stage_hashes or {}).get(key)
-            judged = judge_block(record, pick_fp(record, fp_new, fp_old), rules, existing > 0)
+            judged, plan_changed = judge_storyboard_block(plan_data, blk, record, prev_action, rules,
+                                                          existing > 0)
             if judged.legacy and not force:
                 # 旧格式指纹没法按新算法重算：当作没变，换成新格式，不重跑（不删镜头和选定的首帧/视频）
                 ep.stage_hashes = {**(ep.stage_hashes or {}), key: upgraded_record(fp_old)}
@@ -698,6 +820,8 @@ def run_storyboard(ctx, payload: dict) -> dict:
                         "要重出请用重新生成")
             elif judged.rules_outdated:
                 ctx.log(f"{label}：输入没变，跳过；{RULES_OUTDATED_HINT}")
+            elif plan_changed:
+                ctx.log(f"{label}：输入没变，跳过；{PLAN_OUTDATED_HINT}")
             else:
                 ctx.log(f"{label}：输入没变，跳过")
             skipped += 1
@@ -742,6 +866,7 @@ def run_storyboard(ctx, payload: dict) -> dict:
             if english:
                 ctx.log(f"{label}：提示词里的 {'、'.join(sorted({w for _, w in english}))} 和角色名拼音"
                         "同形，按英文单词处理，没有改")
+            problems += beats_problems(out.shots, plan_data.beats_mode)
             if problems:
                 raise ValueError("；".join(problems))
             # 最后一次机会（网关按真实调用次数告诉我们；手工粘贴的输出也算）不再因为「差得太多」打回，
@@ -759,6 +884,11 @@ def run_storyboard(ctx, payload: dict) -> dict:
             s.execute(delete(Shot).where(Shot.scene_block_id == blk["id"], Shot.origin == "llm"))
             trimmed = 0
             durs, _ = budget_durations(out.shots, blk["seconds"], max_seconds, rewrite_over=False)
+            snap = (plan_data.duration_plan or {}).get("allowed") \
+                if (plan_data.duration_plan or {}).get("mode") == "snap" else None
+            if snap:
+                # 只认几档时长的引擎（param）：镜头时长对齐到档位，不短于台词说完
+                durs = [snap_seconds(d, snap, lo=shot_min_seconds(sh)) for sh, d in zip(out.shots, durs)]
             added: list[Shot] = []
             for j, (sh, dur) in enumerate(zip(out.shots, durs)):
                 dialogue = []
@@ -777,6 +907,9 @@ def run_storyboard(ctx, payload: dict) -> dict:
                     props=list(sh.props), image_prompt=sh.image_prompt,
                     motion_prompt=sh.motion_prompt, audio_prompt=sh.audio_prompt, duration=dur,
                     transition_out=sh.transition_out,
+                    # 多拍镜头：只在多拍模式下存（时长按预算缩放过时拍跟着缩放）
+                    beats=scale_beats([b.model_dump() for b in sh.beats], dur)
+                    if plan_data.beats_mode and sh.beats else None,
                     # 建议接上一镜：本段第一镜不建议（上一镜在别的段落，可能换了场景）
                     suggest_continue=bool(sh.continue_from_prev) and j > 0)
                 s.add(row)
@@ -798,7 +931,7 @@ def run_storyboard(ctx, payload: dict) -> dict:
             ep = s.get(Episode, episode_id)
             ep.stage_hashes = {**(ep.stage_hashes or {}), key: {
                 "inputs": fp_new if placeholders else fp_old, "rules": rules,
-                "placeholders": placeholders,
+                "placeholders": placeholders, "plan": plan_data.duration_plan,
                 "shots": {str(x.id): shot_content_hash(x) for x in added}}}
         done += 1
         prev_action = out.shots[-1].action

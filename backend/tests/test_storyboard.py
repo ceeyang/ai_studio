@@ -569,7 +569,7 @@ def test_shrink_fallback_with_manual_provider(tmp_path, db):
 # 内置分镜模板的内容哈希（统一成 LF 后 sha256 前 16 位）和规则版本绑在一起
 TEMPLATE_HASH_FOR_RULES = {2: "7357bca01548d446", 3: "8436da3c14f43567", 4: "18cc1fe0b08ddcef",
                            5: "900e62f2e60a5040", 6: "09e951b84cd91d7d",
-                           7: "adfbe376bad5789a"}
+                           7: "adfbe376bad5789a", 8: "f9a4a70a2c94d0f8"}
 
 
 def test_builtin_template_hash_is_bound_to_rules_version():

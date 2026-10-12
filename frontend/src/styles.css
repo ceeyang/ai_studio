@@ -1650,6 +1650,14 @@ img.rail-avatar { border: 0; }
 /* 参考图直出：超出视频引擎上限、带不上的参考图 */
 .shot-ref.is-dropped img { opacity: 0.45; }
 .shot-video-mode select { margin-left: 4px; }
+/* 固定时长视频引擎：浪费提醒、多拍镜头的拍（开始 / 结束 / 景别 / 运镜一行，动作占整行） */
+.shot-waste { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.shot-waste p { margin: 0; }
+.beats-editor fieldset.beat-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: var(--s-2); margin: 0; padding: var(--s-3); border: 1px solid var(--border); border-radius: var(--r-md); }
+.beats-editor fieldset.beat-row > label:last-child { grid-column: 1 / -1; }
+.beats-editor legend { padding: 0 6px; font-size: 13px; color: var(--text-2); }
+.beats-editor input { min-width: 0; }
+.shot-beats { white-space: nowrap; }
 
 /* 成片阶段：配乐 */
 .export-group-music { grid-column: 1 / -1; }

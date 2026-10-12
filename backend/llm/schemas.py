@@ -84,6 +84,16 @@ class DialogueOut(BaseModel):
         return self
 
 
+class BeatOut(BaseModel):
+    """多拍镜头的一拍（一次生成里按时间戳切的一段）：start / end 是相对本镜开头的秒数。
+    action 写英文（直接拼进发给视频引擎的时间戳提示词，和 motion_prompt 一样用简短指代）。"""
+    start: float = Field(ge=0)
+    end: float
+    shot_size: str = ""
+    camera_move: str = ""
+    action: str = Field(min_length=1)
+
+
 class ShotOut(BaseModel):
     shot_size: str = ""
     camera_move: str = ""
@@ -99,6 +109,8 @@ class ShotOut(BaseModel):
     transition_out: Transition = "hard_cut"
     # 分镜建议这一镜接上一镜（只是建议，存进 Shot.suggest_continue，用户在工作台一键打开）
     continue_from_prev: bool = False
+    # 多拍镜头（固定时长视频引擎、项目选了多拍镜头时分镜才写）：2–4 拍，首尾相接、覆盖整个 duration
+    beats: list[BeatOut] | None = None
 
     @field_validator("props", mode="before")
     @classmethod
@@ -127,6 +139,17 @@ class ShotOut(BaseModel):
         for d in self.dialogue:
             if d.end > self.duration:
                 raise ValueError(f"台词「{d.zh}」的 end={d.end} 超过了镜头 duration={self.duration}")
+        return self
+
+    @model_validator(mode="after")
+    def _beats_cover_duration(self):
+        from backend.domain.beats import check_beats
+
+        if self.beats:
+            # 拍数、每拍长度、首尾相接、覆盖 [0, duration]；错误信息是中文，LLM 重试时照着改
+            check_beats([b.model_dump() for b in self.beats], self.duration)
+        elif self.beats == []:
+            self.beats = None
         return self
 
 

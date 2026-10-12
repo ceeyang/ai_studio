@@ -17,8 +17,8 @@ from backend.domain.models import Shot, Slot
 from backend.pipeline.common import check_scene_blocks, clean_note, load_episode
 from backend.pipeline.script import (judge_script, structure_inputs, structure_rules,
                                      visual_chars_and_locations, visual_prompt_fp, visual_rules)
-from backend.pipeline.storyboard import (block_fps, build_storyboard_plan, edited_shot_ids,
-                                         judge_block, pick_fp, storyboard_rules)
+from backend.pipeline.storyboard import (build_storyboard_plan, edited_shot_ids,
+                                         judge_storyboard_block, storyboard_rules)
 from backend.queue.errors import JobError
 
 
@@ -78,11 +78,12 @@ def scan_storyboard(s: Session, sv, episode_id: int, force: bool,
             prev_action = _last_action(s, blk["id"]) or prev_action
             continue
         record = stage_hashes.get(f"storyboard:{blk['id']}")
-        fp = pick_fp(record, *block_fps(plan_data, blk, prev_action))
         llm_shots = list(s.scalars(select(Shot).where(Shot.scene_block_id == blk["id"],
                                                       Shot.origin == "llm")))
-        judged = judge_block(record, fp, rules, bool(llm_shots))
-        outdated = outdated or judged.rules_outdated
+        judged, plan_changed = judge_storyboard_block(plan_data, blk, record, prev_action, rules,
+                                                      bool(llm_shots))
+        # 视频引擎的时长规划变了也只是提示（和规则更新一样，不强制不会重跑）
+        outdated = outdated or judged.rules_outdated or (plan_changed and judged.unchanged)
         if force or not judged.unchanged:
             block_ids.append(blk["id"])
             numbers.append(blk["order"] + 1)

@@ -19,6 +19,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Literal
 
+from backend.domain.beats import waste_seconds
 from backend.domain.shots import refs_mode
 
 Difficulty = Literal["easy", "medium", "hard"]
@@ -276,6 +277,13 @@ def advise_shot(shot, engines: Iterable[EngineInfo], current: str | None) -> Sho
     recommended = [Recommendation(engine=e.name, label=e.label, why=_why(diff, e, shot)) for e in ranked[:TOP_N]]
 
     cur = by_name.get(current) if current else None
+    waste = waste_seconds(cur.caps, float(getattr(shot, "duration", 0) or 0), getattr(shot, "beats", None)) \
+        if cur is not None else None
+    if waste:
+        # 固定时长引擎（Gemini 固定 10 秒、Muse 只认 3 / 5 / 10 秒）：镜头比一次生成短，多出来的白出、还占额度
+        unit, lost = waste
+        reasons.append(f"固定时长引擎会浪费 {lost:g} 秒（{cur.label} 每次出 {unit:g} 秒，"
+                       f"这一镜只用 {float(shot.duration):g} 秒；可以并进下一镜做成多拍镜头）")
     if current and cur is None:
         current_ok, current_problems = False, [f"引擎 {current} 不存在或没有启用"]
     elif cur is None:

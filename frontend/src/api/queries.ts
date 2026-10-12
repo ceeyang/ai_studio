@@ -861,6 +861,15 @@ export function useSplitShot(episodeId: number) {
   });
 }
 
+/** 并进下一镜做成多拍镜头（固定时长视频引擎一次生成用满）：返回合并后的镜头，下一镜删掉 */
+export function useMergeNextAsBeats(episodeId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (shotId: number) => api.post<ShotDetail>(`/api/shots/${shotId}/merge-next-as-beats`),
+    onSuccess: () => invalidate(qc, keys.episode(episodeId)),
+  });
+}
+
 export function useReorderShots(episodeId: number) {
   const qc = useQueryClient();
   return useMutation({

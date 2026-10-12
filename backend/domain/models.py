@@ -52,6 +52,10 @@ class Project(Base):
     shot_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
     # 视频开头没接上首帧（出片自检 start_mismatch）时，同一个任务里换种子自动重拍一次
     auto_retry_video: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    # 固定时长视频引擎（Gemini 固定 10 秒、Muse 只认 3 / 5 / 10 秒）怎么用满一次生成：beats = 多拍镜头
+    #（一次生成里切 2–4 拍，默认）/ group = 组镜拆分（第 2 步实现，现在按 off 处理）/ off = 一镜一生成（老行为）。
+    # 分镜按它排；改了之后重跑分镜才生效（不动已有镜头）
+    fixed_engine_pack: Mapped[str] = mapped_column(String(16), default="beats", server_default="beats")
     archived: Mapped[bool] = mapped_column(Boolean, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
@@ -176,6 +180,9 @@ class Shot(Base):
     video_mode: Mapped[str | None] = mapped_column(String(16), nullable=True)
     # 分镜建议这一镜接上一镜（同一场景、动作直接延续）：只是建议，工作台上一键打开 continue_from_prev
     suggest_continue: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    # 多拍镜头：一次生成里按时间戳切的 2–4 拍 [{start, end, shot_size, camera_move, action}]，首尾相接、
+    # 覆盖整个镜头时长（domain/beats.py 校验）；空 = 普通镜头。台词仍在 dialogue（各句落在对应拍里）
+    beats: Mapped[list | None] = mapped_column(JSON, nullable=True)
     transition_out: Mapped[str] = mapped_column(String(32), default="hard_cut")
     # llm：分镜生成的，重跑会被替换/清理；manual：用户手工加的，重跑分镜时要保留
     origin: Mapped[str] = mapped_column(String(16), default="llm")

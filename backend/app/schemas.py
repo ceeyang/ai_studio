@@ -12,6 +12,9 @@ from backend.post.options import ExportOptions
 Aspect = Literal["9:16", "16:9"]
 # 镜头视频怎么出：first_frame = 先出首帧再图生视频；refs = 参考图直出（不出首帧）
 VideoMode = Literal["first_frame", "refs"]
+# 固定时长视频引擎怎么用满一次生成：beats = 多拍镜头（默认）；group = 组镜拆分（第 2 步实现，现在按 off 处理）；
+# off = 一镜一生成（老行为）。见 backend/domain/beats.py
+FixedEnginePack = Literal["beats", "group", "off"]
 Stage = Literal["script", "storyboard", "keyframes", "videos", "export", "all", "fit_khmer"]
 NextStage = Literal["keyframes", "videos", "export"]
 # 风格预设，和 backend/domain/style_presets.py 的 PRESETS 一致（有测试对齐）
@@ -59,6 +62,7 @@ class ProjectPatch(BaseModel):
     # 镜头节奏：每镜几秒；0 = 跟随视频引擎（清空）
     shot_seconds: Literal[0, 3, 4, 5] | None = None
     auto_retry_video: bool | None = None     # 视频开头没接上首帧时自动重拍一次
+    fixed_engine_pack: FixedEnginePack | None = None   # 固定时长视频引擎怎么用满（改了重跑分镜才生效）
 
 
 class ProjectOut(ORM):
@@ -74,6 +78,7 @@ class ProjectOut(ORM):
     style_bible_id: int | None
     shot_seconds: float | None = None
     auto_retry_video: bool = False
+    fixed_engine_pack: str = "beats"
     archived: bool
     created_at: datetime
 
@@ -559,6 +564,16 @@ class DialogueIn(BaseModel):
         return self
 
 
+class BeatIn(BaseModel):
+    """多拍镜头的一拍（start / end 相对本镜开头的秒数；action 英文，直接拼进时间戳视频提示词）。
+    拍数、长度、首尾相接、覆盖镜头时长在路由里按镜头时长校验（domain/beats.check_beats）。"""
+    start: float = Field(ge=0)
+    end: float = Field(ge=0)
+    shot_size: str = ""
+    camera_move: str = ""
+    action: str = ""
+
+
 class ShotFields(BaseModel):
     shot_size: str | None = None
     camera_move: str | None = None
@@ -577,6 +592,7 @@ class ShotFields(BaseModel):
     video_mode: VideoMode | None = None      # null = 首帧模式（和 first_frame 一样）
     suggest_continue: bool | None = None     # false = 不要这条「建议接上一镜」
     transition_out: Transition | None = None
+    beats: list[BeatIn] | None = None        # 多拍镜头的拍；null / [] = 不再是多拍镜头
 
 
 class ShotIn(ShotFields):
@@ -605,6 +621,7 @@ class ShotOut(ORM):
     continue_from_prev: bool
     video_mode: str | None = None    # first_frame / refs（参考图直出）；空 = first_frame
     suggest_continue: bool = False   # 分镜建议这一镜接上一镜（只是建议，用户一键打开）
+    beats: list[dict] | None = None  # 多拍镜头：[{start, end, shot_size, camera_move, action}]；空 = 普通镜头
     transition_out: str
     origin: str = "llm"        # llm = 分镜生成的；manual = 手工添加（含拆分出来的）
 

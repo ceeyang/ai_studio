@@ -39,6 +39,8 @@ export interface Project {
   shot_seconds?: number | null;
   /** 视频开头没接上首帧时自动换种子重拍一次 */
   auto_retry_video?: boolean;
+  /** 固定时长视频引擎（Gemini 固定 10 秒、Muse 只认 3 / 5 / 10 秒）怎么用满一次生成；老项目 beats */
+  fixed_engine_pack?: FixedEnginePack;
   /** 归档了的项目默认不在项目中心显示（GET /api/projects?archived=1 才带上） */
   archived: boolean;
   created_at: string;
@@ -53,6 +55,22 @@ export interface ProjectPatch {
   /** 镜头节奏：每镜几秒；0 = 跟随视频引擎 */
   shot_seconds?: 0 | 3 | 4 | 5;
   auto_retry_video?: boolean;
+  fixed_engine_pack?: FixedEnginePack;
+}
+
+/**
+ * 固定时长视频引擎怎么用满：beats = 多拍镜头（一次生成里切 2–4 拍，默认）；
+ * group = 组镜拆分（即将支持，现在按 off 处理）；off = 不合并（一镜一生成）。改了重跑分镜才生效
+ */
+export type FixedEnginePack = 'beats' | 'group' | 'off';
+
+/** 多拍镜头的一拍：start / end 相对本镜开头的秒数；action 英文（直接拼进视频提示词） */
+export interface Beat {
+  start: number;
+  end: number;
+  shot_size: string;
+  camera_move: string;
+  action: string;
 }
 
 export interface ProjectIn {
@@ -565,6 +583,8 @@ export interface Shot {
   video_mode?: VideoMode | null;
   /** 分镜建议这一镜接上一镜（只是建议，没打开 continue_from_prev） */
   suggest_continue?: boolean;
+  /** 多拍镜头：一次生成里按时间戳切的 2–4 拍；null = 普通镜头 */
+  beats?: Beat[] | null;
   transition_out: string;
   /** llm = 分镜生成的；manual = 手工添加（含拆分出来的） */
   origin: 'llm' | 'manual' | string;
@@ -623,6 +643,8 @@ export interface ShotPatch {
   video_mode?: VideoMode | null;
   /** false = 不要「建议接上一镜」这条提示 */
   suggest_continue?: boolean;
+  /** 多拍镜头的拍；null = 不再是多拍镜头 */
+  beats?: Beat[] | null;
 }
 
 export interface ShotIn extends ShotPatch {

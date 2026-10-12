@@ -265,7 +265,7 @@ def test_storyboard_stores_continue_suggestion_but_never_on_block_first_shot(tmp
         assert [x.suggest_continue for x in shots] == [False, True, False, False]
         assert not any(x.continue_from_prev for x in shots)    # 只是建议，不自动打开
         rec = ep.stage_hashes[f"storyboard:{shots[0].scene_block_id}"]
-        assert rec["rules"] == "7"
+        assert rec["rules"] == "8"
         # 建议不进镜头内容哈希：之后用户关掉建议不算「手改过镜头」
         assert rec["shots"][str(shots[1].id)] == shot_content_hash(shots[1])
     assert any("建议 1 个镜头接上一镜" in m for m in ctx.logs)

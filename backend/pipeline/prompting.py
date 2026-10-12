@@ -544,11 +544,82 @@ GAZE_ONE = ("The person on screen keeps their eyes on what they are doing, looki
 _AT_CAMERA = re.compile(r"\b(?:into|at|toward|towards|to)\s+(?:the\s+)?(?:camera|lens|viewer)\b", re.I)
 
 
+# 多拍镜头（Shot.beats）的时间戳提示词：一次生成里按时间戳切几个镜头（Veo 认这种写法，见设计文档
+# 2026-10-12 固定时长引擎 §2）。视频提示词全英文，这一句也是英文
+BEATS_INSTRUCTION = ("One continuous generation with hard cuts at the timestamps above: each timestamped "
+                     "segment is its own camera shot of the same scene and the same people, cut exactly "
+                     "at each timestamp.")
+
+
+def beats_reminder(characters, speakers: dict[str, Speaker] | None) -> str:
+    """多拍镜头每一拍后面重复的外貌短句（每段重复人物外观，防止跑偏）：画面里的人，「the young woman
+    (woman in her late twenties)」；叫法和外貌简称一样时只写一次。"""
+    if not speakers:
+        return ""
+    parts = []
+    for c in characters or []:
+        sp = speakers.get(getattr(c, "name", ""))
+        if sp is None or not sp.on_screen:
+            continue
+        look = short_ref(getattr(c, "visual_prompt", ""))
+        if not sp.ref or sp.ref == "the speaker":
+            parts.append(look)
+        elif look in ("the speaker", sp.ref):
+            parts.append(sp.ref)
+        else:
+            parts.append(f"{sp.ref} ({look[4:] if look.startswith('the ') else look})")
+    return "Same people: " + ", ".join(parts) if parts else ""
+
+
+def _beat_dialogue(dialogue, beats: list[dict]) -> list[list[dict]]:
+    """每句台词放进它开始时所在的那一拍（第一拍之前的算第一拍，最后一拍之后的算最后一拍）。"""
+    out: list[list[dict]] = [[] for _ in beats]
+    for d in dialogue or []:
+        if not isinstance(d, dict) or not d.get("zh"):
+            continue
+        t = float(d.get("start") or 0)
+        i = next((k for k, b in enumerate(beats) if t < float(b.get("end", 0))), len(beats) - 1)
+        out[i].append(d)
+    return out
+
+
+def beats_segments(beats: list[dict], dialogue, speakers: dict[str, Speaker] | None, *,
+                   has_audio: bool, reminder: str = "", skip: str = "") -> list[str]:
+    """时间戳分段：「[00:00-00:03] Medium shot, static: <动作>」+ 外貌短句 + 落在这一段里的台词。
+    speakers 为 None（算输入哈希）时台词用老写法，外貌短句不写（外貌变了靠首帧 / 参考图过期）。"""
+    from backend.domain.beats import SHOT_SIZE_EN, stamp
+
+    n_on = sum(1 for sp in (speakers or {}).values() if sp.on_screen)
+    lines = []
+    for b, said in zip(beats, _beat_dialogue(dialogue, beats)):
+        size = (b.get("shot_size") or "").strip()
+        head = ", ".join(x for x in (SHOT_SIZE_EN.get(size, size), (b.get("camera_move") or "").strip()) if x)
+        line = f"[{stamp(b.get('start', 0))}-{stamp(b.get('end', 0))}] {head + ': ' if head else ''}" \
+               f"{(b.get('action') or '').strip()}"
+        line = line.rstrip(". ") + "."
+        if reminder:
+            line += f" {reminder}."
+        if has_audio:
+            dl = [_dialogue_line(d, speakers, n_on) for d in said if d["zh"] not in skip]
+            if dl:
+                line += " " + (" ".join(dl) if speakers is None else _join_lines(dl))
+        lines.append(line)
+    return lines
+
+
 def compose_video_prompt(motion_prompt: str, image_prompt: str, audio_prompt: str,
                          dialogue: list[dict], *, anchor: str, has_audio: bool,
-                         speakers: dict[str, Speaker] | None = None) -> str:
+                         speakers: dict[str, Speaker] | None = None,
+                         beats: list[dict] | None = None, reminder: str = "") -> str:
     """speakers 给了（发给引擎时）：画面里的说话人用英文简称，不在画面里的写成画外音、画面里的人闭嘴；
-    不给（算输入哈希、inputs 摘要时）：沿用老写法。"""
+    不给（算输入哈希、inputs 摘要时）：沿用老写法。
+
+    beats（多拍镜头）给了：按时间戳逐拍写（每拍重复 reminder 外貌短句、台词放进对应时间段），再加一句
+    「一次生成、按时间戳硬切」；没有 beats 的镜头和以前一字不差（输入哈希不变）。"""
+    if beats:
+        return _compose_beats_prompt(motion_prompt, audio_prompt, dialogue, anchor=anchor,
+                                     has_audio=has_audio, speakers=speakers, beats=beats,
+                                     reminder=reminder)
     body = (motion_prompt or "").strip() or (image_prompt or "").strip()
     if speakers is None:   # 老写法（算输入哈希、inputs 摘要）：风格锚整段在前，保持一字不差
         text = compose_image_prompt(body, anchor)
@@ -574,6 +645,32 @@ def compose_video_prompt(motion_prompt: str, image_prompt: str, audio_prompt: st
     if speakers is not None:
         parts.append(NO_MUSIC)
     return text + ("\nAudio: " + " ".join(parts) if parts else "")
+
+
+def _compose_beats_prompt(motion_prompt: str, audio_prompt: str, dialogue, *, anchor: str,
+                          has_audio: bool, speakers: dict[str, Speaker] | None, beats: list[dict],
+                          reminder: str) -> str:
+    audio = (audio_prompt or "").strip()
+    segs = beats_segments(beats, dialogue, speakers, has_audio=has_audio,
+                          reminder=reminder if speakers is not None else "", skip=audio)
+    if speakers is None:   # 算输入哈希、inputs 摘要：运动提示词 + 时间戳分段 + 风格锚，拍改了视频就过期
+        text = "\n".join([compose_image_prompt((motion_prompt or "").strip(), anchor), *segs, BEATS_INSTRUCTION])
+        return text + ("\nAudio: " + audio if has_audio and audio else "")
+    text = "\n".join([*segs, BEATS_INSTRUCTION])
+    tail = video_style(anchor)
+    n_on = sum(1 for sp in speakers.values() if sp.on_screen)
+    if n_on and not _AT_CAMERA.search(" ".join(b.get("action") or "" for b in beats)):
+        tail = f"{tail} {GAZE_ONE if n_on == 1 else GAZE_LINE}".strip()
+    unseen = unseen_speakers_clause(dialogue, speakers)
+    if unseen:
+        tail = f"{tail} {unseen}".strip()
+    if tail:
+        text = f"{text} {tail}"
+    if not has_audio:
+        return text
+    # 台词已经放进各段：Audio 里只留画面里的声音，音乐交给成片配乐
+    parts = [p for p in (diegetic_audio(audio), NO_MUSIC) if p]
+    return text + "\nAudio: " + " ".join(parts)
 
 
 # 视频连续性：H3 带参考图时曾在镜头中途切到定妆照（灰色影棚背景、正面站立）。只拼进发给引擎的提示词，
@@ -811,7 +908,8 @@ def video_input_hash(shot, project, style, first_frame_candidate_id: int, engine
                      has_audio: bool, ref_ids=()) -> str:
     prompt = compose_video_prompt(shot.motion_prompt, fingerprint_image_prompt(shot, project),
                                   shot.audio_prompt,
-                                  shot.dialogue, anchor=_anchor(style), has_audio=has_audio)
+                                  shot.dialogue, anchor=_anchor(style), has_audio=has_audio,
+                                  beats=getattr(shot, "beats", None))
     return input_hash("video", prompt, first_frame_candidate_id, engine_name, project.aspect,
                       round(float(shot.duration), 2), **_refs(ref_ids))
 
@@ -821,7 +919,8 @@ def video_refs_input_hash(shot, project, style, engine_name: str, has_audio: boo
     三视图、道具图）算——换了定妆照、场景图，视频就过期。和首帧模式的哈希天然不同（换生成方式要重出）。"""
     prompt = compose_video_prompt(shot.motion_prompt, fingerprint_image_prompt(shot, project),
                                   shot.audio_prompt,
-                                  shot.dialogue, anchor=_anchor(style), has_audio=has_audio)
+                                  shot.dialogue, anchor=_anchor(style), has_audio=has_audio,
+                                  beats=getattr(shot, "beats", None))
     return input_hash("video_refs", prompt, engine_name, project.aspect,
                       round(float(shot.duration), 2), list(ref_ids))
 
@@ -847,7 +946,8 @@ def video_inputs(shot, project, style, first_frame_candidate_id: int, engine_nam
                  has_audio: bool, refs=()) -> dict:
     prompt = compose_video_prompt(shot.motion_prompt, fingerprint_image_prompt(shot, project),
                                   shot.audio_prompt,
-                                  shot.dialogue, anchor=_anchor(style), has_audio=has_audio)
+                                  shot.dialogue, anchor=_anchor(style), has_audio=has_audio,
+                                  beats=getattr(shot, "beats", None))
     return {"prompt": prompt, "negative": _negative(project, style), "engine": engine_name,
             "aspect": project.aspect, "refs": ref_inputs(refs),
             "duration": round(float(shot.duration), 2), "first_frame": first_frame_candidate_id}
