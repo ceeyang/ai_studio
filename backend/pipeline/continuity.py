@@ -10,6 +10,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
+from backend.domain.clip_groups import video_owner
 from backend.domain.hashing import input_hash
 from backend.domain.models import Candidate, Character, Shot
 from backend.domain.refs import Ref, shot_refs
@@ -152,7 +153,9 @@ def run_continue_frame(ctx, payload: dict) -> dict:
         if not shot.continue_from_prev:
             raise JobError(f"镜头 {code} 没有开「接上一镜」")
         prev = prev_shot(s, shot)
-        video = selected_candidate(s, "shot", prev.id, "video") if prev is not None else None
+        # 上一镜是组镜成员：视频是主镜那条（整条的最后一帧 = 组里最后一镜的结尾，导出时它不裁尾）
+        owner = video_owner(s, prev) if prev is not None else None
+        video = selected_candidate(s, "shot", owner.id, "video") if owner is not None else None
         if video is None:
             raise JobError(waiting_reason(code, prev))
         h = continue_hash(video.id)

@@ -3,7 +3,7 @@
 import { useId } from 'react';
 import type { Character, ShotDetail, ShotTakes } from '../../api/types';
 import { Menu } from '../../components/Menu';
-import { type CardAction, type GenStage, activeText, cardAction, cellStatus, qcIssues } from '../director/shotStatus';
+import { type CardAction, type GenStage, activeText, cardAction, cellStatus, groupChip, groupMember, qcIssues } from '../director/shotStatus';
 import { shotTakesText } from './TakeStats';
 
 export interface ShotCardProps {
@@ -52,11 +52,15 @@ export function ShotCard(props: ShotCardProps) {
   const ids = { open: `${uid}-open`, code: `${uid}-code`, status: `${uid}-status`, stale: `${uid}-stale`, fail: `${uid}-fail` };
   const describedBy = [ids.status, st.mark === 'stale' && ids.stale, st.failed && ids.fail].filter(Boolean).join(' ');
 
+  // 组镜成员：视频是主镜那条，从这一镜的起点开始（媒体片段 #t=秒，缩略图就是这一镜的画面）
+  const member = groupMember(shot);
+  const chip = groupChip(shot);
   let media;
   if (st.cand && stage === 'videos') {
+    const src = member && shot.group!.offset > 0 ? `${st.cand.url}#t=${shot.group!.offset.toFixed(2)}` : st.cand.url;
     media = (
       <>
-        <video className="shot-media" src={st.cand.url} poster={kf.cand?.url} muted preload="metadata" aria-label={`${code} 视频`} />
+        <video className="shot-media" src={src} poster={member ? undefined : kf.cand?.url} muted preload="metadata" aria-label={`${code} 视频`} />
       </>
     );
   } else if (st.cand || (stage === 'videos' && kf.cand)) {
@@ -147,6 +151,19 @@ export function ShotCard(props: ShotCardProps) {
                 title="多拍镜头：一次生成里按时间戳切几拍（抽屉里能看 / 改每一拍）"
               >
                 {shot.beats?.length} 拍
+              </span>
+            )}
+            {chip && (
+              <span
+                className="badge shot-group"
+                data-testid={`group-${code}`}
+                title={
+                  member
+                    ? `组镜：和 ${shot.group!.lead_code} 一起生成（${shot.group!.codes.join('、')} 一次出），视频从 ${shot.group!.offset.toFixed(1)} 秒开始是这一镜`
+                    : `组镜主镜：${shot.group!.codes.join('、')} 一次生成，视频挂在这一镜上，导出时拆回各镜`
+                }
+              >
+                {chip}
               </span>
             )}
             {shot.dialogue.length > 0 && (

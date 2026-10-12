@@ -13,11 +13,11 @@ const PACES: { value: 0 | 3 | 4 | 5; label: string }[] = [
   { value: 5, label: '慢：每镜约 5 秒' },
 ];
 
-/** 固定时长视频引擎怎么用满的选项；组镜拆分还没做，先列出来但不能选 */
-const PACKS: { value: FixedEnginePack; label: string; disabled?: boolean }[] = [
+/** 固定时长视频引擎怎么用满的选项 */
+const PACKS: { value: FixedEnginePack; label: string }[] = [
   { value: 'beats', label: '多拍镜头（一次生成里切 2–4 拍）' },
+  { value: 'group', label: '组镜拆分（一次生成拆给几个镜头）' },
   { value: 'off', label: '不合并（一镜一生成）' },
-  { value: 'group', label: '组镜拆分（即将支持）', disabled: true },
 ];
 
 function packOf(p: Project): FixedEnginePack {
@@ -89,14 +89,14 @@ export function ProjectSettingsDialog({ project, onClose }: { project: Project; 
             onChange={(e) => setPack(e.target.value as FixedEnginePack)}
           >
             {PACKS.map((p) => (
-              <option key={p.value} value={p.value} disabled={p.disabled}>
+              <option key={p.value} value={p.value}>
                 {p.label}
               </option>
             ))}
           </select>
         </label>
         <p className="muted small">
-          Gemini 网页每次固定出 10 秒、Muse 只认 3 / 5 / 10 秒。多拍镜头：每个镜头就是一次生成，分镜在里面按时间切 2–4 拍（换景别、换机位），一次出满不浪费；不合并：一镜一生成，短镜头多出来的秒数白出。能精确控时长的引擎不受影响。改了之后重新生成分镜才生效，已有的镜头不动。
+          Gemini 网页每次固定出 10 秒、Muse 只认 3 / 5 / 10 秒。多拍镜头：每个镜头就是一次生成，分镜在里面按时间切 2–4 拍（换景别、换机位），一次出满不浪费；组镜拆分：镜头照常 2–8 秒、各有台词和字幕，相连的几镜一次生成，导出时按时间拆回各镜；不合并：一镜一生成，短镜头多出来的秒数白出。能精确控时长的引擎不受影响。改了之后重新生成分镜才生效，已有的镜头不动。
         </p>
         <label className="check">
           <input type="checkbox" checked={retry} onChange={(e) => setRetry(e.target.checked)} />

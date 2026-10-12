@@ -6,6 +6,7 @@ from dataclasses import asdict, dataclass, field, replace
 
 from sqlalchemy import select
 
+from backend.domain.clip_groups import episode_groups
 from backend.domain.db import Database
 from backend.domain.models import Episode, Slot
 from backend.domain.shots import refs_mode
@@ -46,6 +47,8 @@ class Chain:
     pending_video: dict[int, int] = field(default_factory=dict)
     # 参考图直出的镜头（选了 refs、没开接上一镜）：不出首帧，视频不等首帧
     direct: set[int] = field(default_factory=set)
+    # 组镜成员（不是主镜）→ 主镜：成员不单独出视频，视频任务给主镜（设计文档 2026-10-12 §3.3）
+    owner: dict[int, int] = field(default_factory=dict)
 
 
 @dataclass
@@ -77,9 +80,11 @@ def _waits_prev_video(sid: int, chain: "Chain", stages: list[str], ready: set[in
 
 def _chain_of(s, ep) -> "Chain":
     order = [sh.id for sh in ep.shots]
-    chain = Chain(cont={sh.id for sh in ep.shots if sh.continue_from_prev},
-                  prev={b: a for a, b in zip(order, order[1:])}, order=order,
-                  direct={sh.id for sh in ep.shots if refs_mode(sh)})
+    owner = {sid: g.lead.id for sid, g in episode_groups(ep.shots).items() if g.lead.id != sid}
+    # 组镜成员不接上一镜（和上一镜是同一次生成）；上一镜是组镜成员时，它的视频是主镜那条
+    chain = Chain(cont={sh.id for sh in ep.shots if sh.continue_from_prev and sh.id not in owner},
+                  prev={b: owner.get(a, a) for a, b in zip(order, order[1:])}, order=order,
+                  direct={sh.id for sh in ep.shots if refs_mode(sh)}, owner=owner)
     if chain.cont:
         from backend.domain.models import Job
         from backend.queue.manager import ACTIVE
@@ -159,14 +164,16 @@ def _uses_comfy(engines, kind: str, names) -> bool:
 
 
 def _run_precheck(check: Precheck, engines, stages: list[str], picked, codes: dict[int, str],
-                  selected: set[tuple[int, str]], chain: "Chain | None" = None) -> None:
+                  selected: set[tuple[int, str]], chain: "Chain | None" = None, vpicked=None) -> None:
     """缺首帧就出视频、缺视频就导出、要用的引擎跑在 ComfyUI 上而 ComfyUI 连不上：提交前直接拒绝。
-    接上一镜的镜头出视频前会先取上一镜的尾帧：上一镜有视频、或这一批里会出上一镜的视频就不算缺首帧。"""
+    接上一镜的镜头出视频前会先取上一镜的尾帧：上一镜有视频、或这一批里会出上一镜的视频就不算缺首帧。
+    vpicked：出视频的镜头（组镜成员换成了主镜）；不给时同 picked。组镜成员的首帧可选，不算缺。"""
     chain = chain or Chain()
+    vpicked = picked if vpicked is None else vpicked
     if "videos" in stages and "keyframes" not in stages:
-        batch = {sid for sid, _, _ in picked}
+        batch = {sid for sid, _, _ in vpicked}
         missing = []
-        for sid, _, _ in picked:
+        for sid, _, _ in vpicked:
             if sid in chain.cont:
                 pv = chain.prev.get(sid)
                 if pv is not None and ((pv, "video") in selected or pv in batch
@@ -181,7 +188,9 @@ def _run_precheck(check: Precheck, engines, stages: list[str], picked, codes: di
         if missing:
             raise JobError(f"{'、'.join(missing)} 还没有选定首帧，先生成首帧")
     if "export" in stages and "videos" not in stages and "keyframes" not in stages:
-        missing = [code for sid, code in codes.items() if (sid, "video") not in selected]
+        # 组镜成员的视频是主镜那条
+        missing = [code for sid, code in codes.items()
+                   if (chain.owner.get(sid, sid), "video") not in selected]
         if missing:
             raise JobError(f"以下镜头还没有选定视频：{', '.join(missing)}")
     if check.comfy is None:
@@ -189,7 +198,7 @@ def _run_precheck(check: Precheck, engines, stages: list[str], picked, codes: di
     need = (("keyframes" in stages
              and _uses_comfy(engines, "image", [ie for sid, ie, _ in picked
                                                 if sid not in chain.cont and sid not in chain.direct]))
-            or ("videos" in stages and _uses_comfy(engines, "video", [ve for _, _, ve in picked])))
+            or ("videos" in stages and _uses_comfy(engines, "video", [ve for _, _, ve in vpicked])))
     if need:
         ok, url = check.comfy()
         if not ok:
@@ -287,6 +296,19 @@ def submit_chain(manager, db: Database, engines, episode_id: int, stages: list[s
         if stages[0] not in LLM_STAGES and stages[0] != FIT_STAGE:
             # 只跑首帧时，等上一镜视频的接上一镜镜头不提交（不出一条注定失败的任务）
             picked = [p for p in picked if not _waits_prev_video(p[0], chain, stages, ready)]
+        # 组镜：视频按组出，成员换成主镜（重拍组里任一镜头 = 重出整组），去重；视频引擎跟主镜
+        by_id = {sh.id: sh for sh in ep.shots}
+        vpicked = []
+        for sid, ie, ve in picked:
+            lead = chain.owner.get(sid, sid)
+            if lead != sid:
+                lsh = by_id[lead]
+                ie, ve = lsh.image_engine or proj.image_engine, lsh.video_engine or proj.video_engine
+            if all(lead != x for x, _, _ in vpicked):
+                vpicked.append((lead, ie, ve))
+        if not opts.shots:
+            # 整集出首帧：组镜成员的首帧可选（视频只用主镜的），不出；点名要出的照出
+            picked = [p for p in picked if p[0] not in chain.owner]
         selected: set[tuple[int, str]] = set()
         if precheck is not None and stages[0] not in LLM_STAGES and shot_codes:
             selected = {(oid, kind) for oid, kind in s.execute(
@@ -295,7 +317,7 @@ def submit_chain(manager, db: Database, engines, episode_id: int, stages: list[s
                     Slot.selected_candidate_id.is_not(None)))}
 
     if precheck is not None and stages[0] not in LLM_STAGES:
-        _run_precheck(precheck, engines, stages, picked, shot_codes, selected, chain)
+        _run_precheck(precheck, engines, stages, picked, shot_codes, selected, chain, vpicked)
 
     first = stages[0]
     if first == FIT_STAGE:
@@ -322,7 +344,7 @@ def submit_chain(manager, db: Database, engines, episode_id: int, stages: list[s
         return [manager.submit(first, payload, owner_type="episode", owner_id=episode_id,
                                depends_on=deps, **common)]
 
-    if ("keyframes" in stages or "videos" in stages) and not picked:
+    if ("keyframes" in stages or "videos" in stages) and not picked and not vpicked:
         if shot_codes and "videos" not in stages:
             return []   # 选中的都是等上一镜视频的接上一镜镜头：跳过，说明见 continue_wait_notes
         raise JobError("这一集还没有分镜，先跑 storyboard")
@@ -337,7 +359,7 @@ def submit_chain(manager, db: Database, engines, episode_id: int, stages: list[s
                 img_fam[sid] = _family(engines, "image", image_engine)
     if "videos" in stages:
         refuse = []
-        for sid, _, video_engine in picked:
+        for sid, _, video_engine in vpicked:
             vid_fam[sid] = _family(engines, "video", video_engine)
             if sid in chain.direct and not _ref_mode(engines, video_engine):
                 refuse.append((shot_codes.get(sid, str(sid)), video_engine))
@@ -371,7 +393,7 @@ def submit_chain(manager, db: Database, engines, episode_id: int, stages: list[s
             ids += kf[sid]
     if "videos" in stages:
         vid_of: dict[int, int] = {}
-        todo = [sid for sid, _, _ in picked]
+        todo = [sid for sid, _, _ in vpicked]
         if any(sid in chain.cont for sid in todo):   # 有接上一镜的：按集内顺序排，上一镜的视频先提交
             todo.sort(key=chain.order.index)
         for sid in todo:

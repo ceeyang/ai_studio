@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import shutil
 
-from backend.domain.beats import beat_boundaries
+from backend.domain.beats import beat_boundaries, generation_unit
+from backend.domain.clip_groups import GroupShot, video_owner, video_shot
 from backend.domain.slots import add_candidate, get_or_create_slot, selected_candidate
 from backend.engines.base import VideoRequest
 from backend.pipeline.common import job_services
@@ -293,6 +294,7 @@ def _video_fresh(s, engines, shot_id: int, cur) -> bool:
     ff = selected_candidate(s, "shot", shot_id, "first_frame")
     if ff is None and not refs_mode(shot):
         return False
+    shot = video_shot(s, shot)   # 组镜主镜：按整组算（成员改了，整组视频过期）
     ve = shot.video_engine or proj.video_engine
     current = shot_video_expect(s, engines, shot, proj, style, ff, ve, video_caps(engines, ve))
     return video_check(s, engines, shot, proj, style, ff, cur, current)[0]
@@ -314,6 +316,15 @@ def run_video(ctx, payload: dict) -> dict:
     shot_id = int(payload["shot_id"])
     with sv.db.session() as s:
         shot, ep, proj, style = load_shot(s, shot_id)
+        owner = video_owner(s, shot)
+        if owner.id != shot.id:
+            # 组镜成员不单独出视频：重拍组里任一镜头 = 重出整组（视频挂在主镜上）
+            ctx.log(f"视频 {shot.code}：在组镜里，和主镜 {owner.code} 一起生成，改为重出整组")
+            shot_id = owner.id
+            shot, ep, proj, style = load_shot(s, shot_id)
+        # 组镜主镜：整组当成一个多拍镜头出（每个成员一段时间戳提示词），其余就是这一镜
+        vshot = video_shot(s, shot)
+        group = vshot.group if isinstance(vshot, GroupShot) else None
         direct = refs_mode(shot)   # 参考图直出：不要首帧
         engine_name = shot.video_engine or proj.video_engine
         try:
@@ -332,20 +343,27 @@ def run_video(ctx, payload: dict) -> dict:
                 raise JobError(f"镜头 {shot.code} 还没有选定首帧，先跑 keyframes")
         has_audio = engine.caps.has_audio
         # 发给引擎的版本：说话人用英文简称、画外音写明；输入哈希仍按老写法算（见 compose_video_prompt）
-        speakers = _speakers(proj, shot, ep.shots)
-        prompt = compose_video_prompt(shot.motion_prompt, shot_image_prompt(shot, proj),
-                                      shot.audio_prompt,
-                                      shot.dialogue, anchor=style.anchor_text if style else "",
-                                      has_audio=has_audio, speakers=speakers, beats=shot.beats,
+        speakers = _speakers(proj, vshot, ep.shots)
+        prompt = compose_video_prompt(vshot.motion_prompt, shot_image_prompt(shot, proj),
+                                      vshot.audio_prompt,
+                                      vshot.dialogue, anchor=style.anchor_text if style else "",
+                                      has_audio=has_audio, speakers=speakers, beats=vshot.beats,
                                       reminder=beats_reminder(proj.characters, speakers)
-                                      if shot.beats else "")
-        beats = list(shot.beats or [])
+                                      if vshot.beats else "")
+        beats = list(vshot.beats or [])
+        if group is not None:
+            unit = generation_unit(engine.caps)
+            ctx.log(f"视频 {shot.code}：组镜 {'、'.join(group.codes)} 一次生成（共 {group.total:g} 秒，"
+                    "按时间戳每镜一段，导出时拆回各镜）")
+            if unit is not None and group.total > unit + 0.2:
+                ctx.log(f"视频 {shot.code}：组镜总时长 {group.total:g} 秒超过 {engine_name} 一次生成的 "
+                        f"{unit:g} 秒，最后一镜会不够长；拆出一镜或缩短时长")
         negative = join_negative(proj.negative, style.negative if style else "")
         # 期望输入和老规则的哈希（和界面过期判断同一套，见 pipeline.freshness）
         if direct:
             # 参考图按出首帧的同一套打包（场景图 → 构图参考 → 定妆照 / 三视图 → 道具图），超出上限时
             # split_refs 先保住每个角色一张定妆照
-            exp = video_refs_expect(s, shot, proj, style, engine_name, has_audio, engine.caps.max_refs)
+            exp = video_refs_expect(s, vshot, proj, style, engine_name, has_audio, engine.caps.max_refs)
             plan = None
             packed = exp.used
             for r in exp.dropped:
@@ -361,7 +379,7 @@ def run_video(ctx, payload: dict) -> dict:
             locked_chars = sorted({r.character_id for r in packed
                                    if r.kind in FACE_KINDS and r.character_id is not None})
         else:
-            exp = shot_video_expect(s, sv.engines, shot, proj, style, ff, engine_name, engine.caps)
+            exp = shot_video_expect(s, sv.engines, vshot, proj, style, ff, engine_name, engine.caps)
             plan = exp.plan
             if plan.dropped:
                 src = ("首帧是上一镜视频的尾帧，上一镜没用定妆照锁脸" if plan.continued
@@ -381,15 +399,16 @@ def run_video(ctx, payload: dict) -> dict:
         if not payload.get("force"):
             # 「没变」按选定视频自己的引擎判断：换了视频引擎不重出已选的（多引擎协作）
             cur = selected_candidate(s, "shot", shot.id, "video")
-            if cur is not None and video_check(s, sv.engines, shot, proj, style, ff, cur, exp)[0]:
+            if cur is not None and video_check(s, sv.engines, vshot, proj, style, ff, cur, exp)[0]:
                 ctx.log(f"视频 {shot.code}：输入没变，跳过（要重出用 --force）")
                 return {"skipped": True, "candidate_ids": []}
         slot = get_or_create_slot(s, "shot", shot.id, "video")
         seed = shot_seed(proj.seed, shot.id, len(slot.candidates))
-        seconds = max(1.0, min(float(shot.duration), engine.caps.max_seconds))
+        # 组镜：请求整组总时长（固定时长引擎本来就忽略）
+        seconds = max(1.0, min(float(vshot.duration), engine.caps.max_seconds))
         # 最后一句台词说完再留 0.3 秒：帧数网格往下取时不能把台词截掉
-        min_seconds = min(max((float(d.get("end") or 0) for d in shot.dialogue or []),
-                              default=0.0) + 0.3 if shot.dialogue else 0.0, seconds + 1.0)
+        min_seconds = min(max((float(d.get("end") or 0) for d in vshot.dialogue or []),
+                              default=0.0) + 0.3 if vshot.dialogue else 0.0, seconds + 1.0)
         first = sv.media.abs(ff.file_path) if ff is not None else None
         ff_id = ff.id if ff is not None else None
         slug, code, aspect = proj.slug, shot.code, proj.aspect
@@ -399,12 +418,15 @@ def run_video(ctx, payload: dict) -> dict:
             looks = {c.id: c.visual_prompt for c in proj.characters}
             extra.append(entering_clause([looks.get(cid) or "" for cid in plan.entering]))
         on_screen = any(isinstance(c, dict) and c.get("character_id") is not None
-                        for c in shot.cast or [])
-        if on_screen and ep.shots and ep.shots[-1].id == shot.id:
+                        for c in vshot.cast or [])
+        if on_screen and ep.shots and ep.shots[-1].id in (group.ids if group is not None else [shot.id]):
             extra.append(STAY_IN_FRAME)   # 全集最后一镜：人留在画面里，结尾的压迫感不散
         auto_retry = bool(getattr(proj, "auto_retry_video", False))
         # 有声引擎才查台词的声音性别（第四次实跑 S04：画外男声被念成画面里女人的声音）
-        voices = voice_lines(shot.dialogue, speakers) if has_audio else []
+        voices = voice_lines(vshot.dialogue, speakers) if has_audio else []
+        group_info = ({"members": group.ids, "codes": group.codes, "offsets": group.offsets,
+                       "durations": [round(float(m.duration), 3) for m in group.members]}
+                      if group is not None else None)
         base_seed, taken = proj.seed, len(slot.candidates)
         # 中段叠入参考图的检测：和这条视频实际带的参考图比
         ghost_refs = [(r.label, sv.media.abs(r.file_path)) for r in used
@@ -453,6 +475,9 @@ def run_video(ctx, payload: dict) -> dict:
                       "video_mode": "refs" if direct else "first_frame",
                       "identity": identity, "locked_chars": locked_chars,
                       "workflow": sv.media.rel(run_dir / "workflow.api.json"), "inputs": inputs}
+            if group_info is not None:
+                # 组镜：这条视频是哪几个镜头一起出的、各自的计划起点（导出按当时的成员拆，见 post.load_cut）
+                params["clip_group"] = group_info
             if direct:
                 # 参考图直出用到的参考图（按发给引擎的顺序），调用明细 / 候选详情里列出
                 params["video_refs"] = [{"id": r.candidate_id, "label": r.label, "kind": r.kind}

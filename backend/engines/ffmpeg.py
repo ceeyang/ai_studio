@@ -147,10 +147,14 @@ def parse_sound_end(silencedetect_log: str, duration: float) -> float:
 
 
 def build_normalize_cmd(ffmpeg: str, src, dst, *, width: int, height: int, fps: int,
-                        duration: float, audio: Literal["keep", "silent", "none"]) -> list[str]:
+                        duration: float, audio: Literal["keep", "silent", "none"],
+                        start: float = 0.0) -> list[str]:
+    """start > 0：从第 start 秒开始截（组镜成员从主镜视频的偏移处开始）。-ss 放在 -i 前面（输入定位）：
+    要重新编码时 ffmpeg 会解码到准确的那一帧再开始（不是只跳到关键帧），又不用从头解码。"""
     vf = (f"scale={width}:{height}:force_original_aspect_ratio=increase,"
           f"crop={width}:{height},fps={fps},setsar=1")
-    cmd = [ffmpeg, "-y", "-i", str(src)]
+    seek = ["-ss", f"{start:.3f}"] if start and start > 0 else []
+    cmd = [ffmpeg, "-y", *seek, "-i", str(src)]
     if audio == "silent":
         cmd += ["-f", "lavfi", "-t", f"{duration:.3f}", "-i", "anullsrc=r=48000:cl=stereo"]
     cmd += ["-t", f"{duration:.3f}", "-vf", vf, "-map", "0:v:0"]
@@ -425,14 +429,17 @@ class FFmpeg:
 
     def assemble(self, clips: list[Path], out: Path, *, width: int, height: int, fps: int,
                  transitions: list[str], work_dir: Path,
-                 max_seconds: list[float | None] | None = None) -> Assembled:
-        """max_seconds[i] 不为空时第 i 镜只取前这么多秒（按分镜时长裁尾）。"""
+                 max_seconds: list[float | None] | None = None,
+                 starts_at: list[float] | None = None) -> Assembled:
+        """max_seconds[i] 不为空时第 i 镜只取前这么多秒（按分镜时长裁尾）；starts_at[i] 不为 0 时第 i 镜
+        从这一秒开始取（组镜成员：同一条视频按偏移拆给几个镜头）。"""
         if not clips:
             raise FFmpegError("没有片段可合成")
         out, work_dir = Path(out), Path(work_dir)
         out.parent.mkdir(parents=True, exist_ok=True)
         work_dir.mkdir(parents=True, exist_ok=True)
         limits = list(max_seconds or [])
+        offs = list(starts_at or [])
         flags = [self.has_audio(c) for c in clips]
         any_audio = any(flags)
         norm: list[Path] = []
@@ -441,11 +448,12 @@ class FFmpeg:
             self.check_canceled()
             dst = work_dir / f"n{i:03d}.mp4"
             mode = "keep" if has else ("silent" if any_audio else "none")
-            src_dur = self.video_duration(clip)
+            start = float(offs[i]) if i < len(offs) and offs[i] else 0.0
+            src_dur = max(self.video_duration(clip) - start, 1.0 / max(fps, 1))
             lim = limits[i] if i < len(limits) else None
             dur = min(src_dur, lim) if lim else src_dur
             self.run(build_normalize_cmd(self.ffmpeg, clip, dst, width=width, height=height,
-                                         fps=fps, duration=dur, audio=mode))
+                                         fps=fps, duration=dur, audio=mode, start=start))
             norm.append(dst)
             durs.append(self.video_duration(dst))
         _, starts, total = xfade_timeline(durs, transitions, fps)

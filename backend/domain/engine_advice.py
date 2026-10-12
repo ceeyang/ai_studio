@@ -258,8 +258,11 @@ def _why(difficulty: Difficulty, e: EngineInfo, shot) -> str:
     return "，".join(parts)
 
 
-def advise_shot(shot, engines: Iterable[EngineInfo], current: str | None) -> ShotAdvice:
-    """一个镜头的引擎建议。engines：已注册的视频引擎；current：镜头实际要用的引擎（镜头上的，没选就是项目的）。"""
+def advise_shot(shot, engines: Iterable[EngineInfo], current: str | None, *,
+                group_total: float | None = None, pack: str | None = None) -> ShotAdvice:
+    """一个镜头的引擎建议。engines：已注册的视频引擎；current：镜头实际要用的引擎（镜头上的，没选就是项目的）。
+    group_total：这一镜在组镜里时整组总时长（一次生成出整组，浪费按整组算）；pack：项目的「固定时长视频引擎
+    怎么用满」（浪费提醒里建议并成多拍镜头还是合成组镜）。"""
     engines = list(engines)
     score, reasons = shot_difficulty(shot)
     diff = difficulty_of(score)
@@ -277,13 +280,16 @@ def advise_shot(shot, engines: Iterable[EngineInfo], current: str | None) -> Sho
     recommended = [Recommendation(engine=e.name, label=e.label, why=_why(diff, e, shot)) for e in ranked[:TOP_N]]
 
     cur = by_name.get(current) if current else None
-    waste = waste_seconds(cur.caps, float(getattr(shot, "duration", 0) or 0), getattr(shot, "beats", None)) \
+    used = float(group_total) if group_total is not None else float(getattr(shot, "duration", 0) or 0)
+    waste = waste_seconds(cur.caps, used, None if group_total is not None else getattr(shot, "beats", None)) \
         if cur is not None else None
     if waste:
         # 固定时长引擎（Gemini 固定 10 秒、Muse 只认 3 / 5 / 10 秒）：镜头比一次生成短，多出来的白出、还占额度
         unit, lost = waste
+        what = "这一组" if group_total is not None else "这一镜"
+        fix = "和下一镜合成组镜" if pack == "group" else "并进下一镜做成多拍镜头"
         reasons.append(f"固定时长引擎会浪费 {lost:g} 秒（{cur.label} 每次出 {unit:g} 秒，"
-                       f"这一镜只用 {float(shot.duration):g} 秒；可以并进下一镜做成多拍镜头）")
+                       f"{what}只用 {used:g} 秒；可以{fix}）")
     if current and cur is None:
         current_ok, current_problems = False, [f"引擎 {current} 不存在或没有启用"]
     elif cur is None:

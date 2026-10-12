@@ -22,9 +22,20 @@ export function hasSelected(shot: ShotDetail, stage: GenStage): boolean {
   return !!selectedOf(slotOf(shot, kindOf(stage)));
 }
 
-/** 格子按钮的字：已有选定结果「重拍首帧」，没有「生成首帧」 */
+/** 格子按钮的字：已有选定结果「重拍首帧」，没有「生成首帧」；组镜的视频一次出整组：「重拍整组」「生成整组」 */
 export function genLabel(shot: ShotDetail, stage: GenStage): string {
-  return `${hasSelected(shot, stage) ? '重拍' : '生成'}${cellOf(stage).label}`;
+  const what = stage === 'videos' && shot.group ? '整组' : cellOf(stage).label;
+  return `${hasSelected(shot, stage) ? '重拍' : '生成'}${what}`;
+}
+
+/** 组镜里主镜后面的成员：视频不单独出（用主镜的），首帧可选 */
+export function groupMember(shot: Pick<ShotDetail, 'group'>): boolean {
+  return !!shot.group && shot.group.index > 1;
+}
+
+/** 「组镜 2/3」 */
+export function groupChip(shot: Pick<ShotDetail, 'group'>): string | null {
+  return shot.group ? `组镜 ${shot.group.index}/${shot.group.size}` : null;
 }
 
 /** 这个镜头这一格正在排队/生成的任务 */
@@ -200,6 +211,8 @@ export function voiceMismatch(c?: Candidate): VoiceMismatch[] {
 
 /** 能拿来出视频的首帧：选定了、而且不过期（过期的先回首帧阶段重拍，不拿旧首帧出视频） */
 export function firstFrameReady(shot: ShotDetail): boolean {
+  // 组镜成员：视频跟主镜一起出，看主镜的首帧（自己的首帧可选）
+  if (groupMember(shot)) return shot.group!.video_ready;
   if (refsMode(shot)) return true; // 参考图直出：不要首帧
   // 接上一镜：出视频前后端会先取上一镜的尾帧，只要上一镜有视频就行
   if (continues(shot)) return shot.continue_prev!.has_video;
@@ -228,6 +241,10 @@ export function cardAction(shot: ShotDetail, stage: GenStage): CardAction {
   // 参考图直出：首帧这一格不出图（禁用）
   if (stage === 'keyframes' && refsMode(shot)) return { kind: 'refs_direct', label: '参考图直出', aria: '参考图直出，不出首帧' };
   if (stage === 'videos' && !firstFrameReady(shot)) {
+    if (groupMember(shot)) {
+      const what = `先出 ${shot.group!.lead_code} 首帧`;
+      return { kind: 'need_first_frame', label: what, aria: what };
+    }
     const what = hasSelected(shot, 'keyframes') ? '先重拍首帧' : '先出首帧';
     return { kind: 'need_first_frame', label: what, aria: what };
   }

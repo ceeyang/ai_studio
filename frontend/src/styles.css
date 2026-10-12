@@ -1658,6 +1658,10 @@ img.rail-avatar { border: 0; }
 .beats-editor legend { padding: 0 6px; font-size: 13px; color: var(--text-2); }
 .beats-editor input { min-width: 0; }
 .shot-beats { white-space: nowrap; }
+/* 组镜拆分：卡片上的「组镜 2/3」、抽屉里的组镜信息 */
+.shot-group { white-space: nowrap; }
+.shot-group-panel { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; }
+.shot-group-panel p { margin: 0; }
 
 /* 成片阶段：配乐 */
 .export-group-music { grid-column: 1 / -1; }

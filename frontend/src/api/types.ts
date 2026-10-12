@@ -585,6 +585,8 @@ export interface Shot {
   suggest_continue?: boolean;
   /** 多拍镜头：一次生成里按时间戳切的 2–4 拍；null = 普通镜头 */
   beats?: Beat[] | null;
+  /** 组镜号（同一段落里相连、组号相同的几镜一次生成）；只读，经「和下一镜合成组镜 / 拆出组镜」改 */
+  clip_group?: number | null;
   transition_out: string;
   /** llm = 分镜生成的；manual = 手工添加（含拆分出来的） */
   origin: 'llm' | 'manual' | string;
@@ -612,6 +614,30 @@ export interface ShotDetail extends Shot {
   continue_prev?: ContinuePrev | null;
   /** 参考图直出（video_mode = refs 且没开接上一镜）时视频要带的参考图；首帧模式为空 */
   video_refs?: VideoRef[];
+  /** 在组镜里（≥ 2 镜）时组的信息；成员的 slots 里「视频」就是主镜的视频槽位 */
+  group?: ClipGroup | null;
+}
+
+/**
+ * 组镜拆分（固定时长视频引擎一次生成拆给几个镜头）：主镜（index 1）出视频，成员显示主镜的视频、从 offset 秒开始。
+ * 首帧只看主镜的（成员的首帧可选）。
+ */
+export interface ClipGroup {
+  lead_id: number;
+  lead_code: string;
+  /** 这一镜是组里第几个（1 起，主镜是 1） */
+  index: number;
+  size: number;
+  codes: string[];
+  shot_ids: number[];
+  /** 这一镜在这次生成里的计划起点（秒） */
+  offset: number;
+  /** 整组总时长 */
+  total: number;
+  /** 主镜视频引擎一次生成多长；能精确控时长的引擎为 null */
+  unit?: number | null;
+  /** 主镜能出视频了（首帧选定且没过期 / 参考图直出 / 接上一镜且上一镜有视频） */
+  video_ready: boolean;
 }
 
 export interface ContinuePrev {

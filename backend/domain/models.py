@@ -53,7 +53,7 @@ class Project(Base):
     # 视频开头没接上首帧（出片自检 start_mismatch）时，同一个任务里换种子自动重拍一次
     auto_retry_video: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     # 固定时长视频引擎（Gemini 固定 10 秒、Muse 只认 3 / 5 / 10 秒）怎么用满一次生成：beats = 多拍镜头
-    #（一次生成里切 2–4 拍，默认）/ group = 组镜拆分（第 2 步实现，现在按 off 处理）/ off = 一镜一生成（老行为）。
+    #（一次生成里切 2–4 拍，默认）/ group = 组镜拆分（一次生成拆给几个镜头）/ off = 一镜一生成（老行为）。
     # 分镜按它排；改了之后重跑分镜才生效（不动已有镜头）
     fixed_engine_pack: Mapped[str] = mapped_column(String(16), default="beats", server_default="beats")
     archived: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -183,6 +183,10 @@ class Shot(Base):
     # 多拍镜头：一次生成里按时间戳切的 2–4 拍 [{start, end, shot_size, camera_move, action}]，首尾相接、
     # 覆盖整个镜头时长（domain/beats.py 校验）；空 = 普通镜头。台词仍在 dialogue（各句落在对应拍里）
     beats: Mapped[list | None] = mapped_column(JSON, nullable=True)
+    # 组镜拆分（固定时长视频引擎，设计文档 2026-10-12 §3.3）：同一段落里相连、组号相同的几个镜头一次生成，
+    # 组里排第一的是「主镜」，视频候选挂在主镜上，导出时按偏移拆给各个成员。空 = 不在组镜里。
+    # 组的认定见 domain/clip_groups.py（相连的一串才算一组，只剩一个的不算）；只经组镜接口改
+    clip_group: Mapped[int | None] = mapped_column(Integer, nullable=True)
     transition_out: Mapped[str] = mapped_column(String(32), default="hard_cut")
     # llm：分镜生成的，重跑会被替换/清理；manual：用户手工加的，重跑分镜时要保留
     origin: Mapped[str] = mapped_column(String(16), default="llm")

@@ -870,6 +870,24 @@ export function useMergeNextAsBeats(episodeId: number) {
   });
 }
 
+/** 组镜拆分：把同一段落里的下一镜加进这一镜所在的组（一次生成）；返回这一镜 */
+export function useGroupWithNext(episodeId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (shotId: number) => api.post<ShotDetail>(`/api/shots/${shotId}/group-with-next`),
+    onSuccess: () => invalidate(qc, keys.episode(episodeId)),
+  });
+}
+
+/** 把这一镜拆出组镜（单独出视频）；组里只剩一镜时整组解散 */
+export function useUngroup(episodeId: number) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (shotId: number) => api.post<ShotDetail>(`/api/shots/${shotId}/ungroup`),
+    onSuccess: () => invalidate(qc, keys.episode(episodeId)),
+  });
+}
+
 export function useReorderShots(episodeId: number) {
   const qc = useQueryClient();
   return useMutation({

@@ -50,7 +50,8 @@ def test_generation_unit_and_waste():
     assert snap_seconds(6.4, (5, 10, 15)) == 5 and snap_seconds(8, (5, 10, 15)) == 10
     assert snap_seconds(4.0, (5, 10), lo=5.5) == 10        # 不短于台词说完
     assert effective_pack("beats") == "beats" and effective_pack("off") == "off"
-    assert effective_pack("group") == "off"                # 组镜第 2 步才实现，现在按 off
+    assert effective_pack("group") == "group"              # 组镜拆分（第 2 步）
+    assert effective_pack(None) == "beats"
 
 
 # ------------------------------------------------------------ beats 校验
@@ -131,9 +132,12 @@ def test_plan_pack_off_keeps_old_behaviour(tmp_path, db):
     assert sum(b["count"] for b in plan.blocks) == 7      # 20 ÷ 3，老算法
 
 
-def test_plan_group_pack_treated_as_off_for_now(tmp_path, db):
+def test_plan_group_pack(tmp_path, db):
+    """组镜模式：每镜照常按节奏（没设时 4 秒、最长 8 秒），分好后再分组（test_clip_groups.py）。"""
     plan, _ = _plan(tmp_path, db, "gemini_video", pack="group")
-    assert plan.duration_plan is None
+    assert plan.duration_plan == {"mode": "group", "control": "fixed", "unit": 10.0, "allowed": [10.0],
+                                  "pace": 4.0}
+    assert plan.shot_seconds == 4.0 and plan.max_seconds == 8.0 and plan.group_mode
 
 
 def test_plan_param_engine_snaps_to_allowed(tmp_path, db):

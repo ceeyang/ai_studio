@@ -18,6 +18,9 @@ def renumber_shots(s: Session, episode_id: int, ordered_ids: list[int] | None = 
     for i, sh in enumerate(shots):
         sh.order = i
         sh.code = f"S{i + 1:02d}"
+    # 组镜（clip_group）跟着顺序整理：删 / 插 / 挪镜头后只剩一个的不再算组，被隔开的两串各成一组
+    from backend.domain.clip_groups import normalize_groups
+    normalize_groups(shots)
     s.flush()
     return shots
 

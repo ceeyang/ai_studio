@@ -1,4 +1,4 @@
-"""镜头：增删改、排序、拆分、并进下一镜做成多拍镜头。"""
+"""镜头：增删改、排序、拆分、并进下一镜做成多拍镜头、组镜（和下一镜合成组镜 / 拆出组镜）。"""
 from __future__ import annotations
 
 from fastapi import APIRouter, Request, Response
@@ -8,6 +8,7 @@ from backend.app.schemas import ReorderIn, ShotDetail, ShotEngineAdviceOut, Shot
 from backend.app.views import shot_detail
 from backend.domain.archive import archive_and_delete_slots
 from backend.domain.beats import BEATS_MAX, check_beats, generation_unit, scale_beats
+from backend.domain.clip_groups import UNIT_TOLERANCE, group_of, next_group_no
 from backend.domain.models import Episode, Shot
 from backend.domain.refs import add_shot_ref, remove_shot_ref
 from backend.domain.shots import renumber_shots
@@ -61,7 +62,12 @@ def get_shot_engine_advice(shot_id: int, request: Request):
     with sv.db.session() as s:
         shot = get_or_404(s, Shot, shot_id, "镜头")
         ep = s.get(Episode, shot.episode_id)
-        adv = advise_shot(shot, infos, shot.video_engine or ep.project.video_engine)
+        grp = group_of(s, shot)
+        # 组镜：一次生成出整组，浪费按整组总时长算；引擎跟主镜
+        lead = grp.lead if grp is not None else shot
+        adv = advise_shot(shot, infos, lead.video_engine or ep.project.video_engine,
+                          group_total=grp.total if grp is not None else None,
+                          pack=ep.project.fixed_engine_pack)
         return ShotEngineAdviceOut.model_validate(adv)
 
 
@@ -110,6 +116,11 @@ def patch_shot(shot_id: int, body: ShotFields, request: Request):
             ep = s.get(Episode, shot.episode_id)
             check_placeholders(data["image_prompt"], {c.id for c in ep.project.characters})
         _patch_beats(shot, data)
+        if data.get("continue_from_prev"):
+            grp = group_of(s, shot)
+            if grp is not None and grp.lead.id != shot.id:
+                raise JobError(f"{shot.code} 在组镜里，和上一镜 {grp.members[grp.index(shot.id) - 2].code} "
+                               "是同一次生成，不能接上一镜；要接就先拆出组镜")
         for k, v in data.items():
             if v is None and k not in ("image_engine", "video_engine", "video_mode", "beats"):
                 continue  # 只有引擎覆盖、生成方式、多拍可以清空（回到项目默认 / 首帧模式 / 普通镜头）
@@ -159,7 +170,8 @@ def split_shot(shot_id: int, request: Request):
                   for d in shot.dialogue or [] if float(d.get("start", 0)) >= half]
         new = Shot(episode_id=shot.episode_id, order=shot.order,
                    **{k: getattr(shot, k) for k in COPY_FIELDS},
-                   duration=rest, dialogue=second, transition_out=shot.transition_out, beats=beats_b)
+                   duration=rest, dialogue=second, transition_out=shot.transition_out, beats=beats_b,
+                   clip_group=shot.clip_group)   # 拆出来的后半段留在同一个组镜里（总时长不变）
         shot.duration, shot.dialogue, shot.transition_out = half, first, "hard_cut"
         shot.beats = beats_a
         s.add(new)
@@ -250,6 +262,68 @@ def merge_next_as_beats(shot_id: int, request: Request):
         s.delete(nxt)
         s.flush()
         renumber_shots(s, shot.episode_id)
+        return _detail(s, sv, shot)
+
+
+def _video_unit(sv, ep: Episode, shot: Shot) -> tuple[str, float | None]:
+    engine_name = shot.video_engine or ep.project.video_engine
+    try:
+        caps = sv.engines.video(engine_name).caps
+    except KeyError as e:
+        raise JobError(str(e)) from None
+    return engine_name, generation_unit(caps)
+
+
+@router.post("/shots/{shot_id}/group-with-next", response_model=ShotDetail)
+def group_with_next(shot_id: int, request: Request):
+    """组镜拆分（设计文档 2026-10-12 固定时长引擎 §3.3）：把同一段落里紧跟在这一镜（或它所在组的最后一镜）后面的
+    下一镜加进这一组，一次生成。下一镜在别的段落、已经在另一个组镜里、加进来超过一次生成的时长、视频引擎能精确控
+    时长时拒绝。下一镜的「接上一镜」关掉（和上一镜是同一次生成）。整组视频因此过期（输入哈希含所有成员）。"""
+    sv = services(request)
+    with sv.db.session() as s:
+        shot = get_or_404(s, Shot, shot_id, "镜头")
+        ep = s.get(Episode, shot.episode_id)
+        ordered = renumber_shots(s, shot.episode_id)
+        grp = group_of(s, shot)
+        members = grp.members if grp is not None else [shot]
+        lead, last = members[0], members[-1]
+        i = next(k for k, x in enumerate(ordered) if x.id == last.id)
+        if i + 1 >= len(ordered):
+            raise JobError(f"{last.code} 是这一集最后一镜，没有下一镜可以合成组镜")
+        nxt = ordered[i + 1]
+        if nxt.scene_block_id != lead.scene_block_id:
+            raise JobError(f"{nxt.code} 在另一个段落（换了场景），不能和 {lead.code} 合成组镜")
+        if group_of(s, nxt) is not None:
+            raise JobError(f"{nxt.code} 已经在另一个组镜里，先把它拆出来")
+        engine_name, unit = _video_unit(sv, ep, lead)
+        if unit is None:
+            raise JobError(f"{engine_name} 能按镜头时长出视频，不用合成组镜")
+        total = round(sum(float(m.duration) for m in members) + float(nxt.duration), 2)
+        if total > unit + UNIT_TOLERANCE:
+            names = "、".join(m.code for m in [*members, nxt])
+            raise JobError(f"{names} 加起来 {total:g} 秒，超过 {engine_name} 一次生成的 {unit:g} 秒，"
+                           "不能合成一个组镜")
+        no = lead.clip_group if lead.clip_group is not None else next_group_no(ordered)
+        for m in [*members, nxt]:
+            m.clip_group = no
+        nxt.continue_from_prev = False
+        s.flush()
+        renumber_shots(s, shot.episode_id)
+        return _detail(s, sv, shot)
+
+
+@router.post("/shots/{shot_id}/ungroup", response_model=ShotDetail)
+def ungroup(shot_id: int, request: Request):
+    """把这一镜拆出组镜：它单独出视频（以前自己的视频候选回来）；组里只剩一镜时整组解散；拆的是中间一镜时
+    前后各成一组（后一组的第一镜成了主镜，要重出）。剩下那组的视频因为成员变了而过期。"""
+    sv = services(request)
+    with sv.db.session() as s:
+        shot = get_or_404(s, Shot, shot_id, "镜头")
+        if group_of(s, shot) is None:
+            raise JobError(f"{shot.code} 不在组镜里")
+        shot.clip_group = None
+        s.flush()
+        renumber_shots(s, shot.episode_id)   # 整理组号：剩一镜的清掉，被隔开的两串各成一组
         return _detail(s, sv, shot)
 
 

@@ -15,7 +15,7 @@ from typing import Any
 
 # 项目的「固定时长视频引擎怎么用满」（Project.fixed_engine_pack）
 PACK_BEATS = "beats"     # 多拍镜头（默认）
-PACK_GROUP = "group"     # 组镜拆分：第 2 步实现。TODO(第 2 步)：现在按 off 处理
+PACK_GROUP = "group"     # 组镜拆分：一次生成拆给几个镜头（domain/clip_groups.py）
 PACK_OFF = "off"         # 老行为：一镜一生成
 PACKS = (PACK_BEATS, PACK_GROUP, PACK_OFF)
 
@@ -31,11 +31,10 @@ SHOT_SIZE_EN = {"大特写": "Extreme close-up", "特写": "Close-up", "近景":
 
 
 def effective_pack(pack: str | None) -> str:
-    """项目选项实际生效的模式：group 第 2 步才实现，现在按 off 处理。"""
-    if pack == PACK_BEATS or pack is None:
-        return PACK_BEATS
-    # TODO(第 2 步 组镜拆分)：group 实现后返回 PACK_GROUP
-    return PACK_OFF
+    """项目选项实际生效的模式（老项目没有这个字段时按多拍镜头）。"""
+    if pack in (PACK_GROUP, PACK_OFF):
+        return pack
+    return PACK_BEATS
 
 
 def is_fixed_length(caps) -> bool:

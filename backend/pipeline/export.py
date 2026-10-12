@@ -102,9 +102,14 @@ def run_export(ctx, payload: dict) -> dict:
                                              for t in trims))
         ctx.check_canceled()
         ctx.log(f"合成 {len(cut.clips)} 个镜头 → {width}x{height}@{OUTPUT_FPS}")
+        # 组镜成员从主镜视频的偏移处开始取（没有组镜时不传，和以前一样）
+        seek = {"starts_at": list(cut.starts_at)} if any(cut.starts_at) else {}
+        if seek:
+            ctx.log("组镜拆分：" + "，".join(f"{c} 从 {st:.2f}s 起" for c, st in
+                                          zip(cut.codes, cut.starts_at) if st))
         asm = sv.ffmpeg.assemble(cut.clips, work / "base.mp4" if post else out, width=width,
                                  height=height, fps=OUTPUT_FPS, transitions=cut.transitions,
-                                 work_dir=work, max_seconds=limits)
+                                 work_dir=work, max_seconds=limits, **seek)
         ctx.check_canceled()
         cur = asm.path
         over = 0

@@ -148,10 +148,13 @@ function scriptStage(ep: EpisodeDetail): Draft {
 
 /** 首帧 / 视频这一格：几镜有选定的、几镜过期、几镜缺 */
 function slotStats(shots: ShotDetail[], kind: string) {
-  const marks = shots.map((s) => slotMark(slotOf(s, kind)));
+  // 组镜成员的首帧可选（视频只用主镜的）：没出的不算缺
+  const optional = (s: ShotDetail) => !!s.group && s.group.index > 1 && !slotOf(s, kind)?.selected_candidate_id;
+  const counted = kind === 'first_frame' ? shots.filter((s) => !optional(s)) : shots;
+  const marks = counted.map((s) => slotMark(slotOf(s, kind)));
   const missing = marks.filter((m) => m === 'none').length;
   const stale = marks.filter((m) => m === 'stale').length;
-  return { total: shots.length, selected: shots.length - missing, missing, stale };
+  return { total: counted.length, selected: counted.length - missing, missing, stale };
 }
 
 type Draft = Omit<Stage, 'state'> & {

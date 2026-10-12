@@ -12,7 +12,7 @@ from backend.post.options import ExportOptions
 Aspect = Literal["9:16", "16:9"]
 # 镜头视频怎么出：first_frame = 先出首帧再图生视频；refs = 参考图直出（不出首帧）
 VideoMode = Literal["first_frame", "refs"]
-# 固定时长视频引擎怎么用满一次生成：beats = 多拍镜头（默认）；group = 组镜拆分（第 2 步实现，现在按 off 处理）；
+# 固定时长视频引擎怎么用满一次生成：beats = 多拍镜头（默认）；group = 组镜拆分（一次生成拆给几个镜头）；
 # off = 一镜一生成（老行为）。见 backend/domain/beats.py
 FixedEnginePack = Literal["beats", "group", "off"]
 Stage = Literal["script", "storyboard", "keyframes", "videos", "export", "all", "fit_khmer"]
@@ -622,6 +622,8 @@ class ShotOut(ORM):
     video_mode: str | None = None    # first_frame / refs（参考图直出）；空 = first_frame
     suggest_continue: bool = False   # 分镜建议这一镜接上一镜（只是建议，用户一键打开）
     beats: list[dict] | None = None  # 多拍镜头：[{start, end, shot_size, camera_move, action}]；空 = 普通镜头
+    # 组镜号（同一段落里相连、组号相同的几镜一次生成）；只读，经 group-with-next / ungroup 接口改
+    clip_group: int | None = None
     transition_out: str
     origin: str = "llm"        # llm = 分镜生成的；manual = 手工添加（含拆分出来的）
 
@@ -639,6 +641,22 @@ class VideoRefOut(BaseModel):
     kind: str = ""
     url: str
     used: bool = True    # false = 超出视频引擎的参考图上限，这张带不上
+
+
+class ClipGroupOut(BaseModel):
+    """组镜（设计文档 2026-10-12 固定时长引擎 §3.3）：这一镜和哪几镜一次生成。视频挂在主镜上，
+    成员的 slots 里「视频」就是主镜的视频槽位（从 offset 秒开始是这一镜）。"""
+    lead_id: int
+    lead_code: str
+    index: int            # 这一镜是组里第几个（1 起，主镜是 1）
+    size: int
+    codes: list[str]
+    shot_ids: list[int]
+    offset: float         # 这一镜在这次生成里的计划起点（秒，成员时长累加；导出时再对齐剪切点）
+    total: float          # 整组总时长
+    unit: float | None = None   # 主镜视频引擎一次生成多长；能精确控时长的引擎为空
+    # 主镜能出视频了：首帧选定且没过期 / 参考图直出 / 接上一镜且上一镜有视频（成员的首帧可选，不看）
+    video_ready: bool = False
 
 
 class ShotDetail(ShotOut):
@@ -661,6 +679,8 @@ class ShotDetail(ShotOut):
     continue_prev: ContinuePrevOut | None = None
     # 参考图直出（video_mode = refs 且没开接上一镜）时视频要带的参考图，按发给引擎的顺序；首帧模式为空
     video_refs: list[VideoRefOut] = Field(default_factory=list)
+    # 在组镜里（≥ 2 镜）时：组的信息；不在组里为空
+    group: ClipGroupOut | None = None
 
 
 class EpisodeDetail(EpisodeOut):

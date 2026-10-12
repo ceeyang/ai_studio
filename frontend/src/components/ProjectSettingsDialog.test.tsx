@@ -12,19 +12,29 @@ const PROJECT: Project = {
 };
 
 describe('ProjectSettingsDialog 固定时长视频引擎', () => {
-  it('默认多拍镜头；组镜拆分列出但不能选；改成不合并只发这一项', async () => {
+  it('默认多拍镜头；组镜拆分能选；改成不合并只发这一项', async () => {
     const calls = installFetch({ 'PATCH /api/projects/demo': (c: { body: unknown }) => ({ ...PROJECT, ...(c.body as object) }) });
     renderAt(<ProjectSettingsDialog project={PROJECT} onClose={() => {}} />);
     const select = screen.getByRole('combobox', { name: '固定时长视频引擎怎么用满' }) as HTMLSelectElement;
     expect(select.value).toBe('beats');
-    const group = screen.getByRole('option', { name: '组镜拆分（即将支持）' }) as HTMLOptionElement;
-    expect(group.disabled).toBe(true);
+    const group = screen.getByRole('option', { name: '组镜拆分（一次生成拆给几个镜头）' }) as HTMLOptionElement;
+    expect(group.disabled).toBe(false);
     expect(screen.getByRole('option', { name: '多拍镜头（一次生成里切 2–4 拍）' })).toBeTruthy();
     const user = userEvent.setup();
     await user.selectOptions(select, 'off');
     await user.click(screen.getByRole('button', { name: '保存' }));
     await waitFor(() => expect(calls.some((c) => c.method === 'PATCH')).toBe(true));
     expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({ fixed_engine_pack: 'off' });
+  });
+
+  it('选组镜拆分：只发这一项', async () => {
+    const calls = installFetch({ 'PATCH /api/projects/demo': (c: { body: unknown }) => ({ ...PROJECT, ...(c.body as object) }) });
+    renderAt(<ProjectSettingsDialog project={PROJECT} onClose={() => {}} />);
+    const user = userEvent.setup();
+    await user.selectOptions(screen.getByRole('combobox', { name: '固定时长视频引擎怎么用满' }), 'group');
+    await user.click(screen.getByRole('button', { name: '保存' }));
+    await waitFor(() => expect(calls.some((c) => c.method === 'PATCH')).toBe(true));
+    expect(calls.find((c) => c.method === 'PATCH')?.body).toEqual({ fixed_engine_pack: 'group' });
   });
 
   it('老项目已经选了不合并：下拉显示当前值', () => {

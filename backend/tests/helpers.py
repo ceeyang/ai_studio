@@ -126,10 +126,12 @@ class FakeFFmpeg:
         Path(args[-1]).write_bytes(b"out")
         return ""
 
-    def assemble(self, clips, out, *, width, height, fps, transitions, work_dir, max_seconds=None):
+    def assemble(self, clips, out, *, width, height, fps, transitions, work_dir, max_seconds=None,
+                 starts_at=None):
         self.calls.append({"clips": list(clips), "out": Path(out), "width": width,
                            "height": height, "fps": fps, "transitions": list(transitions),
-                           "max_seconds": list(max_seconds or [])})
+                           "max_seconds": list(max_seconds or []),
+                           "starts_at": list(starts_at or [])})
         Path(out).parent.mkdir(parents=True, exist_ok=True)
         Path(out).write_bytes(b"mp4")
         durs = [min(5.0, m) if m else 5.0 for m in (max_seconds or [None] * len(clips))]

@@ -8,9 +8,10 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from backend.domain.archive import archive_and_delete_slots
-from backend.domain.beats import (PACK_BEATS, effective_pack, episode_shot_count, generation_unit,
-                                  is_fixed_length, scale_beats, snap_seconds)
+from backend.domain.beats import (PACK_BEATS, PACK_GROUP, effective_pack, episode_shot_count,
+                                  generation_unit, is_fixed_length, scale_beats, snap_seconds)
 from backend.domain.backup import BACKUP_KEEP, backup_database
+from backend.domain.clip_groups import GROUP_PACE, GROUP_SHOT_MAX, assign_groups, next_group_no
 from backend.domain.hashing import input_hash
 from backend.domain.models import Episode, Shot
 from backend.domain.shots import renumber_shots
@@ -393,24 +394,34 @@ class StoryboardPlan:
     default_seconds: float = 5.0
     # 引擎感知的时长规划（不是老行为时才有，记进段落记录的 "plan"，见 judge_storyboard_block）：
     #   {"mode": "beats", "control", "unit", "allowed"}：固定时长引擎 + 项目选了多拍镜头，每镜一次生成、2–4 拍；
-    #   {"mode": "snap", "allowed"}：能精确控时长、但只认几档的引擎（即梦 5 / 10 / 15…），时长对齐到档位。
+    #   {"mode": "snap", "allowed"}：能精确控时长、但只认几档的引擎（即梦 5 / 10 / 15…），时长对齐到档位；
+    #   {"mode": "group", "control", "unit", "allowed", "pace"}：固定时长引擎 + 项目选了组镜拆分，每镜照常 2–8 秒
+    #   （没设镜头节奏时按 pace 4 秒排），分好时长后相连的几镜按生成单元自动分组（domain/clip_groups.assign_groups）。
     # None = 老行为（一镜一生成，每镜按镜头节奏）
     duration_plan: dict | None = None
     # 按别的时长规划重算段落预算用（judge_storyboard_block 比老记录的指纹）
     target_seconds: float = 0.0
     weights: list[float] = field(default_factory=list)
     pace: float = 5.0
+    # 视频引擎本身的最长时长（组镜模式下每镜另有上限 GROUP_SHOT_MAX，换规划时按它重算 max_seconds）
+    engine_max: float = 0.0
 
     @property
     def beats_mode(self) -> bool:
         return bool(self.duration_plan) and self.duration_plan.get("mode") == "beats"
+
+    @property
+    def group_mode(self) -> bool:
+        return bool(self.duration_plan) and self.duration_plan.get("mode") == "group"
 
     def replanned(self, duration_plan: dict | None) -> "StoryboardPlan":
         """同样的输入、换一种时长规划（老记录是按哪种规划出的，就按哪种算它的指纹）。"""
         shot_seconds, counts, secs = plan_counts(self.target_seconds, self.weights, self.pace,
                                                  duration_plan)
         blocks = [{**b, "count": n, "seconds": sec} for b, n, sec in zip(self.blocks, counts, secs)]
-        return replace(self, shot_seconds=shot_seconds, blocks=blocks, duration_plan=duration_plan)
+        max_seconds = plan_max_seconds(self.engine_max or self.max_seconds, duration_plan)
+        return replace(self, shot_seconds=shot_seconds, max_seconds=max_seconds, blocks=blocks,
+                       duration_plan=duration_plan)
 
 
 def pace_seconds(pace: float | None, caps) -> float:
@@ -421,15 +432,22 @@ def pace_seconds(pace: float | None, caps) -> float:
     return float(min(max(float(pace), MIN_SHOT_SECONDS), caps.max_seconds))
 
 
-def duration_plan_for(caps, pack: str | None) -> dict | None:
+def duration_plan_for(caps, pack: str | None, shot_seconds: float | None = None) -> dict | None:
     """引擎感知的时长规划（见 StoryboardPlan.duration_plan）。固定时长引擎在 off 模式下照老行为
-    （一镜一生成，不对齐档位：Gemini 只有 10 秒一档，对齐了每镜都成 10 秒），导出时截到镜头时长。"""
+    （一镜一生成，不对齐档位：Gemini 只有 10 秒一档，对齐了每镜都成 10 秒），导出时截到镜头时长。
+    shot_seconds：项目的镜头节奏（组镜模式每镜按它排，没设时 GROUP_PACE 秒）。"""
     allowed = [float(x) for x in getattr(caps, "allowed_seconds", ()) or ()]
     if is_fixed_length(caps):
-        if effective_pack(pack) != PACK_BEATS:
+        mode = effective_pack(pack)
+        unit = float(generation_unit(caps))
+        if mode == PACK_GROUP:
+            pace = float(shot_seconds) if shot_seconds else GROUP_PACE
+            return {"mode": "group", "control": caps.duration_control, "unit": unit,
+                    "allowed": allowed,
+                    "pace": min(max(pace, MIN_SHOT_SECONDS), GROUP_SHOT_MAX, unit)}
+        if mode != PACK_BEATS:
             return None
-        return {"mode": "beats", "control": caps.duration_control,
-                "unit": float(generation_unit(caps)), "allowed": allowed}
+        return {"mode": "beats", "control": caps.duration_control, "unit": unit, "allowed": allowed}
     if allowed:
         return {"mode": "snap", "allowed": allowed}
     return None
@@ -442,12 +460,23 @@ def plan_counts(target: float, weights: list[float], pace: float, duration_plan:
     if duration_plan and duration_plan.get("mode") == "beats":
         shot_seconds = float(duration_plan["unit"])
         total = episode_shot_count(target, shot_seconds)
+    elif duration_plan and duration_plan.get("mode") == "group":
+        # 组镜：每镜照常按节奏排（几镜一组一次生成），镜头数按节奏算
+        shot_seconds = float(duration_plan["pace"])
+        total = shot_budget(target, shot_seconds)
     else:
         shot_seconds = float(pace)
         total = shot_budget(target, shot_seconds)
     counts = allocate_shots(total, weights)
     total_count = sum(counts)
     return shot_seconds, counts, [block_seconds(target, n, total_count) for n in counts]
+
+
+def plan_max_seconds(engine_max: float, duration_plan: dict | None) -> float:
+    """每镜最长几秒：组镜模式下不超过 GROUP_SHOT_MAX（一次生成要拆给几个镜头），其余是引擎上限。"""
+    if duration_plan and duration_plan.get("mode") == "group":
+        return float(min(float(engine_max), GROUP_SHOT_MAX))
+    return float(engine_max)
 
 
 FIRST_SHOT_MAX = 3.5   # 全集第一镜：模板要求 2–3 秒，超过这个数只在日志里提醒
@@ -467,8 +496,10 @@ def build_storyboard_plan(s: Session, sv, episode_id: int) -> StoryboardPlan:
         caps = sv.engines.video(proj.video_engine).caps
     except KeyError as e:
         raise JobError(str(e)) from None
-    pace, max_seconds = pace_seconds(proj.shot_seconds, caps), caps.max_seconds
-    dplan = duration_plan_for(caps, getattr(proj, "fixed_engine_pack", None))
+    pace = pace_seconds(proj.shot_seconds, caps)
+    dplan = duration_plan_for(caps, getattr(proj, "fixed_engine_pack", None),
+                              pace if proj.shot_seconds else None)
+    max_seconds = plan_max_seconds(caps.max_seconds, dplan)
     weights = [float(len(b.text)) for b in blocks]
     shot_seconds, counts, secs = plan_counts(ep.target_seconds, weights, pace, dplan)
     anchor = proj.style_bible.anchor_text if proj.style_bible else ""
@@ -492,7 +523,8 @@ def build_storyboard_plan(s: Session, sv, episode_id: int) -> StoryboardPlan:
                           duration_control=caps.duration_control,
                           allowed_seconds=tuple(float(x) for x in caps.allowed_seconds or ()),
                           default_seconds=float(caps.default_seconds), duration_plan=dplan,
-                          target_seconds=float(ep.target_seconds), weights=weights, pace=pace)
+                          target_seconds=float(ep.target_seconds), weights=weights, pace=pace,
+                          engine_max=float(caps.max_seconds))
 
 
 def previous_shot_lines(db, block_id: int) -> list[str]:
@@ -705,6 +737,16 @@ def known_props(db, block_ids: list[int]) -> list[str]:
         return out[:30]
 
 
+def _assign_clip_groups(s: Session, episode_id: int, added: list[Shot], dplan: dict) -> int:
+    """组镜模式：一段的镜头时长落定后，相连的几镜按生成单元自动分组（组号全集唯一）。返回分了几组。"""
+    rel = assign_groups([float(x.duration) for x in added], float(dplan["unit"]))
+    base = next_group_no(list(s.scalars(select(Shot).where(Shot.episode_id == episode_id))))
+    for row, g in zip(added, rel):
+        row.clip_group = base + g if g is not None else None
+    s.flush()
+    return len({g for g in rel if g is not None})
+
+
 def timing_vars(plan: "StoryboardPlan") -> dict:
     """视频引擎怎么控时长，渲染进分镜提示词（只进提示词；指纹靠段落记录里的 "plan"）。"""
     dp = plan.duration_plan or {}
@@ -915,6 +957,11 @@ def run_storyboard(ctx, payload: dict) -> dict:
                 s.add(row)
                 added.append(row)
             s.flush()
+            if plan_data.group_mode and added:
+                n_groups = _assign_clip_groups(s, episode_id, added, plan_data.duration_plan)
+                if n_groups:
+                    ctx.log(f"{label}：组镜拆分，{len(added)} 个镜头排成 {n_groups} 组一次生成"
+                            f"（每组不超过 {float(plan_data.duration_plan['unit']):g} 秒）")
             raw = [float(sh.duration) for sh in out.shots]
             if [min(d, max_seconds) for d in raw] != durs:
                 ctx.log(f"{label}：镜头总时长 {sum(raw):.1f}s 和本段预算 "

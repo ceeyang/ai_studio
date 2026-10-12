@@ -6,7 +6,9 @@ import {
   useEngineAdvice,
   useEngines,
   useEpisode,
+  useGroupWithNext,
   useMergeNextAsBeats,
+  useUngroup,
   useFirstFrameFromAsset,
   usePatchShot,
   useProject,
@@ -23,7 +25,7 @@ import { WebConversation, isWebImageEngine } from '../../components/WebConversat
 import { useMediaGroup } from '../../components/MediaViewer';
 import { engineLabel, engineOptionText } from '../../format';
 import { ArchivedCandidates } from './ArchivedCandidates';
-import { BeatsEditor, WasteNotice } from './BeatsPanel';
+import { BeatsEditor, GroupPanel, WasteNotice } from './BeatsPanel';
 import { CandidateGrid } from './CandidateGrid';
 import { DialogueEditor } from './DialogueEditor';
 import { ShotEngineHint } from './EngineAdvice';
@@ -527,6 +529,13 @@ export function ShotDrawer({
   const ordered = episode.data ? [...episode.data.shots].sort((a, b) => a.order - b.order) : null;
   const at = ordered ? ordered.findIndex((x) => x.id === shot.id) : -1;
   const nextShot = ordered && at >= 0 ? (ordered[at + 1] ?? null) : undefined;
+  // 组镜：「和下一镜合成组镜」加在组的末尾，看组里最后一镜后面的那一镜
+  const groupLast = shot.group ? shot.group.shot_ids[shot.group.shot_ids.length - 1] : shot.id;
+  const lastAt = ordered ? ordered.findIndex((x) => x.id === groupLast) : -1;
+  const afterGroup = ordered && lastAt >= 0 ? (ordered[lastAt + 1] ?? null) : undefined;
+  const groupNext = useGroupWithNext(episodeId);
+  const ungroup = useUngroup(episodeId);
+  const pack = project.data?.fixed_engine_pack ?? 'beats';
   const [beatsDirty, setBeatsDirty] = useState(false);
   const confirm = useConfirm();
   const [fields, setFields] = useState<FieldsState | null>(null);
@@ -770,12 +779,19 @@ export function ShotDrawer({
         {direct ? <VideoRefsList shot={shot} /> : <FirstFrameFromAsset shot={shot} episodeId={episodeId} aspect={aspect} />}
         <ArchivedCandidates episodeId={episodeId} shotId={shot.id} />
 
-        <ContinueToggle
-          shot={shot}
-          saving={patchContinue.isPending}
-          onChange={(on) => patchContinue.mutate({ id: shot.id, continue_from_prev: on })}
-          onDismiss={() => patchContinue.mutate({ id: shot.id, suggest_continue: false })}
-        />
+        {/* 组镜成员和上一镜是同一次生成，不能接上一镜；生成方式跟主镜 */}
+        {shot.group && shot.group.index > 1 ? (
+          <p className="muted small" data-testid="group-member-note">
+            组镜成员：接上一镜、生成方式（首帧 / 参考图直出）都跟主镜 {shot.group.lead_code}。
+          </p>
+        ) : (
+          <ContinueToggle
+            shot={shot}
+            saving={patchContinue.isPending}
+            onChange={(on) => patchContinue.mutate({ id: shot.id, continue_from_prev: on })}
+            onDismiss={() => patchContinue.mutate({ id: shot.id, suggest_continue: false })}
+          />
+        )}
         {patchContinue.error && <p className="error">{errorText(patchContinue.error)}</p>}
 
         <VideoModeSelect
@@ -791,9 +807,20 @@ export function ShotDrawer({
           shot={shot}
           engine={videoRow}
           next={nextShot}
-          merging={merge.isPending}
-          error={merge.error ? errorText(merge.error) : null}
-          onMerge={() => merge.mutate(shot.id)}
+          merging={merge.isPending || groupNext.isPending}
+          error={merge.error ? errorText(merge.error) : groupNext.error && !shot.group ? errorText(groupNext.error) : null}
+          pack={pack}
+          onMerge={() => (pack === 'group' ? groupNext.mutate(shot.id) : merge.mutate(shot.id))}
+        />
+
+        <GroupPanel
+          shot={shot}
+          engine={videoRow}
+          next={afterGroup}
+          busy={groupNext.isPending || ungroup.isPending}
+          error={groupNext.error ? errorText(groupNext.error) : ungroup.error ? errorText(ungroup.error) : null}
+          onGroupNext={() => groupNext.mutate(shot.id)}
+          onUngroup={() => ungroup.mutate(shot.id)}
         />
 
         <BeatsEditor

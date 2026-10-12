@@ -12,6 +12,7 @@ import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from backend.domain.clip_groups import ClipGroup, episode_groups, snap_boundaries
 from backend.domain.hashing import input_hash
 from backend.domain.models import Episode, Shot
 from backend.domain.slots import selected_candidate
@@ -58,7 +59,30 @@ class Cut:
     engines: list[str] = field(default_factory=list)
     episode_title: str = ""
     aigc: dict | None = None
+    # 组镜（设计文档 2026-10-12 固定时长引擎 §3.3）：同一条主镜视频拆给几个成员。starts_at[i] = 第 i 段从视频
+    # 第几秒开始（普通镜头 0）；lengths[i] = 组里非最后一镜固定取多长（成员之间的切点，None = 不固定）；
+    # grouped[i] = 第 i 段在组镜里（最后一镜按 clip_limits 的组镜规则裁尾）
+    starts_at: list[float] = field(default_factory=list)
+    lengths: list[float | None] = field(default_factory=list)
+    grouped: list[bool] = field(default_factory=list)
 
+
+def _cut_points(sv, group: ClipGroup, cand) -> list[float]:
+    """组镜成员的起点（主镜视频里的秒数，含 0）：计划起点（成员时长累加）对齐到检测到的剪切点
+    （±BOUNDARY_SNAP 秒内取最近的）。剪切点先用出片自检记下的（qc.beat_cuts + qc.hard_cuts），
+    没检测过再跑一次场景检测；检测失败按计划起点。"""
+    qc = (cand.params or {}).get("qc") or {}
+    if "hard_cuts" in qc or "beat_cuts" in qc:
+        cuts = [float(x) for x in (qc.get("beat_cuts") or []) + (qc.get("hard_cuts") or [])]
+    else:
+        detect = getattr(sv.ffmpeg, "scene_cuts", None)
+        try:
+            cuts = list(detect(sv.media.abs(cand.file_path))) if detect is not None else []
+        except JobCanceled:
+            raise
+        except Exception:   # 检测失败：按计划起点拆
+            cuts = []
+    return [0.0, *snap_boundaries(group.offsets[1:], cuts, total=None)]
 
 def load_cut(sv, episode_id: int, *, allow_missing: bool = False) -> Cut:
     with sv.db.session() as s:
@@ -70,15 +94,33 @@ def load_cut(sv, episode_id: int, *, allow_missing: bool = False) -> Cut:
                   episode_title=ep.title or "", aigc=proj.aigc)
         trans = []
         prev_in = False   # 上一镜（按集里的顺序）有没有进成片
+        groups = episode_groups(ep.shots)
+        points: dict[int, list[float]] = {}   # 主镜 id → 成员起点
         for sh in ep.shots:
-            c = selected_candidate(s, "shot", sh.id, "video")
+            g = groups.get(sh.id)
+            k = g.index(sh.id) - 1 if g is not None else 0
+            # 组镜成员的视频是主镜那条
+            c = selected_candidate(s, "shot", g.lead.id if g is not None else sh.id, "video")
             if c is None:
                 cut.missing.append(sh.code)
                 prev_in = False
                 continue
-            cont = bool(sh.continue_from_prev) and prev_in and bool(cut.clips)
+            start, length = 0.0, None
+            if g is not None:
+                if g.lead.id not in points:
+                    points[g.lead.id] = _cut_points(sv, g, c)
+                pts = points[g.lead.id]
+                start = pts[k]
+                if k + 1 < len(pts):
+                    length = round(pts[k + 1] - pts[k], 3)
+            cut.starts_at.append(start)
+            cut.lengths.append(length)
+            cut.grouped.append(g is not None)
+            # 组里主镜后面的成员和上一镜是同一次生成：不算「接上一镜」，接缝硬切（本来就是一条连续的视频）
+            inner = g is not None and k > 0 and prev_in
+            cont = bool(sh.continue_from_prev) and prev_in and bool(cut.clips) and not (g is not None and k > 0)
             cut.continued.append(cont)
-            if cont:
+            if cont or inner:
                 trans[-1] = "hard_cut"   # 上一镜接到这一镜：不要转场，硬切在尾帧上
             prev_in = True
             cut.codes.append(sh.code)
@@ -86,10 +128,10 @@ def load_cut(sv, episode_id: int, *, allow_missing: bool = False) -> Cut:
             cut.clip_rels.append(c.file_path)
             cut.engines.append(c.engine or "")
             qc = (c.params or {}).get("qc") or {}
-            cuts = qc.get("hard_cuts") or []
+            cuts = (qc.get("hard_cuts") or []) if k == 0 else []   # 组镜：自检问题只在主镜上报一次
             if cuts:
                 cut.flagged.append(f"{sh.code} {'、'.join(f'{x:.1f}s' for x in cuts)}")
-            if qc.get("start_mismatch"):
+            if qc.get("start_mismatch") and k == 0:
                 cut.flagged.append(f"{sh.code} 开头没接上首帧")
             cut.dialogue.append([dict(d) for d in sh.dialogue or []])
             cut.shot_seconds.append(float(sh.duration))
@@ -103,11 +145,27 @@ def load_cut(sv, episode_id: int, *, allow_missing: bool = False) -> Cut:
 
 
 def clip_limits(sv, cut: Cut, trim: bool) -> tuple[list[float], list[float | None]]:
-    """每段视频的实际时长，和合成时最多用多少秒（None = 整段）。规则见 backend/post/timeline.py。"""
-    secs = [sv.ffmpeg.video_duration(c) for c in cut.clips]
+    """每段视频的实际时长（组镜成员：从它的起点到视频结尾），和合成时最多用多少秒（None = 整段）。
+    规则见 backend/post/timeline.py。组镜：非最后一镜固定取到下一镜的起点（和裁不裁尾无关）；最后一镜按分镜
+    时长裁尾，只看台词不量音轨（Veo 的环境声一直响到结尾，量音轨就永远不敢裁）。"""
+    full: dict[Path, float] = {}
+    for c in cut.clips:
+        if c not in full:
+            full[c] = sv.ffmpeg.video_duration(c)
+    offs = cut.starts_at or [0.0] * len(cut.clips)
+    secs = [max(full[c] - float(o or 0), 0.05) for c, o in zip(cut.clips, offs)]
+    fixed = cut.lengths or [None] * len(cut.clips)
+    grouped = cut.grouped or [False] * len(cut.clips)
     limits: list[float | None] = []
     nxt = [i + 1 < len(cut.continued) and cut.continued[i + 1] for i in range(len(cut.clips))]
-    for clip, sec, dur, dlg, keep_tail in zip(cut.clips, secs, cut.shot_seconds, cut.dialogue, nxt):
+    for clip, sec, dur, dlg, keep_tail, length, in_group in zip(cut.clips, secs, cut.shot_seconds,
+                                                                 cut.dialogue, nxt, fixed, grouped):
+        if length is not None:
+            limits.append(min(float(length), sec))
+            continue
+        if in_group:
+            limits.append(None if not trim or keep_tail else trim_limit(sec, dur, dlg))
+            continue
         # 下一镜接上一镜：它的首帧是这段的最后一帧，裁了尾两镜就接不上
         if not trim or keep_tail or trim_limit(sec, dur, dlg) is None:   # 按分镜就不该裁的，不用再量音轨
             limits.append(None)
@@ -141,6 +199,8 @@ def dub_key(cut: Cut, limits: list[float | None], align: str = "timeline") -> st
     """配音清单对应的输入：换了视频、裁剪点、台词时间、译文、音色或对齐方式，清单就作废。"""
     lines = [[(d.get("speaker"), d.get("km"), d.get("start")) for d in dlg] for dlg in cut.dialogue]
     extra = {"align": align} if align != "timeline" else {}   # 老清单（只有 timeline）的 key 不变
+    if any(cut.starts_at):
+        extra["starts"] = [round(float(x), 3) for x in cut.starts_at]   # 组镜成员的起点
     return input_hash("dub", cut.clip_rels, [round(x, 3) if x else None for x in limits], lines,
                       sorted((k, v) for k, v in cut.voices.items() if v), **extra)
 
@@ -328,6 +388,16 @@ def run_dub(ctx, payload: dict) -> dict:
     return {"manifest": sv.media.rel(manifest), "lines": len(rows), "over": over}
 
 
+def clip_speech(sv, cut: Cut, i: int, limit: float, **kw) -> list[tuple[float, float]]:
+    """第 i 段的说话段（相对这一段开头的秒数）。组镜成员从主镜视频的偏移处开始：解到 起点 + limit，
+    再平移、只留这一段里的。"""
+    start = float(cut.starts_at[i]) if i < len(cut.starts_at) else 0.0
+    segs = sv.ffmpeg.speech_segments(cut.clips[i], limit=start + limit if start else limit, **kw)
+    if not start:
+        return segs
+    return [(max(a - start, 0.0), b - start) for a, b in segs if b > start]
+
+
 def align_to_speech(ctx, cut: Cut, lines: list[DubLine], starts: list[float],
                     durs: list[float], sv=None) -> tuple[list[DubLine], set[tuple[int, int]]]:
     """把每句配音挪到 H3 片段音轨里实际开口的位置（找不到就留在台词 start），窗口按新起点重算。"""
@@ -338,8 +408,8 @@ def align_to_speech(ctx, cut: Cut, lines: list[DubLine], starts: list[float],
     for i in sorted({ln.shot for ln in lines}):
         ctx.check_canceled()
         mine = [ln for ln in lines if ln.shot == i]
-        segs = sv.ffmpeg.speech_segments(cut.clips[i], min_db=cfg.speech_min_db,
-                                         periodicity=cfg.speech_periodicity, limit=durs[i])
+        segs = clip_speech(sv, cut, i, durs[i], min_db=cfg.speech_min_db,
+                           periodicity=cfg.speech_periodicity)
         plan = [ln.start - starts[i] for ln in mine]
         onsets = align_onsets(plan, segs, max_shift=cfg.align_max_shift)
         notes = []
@@ -372,8 +442,8 @@ def detected_onsets(ctx, sv, cut: Cut, durations: list[float]
             continue
         ctx.check_canceled()
         try:
-            segs = detect(cut.clips[i], min_db=cfg.speech_min_db,
-                          periodicity=cfg.speech_periodicity, limit=durations[i])
+            segs = clip_speech(sv, cut, i, durations[i], min_db=cfg.speech_min_db,
+                               periodicity=cfg.speech_periodicity)
         except JobCanceled:
             raise
         except Exception as e:   # 检测失败只记日志，这一镜按台词时间

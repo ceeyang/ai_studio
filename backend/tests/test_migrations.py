@@ -175,3 +175,35 @@ def test_shot_beats_and_fixed_engine_pack_columns(tmp_path):
     ddl = _ddl(d.path, "shots")
     assert "beats" not in ddl and "AUTOINCREMENT" in ddl
     assert "fixed_engine_pack" not in _ddl(d.path, "projects")
+
+
+def test_shot_clip_group_column(tmp_path):
+    """固定时长引擎第 2 步（组镜拆分）：shots.clip_group 加列不重建表（保住 AUTOINCREMENT），老镜头为空；
+    能降级回去。"""
+    d = Database(tmp_path / "m.db")
+    cfg = _cfg(d)
+    command.upgrade(cfg, "f4a7c2e9b3d1")
+    c = sqlite3.connect(d.path)
+    c.execute("INSERT INTO projects (id, slug, title, aspect, image_engine, video_engine, seed, "
+              "negative, style_preset, archived, created_at) VALUES "
+              "(1,'p','p','9:16','z','w',1,'','live_action',0,'2026-01-01')")
+    c.execute("INSERT INTO episodes (id, project_id, number, title, source_text, target_seconds, "
+              "status, stage_hashes) VALUES (1,1,1,'','',60,'draft','{}')")
+    c.execute("INSERT INTO shots (id, episode_id, \"order\", code, shot_size, camera_move, "
+              "action, dialogue, \"cast\", props, image_prompt, motion_prompt, audio_prompt, "
+              "duration, use_end_frame, continue_from_prev, transition_out, origin) VALUES "
+              "(5,1,0,'','','','','[]','[]','[]','','','',3,0,0,'hard_cut','llm')")
+    c.commit()
+    c.close()
+    command.upgrade(cfg, "a5d8c1f3e7b2")
+    d.engine.dispose()
+    assert "AUTOINCREMENT" in _ddl(d.path, "shots")
+    c = sqlite3.connect(d.path)
+    try:
+        assert c.execute("SELECT clip_group FROM shots WHERE id=5").fetchone()[0] is None
+    finally:
+        c.close()
+    command.downgrade(cfg, "f4a7c2e9b3d1")
+    d.engine.dispose()
+    ddl = _ddl(d.path, "shots")
+    assert "clip_group" not in ddl and "AUTOINCREMENT" in ddl
